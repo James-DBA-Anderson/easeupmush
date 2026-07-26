@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Pompey Punch-Up — a crude hand-drawn Streets of Rage–style brawler set in Portsmouth, UK. Wake up on Southsea beach. Start fighting."
+    />
+    <meta name="theme-color" content="#1a1410" />
+    <meta property="og:title" content="Pompey Punch-Up" />
+    <meta
+      property="og:description"
+      content="Hungover on Southsea beach. Mean lads pile out of a car. The brawling begins."
+    />
+    <meta property="og:type" content="website" />
+    <title>Pompey Punch-Up</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #1a1410;
+        font-family: "Comic Sans MS", "Chalkboard SE", "Marker Felt", cursive,
+          sans-serif;
+      }
+
+      #game-root {
+        width: 100%;
+        height: 100%;
+        display: grid;
+        place-items: center;
+      }
+
+      #game-root canvas {
+        display: block;
+        max-width: 100%;
+        max-height: 100%;
+        image-rendering: pixelated;
+      }
+
+      noscript {
+        color: #f2e6d8;
+        padding: 2rem;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="game-root"></div>
+    <noscript>Pompey Punch-Up needs JavaScript on. Turn it on and refresh, mate.</noscript>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
