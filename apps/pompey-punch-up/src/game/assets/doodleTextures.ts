@@ -48,10 +48,11 @@ function wobble(n: number, amp = 2): number {
 
 export function generateDoodleTextures(scene: Phaser.Scene): void {
   // Bump this when poses/assets change so hot reload regenerates.
-  const VERSION = "doodle_v100";
+  const VERSION = "doodle_v101";
   if (scene.textures.exists(VERSION)) return;
   if (
     scene.textures.exists("sky") ||
+    scene.textures.exists("doodle_v100") ||
     scene.textures.exists("doodle_v99") ||
     scene.textures.exists("doodle_v98") ||
     scene.textures.exists("doodle_v97") ||

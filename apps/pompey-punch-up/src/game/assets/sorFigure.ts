@@ -708,8 +708,10 @@ export function drawSorFighter(
             : ollie
               ? 6
               : manual
-                ? 18
-                : 8
+                ? 22
+                : rideFrame === 0
+                  ? 6
+                  : 8
           : 8
     : ducking
     ? 26
@@ -754,10 +756,12 @@ export function drawSorFighter(
           ? kickflip
             ? -2
             : manual
-              ? -6
+              ? -12
               : ollie
                 ? 4
-                : 6
+                : rideFrame === 0
+                  ? 2
+                  : 6
           : 6
     : isRun
     ? 5
@@ -868,11 +872,11 @@ export function drawSorFighter(
     nearKnee = { x: hip.x + 10, y: hip.y - 4 };
     nearFoot = { x: hip.x + 20, y: hip.y + 6 };
   } else if (manual) {
-    // Weight on the tail — back foot planted, front foot light on the nose
-    farKnee = { x: hip.x - 6, y: hip.y + 14 };
-    farFoot = { x: hip.x - 14, y: feetY };
-    nearKnee = { x: hip.x + 10, y: hip.y + 4 };
-    nearFoot = { x: hip.x + 18, y: feetY - 10 };
+    // Sit back over the tail — rear boot presses the trucks, front rests light on the nose
+    farKnee = { x: hip.x - 8, y: hip.y + 12 };
+    farFoot = { x: hip.x - 16, y: feetY - 3 };
+    nearKnee = { x: hip.x + 6, y: hip.y + 4 };
+    nearFoot = { x: hip.x + 12, y: feetY - 16 };
   } else if (ollie) {
     // Knees up, board rising with the feet
     farKnee = { x: hip.x - 2, y: hip.y + 8 };
@@ -880,16 +884,20 @@ export function drawSorFighter(
     nearKnee = { x: hip.x + 8, y: hip.y + 8 };
     nearFoot = { x: hip.x + 12, y: hip.y + 20 };
   } else if (skating) {
-    // Both boots on the deck — rear on the tail bolts, front toward the nose.
-    // Push frame only lifts the front foot a touch (not off into empty air).
+    // skate0 = plant / push (lead foot on the floor). skate1 = both boots on the deck.
     const push = rideFrame === 0;
-    farKnee = { x: hip.x - 2, y: hip.y + 11 };
-    farFoot = { x: hip.x - 10, y: feetY - 2 };
-    nearKnee = { x: hip.x + 6, y: hip.y + (push ? 13 : 11) };
-    nearFoot = {
-      x: hip.x + (push ? 12 : 9),
-      y: push ? feetY - 1 : feetY - 2,
-    };
+    if (push) {
+      // Stationary or push-off — rear foot on the board, leading foot on the pavement
+      farKnee = { x: hip.x - 2, y: hip.y + 10 };
+      farFoot = { x: hip.x - 8, y: feetY - 2 };
+      nearKnee = { x: hip.x + 10, y: hip.y + 14 };
+      nearFoot = { x: hip.x + 22, y: feetY + 1 };
+    } else {
+      farKnee = { x: hip.x - 2, y: hip.y + 11 };
+      farFoot = { x: hip.x - 10, y: feetY - 2 };
+      nearKnee = { x: hip.x + 6, y: hip.y + 11 };
+      nearFoot = { x: hip.x + 9, y: feetY - 2 };
+    }
   } else if (phase !== null) {
     // Guard shuffle uses a shorter step so the block doesn't look like a full walk
     const amp = (isRun ? 22 : block ? 12 : 18) * m.height;
@@ -1057,16 +1065,26 @@ export function drawSorFighter(
         ? 0.45
         : kickflip
           ? 0.85
-          : isKicking
-            ? kickFrame === 0
-              ? -0.95
-              : kickFrame === 1
-                ? 0.4
-                : -0.3
-            : skating
-              ? -0.15
-              : 0;
-  const farBootAng = kickflip ? 0.35 : skating || ollie || manual ? -0.1 : 0;
+          : manual
+            ? -0.35
+            : isKicking
+              ? kickFrame === 0
+                ? -0.95
+                : kickFrame === 1
+                  ? 0.4
+                  : -0.3
+              : skating && rideFrame === 0
+                ? 0.05
+                : skating
+                  ? -0.15
+                  : 0;
+  const farBootAng = kickflip
+    ? 0.35
+    : manual
+      ? 0.55
+      : skating || ollie
+        ? -0.1
+        : 0;
   limb(ctx, hip.x - 2, hip.y, farKnee.x, farKnee.y, 6.5 * lr, 5.5 * lr, pantsBack);
   jointCap(ctx, farKnee.x, farKnee.y, 5.2 * lr, pantsBack);
   limb(ctx, farKnee.x, farKnee.y, farFoot.x, farFoot.y - 4, 5.5 * lr, 5 * lr, pantsBack);
@@ -1087,16 +1105,22 @@ export function drawSorFighter(
       nearElbow = { x: shoulder.x + 14, y: shoulder.y + 10 };
       nearHand = { x: shoulder.x + 22, y: shoulder.y + 4 };
     } else if (manual) {
-      // Arms wide — balancing the nose-up
-      farElbow = { x: shoulder.x - 6, y: shoulder.y + 6 };
-      farHand = { x: shoulder.x - 18, y: shoulder.y - 4 };
-      nearElbow = { x: shoulder.x + 14, y: shoulder.y + 4 };
-      nearHand = { x: shoulder.x + 26, y: shoulder.y - 6 };
+      // Arms wide and back — counterweight while the nose floats
+      farElbow = { x: shoulder.x - 10, y: shoulder.y + 4 };
+      farHand = { x: shoulder.x - 22, y: shoulder.y - 6 };
+      nearElbow = { x: shoulder.x + 16, y: shoulder.y + 2 };
+      nearHand = { x: shoulder.x + 28, y: shoulder.y - 8 };
     } else if (ollie) {
       farElbow = { x: shoulder.x - 4, y: shoulder.y + 8 };
       farHand = { x: shoulder.x - 12, y: shoulder.y };
       nearElbow = { x: shoulder.x + 10, y: shoulder.y + 6 };
       nearHand = { x: shoulder.x + 18, y: shoulder.y - 2 };
+    } else if (rideFrame === 0) {
+      // Plant / push — soft arms, weight on the pavement foot
+      farElbow = { x: shoulder.x, y: shoulder.y + 14 };
+      farHand = { x: shoulder.x - 4, y: shoulder.y + 10 };
+      nearElbow = { x: shoulder.x + 6, y: shoulder.y + 12 };
+      nearHand = { x: shoulder.x + 10, y: shoulder.y + 8 };
     } else {
       // Cruise — soft balance, not a T-pose
       farElbow = { x: shoulder.x - 2, y: shoulder.y + 14 };

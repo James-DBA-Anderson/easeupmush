@@ -1,0 +1,22 @@
+{
+  "name": "@easeupmush/pompey-punch-up",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Crude hand-drawn Streets of Rage–style brawler set in Portsmouth.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "debug": "vite --config vite.debug.config.ts",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "phaser": "^3.88.2"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.61.1",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.2"
+  }
+}

@@ -1880,11 +1880,18 @@ export class Fighter extends Phaser.GameObjects.Container {
             : 0;
         if (spin !== 0) {
           this.skateSprite.setAngle(spin);
+          this.skateSprite.setOrigin(0.5, 1);
+          this.skateSprite.x = 0;
         } else if (this.boardManual) {
-          // Nose up — pivot on the rear trucks
-          this.skateSprite.setAngle(this.facing * -22);
+          // Pivot on the rear trucks so the nose floats cleanly
+          this.skateSprite.setOrigin(this.facing > 0 ? 0.3 : 0.7, 1);
+          this.skateSprite.setAngle(this.facing * -28);
+          this.skateSprite.x = this.facing * -10;
         } else {
+          this.skateSprite.setOrigin(0.5, 1);
           this.skateSprite.setAngle(0);
+          // Stationary plant: board sits under the rear foot, ahead of the pavement foot
+          this.skateSprite.x = this.boardRolling ? 0 : this.facing * -6;
         }
         // Deck under the soles when cruising; rise with tucked feet in the air
         this.skateSprite.y =
@@ -1893,8 +1900,10 @@ export class Fighter extends Phaser.GameObjects.Container {
             : this.airborne || this.action === "ollie"
               ? -1
               : this.boardManual
-                ? 2
-                : 10;
+                ? 4
+                : this.boardRolling
+                  ? 10
+                  : 8;
         // Wheel spin only while rolling — planted board stays on one frame
         if (spin === 0 && this.boardRolling) {
           const wheelKey =

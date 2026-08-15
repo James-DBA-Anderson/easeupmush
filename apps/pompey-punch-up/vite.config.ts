@@ -5,9 +5,12 @@ import { debugArenaPlugin } from "./vite.debug-plugin";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 
+/** Production path under easeupmush.com; relative `./` for local preview of this app alone. */
+const base = process.env.GAME_BASE ?? "./";
+
 /** Static standalone site — relative asset paths work on any host/path. */
 export default defineConfig({
-  base: "./",
+  base,
   plugins: [debugArenaPlugin()],
   server: {
     port: 5299,
@@ -15,7 +18,7 @@ export default defineConfig({
     open: true,
   },
   preview: {
-    port: 4299,
+    port: 4298,
     open: true,
   },
   optimizeDeps: {
