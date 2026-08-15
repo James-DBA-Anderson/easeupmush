@@ -1,93 +1,288 @@
+import Phaser from "phaser";
 import type { Fighter } from "../entities/Fighter";
-import type { DestructibleProp } from "../world/DestructibleProp";
+import type { CarSurface, DestructibleProp, PropHitResult } from "../world/DestructibleProp";
 import { LANE, ROAD } from "../constants";
 
+function decksOf(car: DestructibleProp, surface: CarSurface) {
+  return {
+    bonnet: car.bonnetY,
+    roof: car.roofY,
+    surface,
+    car,
+  };
+}
+
+function stickTo(f: Fighter, car: DestructibleProp, surface: CarSurface): void {
+  const y = car.deckY(surface);
+  f.platformY = y;
+  f.carSurface = surface;
+  f.mountedCar = car;
+  f.carBonnetY = car.bonnetY;
+  f.carRoofY = car.roofY;
+  f.y = y;
+  f.groundY = car.y;
+}
+
+function dropToRoad(f: Fighter, car: DestructibleProp | null, now: number): void {
+  f.clearCarMount();
+  f.carDismountUntil = now + 450;
+  const roadY = car
+    ? Math.max(ROAD.top + 6, Math.min(LANE.maxY, car.y - 4))
+    : Math.min(ROAD.top + 8, LANE.maxY);
+  f.y = roadY;
+  f.groundY = f.y;
+}
+
 /**
- * SF2-style car platforms: walk/jump onto bonnet from the kerb, hop to roof.
- * Cars sit on the road below the fight lane — step on from the promenade edge.
+ * SF2-style car platforms: jump onto bonnet/roof, or climb from the road.
+ * Bonnet/boot stay off the cabin glass — walk toward the windows to climb the roof.
  */
-export function updateCarPlatforms(fighters: Fighter[], cars: DestructibleProp[]): void {
+export function updateCarPlatforms(
+  fighters: Fighter[],
+  cars: DestructibleProp[],
+  now: number,
+): void {
   for (const f of fighters) {
     if (f.structure.isOut() || f.structure.downed) {
-      f.platformY = null;
+      f.clearCarMount();
+      f.climbing = false;
       continue;
     }
 
+    if (f.updateClimbMotion(now)) continue;
+
     let stuckTo: DestructibleProp | null = null;
-    let surface: number | null = null;
+    let surface: CarSurface | null = null;
 
     for (const car of cars) {
       if (car.key !== "car") continue;
-      const onX = Math.abs(f.x - car.x) <= car.rx + 16;
-      if (!onX) continue;
+      const dx = Math.abs(f.x - car.x);
+      if (dx > car.rx + 36) continue;
 
       const bonnet = car.bonnetY;
       const roof = car.roofY;
-      // On the road near the motor, or already on it
-      const nearRoad = f.laneY >= ROAD.top - 24;
-      const onThisCar = f.platformY !== null && Math.abs(f.groundY - car.y) < 16;
-      const nearLane = onThisCar || nearRoad;
+      const onThisCar = f.mountedCar === car || (f.platformY !== null && Math.abs(f.groundY - car.y) < 28);
+      const wasOnThisCar = f.mountedCar === car || Math.abs(f.groundY - car.y) < 28;
+      const onRoad = f.laneY >= ROAD.top - 14;
+      const overlapX = dx <= car.rx + 28;
+      const fromLeft = f.x < car.x;
+      const atFront = fromLeft && dx > car.rx * 0.32 && dx <= car.rx + 32;
+      const atRear = !fromLeft && dx > car.rx * 0.32 && dx <= car.rx + 32;
+      const alongSide = dx <= car.rx + 10 && Math.abs(f.y - car.y) < 46;
+      const canRemount = now >= f.carDismountUntil;
 
-      // Landing from a jump onto a surface
-      if (f.airborne && f.jumpVy >= 0 && nearLane) {
-        if (f.y >= roof - 14 && f.y <= roof + 16) {
-          f.y = roof;
+      // Bounce the motor when you hop on it
+      if (f.airborne && f.jumpVy < 0 && wasOnThisCar && !f.carJumpBounced) {
+        car.bounce(0.7);
+        f.carJumpBounced = true;
+      }
+
+      // Land while falling — pick the deck under your feet (never the windows)
+      if (
+        f.airborne &&
+        f.jumpVy >= 0 &&
+        f.action !== "swanton" &&
+        f.action !== "hurricanrana" &&
+        overlapX &&
+        (onRoad || wasOnThisCar || atFront || atRear)
+      ) {
+        const band = car.surfaceAt(f.x);
+        if (band === "roof" && f.y >= roof - 22 && f.y <= bonnet - 6) {
           f.airborne = false;
           f.jumpVy = 0;
-          f.platformY = roof;
-          f.groundY = car.y;
           if (f.action === "jump") f.action = "idle";
+          stickTo(f, car, "roof");
+          car.bounce(1.15);
+          f.carJumpBounced = false;
           stuckTo = car;
-          surface = roof;
+          surface = "roof";
           break;
         }
-        if (f.y >= bonnet - 16 && f.y <= bonnet + 20) {
-          f.y = bonnet;
+        if ((band === "bonnet" || band === "boot") && f.y >= roof + 4 && f.y <= bonnet + 40) {
           f.airborne = false;
           f.jumpVy = 0;
-          f.platformY = bonnet;
-          f.groundY = car.y;
           if (f.action === "jump") f.action = "idle";
+          stickTo(f, car, band);
+          car.bounce(1.05);
+          f.carJumpBounced = false;
           stuckTo = car;
-          surface = bonnet;
+          surface = band;
           break;
         }
       }
 
-      // Walk into the car from the road → step onto bonnet
-      if (!f.airborne && f.platformY === null && nearRoad) {
-        if (Math.abs(f.x - car.x) < car.rx + 12) {
-          f.platformY = bonnet;
-          f.groundY = car.y;
-          f.y = bonnet;
-          stuckTo = car;
-          surface = bonnet;
-          break;
-        }
-      }
-
-      // Already on this car — hold surface (bonnet or roof)
-      if (!f.airborne && onThisCar && onX) {
-        const onRoof = f.platformY! <= (bonnet + roof) * 0.5;
-        surface = onRoof ? roof : bonnet;
-        f.platformY = surface;
-        f.y = surface;
-        f.groundY = car.y;
+      // Bumpers → nearest deck; cabin side → roof (not the glass)
+      if (
+        canRemount &&
+        !f.airborne &&
+        f.platformY === null &&
+        !f.climbing &&
+        onRoad &&
+        (atFront || atRear || alongSide)
+      ) {
+        const target: CarSurface =
+          f.x >= car.bonnetMaxX && f.x <= car.bootMinX
+            ? "roof"
+            : f.x < car.x
+              ? "bonnet"
+              : "boot";
+        const range = car.deckRange(target);
+        const inward = Math.sign(car.x - f.x) || 1;
+        const toX = Phaser.Math.Clamp(f.x + inward * 18, range.min, range.max);
+        f.beginClimbOnto(toX, car.deckY(target), car.y, now, decksOf(car, target));
         stuckTo = car;
+        surface = target;
+        break;
+      }
+
+      // Already on this car — hold the deck, and walk toward the cabin to climb
+      if (!f.airborne && onThisCar && overlapX && f.platformY !== null) {
+        const current: CarSurface = f.carSurface ?? car.surfaceAt(f.x) ?? "bonnet";
+        const range = car.deckRange(current);
+
+        if (current === "bonnet" && f.x > range.max + 1) {
+          const roofRange = car.deckRange("roof");
+          f.beginClimbOnto(
+            Phaser.Math.Clamp(f.x, roofRange.min, roofRange.max),
+            car.roofY,
+            car.y,
+            now,
+            decksOf(car, "roof"),
+          );
+          stuckTo = car;
+          surface = "roof";
+          break;
+        }
+        if (current === "boot" && f.x < range.min - 1) {
+          const roofRange = car.deckRange("roof");
+          f.beginClimbOnto(
+            Phaser.Math.Clamp(f.x, roofRange.min, roofRange.max),
+            car.roofY,
+            car.y,
+            now,
+            decksOf(car, "roof"),
+          );
+          stuckTo = car;
+          surface = "roof";
+          break;
+        }
+        if (current === "roof" && f.x < range.min - 1) {
+          const bonnetRange = car.deckRange("bonnet");
+          f.beginClimbOnto(
+            Phaser.Math.Clamp(f.x, bonnetRange.min, bonnetRange.max),
+            car.bonnetY,
+            car.y,
+            now,
+            decksOf(car, "bonnet"),
+          );
+          stuckTo = car;
+          surface = "bonnet";
+          break;
+        }
+        if (current === "roof" && f.x > range.max + 1) {
+          const bootRange = car.deckRange("boot");
+          f.beginClimbOnto(
+            Phaser.Math.Clamp(f.x, bootRange.min, bootRange.max),
+            car.bonnetY,
+            car.y,
+            now,
+            decksOf(car, "boot"),
+          );
+          stuckTo = car;
+          surface = "boot";
+          break;
+        }
+
+        f.x = Phaser.Math.Clamp(f.x, range.min, range.max);
+        stickTo(f, car, current);
+        stuckTo = car;
+        surface = current;
       }
     }
 
-    // Walked off the ends of the car → drop back onto the promenade
-    if (f.platformY !== null && !f.airborne) {
-      const car = cars.find((c) => c.key === "car" && Math.abs(c.y - f.groundY) < 16);
-      if (!car || Math.abs(f.x - car.x) > car.rx + 18) {
-        f.platformY = null;
-        // Drop onto the road under the car
-        f.y = car ? Math.min(car.y, LANE.maxY) : LANE.maxY;
-        f.groundY = f.y;
-      } else if (stuckTo && surface !== null) {
-        f.y = surface;
+    // Walked off a bumper → drop onto the road in front of the motor
+    if (f.platformY !== null && !f.airborne && !f.climbing) {
+      const car =
+        f.mountedCar ??
+        cars.find((c) => c.key === "car" && Math.abs(c.y - f.groundY) < 28) ??
+        null;
+      if (!car) {
+        dropToRoad(f, null, now);
+        continue;
       }
+      const current = f.carSurface ?? car.surfaceAt(f.x);
+      const offFront = current === "bonnet" && f.x < car.bonnetMinX - 4;
+      const offRear = current === "boot" && f.x > car.bootMaxX + 4;
+      const offWhole = Math.abs(f.x - car.x) > car.rx + 28;
+      if (offFront || offRear || offWhole) {
+        dropToRoad(f, car, now);
+      } else if (stuckTo && surface) {
+        stickTo(f, stuckTo, surface);
+      }
+    } else if (!f.airborne && !f.climbing && f.platformY === null && f.mountedCar) {
+      f.mountedCar = null;
+      f.carSurface = null;
     }
   }
+}
+
+/** Body toss slam while stood on a motor — write it off. */
+export function wreckCarUnderThrower(
+  scene: Phaser.Scene,
+  thrower: Fighter,
+  props: DestructibleProp[],
+): { prop: DestructibleProp; result: PropHitResult } | null {
+  const car =
+    thrower.mountedCar && thrower.mountedCar.key === "car"
+      ? thrower.mountedCar
+      : (props.find(
+          (p) => p.isCar && !p.destroyed && Math.abs(p.y - thrower.groundY) < 40,
+        ) ?? null);
+  if (!car || car.destroyed) return null;
+  if (!thrower.mountedCar && thrower.platformY === null && !thrower.climbing) return null;
+  const result = car.wreck(scene);
+  return { prop: car, result };
+}
+
+/**
+ * Draw fighters under cars / coffee van when standing north of them,
+ * and above when in front / on the platform.
+ */
+export function syncCarOcclusion(fighters: Fighter[], props: DestructibleProp[]): void {
+  const motors = props.filter((c) => c.isOccluder);
+  fighters.sort((a, b) => a.laneY - b.laneY || a.y - b.y);
+  fighters.forEach((f, i) => {
+    if (f.isBackground) {
+      f.setDepth(3);
+      return;
+    }
+
+    let depth = 10 + Math.floor(f.laneY * 0.05) + i;
+
+    for (const car of motors) {
+      if (Math.abs(f.x - car.x) > car.rx + 28) continue;
+      const carD = car.image.depth;
+      const onCar =
+        f.climbing ||
+        (f.platformY !== null && Math.abs(f.groundY - car.y) < 36);
+      const inCarSprite = f.y >= car.roofY - 12 && f.y <= car.y + 8;
+
+      // On the deck / climbing / still overlapping the body while mounted
+      if (onCar || (inCarSprite && f.platformY !== null)) {
+        depth = Math.max(depth, carD + 8);
+        continue;
+      }
+
+      // Hinge near the lower body — south of this = in front of the art
+      // (old car.y-12 threshold left almost the whole fight lane drawn behind)
+      const hinge = car.y - Math.round(car.image.displayHeight * 0.28);
+      if (f.laneY < hinge) {
+        depth = Math.min(depth, carD - 2);
+      } else {
+        depth = Math.max(depth, carD + 2 + (i % 4));
+      }
+    }
+
+    f.setDepth(depth);
+  });
 }

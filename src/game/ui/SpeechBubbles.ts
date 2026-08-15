@@ -8,11 +8,12 @@ interface Bubble {
   text: Phaser.GameObjects.Text;
   born: number;
   life: number;
+  sticky: boolean;
 }
 
 /**
  * Comic speech bubbles that stick above a character then fade.
- * Floored / KO'd folk keep quiet.
+ * Floored / KO'd folk keep quiet. Sticky lines wait for the scene to clear them.
  */
 export class SpeechBubbles {
   private readonly bubbles: Bubble[] = [];
@@ -28,9 +29,26 @@ export class SpeechBubbles {
   }
 
   say(owner: Fighter, line: string, lifeMs = 2200): void {
-    if (!this.canSpeak(owner)) return;
+    this.spawn(owner, line, lifeMs, false);
+  }
 
-    // Replace existing bubble on same speaker
+  /** Stays up until clearOwner / clear — for paused story beats. */
+  saySticky(owner: Fighter, line: string): void {
+    this.spawn(owner, line, Number.POSITIVE_INFINITY, true);
+  }
+
+  clearOwner(owner: Fighter): void {
+    for (let i = this.bubbles.length - 1; i >= 0; i--) {
+      if (this.bubbles[i].owner === owner) {
+        this.bubbles[i].root.destroy();
+        this.bubbles.splice(i, 1);
+      }
+    }
+  }
+
+  private spawn(owner: Fighter, line: string, lifeMs: number, sticky: boolean): void {
+    if (!this.canSpeak(owner) && !sticky) return;
+
     for (let i = this.bubbles.length - 1; i >= 0; i--) {
       if (this.bubbles[i].owner === owner) {
         this.bubbles[i].root.destroy();
@@ -45,7 +63,7 @@ export class SpeechBubbles {
         fontSize: "14px",
         color: "#1a1410",
         align: "center",
-        wordWrap: { width: 160 },
+        wordWrap: { width: 200 },
       })
       .setOrigin(0.5);
 
@@ -65,6 +83,7 @@ export class SpeechBubbles {
       text,
       born: this.scene.time.now,
       life: lifeMs,
+      sticky,
     });
   }
 
@@ -74,7 +93,6 @@ export class SpeechBubbles {
     g.lineStyle(3, 0x1a1410, 1);
     g.fillRoundedRect(-w / 2, -h / 2, w, h, 8);
     g.strokeRoundedRect(-w / 2, -h / 2, w, h, 8);
-    // Tail
     g.fillTriangle(-6, h / 2 - 1, 6, h / 2 - 1, 0, h / 2 + 12);
     g.lineBetween(-6, h / 2 - 1, 0, h / 2 + 12);
     g.lineBetween(6, h / 2 - 1, 0, h / 2 + 12);
@@ -84,7 +102,7 @@ export class SpeechBubbles {
     for (let i = this.bubbles.length - 1; i >= 0; i--) {
       const b = this.bubbles[i];
       const age = now - b.born;
-      if (!b.owner.active || age >= b.life || !this.canSpeak(b.owner)) {
+      if (!b.owner.active || (!b.sticky && (age >= b.life || !this.canSpeak(b.owner)))) {
         b.root.destroy();
         this.bubbles.splice(i, 1);
         continue;
@@ -92,12 +110,13 @@ export class SpeechBubbles {
       b.root.x = b.owner.x;
       b.root.y = b.owner.y - 96;
       b.root.setDepth(250 + Math.floor(b.owner.y));
+      b.root.setAlpha(1);
 
-      const fadeStart = b.life * 0.55;
-      if (age > fadeStart) {
-        b.root.setAlpha(1 - (age - fadeStart) / (b.life - fadeStart));
-      } else {
-        b.root.setAlpha(1);
+      if (!b.sticky) {
+        const fadeStart = b.life * 0.55;
+        if (age > fadeStart) {
+          b.root.setAlpha(1 - (age - fadeStart) / (b.life - fadeStart));
+        }
       }
     }
   }

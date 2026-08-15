@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Debug Arena — Pompey Punch-Up</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #1a1410;
+        --paper: #f2e6d8;
+        --panel: #2a221c;
+        --edge: #5a4a3a;
+        --accent: #c45c4a;
+        --muted: #a09078;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #12100e;
+        font-family: "Comic Sans MS", "Chalkboard SE", "Marker Felt", cursive,
+          sans-serif;
+        color: var(--paper);
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 260px;
+        height: 100%;
+        gap: 0;
+      }
+
+      #game-root {
+        min-width: 0;
+        height: 100%;
+        display: grid;
+        place-items: center;
+        background: #1a1410;
+        position: relative;
+        z-index: 1;
+        overflow: hidden;
+      }
+
+      #game-root canvas {
+        display: block;
+        max-width: 100%;
+        max-height: 100%;
+      }
+
+      .panel {
+        background: var(--panel);
+        border-left: 3px solid var(--edge);
+        padding: 14px 12px 20px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        position: relative;
+        z-index: 20;
+        pointer-events: auto;
+      }
+
+      .panel h1 {
+        margin: 0;
+        font-size: 1.15rem;
+        letter-spacing: 0.02em;
+      }
+
+      .panel p {
+        margin: 0;
+        font-size: 0.78rem;
+        color: var(--muted);
+        line-height: 1.35;
+      }
+
+      .group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .group h2 {
+        margin: 0;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      button {
+        font: inherit;
+        font-size: 0.8rem;
+        cursor: pointer;
+        border: 2px solid var(--ink);
+        background: var(--paper);
+        color: var(--ink);
+        padding: 6px 10px;
+        border-radius: 4px;
+      }
+
+      button:hover:not(:disabled) {
+        filter: brightness(1.05);
+      }
+
+      button:disabled {
+        opacity: 0.55;
+        cursor: wait;
+      }
+
+      button.active {
+        background: #3a6db0;
+        color: #f2e6d8;
+        outline: 2px solid #f2e6d8;
+      }
+
+      button.danger {
+        background: var(--accent);
+        color: var(--paper);
+      }
+
+      button.refresh {
+        width: 100%;
+        background: #3a6db0;
+        color: #f2e6d8;
+        font-size: 0.95rem;
+        padding: 10px 12px;
+      }
+
+      .howto {
+        margin: 0;
+        padding: 10px 10px 10px 12px;
+        border-left: 4px solid #c45c4a;
+        background: #1a1410;
+        font-size: 0.82rem;
+        line-height: 1.4;
+        color: var(--paper);
+      }
+
+      .howto strong {
+        color: #ffe08a;
+      }
+
+      .howto ol {
+        margin: 6px 0 0;
+        padding-left: 1.2em;
+      }
+
+      .howto li {
+        margin: 2px 0;
+      }
+
+      a.back {
+        color: var(--muted);
+        font-size: 0.75rem;
+        text-decoration: none;
+      }
+
+      a.back:hover {
+        color: var(--paper);
+      }
+
+      #refresh-note {
+        font-size: 0.72rem;
+        color: var(--muted);
+      }
+
+      @media (max-width: 900px) {
+        .layout {
+          grid-template-columns: 1fr;
+          grid-template-rows: 1fr auto;
+        }
+
+        .panel {
+          border-left: none;
+          border-top: 3px solid var(--edge);
+          max-height: 42vh;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <div id="game-root"></div>
+      <aside class="panel">
+        <div>
+          <h1>Debug arena</h1>
+          <div class="howto">
+            <strong>How to spawn</strong>
+            <ol>
+              <li>Click an item in this panel (it highlights).</li>
+              <li>Click in the game view to place it.</li>
+              <li>Click again to place more — Esc or right-click cancels.</li>
+            </ol>
+          </div>
+          <p style="margin-top: 8px"><a class="back" href="/">← back to game</a></p>
+        </div>
+
+        <button type="button" class="refresh" id="btn-refresh">Refresh (restart server)</button>
+        <p id="refresh-note">Server runs without auto-reload. Save, then Refresh.</p>
+
+        <div class="group">
+          <h2>Enemy AI</h2>
+          <p>Stand = statue (default). Normal = they fight.</p>
+          <div class="row">
+            <button type="button" class="active" data-brain="stand">Stand</button>
+            <button type="button" data-brain="normal">Normal</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h2>Enemies</h2>
+          <div class="row">
+            <button type="button" data-spawn="thug">Thug</button>
+            <button type="button" data-spawn="mad">Mad</button>
+            <button type="button" data-spawn="scout">Scout</button>
+            <button type="button" data-spawn="sergeant">Sgt</button>
+            <button type="button" data-spawn="boss">Boss</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h2>People</h2>
+          <div class="row">
+            <button type="button" data-spawn="civilian">Civilian</button>
+            <button type="button" data-spawn="jogger">Jogger</button>
+            <button type="button" data-spawn="dog_walker">Dog walker</button>
+            <button type="button" data-spawn="bike">Bike</button>
+            <button type="button" data-spawn="scooter">Scooter</button>
+            <button type="button" data-spawn="skater">Skater</button>
+            <button type="button" data-spawn="wheelchair">Wheelchair</button>
+            <button type="button" data-spawn="police">Police</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h2>Objects</h2>
+          <div class="row">
+            <button type="button" data-spawn="car">Car</button>
+            <button type="button" data-spawn="coffee_van">Coffee van</button>
+            <button type="button" data-spawn="bin">Bin</button>
+            <button type="button" data-spawn="bin_green">Green bin</button>
+            <button type="button" data-spawn="bollard">Bollard</button>
+            <button type="button" data-spawn="skateboard">Skateboard</button>
+            <button type="button" data-spawn="chips">Chips stall</button>
+            <button type="button" data-spawn="icecream">Ice cream</button>
+            <button type="button" data-spawn="weapon_shop">Weapon shop</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h2>Weapons</h2>
+          <div class="row">
+            <button type="button" data-spawn="bottle">Bottle</button>
+            <button type="button" data-spawn="bat">Bat</button>
+            <button type="button" data-spawn="brick">Brick</button>
+            <button type="button" data-spawn="chain">Chain</button>
+            <button type="button" data-spawn="cue">Cue</button>
+            <button type="button" data-spawn="knuckle">Knuckles</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h2>Arena</h2>
+          <div class="row">
+            <button type="button" data-spawn="cash">+£50</button>
+            <button type="button" data-spawn="mount_board">Hop on board</button>
+            <button type="button" data-spawn="reset_player">Reset player</button>
+            <button type="button" class="danger" data-spawn="clear">Clear all</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+    <script type="module" src="/src/debug-main.ts"></script>
+  </body>
+</html>

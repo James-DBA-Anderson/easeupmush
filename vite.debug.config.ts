@@ -5,21 +5,27 @@ import { debugArenaPlugin } from "./vite.debug-plugin";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 
-/** Static standalone site — relative asset paths work on any host/path. */
+/**
+ * Debug arena: no file watching / no auto-reload.
+ * `hmr: false` alone still full-reloads on save — watch must be off too.
+ * Edits land only when you hit Refresh (restarts the server, then reloads /debug).
+ */
 export default defineConfig({
   base: "./",
-  plugins: [debugArenaPlugin()],
+  plugins: [debugArenaPlugin({ freeze: true })],
   server: {
     port: 5299,
     strictPort: true,
-    open: true,
+    open: "/debug",
+    hmr: false,
+    // null = do not watch the project; saves never push a reload
+    watch: null,
   },
   preview: {
     port: 4299,
     open: true,
   },
   optimizeDeps: {
-    // Absolute entries so the scanner doesn't choke on relative rollup input
     entries: [resolve(root, "index.html"), resolve(root, "debug.html")],
   },
   build: {

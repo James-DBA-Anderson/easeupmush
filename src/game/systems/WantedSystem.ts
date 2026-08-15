@@ -7,10 +7,10 @@ export class WantedSystem {
   private decayAcc = 0;
   /** Heat must hold before the first copper turns up. */
   private policeHold = 0;
-  private readonly policeHoldNeed = 9;
+  /** Longer hold so a scrap doesn't bring Bill every minute. */
+  private readonly policeHoldNeed = 7.5;
 
   bump(amount: number): void {
-    // Civilian heat builds slowly — you get a few free swings before Bill clocks it
     this.heat = Math.min(5, this.heat + amount * 0.55);
     this.syncLevel();
   }
@@ -21,18 +21,17 @@ export class WantedSystem {
       return;
     }
     this.decayAcc += dt;
-    // Cool off slower to feel fair, but pip drop is gentler
-    if (this.decayAcc >= 16) {
+    if (this.decayAcc >= 12) {
       this.decayAcc = 0;
-      this.heat = Math.max(0, this.heat - 0.4);
+      this.heat = Math.max(0, this.heat - 0.38);
       this.syncLevel();
     }
 
-    // Bill only commits after sustained heat
+    // Bill only commits once you're properly hot — and it takes a while
     if (this.level >= 4) {
-      this.policeHold = Math.min(this.policeHoldNeed, this.policeHold + dt);
+      this.policeHold = Math.min(this.policeHoldNeed + 14, this.policeHold + dt);
     } else {
-      this.policeHold = Math.max(0, this.policeHold - dt * 0.5);
+      this.policeHold = Math.max(0, this.policeHold - dt * 0.55);
     }
   }
 
@@ -43,9 +42,23 @@ export class WantedSystem {
   /** How many bill should be on the beach right now. */
   desiredPoliceCount(): number {
     if (this.policeHold < this.policeHoldNeed) return 0;
-    if (this.level >= 5 && this.policeHold >= this.policeHoldNeed + 8) return 2;
+    // One copper is enough — second only at max heat after a long hold
+    if (this.level >= 5 && this.policeHold >= this.policeHoldNeed + 10) return 2;
     if (this.level >= 4) return 1;
     return 0;
+  }
+
+  /** Slip them a bung — cools the heat and buys the Bill off for a bit. */
+  acceptBribe(heatDrop = 2.4): void {
+    this.heat = Math.max(0, this.heat - heatDrop);
+    this.policeHold = 0;
+    this.decayAcc = 0;
+    this.syncLevel();
+  }
+
+  /** Cash the Bill expect for looking the other way. */
+  bribeCost(): number {
+    return 18 + this.level * 12;
   }
 
   starsLabel(): string {

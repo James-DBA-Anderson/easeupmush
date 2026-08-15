@@ -4,7 +4,7 @@ import type { LootDrop } from "../combat/Structure";
 export type WeaponKind = Exclude<LootDrop["weapon"], "none">;
 
 /**
- * Ground weapon pickup (bottle / bat / brick).
+ * Ground weapon pickup (bottle / bat / brick + shop uniques).
  * Sprite is container-owned only so destroy() removes it from the world.
  */
 export class WeaponPickup extends Phaser.GameObjects.Container {

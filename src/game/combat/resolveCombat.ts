@@ -49,14 +49,17 @@ export function resolveCombat(
         }
       }
       if (best && attacker.markHit(best)) {
+        // Behind them if you're on the opposite side of their facing
+        const fromBehind = (attacker.x - best.x) * best.facing < -8;
         best.takeDown(now);
         best.structure.createOpening(now, 1000);
         if (attacker.team === "player") {
-          attacker.startHoldOn(best, now);
+          attacker.startHoldOn(best, now, fromBehind);
           // Keep victim stuck to you briefly
-          best.x = attacker.x + attacker.facing * 22;
+          best.x = attacker.x + attacker.facing * (fromBehind ? 14 : 22);
           best.y = attacker.y;
           best.groundY = best.y;
+          if (fromBehind) best.facing = attacker.facing;
         }
         onEvent?.({
           attacker,
@@ -73,13 +76,18 @@ export function resolveCombat(
       if (!v.structure.isOut()) {
         v.heldBy = attacker;
         v.clearPlantLock();
-        v.x = attacker.x + attacker.facing * 22;
+        const cling = attacker.holdFromBehind ? 14 : 22;
+        v.x = attacker.x + attacker.facing * cling;
         v.y = attacker.y;
         v.groundY = v.y;
+        if (attacker.holdFromBehind) v.facing = attacker.facing;
         v.action = "down";
+        // Refresh floor timer so tough lads don't get up mid-clinch
+        v.structure.putOnFloor(now, 200);
       } else {
         v.heldBy = null;
         attacker.heldTarget = null;
+        attacker.holdFromBehind = false;
       }
       continue;
     }
@@ -90,29 +98,61 @@ export function resolveCombat(
     let connected = false;
     for (const target of fighters) {
       if (target === attacker) continue;
+      if (attacker.isBackground || target.isBackground) continue;
       if (attacker.team === "enemy" && target.team === "enemy") continue;
       if (attacker.team === "police" && target.team === "police") continue;
-      // Civilians only strike when piled in with the player — and only hit lads
+      // Civilians only strike when piled in with the player, or when
+      // a bloke's steaming over his missus getting hurt.
       if (attacker.team === "civilian") {
-        if (!(attacker instanceof Civilian) || !attacker.isAlly) continue;
-        if (target.team !== "enemy") continue;
+        if (!(attacker instanceof Civilian)) continue;
+        if (attacker.isAlly) {
+          if (target.team !== "enemy") continue;
+        } else if (attacker.isProtecting) {
+          if (!attacker.isTargeting(target)) continue;
+        } else {
+          continue;
+        }
       }
-      if (target.structure.isOut()) continue;
+      // Crawlers / KO'd bodies still take a finishing boot (floor twitch)
+      const crawling =
+        target.structure.crawling && !target.structure.outCold && !target.structure.cuffed;
+      const softFloored = target.structure.downed && !target.structure.isOut();
+      const stomping =
+        attacker.action === "stomp" || (strike?.kind === "boot_head");
+      if (target.structure.isOut() && !crawling && !stomping) continue;
+      if (crawling && !stomping) continue;
       if (target === attacker.heldTarget) continue;
       if (!inReach(attacker, target, attacker.attackReach, attacker.attackDir)) continue;
       if (!attacker.markHit(target)) continue;
 
-      const open = target.structure.isOpen(now) || target.structure.downed;
+      const open =
+        target.structure.isOpen(now) ||
+        target.structure.downed ||
+        crawling ||
+        target.structure.outCold;
       const bootHead =
-        (attacker.action === "kick" || attacker.action === "stomp") && target.structure.downed;
+        (attacker.action === "kick" || attacker.action === "stomp") &&
+        (target.structure.downed || crawling || target.structure.isOut());
+      // Soft floors are openings for boots, not free chin-shot finishers
       const critical =
         strike.critical ||
-        (open && (strike.kind === "kick" || strike.kind === "hook" || strike.kind === "headbutt" || strike.kind === "boot_head"));
+        (!softFloored &&
+          open &&
+          (strike.kind === "kick" ||
+            strike.kind === "hook" ||
+            strike.kind === "headbutt" ||
+            strike.kind === "boot_head"));
 
       let kind: StrikeKind = strike.kind;
       if (bootHead || strike.kind === "boot_head") kind = "boot_head";
-      else if (critical && strike.kind !== "taser" && strike.kind !== "headbutt") kind = "chin_shot";
-
+      else if (
+        !softFloored &&
+        critical &&
+        strike.kind !== "taser" &&
+        strike.kind !== "headbutt"
+      ) {
+        kind = "chin_shot";
+      }
       // Crowd moves shove everyone outward from the attacker
       const knock =
         attacker.omniStrike
@@ -144,8 +184,15 @@ export function resolveCombat(
     }
   }
 
-  fighters.sort((a, b) => a.y - b.y);
-  fighters.forEach((f, i) => f.setDepth(10 + i));
+  fighters.sort((a, b) => a.laneY - b.laneY || a.y - b.y);
+  fighters.forEach((f, i) => {
+    const depth = f.isBackground
+      ? 3
+      : f.platformY !== null
+        ? 26 + Math.floor(f.y * 0.02) + i
+        : 10 + Math.floor(f.laneY * 0.05) + i;
+    if (f.depth !== depth) f.setDepth(depth);
+  });
 }
 
 function resolveBodyTosses(
@@ -218,6 +265,7 @@ export function tryLoot(
   if (!best) return false;
   const drop = best.structure.takeLoot();
   if (!drop) return false;
+  player.startLooting(player.scene.time.now);
   player.money += drop.money;
   if (drop.weapon !== "none") player.equipWeapon(drop.weapon);
   onEvent?.({
