@@ -15,6 +15,7 @@
     "build": "npm run build -w @easeupmush/site && GAME_BASE=/games/pompey-punch-up/ npm run build -w @easeupmush/pompey-punch-up && node scripts/assemble-dist.mjs",
     "preview": "vite preview --config vite.preview.config.ts",
     "site": "npm run build && npm run preview",
+    "deploy": "npm run build && npx wrangler deploy",
     "typecheck": "npm run typecheck -w @easeupmush/pompey-punch-up"
   },
   "devDependencies": {
