@@ -1,11 +1,9 @@
 :root {
   --ink: #07141a;
   --sea: #0b1c24;
-  --sea-mid: #123040;
   --foam: #c8dde6;
   --sodium: #f0a23a;
   --sodium-hot: #ffc46b;
-  --sand: #d4b896;
   --chalk: #e8f0f4;
   --muted: #8aa3b0;
   --font-display: "Anton", Impact, Haettenschweiler, sans-serif;
@@ -34,7 +32,7 @@ body {
   overflow-x: hidden;
 }
 
-/* --- Atmosphere (full-bleed behind hero) --- */
+/* --- Atmosphere --- */
 
 .sea {
   position: fixed;
@@ -44,19 +42,19 @@ body {
   background:
     radial-gradient(ellipse 120% 80% at 70% -10%, #1a3a4a 0%, transparent 55%),
     radial-gradient(ellipse 90% 60% at 10% 20%, #0e2834 0%, transparent 50%),
-    linear-gradient(180deg, #0a1820 0%, var(--sea) 42%, #08151c 100%);
+    linear-gradient(180deg, #0a1820 0%, var(--sea) 55%, #08151c 100%);
 }
 
 .sea__glow {
   position: absolute;
-  width: 42vmin;
-  height: 42vmin;
-  right: 8%;
-  top: 6%;
+  width: 36vmin;
+  height: 36vmin;
+  right: 6%;
+  top: 2%;
   border-radius: 50%;
   background: radial-gradient(
     circle,
-    rgba(240, 162, 58, 0.35) 0%,
+    rgba(240, 162, 58, 0.32) 0%,
     rgba(240, 162, 58, 0.08) 40%,
     transparent 70%
   );
@@ -67,12 +65,12 @@ body {
   position: absolute;
   left: 0;
   right: 0;
-  top: 48vh;
-  height: 2px;
+  top: 22%;
+  height: 1px;
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(200, 221, 230, 0.25),
+    rgba(200, 221, 230, 0.22),
     transparent
   );
   opacity: 0.7;
@@ -82,9 +80,9 @@ body {
   position: absolute;
   left: -10%;
   right: -10%;
-  height: 28vh;
+  height: 22vh;
   bottom: 0;
-  opacity: 0.45;
+  opacity: 0.35;
   background: repeating-linear-gradient(
     -8deg,
     transparent,
@@ -100,23 +98,9 @@ body {
 }
 
 .sea__wave--b {
-  bottom: -4vh;
-  opacity: 0.3;
+  bottom: -3vh;
+  opacity: 0.22;
   animation: drift 22s linear infinite reverse;
-}
-
-.sea__foam {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 18vh;
-  background: linear-gradient(
-    180deg,
-    transparent,
-    rgba(11, 28, 36, 0.85) 60%,
-    var(--ink)
-  );
 }
 
 @keyframes sodium-pulse {
@@ -143,7 +127,7 @@ body {
 @keyframes rise-in {
   from {
     opacity: 0;
-    transform: translateY(18px);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;
@@ -151,54 +135,47 @@ body {
   }
 }
 
-/* --- Hero: one composition --- */
+/* --- Page stack at the top --- */
 
-.hero {
+.page {
   position: relative;
   z-index: 1;
-  min-height: 100vh;
-  min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  padding: clamp(1.5rem, 4vw, 3rem);
-  padding-bottom: clamp(3rem, 10vh, 6rem);
-  max-width: 56rem;
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: clamp(1.25rem, 3vw, 2rem) clamp(1.25rem, 4vw, 2.5rem) 2rem;
+}
+
+.hero {
+  padding: 0 0 1.25rem;
+  max-width: 40rem;
+  animation: rise-in 0.6s ease-out both;
 }
 
 .hero__mark {
-  margin: 0 0 0.35rem;
-  font-size: 0.85rem;
+  margin: 0 0 0.25rem;
+  font-size: 0.8rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--sodium);
-  animation: rise-in 0.7s ease-out both;
 }
 
 .hero__brand {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(3.4rem, 14vw, 7.5rem);
+  font-size: clamp(2.6rem, 9vw, 4.75rem);
   font-weight: 400;
   line-height: 0.92;
   letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--chalk);
   text-shadow: 0 0 40px rgba(240, 162, 58, 0.15);
-  animation: rise-in 0.85s ease-out 0.08s both;
 }
 
 .hero__line {
-  margin: 1rem 0 0;
+  margin: 0.65rem 0 0;
   max-width: 28rem;
-  font-size: clamp(1.05rem, 2.4vw, 1.25rem);
+  font-size: clamp(1rem, 2.2vw, 1.15rem);
   color: var(--foam);
-  animation: rise-in 0.9s ease-out 0.18s both;
-}
-
-.hero__cta-row {
-  margin: 1.75rem 0 0;
-  animation: rise-in 1s ease-out 0.28s both;
 }
 
 /* --- Buttons --- */
@@ -245,93 +222,54 @@ body {
   color: var(--sodium-hot);
 }
 
-/* --- Games section --- */
+/* --- Games --- */
 
 .games {
-  position: relative;
-  z-index: 1;
-  padding: clamp(3rem, 8vh, 5rem) clamp(1.5rem, 4vw, 3rem) 4rem;
-  max-width: 64rem;
-  margin: 0 auto;
-  background: linear-gradient(180deg, transparent, rgba(7, 20, 26, 0.92) 12%);
+  padding: 0.5rem 0 0;
+  animation: rise-in 0.7s ease-out 0.08s both;
 }
 
 .games__heading {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(2rem, 5vw, 3rem);
+  font-size: clamp(1.5rem, 3.5vw, 2rem);
   font-weight: 400;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .games__lede {
-  margin: 0.4rem 0 2rem;
+  margin: 0.25rem 0 1.15rem;
   color: var(--muted);
 }
 
 .feature {
   display: grid;
-  gap: 1.75rem;
-  align-items: stretch;
+  gap: 1.25rem;
+  align-items: center;
 }
 
 @media (min-width: 780px) {
   .feature {
-    grid-template-columns: 1.15fr 1fr;
-    gap: 2.5rem;
-    align-items: center;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 1.75rem;
   }
 }
 
 .feature__visual {
   position: relative;
-  min-height: 220px;
   overflow: hidden;
-  isolation: isolate;
   background: #152830;
+  aspect-ratio: 16 / 9;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
 }
 
-.feature__sky {
-  position: absolute;
-  inset: 0 0 38% 0;
-  background:
-    radial-gradient(circle at 78% 30%, rgba(240, 162, 58, 0.45), transparent 42%),
-    linear-gradient(180deg, #1e4558 0%, #243a45 100%);
-  animation: sodium-pulse 7s ease-in-out infinite;
-}
-
-.feature__prom {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 42%;
-  background:
-    linear-gradient(180deg, #3a4a38 0%, #2a3228 40%, #4a3e32 40%, #3a322a 100%);
-  box-shadow: inset 0 8px 0 rgba(0, 0, 0, 0.2);
-}
-
-.feature__prom::after {
-  content: "";
-  position: absolute;
-  left: 12%;
-  bottom: 55%;
-  width: 38%;
-  height: 28%;
-  background: #1a2228;
-  clip-path: polygon(0 100%, 8% 0, 92% 0, 100% 100%);
-  opacity: 0.85;
-}
-
-.feature__chalk {
-  position: absolute;
-  left: 1rem;
-  bottom: 0.85rem;
-  font-family: var(--font-display);
-  font-size: 0.95rem;
-  letter-spacing: 0.2em;
-  color: rgba(232, 240, 244, 0.55);
+.feature__shot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
 }
 
 .feature__eyebrow {
@@ -344,9 +282,9 @@ body {
 }
 
 .feature__title {
-  margin: 0.35rem 0 0;
+  margin: 0.3rem 0 0;
   font-family: var(--font-display);
-  font-size: clamp(2rem, 4.5vw, 2.75rem);
+  font-size: clamp(1.75rem, 4vw, 2.4rem);
   font-weight: 400;
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -354,29 +292,26 @@ body {
 }
 
 .feature__blurb {
-  margin: 0.85rem 0 0;
+  margin: 0.7rem 0 0;
   color: var(--foam);
   max-width: 36rem;
 }
 
 .feature__actions {
-  margin: 1.35rem 0 0;
+  margin: 1.1rem 0 0;
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
 }
 
 .foot {
-  position: relative;
-  z-index: 1;
-  padding: 2rem clamp(1.5rem, 4vw, 3rem) 2.5rem;
+  margin-top: 2rem;
+  padding-top: 1.25rem;
   color: var(--muted);
   font-size: 0.9rem;
   border-top: 1px solid rgba(200, 221, 230, 0.08);
-  background: var(--ink);
 }
 
 .foot p {
   margin: 0;
-  max-width: 64rem;
 }

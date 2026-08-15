@@ -31,51 +31,55 @@
       <div class="sea__horizon"></div>
       <div class="sea__wave sea__wave--a"></div>
       <div class="sea__wave sea__wave--b"></div>
-      <div class="sea__foam"></div>
     </div>
 
-    <header class="hero">
-      <p class="hero__mark">easeupmush.com</p>
-      <h1 class="hero__brand">Ease Up Mush</h1>
-      <p class="hero__line">Hand-drawn browser games from the South Coast.</p>
-      <p class="hero__cta-row">
-        <a class="btn btn--primary" href="#games">See the games</a>
-      </p>
-    </header>
+    <div class="page">
+      <header class="hero">
+        <p class="hero__mark">easeupmush.com</p>
+        <h1 class="hero__brand">Ease Up Mush</h1>
+        <p class="hero__line">Hand-drawn browser games from the South Coast.</p>
+      </header>
 
-    <main>
-      <section id="games" class="games" aria-labelledby="games-heading">
-        <h2 id="games-heading" class="games__heading">Games</h2>
-        <p class="games__lede">One out now. More on the way.</p>
+      <main>
+        <section id="games" class="games" aria-labelledby="games-heading">
+          <h2 id="games-heading" class="games__heading">Games</h2>
+          <p class="games__lede">One out now. More on the way.</p>
 
-        <article class="feature">
-          <div class="feature__visual" aria-hidden="true">
-            <div class="feature__sky"></div>
-            <div class="feature__prom"></div>
-            <span class="feature__chalk">SOUTHSEA</span>
-          </div>
-          <div class="feature__copy">
-            <p class="feature__eyebrow">Out now</p>
-            <h3 class="feature__title">Pompey Punch-Up</h3>
-            <p class="feature__blurb">
-              Wake up hungover on Southsea beach. Mean lads pile out of a car.
-              A crude hand-drawn Streets of Rage–style brawler — wear them down,
-              no health bars, all body language.
-            </p>
-            <p class="feature__actions">
-              <a class="btn btn--primary" href="/games/pompey-punch-up/">Play</a>
-              <a class="btn btn--ghost" href="/games/pompey-punch-up/debug.html"
-                >Debug arena</a
-              >
-            </p>
-          </div>
-        </article>
-      </section>
-    </main>
+          <article class="feature">
+            <div class="feature__visual">
+              <img
+                class="feature__shot"
+                src="/shots/pompey-punch-up.png"
+                width="960"
+                height="540"
+                alt="Pompey Punch-Up — Southsea seafront at the start of the game"
+              />
+            </div>
+            <div class="feature__copy">
+              <p class="feature__eyebrow">Out now</p>
+              <h3 class="feature__title">Pompey Punch-Up</h3>
+              <p class="feature__blurb">
+                Wake up hungover on Southsea beach. Mean lads pile out of a car.
+                A crude hand-drawn Streets of Rage–style brawler — wear them down,
+                no health bars, all body language.
+              </p>
+              <p class="feature__actions">
+                <a class="btn btn--primary" href="/games/pompey-punch-up/">Play</a>
+                <a
+                  class="btn btn--ghost"
+                  href="/games/pompey-punch-up/debug.html"
+                  >Debug arena</a
+                >
+              </p>
+            </div>
+          </article>
+        </section>
+      </main>
 
-    <footer class="foot">
-      <p>© <span id="year"></span> Ease Up Mush · Portsmouth</p>
-    </footer>
+      <footer class="foot">
+        <p>© <span id="year"></span> Ease Up Mush · Portsmouth</p>
+      </footer>
+    </div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
