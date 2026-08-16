@@ -11,16 +11,19 @@ export function paintBootLogo(): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
-  // Match device pixels so the chrome rim stays sharp on retina
-  const cssW = Math.min(520, Math.floor(window.innerWidth * 0.88));
-  const cssH = Math.round((cssW / TITLE_LOGO_W) * TITLE_LOGO_H);
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  canvas.width = Math.round(cssW * dpr);
-  canvas.height = Math.round(cssH * dpr);
-  canvas.style.width = `${cssW}px`;
-  canvas.style.height = `${cssH}px`;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  drawTitleLogo(ctx, cssW, cssH);
+  try {
+    // Always paint at the wordmark's native size; CSS scales the canvas down.
+    // Drawing into a narrow mobile bitmap clipped the italic chrome rim entirely.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(TITLE_LOGO_W * dpr);
+    canvas.height = Math.round(TITLE_LOGO_H * dpr);
+    canvas.style.width = "";
+    canvas.style.height = "";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawTitleLogo(ctx, TITLE_LOGO_W, TITLE_LOGO_H);
+  } catch (err) {
+    console.warn("Boot logo paint failed", err);
+  }
 }
 
 /** Fade out the HTML boot overlay once the title scene is painted. */

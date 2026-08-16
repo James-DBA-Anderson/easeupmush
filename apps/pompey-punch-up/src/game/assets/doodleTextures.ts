@@ -49,12 +49,15 @@ function wobble(n: number, amp = 2): number {
 
 export function generateDoodleTextures(scene: Phaser.Scene): void {
   // Bump this when poses/assets change so hot reload regenerates.
-  const VERSION = "doodle_v114";
+  const VERSION = "doodle_v118";
   if (scene.textures.exists(VERSION)) return;
   if (
     scene.textures.exists("sky") ||
+    scene.textures.exists("doodle_v117") ||
+    scene.textures.exists("doodle_v116") ||
+    scene.textures.exists("doodle_v115") ||
+    scene.textures.exists("doodle_v114") ||
     scene.textures.exists("doodle_v113") ||
-    scene.textures.exists("doodle_v112") ||
     scene.textures.exists("doodle_v111") ||
     scene.textures.exists("doodle_v110") ||
     scene.textures.exists("doodle_v109") ||
@@ -2005,84 +2008,141 @@ function makeClarenceFunfair(scene: Phaser.Scene): void {
 }
 
 /**
- * Hovertravel pad — apron toward the Solent, hut. Craft is a separate sprite
- * (stern to the promenade — you only see the back / fans).
+ * Hovertravel slip — short concrete cut through the beach to the Solent.
+ * Canvas height matches the beach band (prom → waterline), not the sky.
+ * Sea is painted at the top so the cut reads as water, not empty air.
  */
 function makeHovercraftPort(scene: Phaser.Scene): void {
-  const w = 420;
-  const h = 220;
+  const w = 480;
+  const h = 100;
   const tex = scene.textures.createCanvas("landmark_hovercraft_port", w, h)!;
   const ctx = tex.getContext();
   ctx.clearRect(0, 0, w, h);
 
   scratchStroke(ctx, () => {
-    // Concrete apron — ramp edge toward the sea (top of canvas)
+    // Solent strip across the top — replaces beach so the cut shows sea
+    ctx.fillStyle = "#6a9ab8";
+    ctx.fillRect(0, 0, w, 28);
+    ctx.fillStyle = "#8ec4dc";
+    ctx.fillRect(0, 0, w, 14);
+    ctx.strokeStyle = "rgba(240,248,252,0.65)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(8, 26);
+    ctx.quadraticCurveTo(w * 0.5, 18, w - 8, 26);
+    ctx.stroke();
+    ctx.strokeStyle = "#1a1410";
+    ctx.lineWidth = 2.2;
+
+    // Shingle banks either side of the slip cut
+    ctx.fillStyle = "#c4b49a";
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    ctx.lineTo(108, h);
+    ctx.lineTo(148, 28);
+    ctx.lineTo(0, 28);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(w, h);
+    ctx.lineTo(w - 108, h);
+    ctx.lineTo(w - 148, 28);
+    ctx.lineTo(w, 28);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#a89880";
+    for (const [bx, by] of [
+      [28, h - 22],
+      [52, h - 38],
+      [36, 48],
+      [w - 34, h - 24],
+      [w - 58, h - 40],
+      [w - 40, 50],
+    ] as const) {
+      ctx.beginPath();
+      ctx.ellipse(bx, by, 5, 3.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Concrete slip — wider on the prom (bottom), narrower at the water
     ctx.fillStyle = "#8a8a82";
     ctx.beginPath();
-    ctx.moveTo(40, h - 12);
-    ctx.lineTo(w - 40, h - 12);
-    ctx.lineTo(w - 70, 70);
-    ctx.lineTo(70, 70);
+    ctx.moveTo(102, h - 2);
+    ctx.lineTo(w - 102, h - 2);
+    ctx.lineTo(w - 152, 30);
+    ctx.lineTo(152, 30);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
     ctx.strokeStyle = "#6a6a62";
     ctx.lineWidth = 1.2;
     for (let i = 0; i < 5; i++) {
-      const t = 0.15 + i * 0.16;
+      const t = 0.1 + i * 0.18;
+      const x0 = 110 + t * (w - 220);
+      const x1 = 158 + t * (w - 316);
       ctx.beginPath();
-      ctx.moveTo(50 + t * (w - 100), h - 14);
-      ctx.lineTo(80 + t * (w - 160), 74);
+      ctx.moveTo(x0, h - 4);
+      ctx.lineTo(x1, 32);
+      ctx.stroke();
+    }
+    for (let i = 0; i < 3; i++) {
+      const ty = h - 14 - i * 18;
+      const inset = 6 + i * 12;
+      ctx.beginPath();
+      ctx.moveTo(110 + inset, ty);
+      ctx.lineTo(w - 110 - inset, ty);
       ctx.stroke();
     }
     ctx.strokeStyle = "#1a1410";
     ctx.lineWidth = 2.2;
 
-    // Slip into the Solent
-    ctx.fillStyle = "#7a7a72";
+    // Wet concrete lip into the water
+    ctx.fillStyle = "#7a9aaa";
     ctx.beginPath();
-    ctx.moveTo(90, 72);
-    ctx.lineTo(w - 90, 72);
-    ctx.lineTo(w - 120, 28);
-    ctx.lineTo(120, 28);
+    ctx.moveTo(148, 32);
+    ctx.lineTo(w - 148, 32);
+    ctx.lineTo(w - 156, 24);
+    ctx.lineTo(156, 24);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    // Terminal hut (landward side)
+    // Terminal hut — landward, right bank (keeps height in the beach band)
     ctx.fillStyle = "#d8d0c4";
-    ctx.fillRect(w - 130, h - 100, 90, 64);
-    ctx.strokeRect(w - 130, h - 100, 90, 64);
+    ctx.fillRect(w - 102, h - 54, 68, 40);
+    ctx.strokeRect(w - 102, h - 54, 68, 40);
     ctx.fillStyle = "#3a5a8a";
     ctx.beginPath();
-    ctx.moveTo(w - 136, h - 98);
-    ctx.lineTo(w - 85, h - 122);
-    ctx.lineTo(w - 34, h - 98);
+    ctx.moveTo(w - 106, h - 52);
+    ctx.lineTo(w - 68, h - 68);
+    ctx.lineTo(w - 30, h - 52);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = "#4a3a2a";
-    ctx.fillRect(w - 108, h - 70, 20, 32);
-    ctx.strokeRect(w - 108, h - 70, 20, 32);
+    ctx.fillRect(w - 88, h - 36, 14, 20);
+    ctx.strokeRect(w - 88, h - 36, 14, 20);
     ctx.fillStyle = "#7ec8e8";
-    ctx.fillRect(w - 74, h - 86, 22, 16);
-    ctx.strokeRect(w - 74, h - 86, 22, 16);
+    ctx.fillRect(w - 64, h - 44, 16, 12);
+    ctx.strokeRect(w - 64, h - 44, 16, 12);
     ctx.fillStyle = "#f2e6d8";
-    ctx.fillRect(w - 126, h - 110, 82, 14);
-    ctx.strokeRect(w - 126, h - 110, 82, 14);
+    ctx.fillRect(w - 100, h - 62, 64, 10);
+    ctx.strokeRect(w - 100, h - 62, 64, 10);
     ctx.fillStyle = "#1a1410";
-    ctx.font = "bold 9px Comic Sans MS, cursive";
-    ctx.fillText("HOVERTRAVEL", w - 120, h - 99);
+    ctx.font = "bold 7px Comic Sans MS, cursive";
+    ctx.fillText("HOVERTRAVEL", w - 96, h - 54);
 
-    // Bollards along the apron
+    // Bollards on the apron lip
     ctx.fillStyle = "#5a5a5a";
-    for (const x of [100, 150, 200, 250, 300]) {
-      ctx.fillRect(x, h - 36, 5, 18);
-      ctx.strokeRect(x, h - 36, 5, 18);
+    for (const x of [130, 180, 230, 280, 330]) {
+      ctx.fillRect(x, h - 20, 4, 12);
+      ctx.strokeRect(x, h - 20, 4, 12);
     }
     ctx.beginPath();
-    ctx.moveTo(100, h - 30);
-    ctx.lineTo(305, h - 30);
+    ctx.moveTo(130, h - 16);
+    ctx.lineTo(334, h - 16);
     ctx.stroke();
   }, "#1a1410", 2.2);
   tex.refresh();
@@ -3746,165 +3806,44 @@ function makePassingTraffic(scene: Phaser.Scene): void {
     tex.refresh();
   }
 
-  // E-scooter with rider — faces left like other traffic (stem/front on left).
+  // E-scooter with rider — same art as promenade scooter folk (mount + ride pose)
   {
-    const w = 110;
-    const h = 100;
-    const paint = (ctx: CanvasRenderingContext2D, frame: number) => {
-      ctx.clearRect(0, 0, w, h);
-      const rot = frame * 0.85;
-      const deckY = h - 28;
-      const frontX = 16;
-      const rearX = w - 18;
-      const hubY = h - 12;
-      const stemBaseX = frontX + 2;
-      const stemTopX = frontX;
-      const gripY = 22;
-
-      const spinWheel = (cx: number, cy: number, spin: number, radius: number) => {
-        ctx.fillStyle = "#1a1a1a";
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = "#d8d0c4";
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius - 2.4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.strokeStyle = "#7a786e";
-        ctx.lineWidth = 1.1;
-        for (let i = 0; i < 3; i++) {
-          const a = spin + (i * Math.PI * 2) / 3;
-          ctx.beginPath();
-          ctx.moveTo(cx, cy);
-          ctx.lineTo(
-            cx + Math.cos(a) * (radius - 2.5),
-            cy + Math.sin(a) * (radius - 2.5),
-          );
-          ctx.stroke();
-        }
-        ctx.strokeStyle = "#1a1410";
-        ctx.lineWidth = 2.2;
-        ctx.fillStyle = "#3a3a38";
-        ctx.beginPath();
-        ctx.arc(cx, cy, 1.8, 0, Math.PI * 2);
-        ctx.fill();
-      };
-
-      scratchStroke(ctx, () => {
-        shadow(ctx, w / 2, h - 4, 42);
-
-        // Rider — standing, leaning toward bars (left)
-        ctx.fillStyle = "#2a5080";
-        ctx.beginPath();
-        ctx.moveTo(48, 38);
-        ctx.lineTo(62, 36);
-        ctx.lineTo(60, deckY - 2);
-        ctx.lineTo(46, deckY);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        // Legs / feet on deck
-        ctx.fillStyle = "#1a2438";
-        ctx.beginPath();
-        ctx.moveTo(48, deckY - 4);
-        ctx.lineTo(58, deckY - 6);
-        ctx.lineTo(64, deckY + 4);
-        ctx.lineTo(42, deckY + 5);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        // Arms to bars
-        ctx.strokeStyle = "#1a1410";
-        ctx.lineWidth = 2.4;
-        ctx.beginPath();
-        ctx.moveTo(50, 44);
-        ctx.lineTo(stemTopX + 8, gripY + 6);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(56, 42);
-        ctx.lineTo(stemTopX + 2, gripY + 4);
-        ctx.stroke();
-        // Head
-        ctx.fillStyle = "#c4a882";
-        ctx.beginPath();
-        ctx.arc(52, 28, 7, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = "#1a1410";
-        ctx.beginPath();
-        ctx.ellipse(50, 24, 7.5, 3.5, -0.15, Math.PI, Math.PI * 2);
-        ctx.fill();
-
-        // Deck board (front left → rear right)
-        ctx.fillStyle = "#3d7a9a";
-        ctx.beginPath();
-        ctx.moveTo(frontX + 4, deckY);
-        ctx.lineTo(rearX - 4, deckY + 1);
-        ctx.quadraticCurveTo(rearX + 1, deckY + 2, rearX, deckY + 6);
-        ctx.lineTo(frontX + 6, deckY + 7);
-        ctx.quadraticCurveTo(frontX + 2, deckY + 4, frontX + 4, deckY);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = "#2a2a30";
-        ctx.fillRect(frontX + 10, deckY + 2, rearX - frontX - 20, 3);
-
-        // Stem / fork (front = left)
-        ctx.strokeStyle = "#c45a2a";
-        ctx.lineWidth = 3.4;
-        ctx.beginPath();
-        ctx.moveTo(stemBaseX, deckY + 2);
-        ctx.lineTo(stemTopX, gripY + 8);
-        ctx.stroke();
-        ctx.strokeStyle = "#1a1410";
-        ctx.lineWidth = 1.6;
-        ctx.beginPath();
-        ctx.moveTo(stemBaseX, deckY + 2);
-        ctx.lineTo(stemTopX, gripY + 8);
-        ctx.stroke();
-        ctx.strokeStyle = "#c45a2a";
-        ctx.lineWidth = 2.6;
-        ctx.beginPath();
-        ctx.moveTo(stemBaseX, deckY + 2);
-        ctx.lineTo(frontX, hubY);
-        ctx.stroke();
-        ctx.strokeStyle = "#1a1410";
-        ctx.lineWidth = 1.4;
-        ctx.beginPath();
-        ctx.moveTo(stemBaseX, deckY + 2);
-        ctx.lineTo(frontX, hubY);
-        ctx.stroke();
-
-        // T-bar reaches back toward rider
-        ctx.strokeStyle = "#1a1410";
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(stemTopX - 2, gripY + 1);
-        ctx.lineTo(stemTopX + 22, gripY + 4);
-        ctx.stroke();
-        ctx.fillStyle = "#c45a2a";
-        ctx.beginPath();
-        ctx.arc(stemTopX + 2, gripY + 6, 3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = "#1a1a1a";
-        ctx.beginPath();
-        ctx.arc(stemTopX - 2, gripY + 1, 3, 0, Math.PI * 2);
-        ctx.arc(stemTopX + 22, gripY + 4, 3.4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-
-        spinWheel(frontX, hubY, rot, 7);
-        spinWheel(rearX, hubY, rot + 0.4, 7);
-      }, "#1a1410", 2.2);
-    };
-
+    const w = 100;
+    const h = 108;
+    const look =
+      POMPEY_LOOKS.find((l) => l.id === "look_c12") ??
+      POMPEY_LOOKS.find((l) => l.present === "fem") ??
+      POMPEY_LOOKS[2]!;
     for (const frame of [0, 1] as const) {
       const key = `traffic_scooter_${frame}`;
       const tex = scene.textures.createCanvas(key, w, h)!;
-      paint(tex.getContext(), frame);
+      const ctx = tex.getContext();
+      ctx.clearRect(0, 0, w, h);
+      // Traffic sprites face left by default (spawn flips when going right)
+      ctx.save();
+      ctx.translate(w, 0);
+      ctx.scale(-1, 1);
+      ctx.fillStyle = "rgba(26,20,16,0.2)";
+      ctx.beginPath();
+      ctx.ellipse(w * 0.5, h - 4, 34, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Scooter under the feet (same drawScooter as mount_scooter)
+      ctx.save();
+      ctx.translate((w - 64) * 0.5 + 6, h - 64);
+      drawScooter(ctx, 64, 64, frame);
+      ctx.restore();
+      // Rider — same ride_scooter pose as promenade civilians
+      const pose = (frame === 0 ? "ride_scooter0" : "ride_scooter1") as SorPose;
+      drawSorFighter(ctx, w * 0.5 - 8, h - 14, look.skin, look.shirt, pose, {
+        hair: look.hair,
+        pants: look.pants,
+        build: look.build,
+        present: look.present,
+        hairStyle: look.hairStyle,
+        bottom: look.bottom,
+        kit: look.kit,
+      });
+      ctx.restore();
       tex.refresh();
     }
   }

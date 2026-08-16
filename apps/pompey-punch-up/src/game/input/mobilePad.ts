@@ -27,6 +27,7 @@ export type MobilePadFrame = {
   /** Menus / continue — Jump or Punch tap. */
   confirmJust: boolean;
   restartJust: boolean;
+  pauseJust: boolean;
 };
 
 const held = {
@@ -59,6 +60,7 @@ const edged = {
   coverJust: false,
   confirmJust: false,
   restartJust: false,
+  pauseJust: false,
 };
 
 let mounted = false;
@@ -115,6 +117,7 @@ export function takeMobilePad(): MobilePadFrame {
     lootJust: edged.lootJust,
     confirmJust: edged.confirmJust,
     restartJust: edged.restartJust,
+    pauseJust: edged.pauseJust,
   };
   edged.leftJust = false;
   edged.rightJust = false;
@@ -156,6 +159,12 @@ export function consumeConfirmJust(): boolean {
 export function consumeRestartJust(): boolean {
   const v = edged.restartJust;
   edged.restartJust = false;
+  return v;
+}
+
+export function consumePauseJust(): boolean {
+  const v = edged.pauseJust;
+  edged.pauseJust = false;
   return v;
 }
 
@@ -322,17 +331,16 @@ export function mountMobileControls(): void {
         <div class="mp-stick-knob"></div>
       </div>
     </div>
-    <div class="mp-cluster mp-cluster--meta">
-      <button type="button" class="mp-btn mp-meta" data-btn="run" aria-label="Run">Run</button>
-      <button type="button" class="mp-btn mp-meta" data-btn="block" aria-label="Block">Block</button>
-      <button type="button" class="mp-btn mp-meta" data-btn="cover" aria-label="Cover">Duck</button>
-      <button type="button" class="mp-btn mp-meta mp-meta--restart" data-restart aria-label="Restart">R</button>
+    <div class="mp-cluster mp-cluster--pause">
+      <button type="button" class="mp-btn mp-pause" data-pause aria-label="Pause">II</button>
     </div>
     <div class="mp-cluster mp-cluster--fight">
-      <button type="button" class="mp-btn mp-act mp-act--jump" data-btn="jump" aria-label="Jump">Jump</button>
       <button type="button" class="mp-btn mp-act mp-act--punch" data-btn="punch" aria-label="Punch">Punch</button>
-      <button type="button" class="mp-btn mp-act mp-act--grab" data-btn="grab" aria-label="Grab">Grab</button>
       <button type="button" class="mp-btn mp-act mp-act--kick" data-btn="kick" aria-label="Kick">Kick</button>
+      <button type="button" class="mp-btn mp-act mp-act--grab" data-btn="grab" aria-label="Grab">Grab</button>
+      <button type="button" class="mp-btn mp-act mp-act--block" data-btn="block" aria-label="Block">Block</button>
+      <button type="button" class="mp-btn mp-act mp-act--run" data-btn="run" aria-label="Run">Run</button>
+      <button type="button" class="mp-btn mp-act mp-act--jump" data-btn="jump" aria-label="Jump">Jump</button>
     </div>
   `;
   document.body.appendChild(root);
@@ -360,12 +368,12 @@ export function mountMobileControls(): void {
     );
   });
 
-  const restartBtn = root.querySelector<HTMLElement>("[data-restart]");
-  if (restartBtn) {
+  const pauseBtn = root.querySelector<HTMLElement>("[data-pause]");
+  if (pauseBtn) {
     bindHold(
-      restartBtn,
+      pauseBtn,
       () => {
-        edged.restartJust = true;
+        edged.pauseJust = true;
       },
       () => {
         /* tap only */

@@ -1,6 +1,19 @@
 export const GAME_WIDTH = 960;
 export const GAME_HEIGHT = 540;
 
+/**
+ * Visible playfield width. On wide phones Scale.EXPAND grows past GAME_WIDTH
+ * so the canvas fills the screen instead of letterboxing.
+ */
+export function viewportWidth(scene: {
+  scale: { gameSize: { width: number } };
+  cameras?: { main?: { width: number } };
+}): number {
+  const fromCam = scene.cameras?.main?.width;
+  const fromScale = scene.scale.gameSize.width;
+  return Math.max(GAME_WIDTH, Math.round(fromCam || fromScale || GAME_WIDTH));
+}
+
 /** Side-scrolling Southsea strip (Eastney → South Parade Pier → sea defences → Clarence Pier). */
 export const WORLD_WIDTH = 14500;
 

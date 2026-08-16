@@ -52,15 +52,18 @@ export function resolveCombat(
       if (best && attacker.markHit(best)) {
         // Behind them if you're on the opposite side of their facing
         const fromBehind = (attacker.x - best.x) * best.facing < -8;
-        best.takeDown(now);
         best.structure.createOpening(now, 1000);
         if (attacker.team === "player") {
+          // Clinch upright — the toss is what puts them on the mat
           attacker.startHoldOn(best, now, fromBehind);
           // Keep victim stuck to you briefly
           best.x = attacker.x + attacker.facing * (fromBehind ? 14 : 22);
           best.y = attacker.y;
           best.groundY = best.y;
           if (fromBehind) best.facing = attacker.facing;
+        } else {
+          // Enemy/police grabs still dump you
+          best.takeDown(now);
         }
         onEvent?.({
           attacker,
@@ -77,14 +80,18 @@ export function resolveCombat(
       if (!v.structure.isOut()) {
         v.heldBy = attacker;
         v.clearPlantLock();
+        // Standing clinch — never force a floor pose here
+        v.structure.downed = false;
+        v.structure.groundedUntil = 0;
         const cling = attacker.holdFromBehind ? 14 : 22;
         v.x = attacker.x + attacker.facing * cling;
         v.y = attacker.y;
         v.groundY = v.y;
         if (attacker.holdFromBehind) v.facing = attacker.facing;
-        v.action = "down";
-        // Refresh floor timer so tough lads don't get up mid-clinch
-        v.structure.putOnFloor(now, 200);
+        v.airborne = false;
+        v.jumpVy = 0;
+        v.action = "hitstun";
+        v.actionUntil = Math.max(v.actionUntil, attacker.actionUntil);
       } else {
         v.heldBy = null;
         attacker.heldTarget = null;

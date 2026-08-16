@@ -74,6 +74,11 @@
         touch-action: none;
       }
 
+      /* Edge-to-edge on mobile — pads already respect safe insets */
+      body.mobile-play #game-root {
+        padding: 0;
+      }
+
       #game-root canvas {
         display: block;
         max-width: 100%;
@@ -109,8 +114,11 @@
       #boot-loader .boot-logo {
         display: block;
         width: min(520px, 88vw);
+        max-width: 100%;
         height: auto;
         margin: 0;
+        /* Intrinsic bitmap is 820×178; keep ratio so iOS doesn't collapse height */
+        aspect-ratio: 820 / 178;
       }
 
       #boot-loader .boot-line {
@@ -308,34 +316,40 @@
         border-color: rgba(255, 200, 120, 0.7);
       }
 
-      .mp-cluster--meta {
-        left: max(10px, var(--safe-l));
+      .mp-cluster--pause {
+        right: max(10px, var(--safe-r));
         top: max(10px, var(--safe-t));
-        grid-auto-flow: column;
-        gap: 6px;
+        pointer-events: auto;
       }
 
       .mp-cluster--fight {
         right: max(10px, var(--safe-r));
         bottom: max(12px, var(--safe-b));
-        grid-template-columns: 64px 72px;
-        grid-template-rows: 56px 64px;
+        grid-template-columns: 68px 68px;
+        grid-template-rows: 56px 56px 56px;
         grid-template-areas:
-          "jump punch"
-          "grab kick";
+          "punch kick"
+          "grab block"
+          "run jump";
       }
 
-      .mp-act--jump {
-        grid-area: jump;
-      }
       .mp-act--punch {
         grid-area: punch;
+      }
+      .mp-act--kick {
+        grid-area: kick;
       }
       .mp-act--grab {
         grid-area: grab;
       }
-      .mp-act--kick {
-        grid-area: kick;
+      .mp-act--block {
+        grid-area: block;
+      }
+      .mp-act--run {
+        grid-area: run;
+      }
+      .mp-act--jump {
+        grid-area: jump;
       }
 
       .mp-btn {
@@ -364,7 +378,7 @@
       .mp-act--punch,
       .mp-act--kick {
         min-width: 68px;
-        min-height: 64px;
+        min-height: 56px;
         background: rgba(90, 36, 28, 0.72);
         border-color: rgba(255, 180, 120, 0.4);
       }
@@ -373,17 +387,22 @@
         background: rgba(40, 70, 90, 0.72);
       }
 
-      .mp-meta {
-        min-width: 48px;
-        min-height: 40px;
-        font-size: 11px;
-        border-radius: 12px;
-        opacity: 0.92;
+      .mp-act--block {
+        background: rgba(50, 55, 70, 0.72);
       }
 
-      .mp-meta--restart {
-        min-width: 36px;
-        opacity: 0.55;
+      .mp-act--run {
+        background: rgba(70, 55, 30, 0.72);
+      }
+
+      .mp-pause {
+        min-width: 44px;
+        min-height: 40px;
+        font-size: 13px;
+        font-weight: bold;
+        letter-spacing: 0.08em;
+        border-radius: 12px;
+        opacity: 0.9;
       }
 
       .mp-btn.is-down {
@@ -406,8 +425,8 @@
           height: 46px;
         }
         .mp-cluster--fight {
-          grid-template-columns: 56px 62px;
-          grid-template-rows: 48px 56px;
+          grid-template-columns: 58px 58px;
+          grid-template-rows: 48px 48px 48px;
         }
         .mp-btn {
           min-width: 44px;

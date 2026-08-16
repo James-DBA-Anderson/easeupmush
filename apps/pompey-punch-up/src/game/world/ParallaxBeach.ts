@@ -1,5 +1,13 @@
 import Phaser from "phaser";
-import { GAME_HEIGHT, GAME_WIDTH, LANE, PASSING_TRAFFIC_DEPTH, ROAD, WORLD_WIDTH } from "../constants";
+import {
+  GAME_HEIGHT,
+  GAME_WIDTH,
+  LANE,
+  PASSING_TRAFFIC_DEPTH,
+  ROAD,
+  WORLD_WIDTH,
+  viewportWidth,
+} from "../constants";
 import { separateObstacles, type Obstacle } from "./obstacles";
 import { DestructibleProp, type DestructibleSpawn } from "./DestructibleProp";
 import { FoodStall, type FoodStallSpawn } from "./FoodStall";
@@ -95,12 +103,12 @@ const PASSING_TRAFFIC: TrafficSpec[] = [
     weight: 14,
     speedMin: 150,
     speedMax: 250,
-    scaleMin: 1.25,
-    scaleMax: 1.45,
+    scaleMin: 1.35,
+    scaleMax: 1.5,
     pitch: 1.38,
     noTint: true,
     frames: ["traffic_scooter_0", "traffic_scooter_1"],
-    animSpeed: 12,
+    animSpeed: 8,
   },
   {
     key: "traffic_bike",
@@ -165,9 +173,23 @@ export class ParallaxBeach {
   /** Last camera scroll — spitfire must track sky parallax while flying. */
   private lastCamScrollX = 0;
   private hasCamScroll = false;
+  /** Expanded playfield width (Scale.EXPAND on wide phones). */
+  private viewW = GAME_WIDTH;
+  private kerb?: Phaser.GameObjects.Rectangle;
 
   constructor(private readonly scene: Phaser.Scene) {
+    this.viewW = viewportWidth(scene);
     this.build();
+  }
+
+  private syncViewportWidth(): void {
+    const w = viewportWidth(this.scene);
+    if (w === this.viewW) return;
+    this.viewW = w;
+    for (const layer of this.layers) {
+      layer.sprite.setSize(w, layer.sprite.height);
+    }
+    this.kerb?.setPosition(w / 2, ROAD.top + 2).setSize(w, 4);
   }
 
   getObstacles(): Obstacle[] {
@@ -224,9 +246,9 @@ export class ParallaxBeach {
     }
     const c = this.hoverCraft;
     const screenX = c.worldX - camScrollX * c.factor;
-    const pan = Phaser.Math.Clamp((screenX / GAME_WIDTH) * 2 - 1, -1, 1);
-    const dist = Math.abs(screenX - GAME_WIDTH * 0.5);
-    const near = 1 - Phaser.Math.Clamp(dist / (GAME_WIDTH * 0.85), 0, 1);
+    const pan = Phaser.Math.Clamp((screenX / this.viewW) * 2 - 1, -1, 1);
+    const dist = Math.abs(screenX - this.viewW * 0.5);
+    const near = 1 - Phaser.Math.Clamp(dist / (this.viewW * 0.85), 0, 1);
     if (this.hoverDeparting) {
       const spin = 1.15 + (1 - this.hoverDepartScale) * 0.9;
       return {
@@ -257,11 +279,11 @@ export class ParallaxBeach {
       return { active: false, progress: 0.5, pan: 0 };
     }
     const p = this.spitfire;
-    const pan = Phaser.Math.Clamp((p.x / GAME_WIDTH) * 2 - 1, -1, 1);
+    const pan = Phaser.Math.Clamp((p.x / this.viewW) * 2 - 1, -1, 1);
     const progress =
       p.vx >= 0
-        ? Phaser.Math.Clamp(p.x / GAME_WIDTH, 0, 1)
-        : Phaser.Math.Clamp(1 - p.x / GAME_WIDTH, 0, 1);
+        ? Phaser.Math.Clamp(p.x / this.viewW, 0, 1)
+        : Phaser.Math.Clamp(1 - p.x / this.viewW, 0, 1);
     return { active: true, progress, pan };
   }
 
@@ -277,8 +299,8 @@ export class ParallaxBeach {
       return { active: false, intensity: 0, pan: 0, pitch: 1 };
     }
     const screenX = car.worldX - camScrollX;
-    const pan = Phaser.Math.Clamp((screenX / GAME_WIDTH) * 2 - 1, -1, 1);
-    const across = Phaser.Math.Clamp(screenX / GAME_WIDTH, -0.15, 1.15);
+    const pan = Phaser.Math.Clamp((screenX / this.viewW) * 2 - 1, -1, 1);
+    const across = Phaser.Math.Clamp(screenX / this.viewW, -0.15, 1.15);
     const progress = Phaser.Math.Clamp(across, 0, 1);
     const travel = car.vx >= 0 ? progress : 1 - progress;
     // Higher pitch on approach, drops as it rolls away — scaled by vehicle type
@@ -286,7 +308,7 @@ export class ParallaxBeach {
     const near =
       1 -
       Phaser.Math.Clamp(
-        Math.abs(screenX - GAME_WIDTH * 0.5) / (GAME_WIDTH * 0.72),
+        Math.abs(screenX - this.viewW * 0.5) / (this.viewW * 0.72),
         0,
         1,
       );
@@ -346,12 +368,13 @@ export class ParallaxBeach {
 
   private build(): void {
     const s = this.scene;
+    const viewW = this.viewW;
     const seaY = GAME_HEIGHT * 0.32;
     const commonY = GAME_HEIGHT * 0.44;
     const beachY = GAME_HEIGHT * 0.5;
 
     const sky = s.add
-      .tileSprite(0, 0, GAME_WIDTH, GAME_HEIGHT, "sky")
+      .tileSprite(0, 0, viewW, GAME_HEIGHT, "sky")
       .setOrigin(0)
       .setScrollFactor(0)
       .setDepth(-50);
@@ -359,7 +382,7 @@ export class ParallaxBeach {
 
     // Cloud banks — farther = weaker camera parallax + slower wind drift
     const cloudFar = s.add
-      .tileSprite(0, 0, GAME_WIDTH, 150, "clouds_far")
+      .tileSprite(0, 0, viewW, 150, "clouds_far")
       .setOrigin(0)
       .setScrollFactor(0)
       .setDepth(-43)
@@ -367,7 +390,7 @@ export class ParallaxBeach {
     this.layers.push({ sprite: cloudFar, factor: 0.025, drift: 1.6, driftX: 0 });
 
     const cloudMid = s.add
-      .tileSprite(0, 8, GAME_WIDTH, 160, "clouds_mid")
+      .tileSprite(0, 8, viewW, 160, "clouds_mid")
       .setOrigin(0)
       .setScrollFactor(0)
       .setDepth(-40)
@@ -375,7 +398,7 @@ export class ParallaxBeach {
     this.layers.push({ sprite: cloudMid, factor: 0.055, drift: 3.2, driftX: 40 });
 
     const cloudNear = s.add
-      .tileSprite(0, 18, GAME_WIDTH, 150, "clouds_near")
+      .tileSprite(0, 18, viewW, 150, "clouds_near")
       .setOrigin(0)
       .setScrollFactor(0)
       .setDepth(-37)
@@ -412,7 +435,7 @@ export class ParallaxBeach {
     });
 
     const sea = s.add
-      .tileSprite(0, seaY, GAME_WIDTH, 128, "sea_0")
+      .tileSprite(0, seaY, viewW, 128, "sea_0")
       .setOrigin(0)
       .setScrollFactor(0)
       .setDepth(-28);
@@ -580,12 +603,12 @@ export class ParallaxBeach {
       depth: -8,
     });
 
-    // Hovertravel — stern to the promenade (only the back / high fans face you)
+    // Hovertravel — slip replaces a beach cut down to the Solent (top ≈ seaY)
     const hoverX = 11200;
-    const hoverY = LANE.minY + 42;
-    const hoverScale = 1.55;
-    this.addLandmark("landmark_hovercraft_port", hoverX, LANE.minY + 24, 1, {
-      scale: 1.45,
+    const hoverY = LANE.minY + 10;
+    const hoverScale = 1.05;
+    this.addLandmark("landmark_hovercraft_port", hoverX, LANE.minY + 8, 1, {
+      scale: 1.2,
       depth: -8,
     });
     this.hoverCraft = this.addLandmark("hovercraft_0", hoverX, hoverY, 1, {
@@ -596,16 +619,16 @@ export class ParallaxBeach {
     });
     // Stern intakes facing the scrap — fight-lane hazards (not the sprite fan centres
     // high on the craft, which sit ~180px above the promenade and never catch a toss).
-    const intakeY = Math.max(LANE.minY + 10, hoverY - 36);
+    const intakeY = Math.max(LANE.minY + 10, hoverY - 28);
     this.hoverFans.push(
-      { x: hoverX - 48 * hoverScale, y: intakeY, rx: 52, ry: 56 },
-      { x: hoverX + 48 * hoverScale, y: intakeY, rx: 52, ry: 56 },
+      { x: hoverX - 42 * hoverScale, y: intakeY, rx: 46, ry: 48 },
+      { x: hoverX + 42 * hoverScale, y: intakeY, rx: 46, ry: 48 },
     );
     this.hoverHull.push({
       x: hoverX,
-      y: hoverY - 70,
-      rx: 72,
-      ry: 78,
+      y: hoverY - 52,
+      rx: 62,
+      ry: 64,
       kind: "prop",
     });
 
@@ -646,14 +669,14 @@ export class ParallaxBeach {
 
     // Shingle behind the grass — from below the sea down to the promenade
     const shingle = s.add
-      .tileSprite(0, commonY, GAME_WIDTH, 70, "common")
+      .tileSprite(0, commonY, viewW, 70, "common")
       .setOrigin(0)
       .setScrollFactor(0)
       .setDepth(-15);
     this.layers.push({ sprite: shingle, factor: 0.72 });
 
     const beach = s.add
-      .tileSprite(0, beachY, GAME_WIDTH, 300, "beach")
+      .tileSprite(0, beachY, viewW, 300, "beach")
       .setOrigin(0)
       .setScrollFactor(0)
       .setDepth(-14);
@@ -778,18 +801,16 @@ export class ParallaxBeach {
       }),
     );
     const road = s.add
-      .tileSprite(0, ROAD.top, GAME_WIDTH, ROAD.height, "road")
+      .tileSprite(0, ROAD.top, viewW, ROAD.height, "road")
       .setOrigin(0)
       .setScrollFactor(0)
       .setDepth(16);
     this.layers.push({ sprite: road, factor: 1.12 });
 
-    const kerb = s.add
-      .rectangle(GAME_WIDTH / 2, ROAD.top + 2, GAME_WIDTH, 4, 0xc8b898, 0.9)
+    this.kerb = s.add
+      .rectangle(viewW / 2, ROAD.top + 2, viewW, 4, 0xc8b898, 0.9)
       .setScrollFactor(0)
       .setDepth(17);
-
-    void kerb;
 
     s.add
       .rectangle(WORLD_WIDTH / 2, GAME_HEIGHT / 2, WORLD_WIDTH, GAME_HEIGHT, 0x000000, 0)
@@ -826,7 +847,7 @@ export class ParallaxBeach {
       spec.speedMin + Math.random() * (spec.speedMax - spec.speedMin);
     const worldX = goingRight
       ? cameraScrollX - 280
-      : cameraScrollX + GAME_WIDTH + 280;
+      : cameraScrollX + this.viewW + 280;
     // Closer to camera than the parked motors (those sit ~GAME_HEIGHT - 8)
     const y = GAME_HEIGHT - 2 - Math.random() * 4;
     const scale =
@@ -880,10 +901,10 @@ export class ParallaxBeach {
     const startX = fromSide
       ? goingRight
         ? -40
-        : GAME_WIDTH + 40
+        : this.viewW + 40
       : goingRight
-        ? Math.random() * GAME_WIDTH * 0.4
-        : GAME_WIDTH * (0.55 + Math.random() * 0.35);
+        ? Math.random() * this.viewW * 0.4
+        : this.viewW * (0.55 + Math.random() * 0.35);
     const speed =
       (kind === "jet" ? 55 : kind === "kayak" ? 22 : 32) * (goingRight ? 1 : -1);
     const scale = kind === "jet" ? 0.55 : kind === "kayak" ? 0.78 : 0.62;
@@ -909,6 +930,7 @@ export class ParallaxBeach {
   }
 
   update(cameraScrollX: number, delta: number, now = 0): void {
+    this.syncViewportWidth();
     this.waveT += delta;
     const camDelta = this.hasCamScroll ? cameraScrollX - this.lastCamScrollX : 0;
     this.lastCamScrollX = cameraScrollX;
@@ -1014,7 +1036,7 @@ export class ParallaxBeach {
         }
       }
       const off =
-        (c.vx > 0 && c.x > GAME_WIDTH + 80) || (c.vx < 0 && c.x < -80);
+        (c.vx > 0 && c.x > this.viewW + 80) || (c.vx < 0 && c.x < -80);
       if (off) {
         c.image.destroy();
       } else {
@@ -1045,7 +1067,7 @@ export class ParallaxBeach {
       const margin = 280;
       const off =
         car.worldX < cameraScrollX - margin ||
-        car.worldX > cameraScrollX + GAME_WIDTH + margin;
+        car.worldX > cameraScrollX + this.viewW + margin;
       if (off) {
         car.image.destroy();
       } else {
@@ -1066,7 +1088,7 @@ export class ParallaxBeach {
       p.image.x = p.x;
       p.image.y = p.y + Math.sin(p.bobPhase) * 2.5;
       const off =
-        (p.vx > 0 && p.x > GAME_WIDTH + 60) || (p.vx < 0 && p.x < -60);
+        (p.vx > 0 && p.x > this.viewW + 60) || (p.vx < 0 && p.x < -60);
       if (off) {
         p.image.destroy();
         this.spitfire = null;
@@ -1080,7 +1102,7 @@ export class ParallaxBeach {
     if (this.spitfire || !this.scene.textures.exists("sky_spitfire")) return;
     const goingRight = Math.random() < 0.55;
     const y = 28 + Math.random() * 42;
-    const startX = goingRight ? -50 : GAME_WIDTH + 50;
+    const startX = goingRight ? -50 : this.viewW + 50;
     const speed = (95 + Math.random() * 35) * (goingRight ? 1 : -1);
     const image = this.scene.add
       .image(startX, y, "sky_spitfire")

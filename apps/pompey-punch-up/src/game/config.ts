@@ -22,9 +22,9 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
     },
   },
   scale: {
-    // Always fit the full 16:9 frame — ENVELOP cropped the title when the
-    // mobile browser bar ate into the viewport height.
-    mode: Phaser.Scale.FIT,
+    // Wide phones: expand the playfield sideways so the canvas fills the
+    // screen (no side letterbox). Desktop keeps FIT for clean 16:9.
+    mode: mobile ? Phaser.Scale.EXPAND : Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
   input: {

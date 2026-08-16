@@ -70,7 +70,7 @@ if (isMobilePlay()) {
 
 const game = new Phaser.Game({ ...gameConfig, parent });
 
-/** Keep FIT sizing in sync when the mobile URL bar shows / hides. */
+/** Keep scale sizing in sync when the mobile URL bar shows / hides. */
 function refreshMobileScale(): void {
   if (!game.scale) return;
   game.scale.refresh();

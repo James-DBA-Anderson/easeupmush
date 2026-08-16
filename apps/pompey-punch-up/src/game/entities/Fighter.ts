@@ -1401,8 +1401,14 @@ export class Fighter extends Phaser.GameObjects.Container {
     this.pendingGrabWhiffFx = false;
     target.heldBy = this;
     target.clearPlantLock();
-    // Keep them floored for the whole clinch (toughness shortens putOnFloor otherwise)
-    target.structure.putOnFloor(now, 1400);
+    // Standing clinch — don't dump them until the toss
+    target.structure.downed = false;
+    target.structure.groundedUntil = 0;
+    target.airborne = false;
+    target.jumpVy = 0;
+    target.endToss();
+    target.action = "hitstun";
+    target.actionUntil = now + 1400;
     if (fromBehind) {
       // Waist lock — square up behind them, same facing
       const face = target.facing < 0 ? -1 : 1;
@@ -1613,6 +1619,11 @@ export class Fighter extends Phaser.GameObjects.Container {
         this.sprite.setOrigin(0.5, 1);
         this.sprite.y = 0;
         this.sprite.setRotation(0);
+        this.structure.downed = false;
+        this.structure.groundedUntil = 0;
+        if (this.structure.crawling && !this.structure.outCold) {
+          this.structure.crawling = false;
+        }
         this.action = "idle";
         this.actionUntil = 0;
         this.clearPlantLock();
@@ -2147,6 +2158,8 @@ export class Fighter extends Phaser.GameObjects.Container {
       if (t < 0.75) return "jump0";
       return "hurt";
     }
+    // Standing clinch — never show the floor pose while someone has hold of you
+    if (this.heldBy) return "hurt";
     if (s.cuffed) return "cuffed";
     if (this.isCrawlingAway) return this.crawlPhase < 0.5 ? "crawl0" : "crawl1";
     if (s.outCold || s.crawling) return "down";
@@ -2559,7 +2572,21 @@ export class Fighter extends Phaser.GameObjects.Container {
     if (!this.heldTarget) return;
     const v = this.heldTarget;
     v.heldBy = null;
-    if (v.structure.downed || v.structure.isOut()) v.markPlantHere();
+    if (v.structure.isOut()) {
+      v.markPlantHere();
+    } else {
+      // Let go without dumping them — brief stun, then free
+      v.structure.downed = false;
+      v.structure.groundedUntil = 0;
+      v.clearPlantLock();
+      v.airborne = false;
+      v.jumpVy = 0;
+      v.endToss();
+      if (v.action === "down" || v.action === "hitstun") {
+        v.action = "hitstun";
+        v.actionUntil = Math.max(v.actionUntil, this.scene.time.now + 280);
+      }
+    }
     this.heldTarget = null;
     this.holdFromBehind = false;
   }

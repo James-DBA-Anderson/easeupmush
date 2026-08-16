@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { COMMON, GAME_HEIGHT, GAME_WIDTH, LANE, WORLD_WIDTH } from "../constants";
+import { COMMON, GAME_HEIGHT, LANE, WORLD_WIDTH, viewportWidth } from "../constants";
 import { resolveCombat, tryLoot, nearestLootable, type CombatEvent } from "../combat/resolveCombat";
 import { Enemy, type EnemyRole, KO_CRIES } from "../entities/Enemy";
 import { Player } from "../entities/Player";
@@ -15,6 +15,11 @@ import { SeagullFlock } from "../world/SeagullFlock";
 import { WantedSystem } from "../systems/WantedSystem";
 import { SpeechBubbles } from "../ui/SpeechBubbles";
 import { nextPlayerQuip } from "../ui/playerQuips";
+import {
+  makeContinueButton,
+  makeKeyPrompt,
+  type KeyPromptHandle,
+} from "../ui/KeyPrompt";
 import { separateFighters, separateFightersFromObstacles } from "../systems/separateFighters";
 import { resolvePropHits } from "../systems/resolvePropHits";
 import { updateCarPlatforms, syncCarOcclusion, wreckCarUnderThrower } from "../systems/climbCars";
@@ -30,6 +35,7 @@ import {
   clearPunchJust,
   consumeConfirmJust,
   consumeCoverJust,
+  consumePauseJust,
   consumeRestartJust,
   isMobilePlay,
   peekPunchJust,
@@ -124,9 +130,13 @@ export class BeachScene extends Phaser.Scene {
   private enemyPortraitDamage!: Phaser.GameObjects.Graphics;
   private portraitRank: EnemyRole | null = null;
   private lootHint!: Phaser.GameObjects.Text;
-  private restartPrompt?: Phaser.GameObjects.Text;
-  /** World zoom on mobile — HUD is re-pinned so it stays put on screen. */
+  private restartPrompt?: KeyPromptHandle;
+  /** Kept for HUD pin math; mobile no longer zooms the camera (EXPAND fills). */
   private viewZoom = 1;
+  /** Expanded canvas width on wide phones (Scale.EXPAND). */
+  private get viewW(): number {
+    return viewportWidth(this);
+  }
   private floatTexts: Phaser.GameObjects.Text[] = [];
   private defeated = false;
   private restartKey!: Phaser.Input.Keyboard.Key;
@@ -209,9 +219,12 @@ export class BeachScene extends Phaser.Scene {
     index: number;
     report: { honour: number; seconds: number; missing: string[] };
   } | null = null;
-  private continueHint?: Phaser.GameObjects.Text;
+  private continueHint?: KeyPromptHandle;
   private continueKey!: Phaser.Input.Keyboard.Key;
   private continueAltKey!: Phaser.Input.Keyboard.Key;
+  /** Mobile pause menu — freezes scrap until Resume / Restart. */
+  private gamePaused = false;
+  private pauseOverlay?: Phaser.GameObjects.Container;
   constructor() {
     super("BeachScene");
   }
@@ -235,6 +248,9 @@ export class BeachScene extends Phaser.Scene {
     this.defeated = false;
     this.playerDowned = null;
     this.lastPlayerDefeat = null;
+    this.gamePaused = false;
+    this.pauseOverlay?.destroy();
+    this.pauseOverlay = undefined;
     this.bossAnnounced = false;
     this.droneAssistAnnounced = false;
     this.callArmedUnlock = null;
@@ -271,10 +287,11 @@ export class BeachScene extends Phaser.Scene {
     this.police = [];
 
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, GAME_HEIGHT);
-    this.viewZoom = isMobilePlay() ? 1.15 : 1;
-    if (this.viewZoom !== 1) {
-      this.cameras.main.setZoom(this.viewZoom);
-    }
+    // No camera zoom on mobile — Scale.EXPAND already fills the screen.
+    // Zoom was desyncing scrollFactor-0 beach/buildings from the fight lane
+    // and making vertical follow slide the road/cars up on load.
+    this.viewZoom = 1;
+    this.cameras.main.setZoom(1);
     this.parallax = new ParallaxBeach(this);
     this.skyDrone = new SkyDrone(this);
     this.gulls = new SeagullFlock(this);
@@ -443,8 +460,14 @@ export class BeachScene extends Phaser.Scene {
     this.weaponShops = this.parallax.weaponShops;
     this.refreshObstacles();
 
-    this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
-    this.cameras.main.setDeadzone(120 / this.viewZoom, 80 / this.viewZoom);
+    // Follow X only — Y stay locked so the road/prom never slide on load,
+    // and SF0 landmarks stay glued to the fight lane.
+    this.cameras.main.setScroll(
+      Math.max(0, this.player.x - this.viewW * 0.5),
+      0,
+    );
+    this.cameras.main.startFollow(this.player, true, 0.08, 0);
+    this.cameras.main.setDeadzone(120, 48);
 
     const START_BANNER =
       "Southsea — morning after. Something's ringing in your ears…";
@@ -502,7 +525,7 @@ export class BeachScene extends Phaser.Scene {
       ])
       .setDepth(105)
       .setVisible(false);
-    this.pinHud(this.enemyPortrait, GAME_WIDTH - 20, 16);
+    this.pinHud(this.enemyPortrait, this.viewW - 20, 16);
 
     this.lootHint = this.add
       .text(0, 0, "", {
@@ -515,7 +538,7 @@ export class BeachScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(110)
       .setVisible(false);
-    this.pinHud(this.lootHint, GAME_WIDTH / 2, GAME_HEIGHT - 80);
+    this.pinHud(this.lootHint, this.viewW / 2, GAME_HEIGHT - 80);
 
     this.hint = this.add
       .text(
@@ -533,7 +556,7 @@ export class BeachScene extends Phaser.Scene {
       .setOrigin(0.5, 1)
       .setDepth(100)
       .setAlpha(0.92);
-    this.pinHud(this.hint, GAME_WIDTH / 2, GAME_HEIGHT - 18);
+    this.pinHud(this.hint, this.viewW / 2, GAME_HEIGHT - 18);
 
     this.restartKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.continueKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
@@ -961,7 +984,7 @@ export class BeachScene extends Phaser.Scene {
 
     const need = this.wanted.desiredPoliceCount();
     while (this.police.filter((p) => !p.structure.isOut() && !p.bribed).length < need) {
-      const edge = this.cameras.main.scrollX + GAME_WIDTH + 40;
+      const edge = this.cameras.main.scrollX + this.viewW + 40;
       const y = GAME_HEIGHT * (0.6 + Math.random() * 0.12);
       const n = this.police.length + 1;
       const copper = new Police(this, edge, y, `PC ${n}`);
@@ -1096,7 +1119,7 @@ export class BeachScene extends Phaser.Scene {
     const side = Math.random() < 0.5 ? -1 : 1;
     // Prefer just ahead / just behind the camera so you clock them mid-stroll
     const x = Phaser.Math.Clamp(
-      cam.scrollX + GAME_WIDTH * (0.25 + Math.random() * 0.55) + side * (40 + Math.random() * 80),
+      cam.scrollX + this.viewW * (0.25 + Math.random() * 0.55) + side * (40 + Math.random() * 80),
       LANE.minX + 40,
       LANE.maxX - 40,
     );
@@ -1197,7 +1220,7 @@ export class BeachScene extends Phaser.Scene {
     const cam = this.cameras.main;
     const margin = 72;
     const viewLeft = cam.scrollX - margin;
-    const viewRight = cam.scrollX + GAME_WIDTH + margin;
+    const viewRight = cam.scrollX + this.viewW + margin;
     const y = Phaser.Math.Clamp(
       next.y + (waveIndex - 0.5) * 28,
       LANE.minY,
@@ -1241,6 +1264,12 @@ export class BeachScene extends Phaser.Scene {
   update(time: number, delta: number) {
     const now = time;
     const dt = delta / 1000;
+
+    if (this.handlePauseInput()) {
+      this.bubbles.update(now);
+      this.updateHud();
+      return;
+    }
 
     this.parallax.update(this.cameras.main.scrollX, delta, now);
     this.updateSkyDrone(now, dt);
@@ -1515,14 +1544,17 @@ export class BeachScene extends Phaser.Scene {
       }
     }
 
-    // Mobile: Duck hops off the board (Loot button used to be Q)
-    if (this.introPhase === "done" && isMobilePlay() && consumeCoverJust()) {
-      if (this.player.skating) {
-        const left = this.player.dismountSkateboard(true);
-        if (left) {
-          this.spawnSkateboard(left.x, left.y);
-          this.spawnFloat(this.player.x, this.player.y - 50, "hopped off");
-        }
+    // Mobile: stick-down hops off the board (Duck button removed)
+    if (
+      this.introPhase === "done" &&
+      isMobilePlay() &&
+      this.player.skating &&
+      (consumeCoverJust() || this.player.stickDownJust)
+    ) {
+      const left = this.player.dismountSkateboard(true);
+      if (left) {
+        this.spawnSkateboard(left.x, left.y);
+        this.spawnFloat(this.player.x, this.player.y - 50, "hopped off");
       }
     }
 
@@ -1722,17 +1754,22 @@ export class BeachScene extends Phaser.Scene {
     this.bubbles.saySticky(chat.speaker, line.text);
     if (line.banner) this.banner.setText(line.banner);
     this.continueHint?.destroy();
-    this.continueHint = this.add
-      .text(0, 0, "Space / E / tap Jump — continue", {
-        fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
-        fontSize: "16px",
-        color: "#1a1410",
-        backgroundColor: "#ffe08a",
-        padding: { x: 12, y: 6 },
-      })
-      .setOrigin(0.5)
-      .setDepth(320);
-    this.pinHud(this.continueHint, GAME_WIDTH / 2, GAME_HEIGHT - 52);
+    this.continueHint = makeContinueButton(this, {
+      label: "Continue",
+      onPress: () => this.advanceCaseyChat(),
+      depth: 320,
+    });
+    this.pinHud(this.continueHint.root, this.viewW / 2, GAME_HEIGHT - 52);
+  }
+
+  private advanceCaseyChat(): void {
+    if (!this.caseyChat) return;
+    this.caseyChat.index += 1;
+    if (this.caseyChat.index >= this.caseyChat.lines.length) {
+      this.finishCaseyChat();
+    } else {
+      this.showCaseyChatLine();
+    }
   }
 
   private updateCaseyChat(_now: number): void {
@@ -1742,12 +1779,7 @@ export class BeachScene extends Phaser.Scene {
       Phaser.Input.Keyboard.JustDown(this.continueAltKey) ||
       consumeConfirmJust();
     if (!pressed) return;
-    this.caseyChat.index += 1;
-    if (this.caseyChat.index >= this.caseyChat.lines.length) {
-      this.finishCaseyChat();
-    } else {
-      this.showCaseyChatLine();
-    }
+    this.advanceCaseyChat();
   }
 
   private finishCaseyChat(): void {
@@ -2110,23 +2142,13 @@ export class BeachScene extends Phaser.Scene {
     );
     this.registry.set("levelTwoCleared", true);
     this.restartPrompt?.destroy();
-    this.restartPrompt = this.add
-      .text(
-        0,
-        0,
-        "CLARENCE PIER CLEARED\n\nLevel 3: Old Portsmouth — coming next\n\n(R to replay from the start)",
-        {
-          fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
-          fontSize: "25px",
-          color: "#1a1410",
-          backgroundColor: "#f2e6d8",
-          padding: { x: 20, y: 16 },
-          align: "center",
-        },
-      )
-      .setOrigin(0.5)
-      .setDepth(300);
-    this.pinHud(this.restartPrompt, GAME_WIDTH / 2, GAME_HEIGHT / 2);
+    this.restartPrompt = makeKeyPrompt(this, {
+      message: "CLARENCE PIER CLEARED\n\nLevel 3: Old Portsmouth — coming next",
+      buttonLabel: "Replay from start",
+      onPress: () => this.scene.restart(),
+      depth: 300,
+    });
+    this.pinHud(this.restartPrompt.root, this.viewW / 2, GAME_HEIGHT / 2);
   }
 
   private updateHud(): void {
@@ -2477,7 +2499,7 @@ export class BeachScene extends Phaser.Scene {
         e.x += dir * e.runSpeed * 0.85 * dt;
         e.groundY = e.y;
         e.action = "run";
-        if (e.x < cam.scrollX - 140 || e.x > cam.scrollX + GAME_WIDTH + 140) {
+        if (e.x < cam.scrollX - 140 || e.x > cam.scrollX + this.viewW + 140) {
           gone.push(e);
         }
       }
@@ -2704,31 +2726,111 @@ export class BeachScene extends Phaser.Scene {
     this.defeated = true;
     this.banner.setText("Cuffed by the Bill. You're going in the van.");
     this.restartPrompt?.destroy();
-    this.restartPrompt = this.add
-      .text(
-        0,
-        0,
-        "CUFFED\n\nPress R to restart from checkpoint",
-        {
-          fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
-          fontSize: "26px",
-          color: "#1a1410",
-          backgroundColor: "#f2e6d8",
-          padding: { x: 16, y: 12 },
-          align: "center",
-        },
-      )
-      .setOrigin(0.5)
-      .setDepth(300);
-    this.pinHud(this.restartPrompt, GAME_WIDTH / 2, GAME_HEIGHT / 2);
-
-    this.hint.setText("R — restart from checkpoint");
+    this.restartPrompt = makeKeyPrompt(this, {
+      message: "CUFFED",
+      buttonLabel: "Restart checkpoint",
+      onPress: () => this.restartFromCheckpoint(),
+      depth: 300,
+    });
+    this.pinHud(this.restartPrompt.root, this.viewW / 2, GAME_HEIGHT / 2);
+    this.hint.setText("Restart — or press R");
   }
 
   /** Bill's van → dump you at the last solid beat (promenade or post-Casey). */
   private restartFromCheckpoint(): void {
     this.registry.set("resumeCheckpoint", { ...this.runCheckpoint });
     this.scene.restart();
+  }
+
+  /** @returns true while the scrap is frozen on the pause menu. */
+  private handlePauseInput(): boolean {
+    if (consumePauseJust()) {
+      if (this.gamePaused) this.setGamePaused(false);
+      else if (this.canOpenPause()) this.setGamePaused(true);
+    }
+    return this.gamePaused;
+  }
+
+  private canOpenPause(): boolean {
+    return (
+      this.introPhase === "done" &&
+      !this.caseyChat &&
+      !this.defeated &&
+      this.endingState === "playing"
+    );
+  }
+
+  private setGamePaused(on: boolean): void {
+    this.gamePaused = on;
+    if (on) {
+      chipRock.setHeat(0);
+      this.showPauseOverlay();
+    } else {
+      this.hidePauseOverlay();
+    }
+  }
+
+  private showPauseOverlay(): void {
+    this.hidePauseOverlay();
+    const dim = this.add
+      .rectangle(0, 0, this.viewW + 80, GAME_HEIGHT + 80, 0x1a1410, 0.62)
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(400)
+      .setInteractive();
+    this.pinHud(dim, this.viewW / 2, GAME_HEIGHT / 2);
+
+    const title = this.add
+      .text(0, 0, "PAUSED", {
+        fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
+        fontSize: "36px",
+        color: "#ffe08a",
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(401);
+    this.pinHud(title, this.viewW / 2, GAME_HEIGHT * 0.32);
+
+    const resume = this.add
+      .text(0, 0, "Resume", {
+        fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
+        fontSize: "22px",
+        color: "#1a1410",
+        backgroundColor: "#ffe08a",
+        padding: { x: 22, y: 10 },
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(401)
+      .setInteractive({ useHandCursor: true });
+    this.pinHud(resume, this.viewW / 2, GAME_HEIGHT * 0.48);
+
+    const restart = this.add
+      .text(0, 0, "Restart checkpoint", {
+        fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
+        fontSize: "18px",
+        color: "#f2e6d8",
+        backgroundColor: "#3a3028",
+        padding: { x: 16, y: 8 },
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(401)
+      .setInteractive({ useHandCursor: true });
+    this.pinHud(restart, this.viewW / 2, GAME_HEIGHT * 0.62);
+
+    resume.on("pointerup", () => this.setGamePaused(false));
+    restart.on("pointerup", () => {
+      this.setGamePaused(false);
+      this.restartFromCheckpoint();
+    });
+
+    this.pauseOverlay = this.add.container(0, 0, [dim, title, resume, restart]).setDepth(400);
+  }
+
+  private hidePauseOverlay(): void {
+    this.pauseOverlay?.destroy(true);
+    this.pauseOverlay = undefined;
   }
 
   private applyResumeCheckpoint(cp: RunCheckpoint): void {
@@ -3219,7 +3321,7 @@ export class BeachScene extends Phaser.Scene {
       obj.setScale(baseScale);
       return;
     }
-    const cx = GAME_WIDTH * 0.5;
+    const cx = this.viewW * 0.5;
     const cy = GAME_HEIGHT * 0.5;
     obj.setPosition(cx + (screenX - cx) / z, cy + (screenY - cy) / z);
     obj.setScale(baseScale / z);

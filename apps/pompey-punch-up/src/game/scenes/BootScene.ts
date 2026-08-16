@@ -80,7 +80,7 @@ const CONTROLS_MOBILE: { id: string; keys: string; action: string }[] = [
   { id: "grab", keys: "Grab", action: "grab · again to toss" },
   { id: "jumpkick", keys: "Jump + Punch", action: "jump kick" },
   { id: "stomp", keys: "Stick down + Kick", action: "stomp floored" },
-  { id: "cover", keys: "Duck", action: "cover · hop off board" },
+  { id: "cover", keys: "Stick down", action: "cover · hop off board" },
   { id: "pickup", keys: "Punch", action: "near kit, shop or board" },
   { id: "loot", keys: "Punch", action: "near a floored body" },
 ];

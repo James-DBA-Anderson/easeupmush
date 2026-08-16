@@ -38,6 +38,7 @@ const EMPTY_PAD: MobilePadFrame = {
   lootJust: false,
   confirmJust: false,
   restartJust: false,
+  pauseJust: false,
 };
 
 export class Player extends Fighter {
@@ -199,7 +200,13 @@ export class Player extends Fighter {
   }
 
   isDuckingInput(): boolean {
-    return this.keys.cover.isDown || this.pad.cover;
+    // Mobile: stick down near cover (Duck button removed from the pad)
+    return this.keys.cover.isDown || this.pad.cover || this.pad.down;
+  }
+
+  /** Stick-down edge this frame — hop off the board on mobile (not diagonals). */
+  get stickDownJust(): boolean {
+    return this.pad.downJust && !this.pad.left && !this.pad.right;
   }
 
   /** Someone under / beside the motor — for Swanton aim or a hurricanrana. */
