@@ -786,7 +786,13 @@ export class DebugArenaScene extends Phaser.Scene {
     if (ev.result === "blocked") this.playBlockImpact(ev.target, ev.attacker);
     if (ev.kind === "toss_hit") {
       this.playThrowImpact(ev.attacker, ev.target, "pileup");
-      this.floatText(ev.target.x, ev.target.y - 72, "pile-up!");
+      this.floatText(
+        ev.result === "headbang"
+          ? (ev.attacker.x + ev.target.x) * 0.5
+          : ev.target.x,
+        ev.target.y - 72,
+        ev.result === "headbang" ? "CLANG!" : "pile-up!",
+      );
     }
     if (ev.kind === "boot_head") this.floatText(ev.target.x, ev.target.y - 72, "STOMP");
 

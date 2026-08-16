@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+      content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -55,9 +55,12 @@
         font-family: "Comic Sans MS", "Chalkboard SE", "Marker Felt", cursive,
           sans-serif;
         touch-action: none;
+        -ms-touch-action: none;
         -webkit-user-select: none;
         user-select: none;
         -webkit-touch-callout: none;
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
       }
 
       #game-root {
@@ -68,6 +71,7 @@
         /* Keep the canvas inside the safe / visible area on notched phones */
         padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l);
         box-sizing: border-box;
+        touch-action: none;
       }
 
       #game-root canvas {
@@ -75,6 +79,7 @@
         max-width: 100%;
         max-height: 100%;
         image-rendering: auto;
+        touch-action: none;
       }
 
       #boot-loader {
@@ -237,28 +242,70 @@
         pointer-events: none;
       }
 
-      .mp-cluster--move {
-        left: max(10px, var(--safe-l));
-        bottom: max(12px, var(--safe-b));
-        grid-template-columns: 56px 56px 56px;
-        grid-template-rows: 56px 56px 56px;
-        grid-template-areas:
-          ". up ."
-          "left . right"
-          ". down .";
+      /* Left half — floating stick appears under the thumb */
+      .mp-stick-zone {
+        position: absolute;
+        left: 0;
+        top: 18%;
+        bottom: 0;
+        width: min(46vw, 320px);
+        pointer-events: auto;
+        touch-action: none;
+        -webkit-tap-highlight-color: transparent;
       }
 
-      .mp-cluster--move [data-dir="up"] {
-        grid-area: up;
+      .mp-stick {
+        position: fixed;
+        width: 118px;
+        height: 118px;
+        margin-left: -59px;
+        margin-top: -59px;
+        border-radius: 999px;
+        pointer-events: none;
+        opacity: 0.32;
+        transition: opacity 0.12s ease;
+        left: max(72px, calc(var(--safe-l) + 72px));
+        top: auto;
+        bottom: max(64px, calc(var(--safe-b) + 64px));
       }
-      .mp-cluster--move [data-dir="left"] {
-        grid-area: left;
+
+      .mp-stick.is-active {
+        opacity: 1;
+        bottom: auto;
       }
-      .mp-cluster--move [data-dir="right"] {
-        grid-area: right;
+
+      .mp-stick-base {
+        position: absolute;
+        inset: 0;
+        border-radius: 999px;
+        border: 2px solid rgba(242, 230, 216, 0.28);
+        background: radial-gradient(
+          circle at 50% 45%,
+          rgba(60, 48, 40, 0.35),
+          rgba(20, 14, 10, 0.55)
+        );
+        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
       }
-      .mp-cluster--move [data-dir="down"] {
-        grid-area: down;
+
+      .mp-stick-knob {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 54px;
+        height: 54px;
+        border-radius: 999px;
+        transform: translate(-50%, -50%);
+        border: 2px solid rgba(255, 200, 120, 0.45);
+        background: radial-gradient(
+          circle at 40% 35%,
+          rgba(90, 70, 55, 0.9),
+          rgba(40, 28, 20, 0.92)
+        );
+        box-shadow: 0 2px 0 rgba(0, 0, 0, 0.4);
+      }
+
+      .mp-stick-zone.is-active .mp-stick-knob {
+        border-color: rgba(255, 200, 120, 0.7);
       }
 
       .mp-cluster--meta {
@@ -272,11 +319,10 @@
         right: max(10px, var(--safe-r));
         bottom: max(12px, var(--safe-b));
         grid-template-columns: 64px 72px;
-        grid-template-rows: 56px 64px 56px;
+        grid-template-rows: 56px 64px;
         grid-template-areas:
           "jump punch"
-          "grab kick"
-          "use use";
+          "grab kick";
       }
 
       .mp-act--jump {
@@ -290,9 +336,6 @@
       }
       .mp-act--kick {
         grid-area: kick;
-      }
-      .mp-act--use {
-        grid-area: use;
       }
 
       .mp-btn {
@@ -311,11 +354,6 @@
         padding: 0;
         box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
         -webkit-tap-highlight-color: transparent;
-      }
-
-      .mp-dir {
-        font-size: 16px;
-        line-height: 1;
       }
 
       .mp-act {
@@ -357,13 +395,19 @@
       }
 
       @media (max-height: 420px) {
-        .mp-cluster--move {
-          grid-template-columns: 48px 48px 48px;
-          grid-template-rows: 48px 48px 48px;
+        .mp-stick {
+          width: 100px;
+          height: 100px;
+          margin-left: -50px;
+          margin-top: -50px;
+        }
+        .mp-stick-knob {
+          width: 46px;
+          height: 46px;
         }
         .mp-cluster--fight {
           grid-template-columns: 56px 62px;
-          grid-template-rows: 48px 56px 44px;
+          grid-template-rows: 48px 56px;
         }
         .mp-btn {
           min-width: 44px;

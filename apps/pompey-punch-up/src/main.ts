@@ -13,8 +13,46 @@ if (!parent) {
   throw new Error("Missing #game-root");
 }
 
+/**
+ * Stop accidental browser zoom (double-tap / pinch). Viewport meta helps,
+ * but iOS Safari still zooms without these gesture / touchend guards.
+ */
+function disableMobileBrowserZoom(): void {
+  const block = (ev: Event) => {
+    ev.preventDefault();
+  };
+  // Non-standard Safari pinch gestures
+  document.addEventListener("gesturestart", block, { passive: false });
+  document.addEventListener("gesturechange", block, { passive: false });
+  document.addEventListener("gestureend", block, { passive: false });
+
+  // Double-tap zoom
+  let lastTouchEnd = 0;
+  document.addEventListener(
+    "touchend",
+    (ev) => {
+      const now = Date.now();
+      if (now - lastTouchEnd <= 350) {
+        ev.preventDefault();
+      }
+      lastTouchEnd = now;
+    },
+    { passive: false },
+  );
+
+  // Multi-finger pinch on some WebViews
+  document.addEventListener(
+    "touchmove",
+    (ev) => {
+      if (ev.touches.length > 1) ev.preventDefault();
+    },
+    { passive: false },
+  );
+}
+
 if (isMobilePlay()) {
   document.body.classList.add("mobile-play");
+  disableMobileBrowserZoom();
   syncPadVisibility();
   mountMobileControls();
 

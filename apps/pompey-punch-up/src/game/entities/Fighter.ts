@@ -196,7 +196,9 @@ export class Fighter extends Phaser.GameObjects.Container {
   tossVx = 0;
   tossUntil = 0;
   /** When the body toss began — drives the flip spin. */
-  private tossStartedAt = 0;
+  tossStartedAt = 0;
+  /** Already tried the close-range head clash for this flight. */
+  private headbangChecked = false;
   /** Grabbed victim for body toss. */
   heldTarget: Fighter | null = null;
   /** Clinch started from behind them — L toss becomes a German suplex. */
@@ -901,6 +903,7 @@ export class Fighter extends Phaser.GameObjects.Container {
     victim.tossUntil = now + flyMs;
     victim.airborne = true;
     victim.jumpVy = flyY;
+    victim.headbangChecked = false;
     this.diveAimX = null;
 
     // Slam: can KO/crawl when they're worn; survivors bounce up on landing
@@ -949,6 +952,90 @@ export class Fighter extends Phaser.GameObjects.Container {
     this.tossVx = 0;
     this.tossUntil = 0;
     this.tossStartedAt = 0;
+    this.headbangChecked = false;
+  }
+
+  /**
+   * Batman Returns — if another lad is right there when you hurl someone,
+   * smash their heads together (once per flight, first beat only).
+   */
+  tryHeadbangClash(now: number, fighters: Fighter[]): Fighter | null {
+    if (this.headbangChecked) return null;
+    if (this.tossVx === 0 || now >= this.tossUntil) return null;
+    // Only the fresh release — mid-flight pile-ups use resolveBodyTosses
+    if (now - this.tossStartedAt > 130) {
+      this.headbangChecked = true;
+      return null;
+    }
+
+    const dir = Math.sign(this.tossVx) || this.facing;
+    let best: Fighter | null = null;
+    let bestAhead = 78;
+    for (const t of fighters) {
+      if (t === this) continue;
+      if (t.structure.downed || t.structure.isOut()) continue;
+      if (t.isInThrowArc || t.isBeingTossed) continue;
+      if (t.team === "player") continue;
+      if (
+        t.team === "civilian" &&
+        "isAlly" in t &&
+        (t as { isAlly: boolean }).isAlly
+      ) {
+        continue;
+      }
+      if (t.team === "civilian" && this.team === "civilian") continue;
+      const ahead = (t.x - this.x) * dir;
+      if (ahead < -12 || ahead > 78) continue;
+      if (Math.abs(t.laneY - this.laneY) > 46) continue;
+      if (ahead < bestAhead) {
+        bestAhead = ahead;
+        best = t;
+      }
+    }
+    if (!best || !this.markHit(best)) {
+      return null;
+    }
+    this.headbangChecked = true;
+
+    // Pull both skulls into the middle
+    const midX = (this.x + best.x) * 0.5;
+    this.x = midX - dir * 12;
+    best.x = midX + dir * 12;
+    best.y = this.y;
+    best.groundY = this.groundY;
+    best.faceToward(this.x, now);
+    this.faceToward(best.x, now);
+
+    best.receiveStrike({
+      kind: "hook",
+      power: 0.85,
+      critical: true,
+      dirty: false,
+      onOpening: true,
+      now,
+      bodyPart: "head",
+      knockDir: dir,
+    });
+    // Missile is i-framed for the flight — softFloorOnly still lands the clang
+    this.receiveStrike({
+      kind: "hook",
+      power: 0.55,
+      critical: false,
+      dirty: false,
+      onOpening: true,
+      softFloorOnly: true,
+      now,
+      bodyPart: "head",
+      knockDir: -dir,
+    });
+
+    // Both reel — no long missile flight after a head clash
+    this.tossVx = dir * 55;
+    this.tossUntil = now + 220;
+    if (this.jumpVy < -80) this.jumpVy = -80;
+    best.invulnUntil = Math.max(best.invulnUntil, now + 180);
+
+    return best;
   }
 
   /** Jolt a floored body without moving their plant point. */

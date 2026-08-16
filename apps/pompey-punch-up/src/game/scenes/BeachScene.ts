@@ -27,8 +27,12 @@ import type { WeaponShop } from "../world/WeaponShop";
 import type { Obstacle } from "../world/obstacles";
 import { separateObstacles } from "../world/obstacles";
 import {
+  clearPunchJust,
   consumeConfirmJust,
+  consumeCoverJust,
   consumeRestartJust,
+  isMobilePlay,
+  peekPunchJust,
   setMobilePadActive,
 } from "../input/mobilePad";
 
@@ -121,6 +125,8 @@ export class BeachScene extends Phaser.Scene {
   private portraitRank: EnemyRole | null = null;
   private lootHint!: Phaser.GameObjects.Text;
   private restartPrompt?: Phaser.GameObjects.Text;
+  /** World zoom on mobile — HUD is re-pinned so it stays put on screen. */
+  private viewZoom = 1;
   private floatTexts: Phaser.GameObjects.Text[] = [];
   private defeated = false;
   private restartKey!: Phaser.Input.Keyboard.Key;
@@ -265,6 +271,10 @@ export class BeachScene extends Phaser.Scene {
     this.police = [];
 
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, GAME_HEIGHT);
+    this.viewZoom = isMobilePlay() ? 1.15 : 1;
+    if (this.viewZoom !== 1) {
+      this.cameras.main.setZoom(this.viewZoom);
+    }
     this.parallax = new ParallaxBeach(this);
     this.skyDrone = new SkyDrone(this);
     this.gulls = new SeagullFlock(this);
@@ -434,23 +444,23 @@ export class BeachScene extends Phaser.Scene {
     this.refreshObstacles();
 
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
-    this.cameras.main.setDeadzone(120, 80);
+    this.cameras.main.setDeadzone(120 / this.viewZoom, 80 / this.viewZoom);
 
     const START_BANNER =
       "Southsea — morning after. Something's ringing in your ears…";
     this.banner = this.add
-      .text(24, 16, START_BANNER, {
+      .text(0, 0, START_BANNER, {
         fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
         fontSize: "15px",
         color: "#1a1410",
         backgroundColor: "#f2e6d8",
         padding: { x: 8, y: 4 },
       })
-      .setScrollFactor(0)
       .setDepth(100);
+    this.pinHud(this.banner, 24, 16);
 
     this.hud = this.add
-      .text(24, 52, "", {
+      .text(0, 0, "", {
         fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
         fontSize: "16px",
         color: "#1a1410",
@@ -459,8 +469,8 @@ export class BeachScene extends Phaser.Scene {
         align: "left",
       })
       .setOrigin(0, 0)
-      .setScrollFactor(0)
       .setDepth(100);
+    this.pinHud(this.hud, 24, 52);
 
     const portraitFrame = this.add.graphics();
     portraitFrame.fillStyle(0xf2e6d8, 0.96);
@@ -483,19 +493,19 @@ export class BeachScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 0);
     this.enemyPortrait = this.add
-      .container(GAME_WIDTH - 20, 16, [
+      .container(0, 0, [
         portraitFrame,
         this.enemyPortraitImage,
         this.enemyPortraitDamage,
         this.enemyPortraitRank,
         this.enemyPortraitName,
       ])
-      .setScrollFactor(0)
       .setDepth(105)
       .setVisible(false);
+    this.pinHud(this.enemyPortrait, GAME_WIDTH - 20, 16);
 
     this.lootHint = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 80, "", {
+      .text(0, 0, "", {
         fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
         fontSize: "18px",
         color: "#1a1410",
@@ -503,14 +513,14 @@ export class BeachScene extends Phaser.Scene {
         padding: { x: 10, y: 4 },
       })
       .setOrigin(0.5)
-      .setScrollFactor(0)
       .setDepth(110)
       .setVisible(false);
+    this.pinHud(this.lootHint, GAME_WIDTH / 2, GAME_HEIGHT - 80);
 
     this.hint = this.add
       .text(
-        GAME_WIDTH / 2,
-        GAME_HEIGHT - 18,
+        0,
+        0,
         "WASD  ·  C cover  ·  H block  ·  J combo  ·  J+K back  ·  K kick  ·  L grab  ·  Space jump  ·  E pick up  ·  Q loot  ·  R retry  ·  K on car = splash / rana",
         {
           fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
@@ -521,9 +531,9 @@ export class BeachScene extends Phaser.Scene {
         },
       )
       .setOrigin(0.5, 1)
-      .setScrollFactor(0)
       .setDepth(100)
       .setAlpha(0.92);
+    this.pinHud(this.hint, GAME_WIDTH / 2, GAME_HEIGHT - 18);
 
     this.restartKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.continueKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
@@ -647,7 +657,9 @@ export class BeachScene extends Phaser.Scene {
     this.skateboards = this.skateboards.filter((x) => x !== board && !x.taken);
     this.spawnFloat(this.player.x, this.player.y - 50, "on the board");
     this.banner.setText(
-      "Skateboarding — Space ollie, Down+move for a manual, Space then K for a kickflip. Q to hop off.",
+      isMobilePlay()
+        ? "Skateboarding — Jump ollie, Down+move for a manual, Jump then Kick for a kickflip. Duck to hop off."
+        : "Skateboarding — Space ollie, Down+move for a manual, Space then K for a kickflip. Q to hop off.",
     );
     void chipSfx.pickup();
     return true;
@@ -1322,6 +1334,7 @@ export class BeachScene extends Phaser.Scene {
     if (this.introPhase !== "done") {
       this.updateIntro(now, dt);
     } else {
+      this.tryMobilePunchContext();
       this.player.updatePlayer(now, dt, LANE, this.fighters);
       if (this.player.action === "body_toss") {
         this.techniquesUsed.add(
@@ -1502,6 +1515,17 @@ export class BeachScene extends Phaser.Scene {
       }
     }
 
+    // Mobile: Duck hops off the board (Loot button used to be Q)
+    if (this.introPhase === "done" && isMobilePlay() && consumeCoverJust()) {
+      if (this.player.skating) {
+        const left = this.player.dismountSkateboard(true);
+        if (left) {
+          this.spawnSkateboard(left.x, left.y);
+          this.spawnFloat(this.player.x, this.player.y - 50, "hopped off");
+        }
+      }
+    }
+
     for (const f of this.fighters) {
       const boardDrop = f.takeBoardDrop();
       if (boardDrop) {
@@ -1537,14 +1561,18 @@ export class BeachScene extends Phaser.Scene {
     } else if (stallHint && !lootTarget && !nearWep && !nearBoard) {
       this.lootHint.setText(stallHint).setVisible(true);
     } else if (lootTarget) {
-      this.lootHint.setText("Q — loot").setVisible(true);
+      this.lootHint.setText(`${this.actKey()} — loot`).setVisible(true);
     } else if (nearBoard && !this.player.skating) {
-      this.lootHint.setText("E — hop on the board").setVisible(true);
+      this.lootHint.setText(`${this.actKey()} — hop on the board`).setVisible(true);
     } else if (nearWep) {
-      this.lootHint.setText(`E — grab ${nearWep.kind}`).setVisible(true);
+      this.lootHint.setText(`${this.actKey()} — grab ${nearWep.kind}`).setVisible(true);
     } else if (this.player.skating) {
       this.lootHint
-        .setText("Space ollie · Down+move manual · Space+K kickflip · Q hop off")
+        .setText(
+          isMobilePlay()
+            ? "Jump ollie · Down+move manual · Jump+Kick kickflip · Duck hop off"
+            : "Space ollie · Down+move manual · Space+K kickflip · Q hop off",
+        )
         .setVisible(true);
     } else {
       const nearCover = this.nearestCover(90);
@@ -1695,7 +1723,7 @@ export class BeachScene extends Phaser.Scene {
     if (line.banner) this.banner.setText(line.banner);
     this.continueHint?.destroy();
     this.continueHint = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 52, "Space / E / tap Jump — continue", {
+      .text(0, 0, "Space / E / tap Jump — continue", {
         fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
         fontSize: "16px",
         color: "#1a1410",
@@ -1703,8 +1731,8 @@ export class BeachScene extends Phaser.Scene {
         padding: { x: 12, y: 6 },
       })
       .setOrigin(0.5)
-      .setScrollFactor(0)
       .setDepth(320);
+    this.pinHud(this.continueHint, GAME_WIDTH / 2, GAME_HEIGHT - 52);
   }
 
   private updateCaseyChat(_now: number): void {
@@ -2084,8 +2112,8 @@ export class BeachScene extends Phaser.Scene {
     this.restartPrompt?.destroy();
     this.restartPrompt = this.add
       .text(
-        GAME_WIDTH / 2,
-        GAME_HEIGHT / 2,
+        0,
+        0,
         "CLARENCE PIER CLEARED\n\nLevel 3: Old Portsmouth — coming next\n\n(R to replay from the start)",
         {
           fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
@@ -2097,8 +2125,8 @@ export class BeachScene extends Phaser.Scene {
         },
       )
       .setOrigin(0.5)
-      .setScrollFactor(0)
       .setDepth(300);
+    this.pinHud(this.restartPrompt, GAME_WIDTH / 2, GAME_HEIGHT / 2);
   }
 
   private updateHud(): void {
@@ -2678,8 +2706,8 @@ export class BeachScene extends Phaser.Scene {
     this.restartPrompt?.destroy();
     this.restartPrompt = this.add
       .text(
-        GAME_WIDTH / 2,
-        GAME_HEIGHT / 2,
+        0,
+        0,
         "CUFFED\n\nPress R to restart from checkpoint",
         {
           fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
@@ -2691,8 +2719,8 @@ export class BeachScene extends Phaser.Scene {
         },
       )
       .setOrigin(0.5)
-      .setScrollFactor(0)
       .setDepth(300);
+    this.pinHud(this.restartPrompt, GAME_WIDTH / 2, GAME_HEIGHT / 2);
 
     this.hint.setText("R — restart from checkpoint");
   }
@@ -2813,7 +2841,17 @@ export class BeachScene extends Phaser.Scene {
 
     if (ev.kind === "toss_hit") {
       this.playThrowImpact(ev.attacker, ev.target, "pileup");
-      this.spawnFloat(ev.target.x, ev.target.y - 56, "pile-up!");
+      if (ev.result === "headbang") {
+        this.spawnFloat(
+          (ev.attacker.x + ev.target.x) * 0.5,
+          Math.min(ev.attacker.y, ev.target.y) - 60,
+          "CLANG!",
+        );
+        this.banner.setText("Heads together!");
+        void chipSfx.hit("critical");
+      } else {
+        this.spawnFloat(ev.target.x, ev.target.y - 56, "pile-up!");
+      }
       this.wanted.bump(0.08);
     }
 
@@ -2932,8 +2970,8 @@ export class BeachScene extends Phaser.Scene {
       }
       this.banner.setText(
         ev.result === "out_cold"
-          ? "Out cold — press Q near them to loot."
-          : "Crawl-away KO — Q to loot if you're quick.",
+          ? `Out cold — press ${this.lootKey()} near them to loot.`
+          : `Crawl-away KO — ${this.lootKey()} to loot if you're quick.`,
       );
     }
   }
@@ -3152,14 +3190,99 @@ export class BeachScene extends Phaser.Scene {
     return best;
   }
 
+  private actKey(): string {
+    return isMobilePlay() ? "Punch" : "E";
+  }
+
+  private lootKey(): string {
+    return isMobilePlay() ? "Punch" : "Q";
+  }
+
+  /**
+   * Keep HUD at a fixed screen spot when the world camera is zoomed.
+   * Phaser zooms scrollFactor-0 objects around the view centre — undo that.
+   */
+  private pinHud(
+    obj: Phaser.GameObjects.GameObject & {
+      setScrollFactor: (x: number, y?: number) => unknown;
+      setPosition: (x: number, y: number) => unknown;
+      setScale: (x: number, y?: number) => unknown;
+    },
+    screenX: number,
+    screenY: number,
+    baseScale = 1,
+  ): void {
+    const z = this.viewZoom;
+    obj.setScrollFactor(0);
+    if (z === 1) {
+      obj.setPosition(screenX, screenY);
+      obj.setScale(baseScale);
+      return;
+    }
+    const cx = GAME_WIDTH * 0.5;
+    const cy = GAME_HEIGHT * 0.5;
+    obj.setPosition(cx + (screenX - cx) / z, cy + (screenY - cy) / z);
+    obj.setScale(baseScale / z);
+  }
+
+  /**
+   * On mobile, Punch is the only action button for world interactions —
+   * steal the press when buy / pick up / board / loot can actually complete.
+   */
+  private tryMobilePunchContext(): void {
+    if (!isMobilePlay() || !peekPunchJust()) return;
+    if (this.player.structure.isOut()) return;
+
+    const copper = this.nearestBribeableCopper();
+    const canBribe =
+      !!copper && this.player.money >= this.wanted.bribeCost();
+    const shop = this.nearestWeaponShop();
+    const canBuyWep =
+      !!shop &&
+      !shop.soldOut &&
+      !!shop.offer &&
+      this.player.money >= shop.offer.price;
+    const stall = this.nearestStall();
+    const canBuyFood =
+      !!stall &&
+      !stall.soldOut &&
+      this.player.structure.needsFeed() &&
+      this.player.money >= stall.price;
+    const canBoard =
+      !this.player.skating &&
+      !this.player.airborne &&
+      !this.player.climbing &&
+      !!this.nearestSkateboard();
+    const canGrabWep = !!this.nearestPickup();
+    const canLoot = !!nearestLootable(this.player, this.fighters);
+
+    if (!canBribe && !canBuyWep && !canBuyFood && !canBoard && !canGrabWep && !canLoot) {
+      return;
+    }
+
+    if (canBribe || canBuyWep || canBuyFood || canBoard || canGrabWep) {
+      const bribed = canBribe && this.tryBribePolice();
+      const boughtWep = bribed || (canBuyWep && this.tryBuyWeapon());
+      const served = boughtWep || (canBuyFood && this.tryBuyFood());
+      const boarded = served || (canBoard && this.tryPickupSkateboard());
+      const picked = boarded || (canGrabWep && this.tryPickupWeapon());
+      if (picked) clearPunchJust();
+      return;
+    }
+
+    if (canLoot && tryLoot(this.player, this.fighters, (ev) => this.onCombat(ev))) {
+      clearPunchJust();
+    }
+  }
+
   private policeBribeHint(): string | null {
     const copper = this.nearestBribeableCopper();
     if (!copper) return null;
     const cost = this.wanted.bribeCost();
     if (this.player.money < cost) {
-      return `E — bung the Bill £${cost} (skint)`;
+      return `${this.actKey()} — bung the Bill £${cost} (skint)`;
     }
-    return `E — bung the Bill £${cost}`;
+    return `${this.actKey()} — bung the Bill £${cost}`;
   }
 
   /** Slip the copper a bung — cools wanted and sends them packing. */
@@ -3190,7 +3313,7 @@ export class BeachScene extends Phaser.Scene {
     if (this.player.money < offer.price) {
       return `${shop.label} — ${offer.name} £${offer.price} (skint)`;
     }
-    return `E — buy ${offer.name} £${offer.price}`;
+    return `${this.actKey()} — buy ${offer.name} £${offer.price}`;
   }
 
   /** Buy unique kit from an arcade locker / fence. */
@@ -3241,7 +3364,7 @@ export class BeachScene extends Phaser.Scene {
     if (this.player.money < stall.price) {
       return `${stall.label} — ${stall.item} £${stall.price} (skint)`;
     }
-    return `E — buy ${stall.item} £${stall.price}`;
+    return `${this.actKey()} — buy ${stall.item} £${stall.price}`;
   }
 
   /** Hand over cash at a kiosk. Returns true if the E press was used up here. */

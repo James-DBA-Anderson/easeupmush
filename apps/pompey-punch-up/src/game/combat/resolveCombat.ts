@@ -204,14 +204,28 @@ function resolveBodyTosses(
       if (now >= missile.tossUntil) missile.tossVx = 0;
       continue;
     }
+
+    // Fresh release + someone close → bang skulls (Batman Returns)
+    const clashed = missile.tryHeadbangClash(now, fighters);
+    if (clashed) {
+      onEvent?.({
+        attacker: missile,
+        target: clashed,
+        result: "headbang",
+        kind: "toss_hit",
+      });
+      continue;
+    }
+
     for (const target of fighters) {
       if (target === missile) continue;
       // Floor finishers only — flying bodies skip planted / KO'd lads
       if (target.structure.downed || target.structure.isOut()) continue;
       if (target.team === "civilian" && missile.team === "civilian") continue;
+      if (target.team === "player") continue;
       const dx = Math.abs(target.x - missile.x);
       const dy = Math.abs(target.laneY - missile.laneY);
-      if (dx > 36 || dy > 40) continue;
+      if (dx > 42 || dy > 42) continue;
       if (!missile.markHit(target)) continue;
 
       const dir = Math.sign(missile.tossVx) || 1;
@@ -222,7 +236,7 @@ function resolveBodyTosses(
         dirty: false,
         onOpening: true,
         now,
-        bodyPart: "body",
+        bodyPart: "head",
         knockDir: dir,
       });
       // Soften the missile too
@@ -232,8 +246,9 @@ function resolveBodyTosses(
         critical: false,
         dirty: false,
         onOpening: true,
+        softFloorOnly: true,
         now,
-        bodyPart: "body",
+        bodyPart: "head",
         knockDir: -dir,
       });
       missile.tossVx *= 0.35;
