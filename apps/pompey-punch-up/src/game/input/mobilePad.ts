@@ -1,0 +1,303 @@
+/** On-screen pad state — held across frames; Just* cleared after each take(). */
+
+export type MobilePadFrame = {
+  left: boolean;
+  right: boolean;
+  up: boolean;
+  down: boolean;
+  leftJust: boolean;
+  rightJust: boolean;
+  upJust: boolean;
+  downJust: boolean;
+  punch: boolean;
+  kick: boolean;
+  jump: boolean;
+  grab: boolean;
+  block: boolean;
+  run: boolean;
+  interact: boolean;
+  loot: boolean;
+  cover: boolean;
+  punchJust: boolean;
+  kickJust: boolean;
+  jumpJust: boolean;
+  grabJust: boolean;
+  interactJust: boolean;
+  lootJust: boolean;
+  /** Menus / continue — Jump or Punch tap. */
+  confirmJust: boolean;
+  restartJust: boolean;
+};
+
+const held = {
+  left: false,
+  right: false,
+  up: false,
+  down: false,
+  punch: false,
+  kick: false,
+  jump: false,
+  grab: false,
+  block: false,
+  run: false,
+  interact: false,
+  loot: false,
+  cover: false,
+};
+
+const edged = {
+  leftJust: false,
+  rightJust: false,
+  upJust: false,
+  downJust: false,
+  punchJust: false,
+  kickJust: false,
+  jumpJust: false,
+  grabJust: false,
+  interactJust: false,
+  lootJust: false,
+  confirmJust: false,
+  restartJust: false,
+};
+
+let mounted = false;
+let root: HTMLElement | null = null;
+/** Off on the title screen so the start tap isn't fighting the pad. */
+let padActive = false;
+
+export function isMobilePlay(): boolean {
+  if (typeof window === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const mobileUa = /Android|iPhone|iPad|iPod|Mobile|IEMobile|Opera Mini/i.test(ua);
+  const coarse = window.matchMedia("(pointer: coarse)").matches;
+  const noHover = window.matchMedia("(hover: none)").matches;
+  const shortSide = Math.min(screen.width, screen.height);
+  return mobileUa || ((coarse || noHover) && shortSide <= 920);
+}
+
+export function isLandscape(): boolean {
+  return window.matchMedia("(orientation: landscape)").matches;
+}
+
+/**
+ * Snapshot for the player tick. Clears move/attack Just* flags.
+ * Interact / loot / confirm / restart stay latched until consume*().
+ */
+export function takeMobilePad(): MobilePadFrame {
+  const frame: MobilePadFrame = {
+    left: held.left,
+    right: held.right,
+    up: held.up,
+    down: held.down,
+    leftJust: edged.leftJust,
+    rightJust: edged.rightJust,
+    upJust: edged.upJust,
+    downJust: edged.downJust,
+    punch: held.punch,
+    kick: held.kick,
+    jump: held.jump,
+    grab: held.grab,
+    block: held.block,
+    run: held.run,
+    interact: held.interact,
+    loot: held.loot,
+    cover: held.cover,
+    punchJust: edged.punchJust,
+    kickJust: edged.kickJust,
+    jumpJust: edged.jumpJust,
+    grabJust: edged.grabJust,
+    interactJust: edged.interactJust,
+    lootJust: edged.lootJust,
+    confirmJust: edged.confirmJust,
+    restartJust: edged.restartJust,
+  };
+  edged.leftJust = false;
+  edged.rightJust = false;
+  edged.upJust = false;
+  edged.downJust = false;
+  edged.punchJust = false;
+  edged.kickJust = false;
+  edged.jumpJust = false;
+  edged.grabJust = false;
+  // Drop unused menu confirms so an old Punch doesn't skip Casey later
+  edged.confirmJust = false;
+  return frame;
+}
+
+export function consumeInteractJust(): boolean {
+  const v = edged.interactJust;
+  edged.interactJust = false;
+  return v;
+}
+
+export function consumeLootJust(): boolean {
+  const v = edged.lootJust;
+  edged.lootJust = false;
+  return v;
+}
+
+export function consumeConfirmJust(): boolean {
+  const v = edged.confirmJust;
+  edged.confirmJust = false;
+  return v;
+}
+
+export function consumeRestartJust(): boolean {
+  const v = edged.restartJust;
+  edged.restartJust = false;
+  return v;
+}
+
+function setDir(dir: "left" | "right" | "up" | "down", on: boolean): void {
+  if (on && !held[dir]) edged[`${dir}Just`] = true;
+  held[dir] = on;
+}
+
+function setBtn(
+  key: "punch" | "kick" | "jump" | "grab" | "block" | "run" | "interact" | "loot" | "cover",
+  on: boolean,
+): void {
+  if (on && !held[key]) {
+    if (key === "punch" || key === "kick" || key === "jump" || key === "grab") {
+      edged[`${key}Just`] = true;
+    }
+    if (key === "interact") edged.interactJust = true;
+    if (key === "loot") edged.lootJust = true;
+    if (key === "punch" || key === "jump") edged.confirmJust = true;
+  }
+  held[key] = on;
+}
+
+function bindHold(el: HTMLElement, onDown: () => void, onUp: () => void): void {
+  const down = (ev: Event) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    onDown();
+    el.classList.add("is-down");
+  };
+  const up = (ev: Event) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    onUp();
+    el.classList.remove("is-down");
+  };
+  el.addEventListener("pointerdown", down);
+  el.addEventListener("pointerup", up);
+  el.addEventListener("pointercancel", up);
+  el.addEventListener("pointerleave", up);
+  el.addEventListener("contextmenu", (ev) => ev.preventDefault());
+}
+
+export function mountMobileControls(): void {
+  if (mounted || !isMobilePlay()) return;
+  mounted = true;
+  document.body.classList.add("mobile-play");
+
+  root = document.createElement("div");
+  root.id = "mobile-pad";
+  root.setAttribute("aria-hidden", "true");
+  root.innerHTML = `
+    <div class="mp-cluster mp-cluster--move">
+      <button type="button" class="mp-btn mp-dir" data-dir="up" aria-label="Up">▲</button>
+      <button type="button" class="mp-btn mp-dir" data-dir="left" aria-label="Left">◀</button>
+      <button type="button" class="mp-btn mp-dir" data-dir="right" aria-label="Right">▶</button>
+      <button type="button" class="mp-btn mp-dir" data-dir="down" aria-label="Down">▼</button>
+    </div>
+    <div class="mp-cluster mp-cluster--meta">
+      <button type="button" class="mp-btn mp-meta" data-btn="run" aria-label="Run">Run</button>
+      <button type="button" class="mp-btn mp-meta" data-btn="block" aria-label="Block">Block</button>
+      <button type="button" class="mp-btn mp-meta" data-btn="cover" aria-label="Cover">Duck</button>
+      <button type="button" class="mp-btn mp-meta" data-btn="loot" aria-label="Loot">Loot</button>
+      <button type="button" class="mp-btn mp-meta mp-meta--restart" data-restart aria-label="Restart">R</button>
+    </div>
+    <div class="mp-cluster mp-cluster--fight">
+      <button type="button" class="mp-btn mp-act mp-act--jump" data-btn="jump" aria-label="Jump">Jump</button>
+      <button type="button" class="mp-btn mp-act mp-act--punch" data-btn="punch" aria-label="Punch">Punch</button>
+      <button type="button" class="mp-btn mp-act mp-act--grab" data-btn="grab" aria-label="Grab">Grab</button>
+      <button type="button" class="mp-btn mp-act mp-act--kick" data-btn="kick" aria-label="Kick">Kick</button>
+      <button type="button" class="mp-btn mp-act mp-act--use" data-btn="interact" aria-label="Use">Use</button>
+    </div>
+  `;
+  document.body.appendChild(root);
+
+  root.querySelectorAll<HTMLElement>("[data-dir]").forEach((el) => {
+    const dir = el.dataset.dir as "left" | "right" | "up" | "down";
+    bindHold(
+      el,
+      () => setDir(dir, true),
+      () => setDir(dir, false),
+    );
+  });
+
+  root.querySelectorAll<HTMLElement>("[data-btn]").forEach((el) => {
+    const btn = el.dataset.btn as
+      | "punch"
+      | "kick"
+      | "jump"
+      | "grab"
+      | "block"
+      | "run"
+      | "interact"
+      | "loot"
+      | "cover";
+    bindHold(
+      el,
+      () => setBtn(btn, true),
+      () => setBtn(btn, false),
+    );
+  });
+
+  const restartBtn = root.querySelector<HTMLElement>("[data-restart]");
+  if (restartBtn) {
+    bindHold(
+      restartBtn,
+      () => {
+        edged.restartJust = true;
+      },
+      () => {
+        /* tap only */
+      },
+    );
+  }
+
+  syncPadVisibility();
+  window.addEventListener("orientationchange", syncPadVisibility);
+  window.addEventListener("resize", syncPadVisibility);
+}
+
+export function syncPadVisibility(): void {
+  const mobile = isMobilePlay();
+  const land = isLandscape();
+  document.body.classList.toggle("mobile-play", mobile);
+  document.body.classList.toggle("mobile-landscape", mobile && land);
+  document.body.classList.toggle("mobile-portrait", mobile && !land);
+  if (!root) return;
+  root.hidden = !(mobile && land && padActive);
+}
+
+export function setMobilePadActive(on: boolean): void {
+  padActive = on;
+  syncPadVisibility();
+}
+
+/** Prefer landscape; often needs a user gesture + fullscreen on Android. */
+export async function tryEnforceLandscape(): Promise<void> {
+  if (!isMobilePlay()) return;
+  try {
+    const el = document.documentElement;
+    if (!document.fullscreenElement && el.requestFullscreen) {
+      await el.requestFullscreen();
+    }
+  } catch {
+    /* ignore — not always allowed */
+  }
+  try {
+    const orient = screen.orientation as ScreenOrientation & {
+      lock?: (o: string) => Promise<void>;
+    };
+    if (orient?.lock) await orient.lock("landscape");
+  } catch {
+    /* iOS / unsupported — CSS rotate prompt covers this */
+  }
+  syncPadVisibility();
+}

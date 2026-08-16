@@ -315,3 +315,114 @@ body {
 .foot p {
   margin: 0;
 }
+
+.foot a {
+  color: var(--foam);
+  text-decoration: none;
+}
+
+.foot a:hover {
+  color: var(--sodium-hot);
+  text-decoration: underline;
+}
+
+/* --- About --- */
+
+.page--about {
+  max-width: 42rem;
+}
+
+.hero--compact {
+  padding-bottom: 0.75rem;
+}
+
+.hero--compact .hero__brand {
+  font-size: clamp(2rem, 7vw, 3.25rem);
+}
+
+.about {
+  margin: 0.5rem 0 0;
+  animation: rise-in 0.7s ease-out 0.06s both;
+}
+
+.about__section {
+  margin-bottom: 2rem;
+}
+
+.about__section h2 {
+  margin: 0 0 0.75rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.25rem, 3vw, 1.55rem);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--chalk);
+}
+
+.about__section p {
+  margin: 0 0 0.75rem;
+  color: var(--foam);
+  line-height: 1.6;
+}
+
+.about__section p:last-child {
+  margin-bottom: 0;
+}
+
+.about__section ul {
+  margin: 0 0 0.75rem;
+  padding-left: 1.25rem;
+  color: var(--foam);
+  line-height: 1.6;
+}
+
+.about__section li {
+  margin-bottom: 0.4rem;
+}
+
+.about__section li:last-child {
+  margin-bottom: 0;
+}
+
+.about__section strong {
+  color: var(--chalk);
+  font-weight: 700;
+}
+
+.about__faq {
+  margin: 0;
+}
+
+.about__faq dt {
+  margin: 0 0 0.25rem;
+  font-weight: 700;
+  color: var(--chalk);
+}
+
+.about__faq dd {
+  margin: 0 0 1rem;
+  padding-left: 0;
+  color: var(--foam);
+  line-height: 1.6;
+}
+
+.about__faq dd:last-child {
+  margin-bottom: 0;
+}
+
+.about__support {
+  color: var(--muted);
+  font-size: 0.95rem;
+  text-decoration: none;
+}
+
+.about__support:hover {
+  color: var(--sodium-hot);
+  text-decoration: underline;
+}
+
+.about__actions {
+  margin-top: 0.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(200, 221, 230, 0.08);
+}

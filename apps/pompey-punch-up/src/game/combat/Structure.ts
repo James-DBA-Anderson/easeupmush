@@ -42,6 +42,11 @@ export interface StrikeInput {
   activeBlock?: boolean;
   /** Strike landed from behind the defender's facing — guard does not cover this. */
   hitFromBehind?: boolean;
+  /**
+   * Body-toss slam — wear + possible finish when battered.
+   * Survivors are not soft-floored; they bounce straight back up.
+   */
+  softFloorOnly?: boolean;
 }
 
 export interface LootDrop {
@@ -174,14 +179,15 @@ export class Structure {
     this.openUntil = Math.max(this.openUntil, now + ms * scale);
   }
 
-  /** Temporary knockdown — they can get up after `ms`. */
-  putOnFloor(now: number, ms: number): void {
+  /** Temporary knockdown — they can get up after `ms`. Pass `force` to refresh an intentional plant (powerbomb). */
+  putOnFloor(now: number, ms: number, force = false): void {
     if (this.isOut()) return;
     const scale = 1 / Math.sqrt(this.toughness);
     const dur = Math.max(120, ms * scale);
     // Already soft-floored — don't refresh the timer under a punch storm
     // (that left lads planted forever while still taking hits).
     if (
+      !force &&
       this.downed &&
       Number.isFinite(this.groundedUntil) &&
       now < this.groundedUntil &&
@@ -193,10 +199,12 @@ export class Structure {
     // Soft scraps: hard-cap so clinch refreshes can't soft-lock anyone on the deck.
     // Long intentional downs (intro sleep, etc.) keep their full timer.
     if (ms <= 2500) {
-      this.groundedUntil = Math.min(
-        Math.max(this.groundedUntil, now + Math.min(dur, 2200)),
-        now + 2200,
-      );
+      this.groundedUntil = force
+        ? now + Math.min(dur, 2200)
+        : Math.min(
+            Math.max(this.groundedUntil, now + Math.min(dur, 2200)),
+            now + 2200,
+          );
     } else {
       this.groundedUntil = Math.max(this.groundedUntil, now + dur);
     }
@@ -317,6 +325,30 @@ export class Structure {
     if (this.isOut()) {
       if (hit.kind === "boot_head") return "flinch";
       return "blocked";
+    }
+
+    // Body-toss slam — KO/crawl only when worn; never soft-floor (that fought get-up).
+    if (hit.softFloorOnly) {
+      const t = this.toughness;
+      this.wind = clamp(this.wind - (0.12 + hit.power * 0.14) / t);
+      this.balance = clamp(this.balance - (0.14 + hit.power * 0.16) / t);
+      this.guard = clamp(this.guard - (0.1 * hit.power) / t);
+      if (hit.bodyPart === "head" || hit.bodyPart === "face") {
+        this.facePain = clamp(this.facePain + 0.1 + hit.power * 0.08);
+      } else {
+        this.gutPain = clamp(this.gutPain + 0.12 + hit.power * 0.1);
+      }
+      const wornNow = this.wornFactor();
+      // Only permanent finishes — skip finish()'s soft-floor stumble path
+      if (wornNow >= 0.42) {
+        const result = this.finish(hit, true);
+        if (result === "out_cold" || result === "crawl_away") return result;
+      }
+      this.downed = false;
+      this.groundedUntil = 0;
+      // Tiny open — get-up grace covers the scramble; a long open caused punch→floor flicker
+      this.createOpening(hit.now, 80);
+      return "flinch";
     }
 
     const t = this.toughness;

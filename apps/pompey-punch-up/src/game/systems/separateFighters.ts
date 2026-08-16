@@ -48,6 +48,8 @@ export function separateFightersFromObstacles(
     if (f.airborne || isImmobile(f) || f.platformY !== null || f.climbing || f.isBackground) continue;
     if (f.isInThrowArc || f.action === "body_toss" || f.action === "hurricanrana") continue;
     for (const o of obstacles) {
+      // Floored bodies / pickups / crashed mounts don't shove fighters
+      if (o.kind !== "prop") continue;
       const dx = f.x - o.x;
       const dy = f.y - o.y;
       const minX = BODY_RX * 0.7 + o.rx;

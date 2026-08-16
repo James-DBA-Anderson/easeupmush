@@ -5,6 +5,7 @@ export interface Obstacle {
   rx: number;
   /** Lane / depth radius */
   ry: number;
+  /** prop = solid; corpse/pickup = walk-over (ignored by steer/separate). */
   kind: "prop" | "corpse" | "pickup";
 }
 
@@ -31,6 +32,8 @@ export function steerAway(
   let sideSteer = 0;
 
   for (const o of obstacles) {
+    // Corpses / pickups / wrecks are walk-over scenery — only props block
+    if (o.kind !== "prop") continue;
     const dx = x - o.x;
     const dy = y - o.y;
     const nx = dx / Math.max(o.rx, 1);

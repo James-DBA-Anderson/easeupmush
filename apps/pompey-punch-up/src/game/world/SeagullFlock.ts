@@ -29,6 +29,8 @@ export class Seagull {
   /** Must watch this long before diving. */
   private watchUntil = 0;
   private readonly scale: number;
+  private pendingCry: "soft" | "loud" | null = null;
+  private nextAmbientCryAt = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     this.phase = Math.random() * Math.PI * 2;
@@ -37,6 +39,7 @@ export class Seagull {
     this.soarX = x;
     this.soarY = y;
     this.scale = 0.85 + Math.random() * 0.25;
+    this.nextAmbientCryAt = 4000 + Math.random() * 12000;
     this.sprite = scene.add
       .image(x, y, "prop_seagull_1")
       .setOrigin(0.5, 0.5)
@@ -70,6 +73,10 @@ export class Seagull {
 
     if (this.state === "soar") {
       this.updateSoar(dt);
+      if (now >= this.nextAmbientCryAt) {
+        this.nextAmbientCryAt = now + 9000 + Math.random() * 16000;
+        if (Math.random() < 0.55) this.pendingCry = "soft";
+      }
       const body = this.pickSafeCorpse(corpses, threats);
       // Rarely commit to watching — most of the time they keep circling
       if (body && Math.random() < 0.006) {
@@ -100,7 +107,18 @@ export class Seagull {
     if (this.state !== "feed") return false;
     if (now < this.peckUntil) return false;
     this.peckUntil = now + 2200 + Math.random() * 2500;
-    return Math.random() < 0.45;
+    if (Math.random() < 0.45) {
+      this.pendingCry = "soft";
+      return true;
+    }
+    return false;
+  }
+
+  /** Consume a pending cry for SFX (soft soar / loud flee). */
+  takeCry(): "soft" | "loud" | null {
+    const c = this.pendingCry;
+    this.pendingCry = null;
+    return c;
   }
 
   private pickSafeCorpse(corpses: Fighter[], threats: Fighter[]): Fighter | null {
@@ -171,6 +189,7 @@ export class Seagull {
       // One last nervous check — only dive if still quiet
       if (Math.random() < 0.7) {
         this.state = "dive";
+        this.pendingCry = "soft";
       } else {
         this.watchUntil = now + 1200 + Math.random() * 1800;
       }
@@ -238,6 +257,7 @@ export class Seagull {
     this.fleeUntil = now + 2800 + Math.random() * 1600;
     this.target = null;
     this.watchUntil = 0;
+    this.pendingCry = "loud";
     const dir = this.sprite.x >= fromX ? 1 : -1;
     this.soarX = this.sprite.x + dir * 160;
     this.soarY = GAME_HEIGHT * (0.14 + Math.random() * 0.1);
@@ -298,6 +318,15 @@ export class SeagullFlock {
       if (g.takeSquawk(now)) {
         out.push({ x: g.sprite.x, y: g.sprite.y - 16 });
       }
+    }
+    return out;
+  }
+
+  takeCries(): { loud: boolean }[] {
+    const out: { loud: boolean }[] = [];
+    for (const g of this.gulls) {
+      const c = g.takeCry();
+      if (c) out.push({ loud: c === "loud" });
     }
     return out;
   }

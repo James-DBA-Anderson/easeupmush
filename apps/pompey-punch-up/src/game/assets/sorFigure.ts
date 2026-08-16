@@ -64,6 +64,10 @@ export type SorPose =
   | "bloodied"
   | "film"
   | "phone"
+  | "phone0"
+  | "phone1"
+  | "phone2"
+  | "phone3"
   | "block"
   | "block0"
   | "block1"
@@ -371,6 +375,8 @@ function bootSide(
   ctx.save();
   ctx.translate(ankleX, soleY);
   ctx.rotate(angleRad);
+  // Slightly undersize vs the doodle body so boots don't dominate the silhouette
+  ctx.scale(0.86, 0.86);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.fillStyle = "#2a2220";
@@ -515,10 +521,10 @@ function strideArms(
 
 function walkPhase(pose: SorPose): number | null {
   // Offset so we never land on sin=0 for both feet (walk0≈walk2 twin)
-  if (pose === "walk0" || pose === "block0") return 0.08;
-  if (pose === "walk1" || pose === "block1") return 0.33;
-  if (pose === "walk2" || pose === "block2") return 0.58;
-  if (pose === "walk3" || pose === "block3") return 0.83;
+  if (pose === "walk0" || pose === "block0" || pose === "phone0") return 0.08;
+  if (pose === "walk1" || pose === "block1" || pose === "phone1") return 0.33;
+  if (pose === "walk2" || pose === "block2" || pose === "phone2") return 0.58;
+  if (pose === "walk3" || pose === "block3" || pose === "phone3") return 0.83;
   if (pose === "run0" || pose === "run") return 0.08;
   if (pose === "run1") return 0.33;
   if (pose === "run2") return 0.58;
@@ -604,7 +610,12 @@ export function drawSorFighter(
   const limp = pose === "limp_arm";
   const limpLeg = pose === "limp_leg";
   const film = pose === "film";
-  const phone = pose === "phone";
+  const phone =
+    pose === "phone" ||
+    pose === "phone0" ||
+    pose === "phone1" ||
+    pose === "phone2" ||
+    pose === "phone3";
   const ducking = pose === "crouch";
   const riding = pose === "ride0" || pose === "ride1";
   const scooterRide = pose === "ride_scooter0" || pose === "ride_scooter1";
@@ -708,7 +719,7 @@ export function drawSorFighter(
             : ollie
               ? 6
               : manual
-                ? 22
+                ? 10
                 : rideFrame === 0
                   ? 6
                   : 8
@@ -751,12 +762,12 @@ export function drawSorFighter(
     ? riding
       ? 8
       : scooterRide
-        ? 10
+        ? 6
         : onSkate
           ? kickflip
             ? -2
             : manual
-              ? -12
+              ? -8
               : ollie
                 ? 4
                 : rideFrame === 0
@@ -859,12 +870,12 @@ export function drawSorFighter(
       y: hip.y + 16 + Math.sin(a) * 7,
     };
   } else if (scooterRide) {
-    // Both feet on the deck, slight weight shift
+    // Both feet on the deck (aft of the stem), slight weight shift
     const shift = rideFrame === 0 ? -2 : 2;
-    farKnee = { x: hip.x - 4, y: hip.y + 12 };
-    farFoot = { x: hip.x - 6 + shift, y: feetY - 1 };
-    nearKnee = { x: hip.x + 8, y: hip.y + 12 };
-    nearFoot = { x: hip.x + 12 + shift, y: feetY - 1 };
+    farKnee = { x: hip.x - 6, y: hip.y + 12 };
+    farFoot = { x: hip.x - 12 + shift, y: feetY - 1 };
+    nearKnee = { x: hip.x + 4, y: hip.y + 12 };
+    nearFoot = { x: hip.x + 2 + shift, y: feetY - 1 };
   } else if (kickflip) {
     // Scoop + flick — rear foot pops the tail, front foot flicks across
     farKnee = { x: hip.x - 4, y: hip.y + 2 };
@@ -872,11 +883,11 @@ export function drawSorFighter(
     nearKnee = { x: hip.x + 10, y: hip.y - 4 };
     nearFoot = { x: hip.x + 20, y: hip.y + 6 };
   } else if (manual) {
-    // Sit back over the tail — rear boot presses the trucks, front rests light on the nose
-    farKnee = { x: hip.x - 8, y: hip.y + 12 };
-    farFoot = { x: hip.x - 16, y: feetY - 3 };
-    nearKnee = { x: hip.x + 6, y: hip.y + 4 };
-    nearFoot = { x: hip.x + 12, y: feetY - 16 };
+    // Sit back over the tail — weight on rear trucks, nose up, body still tall
+    farKnee = { x: hip.x - 6, y: hip.y + 10 };
+    farFoot = { x: hip.x - 14, y: feetY - 2 };
+    nearKnee = { x: hip.x + 8, y: hip.y + 2 };
+    nearFoot = { x: hip.x + 14, y: feetY - 14 };
   } else if (ollie) {
     // Knees up, board rising with the feet
     farKnee = { x: hip.x - 2, y: hip.y + 8 };
@@ -919,11 +930,11 @@ export function drawSorFighter(
     nearKnee = { x: hip.x + 16, y: hip.y + 14 };
     nearFoot = { x: hip.x + 28, y: feetY + 2 };
   } else if (jumpKick) {
-    // Flying side kick — rear leg tucked, lead leg locked out
+    // Flying side kick — rear leg tucked, lead leg out with toes up
     farKnee = { x: hip.x - 8, y: hip.y + 8 };
     farFoot = { x: hip.x - 12, y: hip.y + 16 };
     nearKnee = { x: hip.x + 20, y: hip.y };
-    nearFoot = { x: hip.x + 38, y: hip.y - 4 };
+    nearFoot = { x: hip.x + 38, y: hip.y - 6 };
   } else if (isKicking) {
     if (kickFrame === 0) {
       // Chamber — plant under the hip, knee cocked up with foot tucked under
@@ -932,11 +943,11 @@ export function drawSorFighter(
       nearKnee = { x: hip.x + 6, y: hip.y - 10 };
       nearFoot = { x: hip.x + 2, y: hip.y + 4 };
     } else if (kickFrame === 1) {
-      // Snap — boot out at midriff, knee still softly bent (not a locked stilt)
+      // Snap — boot out at midriff, toes pointed up
       farKnee = { x: hip.x - 6, y: hip.y + 16 };
       farFoot = { x: hip.x - 8, y: feetY };
       nearKnee = { x: hip.x + 16, y: hip.y + 2 };
-      nearFoot = { x: hip.x + 30, y: hip.y };
+      nearFoot = { x: hip.x + 30, y: hip.y - 2 };
     } else {
       // Retract — knee folding back in before the foot drops
       farKnee = { x: hip.x - 3, y: hip.y + 15 };
@@ -1056,23 +1067,23 @@ export function drawSorFighter(
     nearFoot = reach(nearKnee, nearFoot, 18 * lr);
   }
   // Far (back) leg only — near leg is drawn after the torso so it stays opaque
-  // Kick foot pitch: chamber toes-up, snap pointed, stomp toes-down
+  // Kick foot pitch: chamber + snap toes-up (pointed); recover eases; stomp toes-down
   const nearBootAng = stompUp
     ? -1.05
     : stomp
       ? 0.55
       : jumpKick
-        ? 0.45
+        ? -0.85
         : kickflip
           ? 0.85
           : manual
             ? -0.35
             : isKicking
               ? kickFrame === 0
-                ? -0.95
+                ? -1.05
                 : kickFrame === 1
-                  ? 0.4
-                  : -0.3
+                  ? -0.95
+                  : -0.45
               : skating && rideFrame === 0
                 ? 0.05
                 : skating
@@ -1129,11 +1140,11 @@ export function drawSorFighter(
       nearHand = { x: shoulder.x + 14, y: shoulder.y + 6 };
     }
   } else if (scooterRide) {
-    // Reach forward onto the T-bar — grips sit near shoulder height on the mount
-    farElbow = { x: shoulder.x - 2, y: shoulder.y + 8 };
-    farHand = { x: shoulder.x - 10, y: shoulder.y + 2 };
-    nearElbow = { x: shoulder.x + 6, y: shoulder.y + 6 };
-    nearHand = { x: shoulder.x + 6, y: shoulder.y + 1 };
+    // Reach the T-bar — arms forward from a more upright stance over the deck
+    farElbow = { x: shoulder.x + 2, y: shoulder.y + 8 };
+    farHand = { x: shoulder.x + 2, y: shoulder.y + 2 };
+    nearElbow = { x: shoulder.x + 10, y: shoulder.y + 6 };
+    nearHand = { x: shoulder.x + 16, y: shoulder.y + 1 };
   } else if (onWheels) {
     // Hands planted on the flat bars — forward and down from the saddle lean
     farElbow = { x: shoulder.x + 2, y: shoulder.y + 12 };
@@ -2320,14 +2331,6 @@ export function drawKidsPark(ctx: CanvasRenderingContext2D, w: number, h: number
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-
-    // Tiny "PLAY" plaque on the rail
-    ctx.fillStyle = "#1a4060";
-    ctx.fillRect(w * 0.4, railY - 14, 36, 12);
-    ctx.strokeRect(w * 0.4, railY - 14, 36, 12);
-    ctx.fillStyle = "#f2e6d8";
-    ctx.font = "bold 9px sans-serif";
-    ctx.fillText("PLAY", w * 0.43, railY - 5);
   }, "#c45a3a", "#1a1410", 2);
 }
 

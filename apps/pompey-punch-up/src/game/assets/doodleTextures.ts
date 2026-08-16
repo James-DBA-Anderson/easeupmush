@@ -48,10 +48,15 @@ function wobble(n: number, amp = 2): number {
 
 export function generateDoodleTextures(scene: Phaser.Scene): void {
   // Bump this when poses/assets change so hot reload regenerates.
-  const VERSION = "doodle_v101";
+  const VERSION = "doodle_v109";
   if (scene.textures.exists(VERSION)) return;
   if (
     scene.textures.exists("sky") ||
+    scene.textures.exists("doodle_v108") ||
+    scene.textures.exists("doodle_v107") ||
+    scene.textures.exists("doodle_v103") ||
+    scene.textures.exists("doodle_v102") ||
+    scene.textures.exists("doodle_v101") ||
     scene.textures.exists("doodle_v100") ||
     scene.textures.exists("doodle_v99") ||
     scene.textures.exists("doodle_v98") ||
@@ -144,7 +149,13 @@ export function generateDoodleTextures(scene: Phaser.Scene): void {
         [
           "sky",
           "clouds",
+          "clouds_far",
+          "clouds_mid",
+          "clouds_near",
           "sea",
+          "sea_0",
+          "sea_1",
+          "sea_2",
           "beach",
           "road",
           "common",
@@ -191,6 +202,10 @@ export function generateDoodleTextures(scene: Phaser.Scene): void {
           "weapon_knuckle",
           "sky_drone_0",
           "sky_drone_1",
+          "tower_kids_0",
+          "tower_kids_1",
+          "tower_kids_2",
+          "tower_kids_3",
         ].includes(key)
       ) {
         scene.textures.remove(key);
@@ -454,13 +469,13 @@ function makeSky(scene: Phaser.Scene): void {
 }
 
 function makeClouds(scene: Phaser.Scene): void {
-  const w = 768;
-  const h = 180;
-  const tex = scene.textures.createCanvas("clouds", w, h)!;
-  const ctx = tex.getContext();
-  ctx.clearRect(0, 0, w, h);
-
-  const puff = (cx: number, cy: number, scale: number, alpha: number) => {
+  const puff = (
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    scale: number,
+    alpha: number,
+  ) => {
     const lobes: [number, number, number][] = [
       [0, 0, 22],
       [-18, 4, 16],
@@ -475,120 +490,171 @@ function makeClouds(scene: Phaser.Scene): void {
       ctx.ellipse(cx + dx * scale, cy + dy * scale, r * scale, r * scale * 0.78, 0, 0, Math.PI * 2);
       ctx.fill();
     }
-    // Soft underside shade — no hard black outline
     ctx.fillStyle = `rgba(180,195,210,${alpha * 0.28})`;
     ctx.beginPath();
     ctx.ellipse(cx, cy + 10 * scale, 28 * scale, 8 * scale, 0, 0, Math.PI * 2);
     ctx.fill();
   };
 
-  // Sparse Solent scud — a few soft banks, not three hard circles
-  puff(90, 70, 1.15, 0.55);
-  puff(280, 48, 0.85, 0.4);
-  puff(480, 82, 1.05, 0.48);
-  puff(670, 55, 0.7, 0.35);
-  tex.refresh();
+  const bake = (
+    key: string,
+    w: number,
+    h: number,
+    banks: [number, number, number, number][],
+  ) => {
+    const tex = scene.textures.createCanvas(key, w, h)!;
+    const ctx = tex.getContext();
+    ctx.clearRect(0, 0, w, h);
+    for (const [x, y, scale, alpha] of banks) puff(ctx, x, y, scale, alpha);
+    tex.refresh();
+  };
+
+  // Far haze — small / sparse / high
+  bake("clouds_far", 900, 160, [
+    [70, 40, 0.55, 0.32],
+    [260, 28, 0.42, 0.26],
+    [480, 48, 0.5, 0.28],
+    [700, 34, 0.38, 0.24],
+    [840, 52, 0.45, 0.22],
+  ]);
+  // Mid scud
+  bake("clouds_mid", 768, 180, [
+    [90, 70, 1.15, 0.55],
+    [280, 48, 0.85, 0.4],
+    [480, 82, 1.05, 0.48],
+    [670, 55, 0.7, 0.35],
+  ]);
+  // Near — chunkier, lower in the band
+  bake("clouds_near", 720, 170, [
+    [110, 88, 1.35, 0.58],
+    [340, 72, 1.0, 0.46],
+    [560, 95, 1.2, 0.52],
+  ]);
+  // Legacy alias for anything still asking for "clouds"
+  bake("clouds", 768, 180, [
+    [90, 70, 1.15, 0.55],
+    [280, 48, 0.85, 0.4],
+    [480, 82, 1.05, 0.48],
+    [670, 55, 0.7, 0.35],
+  ]);
 }
 
 function makeSea(scene: Phaser.Scene): void {
-  // Solent chop — grey-green, soft horizon / foreshore so sprites gel at the edges
+  // Solent chop — grey-green, soft horizon / foreshore; a few swell phases for subtle motion
   const w = 512;
   const h = 120;
-  const tex = scene.textures.createCanvas("sea", w, h)!;
-  const ctx = tex.getContext();
-  ctx.clearRect(0, 0, w, h);
 
-  // Body fades in from the sky and out into the shingle
-  const depth = ctx.createLinearGradient(0, 0, 0, h);
-  depth.addColorStop(0, "rgba(106,154,170,0)");
-  depth.addColorStop(0.07, "rgba(106,154,170,0.5)");
-  depth.addColorStop(0.16, "rgba(74,122,140,0.92)");
-  depth.addColorStop(0.42, "rgba(58,101,120,1)");
-  depth.addColorStop(0.72, "rgba(46,83,100,1)");
-  depth.addColorStop(0.9, "rgba(36,63,78,0.85)");
-  depth.addColorStop(1, "rgba(36,63,78,0)");
-  ctx.fillStyle = depth;
-  ctx.fillRect(0, 0, w, h);
+  const bake = (key: string, phase: number, foamBoost: number) => {
+    const tex = scene.textures.createCanvas(key, w, h)!;
+    const ctx = tex.getContext();
+    ctx.clearRect(0, 0, w, h);
 
-  // Soft sky bleed at the far edge
-  const haze = ctx.createLinearGradient(0, 0, 0, 28);
-  haze.addColorStop(0, "rgba(190,210,220,0.4)");
-  haze.addColorStop(1, "rgba(190,210,220,0)");
-  ctx.fillStyle = haze;
-  ctx.fillRect(0, 0, w, 28);
+    const depth = ctx.createLinearGradient(0, 0, 0, h);
+    depth.addColorStop(0, "rgba(106,154,170,0)");
+    depth.addColorStop(0.07, "rgba(106,154,170,0.5)");
+    depth.addColorStop(0.16, "rgba(74,122,140,0.92)");
+    depth.addColorStop(0.42, "rgba(58,101,120,1)");
+    depth.addColorStop(0.72, "rgba(46,83,100,1)");
+    depth.addColorStop(0.9, "rgba(36,63,78,0.85)");
+    depth.addColorStop(1, "rgba(36,63,78,0)");
+    ctx.fillStyle = depth;
+    ctx.fillRect(0, 0, w, h);
 
-  // Broad swell bands (skip the faded margins)
-  for (let i = 0; i < 5; i++) {
-    const y0 = 30 + i * 15;
-    const band = ctx.createLinearGradient(0, y0 - 6, 0, y0 + 10);
-    band.addColorStop(0, "rgba(255,255,255,0)");
-    band.addColorStop(0.45, `rgba(210,230,235,${0.06 + i * 0.015})`);
-    band.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = band;
-    ctx.beginPath();
-    ctx.moveTo(0, y0);
-    for (let x = 0; x <= w; x += 16) {
-      ctx.lineTo(x, y0 + Math.sin(x * 0.028 + i * 1.3) * (3.5 + i * 0.4));
-    }
-    ctx.lineTo(w, y0 + 14);
-    ctx.lineTo(0, y0 + 14);
-    ctx.closePath();
-    ctx.fill();
-  }
+    const haze = ctx.createLinearGradient(0, 0, 0, 28);
+    haze.addColorStop(0, "rgba(190,210,220,0.4)");
+    haze.addColorStop(1, "rgba(190,210,220,0)");
+    ctx.fillStyle = haze;
+    ctx.fillRect(0, 0, w, 28);
 
-  scratchStroke(ctx, () => {
-    for (let i = 0; i < 10; i++) {
-      const y = 22 + i * 8.5;
-      ctx.globalAlpha = 0.28 + (i % 3) * 0.07;
+    for (let i = 0; i < 5; i++) {
+      const y0 = 30 + i * 15 + Math.sin(phase + i * 0.7) * 1.6;
+      const band = ctx.createLinearGradient(0, y0 - 6, 0, y0 + 10);
+      band.addColorStop(0, "rgba(255,255,255,0)");
+      band.addColorStop(0.45, `rgba(210,230,235,${0.06 + i * 0.015})`);
+      band.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = band;
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      for (let x = 0; x <= w; x += 22) {
+      ctx.moveTo(0, y0);
+      for (let x = 0; x <= w; x += 16) {
         ctx.lineTo(
           x,
-          y + Math.sin(x * 0.045 + i * 0.9) * 3.2 + Math.sin(x * 0.11 + i) * 1.4,
+          y0 +
+            Math.sin(x * 0.028 + i * 1.3 + phase) * (3.5 + i * 0.4) +
+            Math.sin(x * 0.07 + phase * 1.4) * 1.2,
+        );
+      }
+      ctx.lineTo(w, y0 + 14);
+      ctx.lineTo(0, y0 + 14);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    scratchStroke(ctx, () => {
+      for (let i = 0; i < 10; i++) {
+        const y = 22 + i * 8.5 + Math.sin(phase * 0.8 + i) * 1.2;
+        ctx.globalAlpha = 0.28 + (i % 3) * 0.07;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        for (let x = 0; x <= w; x += 22) {
+          ctx.lineTo(
+            x,
+            y +
+              Math.sin(x * 0.045 + i * 0.9 + phase) * 3.2 +
+              Math.sin(x * 0.11 + i + phase * 0.6) * 1.4,
+          );
+        }
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }, "#1e3844", 1.6);
+
+    const foamY = h - 28 + Math.sin(phase) * 2;
+    const foamFade = ctx.createLinearGradient(0, foamY, 0, h);
+    foamFade.addColorStop(0, "rgba(212,228,236,0)");
+    foamFade.addColorStop(0.35, `rgba(212,228,236,${0.28 + foamBoost * 0.12})`);
+    foamFade.addColorStop(0.7, `rgba(232,242,248,${0.38 + foamBoost * 0.14})`);
+    foamFade.addColorStop(1, "rgba(232,242,248,0)");
+    ctx.fillStyle = foamFade;
+    ctx.fillRect(0, foamY, w, h - foamY);
+
+    scratchStroke(ctx, () => {
+      ctx.globalAlpha = 0.55 + foamBoost * 0.25;
+      ctx.beginPath();
+      ctx.moveTo(0, h - 16 + Math.sin(phase) * 2);
+      for (let x = 0; x <= w; x += 14) {
+        ctx.lineTo(
+          x,
+          h - 16 +
+            Math.sin(x * 0.12 + phase) * 2.5 +
+            Math.sin(x * 0.05 + phase * 1.2) * 1.5,
         );
       }
       ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-  }, "#1e3844", 1.6);
+      ctx.beginPath();
+      ctx.moveTo(0, h - 8 + Math.sin(phase + 1) * 1.5);
+      for (let x = 0; x <= w; x += 18) {
+        ctx.lineTo(x, h - 8 + Math.sin(x * 0.09 + 1 + phase) * 2);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }, "#d4e4ec", 2.2);
 
-  // Near-shore foam — soft so it gels into the shingle band
-  const foamFade = ctx.createLinearGradient(0, h - 28, 0, h);
-  foamFade.addColorStop(0, "rgba(212,228,236,0)");
-  foamFade.addColorStop(0.35, "rgba(212,228,236,0.35)");
-  foamFade.addColorStop(0.7, "rgba(232,242,248,0.45)");
-  foamFade.addColorStop(1, "rgba(232,242,248,0)");
-  ctx.fillStyle = foamFade;
-  ctx.fillRect(0, h - 28, w, 28);
-
-  scratchStroke(ctx, () => {
-    ctx.globalAlpha = 0.7;
-    ctx.beginPath();
-    ctx.moveTo(0, h - 16);
-    for (let x = 0; x <= w; x += 14) {
-      ctx.lineTo(x, h - 16 + Math.sin(x * 0.12) * 2.5 + Math.sin(x * 0.05) * 1.5);
+    ctx.fillStyle = `rgba(230,242,248,${0.42 + foamBoost * 0.18})`;
+    for (let i = 0; i < 18; i++) {
+      const x = ((i * 97 + Math.floor(phase * 40)) % (w - 40)) + 12;
+      const y = 34 + ((i * 53) % (h - 58)) + Math.sin(phase + i) * 2;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 5 + (i % 3), 1.2, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(0, h - 8);
-    for (let x = 0; x <= w; x += 18) {
-      ctx.lineTo(x, h - 8 + Math.sin(x * 0.09 + 1) * 2);
-    }
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }, "#d4e4ec", 2.2);
+    tex.refresh();
+  };
 
-  // Sparse whitecaps
-  ctx.fillStyle = "rgba(230,242,248,0.5)";
-  for (let i = 0; i < 18; i++) {
-    const x = ((i * 97) % (w - 40)) + 12;
-    const y = 34 + ((i * 53) % (h - 58));
-    ctx.beginPath();
-    ctx.ellipse(x, y, 5 + (i % 3), 1.2, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  tex.refresh();
+  bake("sea_0", 0, 0.15);
+  bake("sea_1", 1.15, 0.55);
+  bake("sea_2", 2.3, 1);
+  // Legacy alias
+  bake("sea", 0, 0.15);
 }
 
 function makeCommon(scene: Phaser.Scene): void {
@@ -1566,13 +1632,14 @@ function makeRoundTower(scene: Phaser.Scene): void {
   tex.refresh();
 }
 
-/** Kids bombing off the Round Tower — transparent overlays on the tower. */
+/** Kids bombing off the Round Tower into the sea (north / up-screen). */
 function makeTowerKidsJump(scene: Phaser.Scene): void {
   const w = 160;
   const h = 168;
   const cx = w * 0.5;
   const parapetY = 36;
-  const waterY = h - 14;
+  // Sea sits above the tower in world space — splash / swim up here
+  const seaY = 10;
 
   const kid = (
     ctx: CanvasRenderingContext2D,
@@ -1583,9 +1650,10 @@ function makeTowerKidsJump(scene: Phaser.Scene): void {
   ) => {
     ctx.save();
     ctx.translate(x, y);
-    if (pose === "leap") ctx.rotate(-0.35);
-    if (pose === "dive") ctx.rotate(1.15);
-    if (pose === "swim") ctx.rotate(0.2);
+    // Leap / dive tip toward the sea (up the canvas)
+    if (pose === "leap") ctx.rotate(-0.55);
+    if (pose === "dive") ctx.rotate(-1.05);
+    if (pose === "swim") ctx.rotate(0.15);
 
     // Legs
     ctx.strokeStyle = "#1a1410";
@@ -1662,20 +1730,21 @@ function makeTowerKidsJump(scene: Phaser.Scene): void {
   };
 
   const splash = (ctx: CanvasRenderingContext2D, x: number, y: number, big: boolean) => {
-    ctx.strokeStyle = "#6ab0c8";
+    ctx.strokeStyle = "#7ec8de";
     ctx.lineWidth = 2;
     const n = big ? 7 : 4;
     for (let i = 0; i < n; i++) {
-      const a = -Math.PI / 2 + (i - (n - 1) / 2) * 0.35;
+      // Spray mostly upward into the Solent
+      const a = -Math.PI / 2 + (i - (n - 1) / 2) * 0.38;
       const len = (big ? 14 : 8) + (i % 2) * 4;
       ctx.beginPath();
       ctx.moveTo(x, y);
       ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len);
       ctx.stroke();
     }
-    ctx.fillStyle = "rgba(120,190,210,0.45)";
+    ctx.fillStyle = "rgba(120,190,210,0.5)";
     ctx.beginPath();
-    ctx.ellipse(x, y + 2, big ? 16 : 10, big ? 5 : 3, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, y + 1, big ? 16 : 10, big ? 5 : 3, 0, 0, Math.PI * 2);
     ctx.fill();
   };
 
@@ -1683,9 +1752,9 @@ function makeTowerKidsJump(scene: Phaser.Scene): void {
     {
       key: "tower_kids_0",
       draw: (ctx) => {
-        // Two on the parapet, one winding up to jump
+        // On the parapet, winding up for a sea bomb
         kid(ctx, cx - 14, parapetY, "stand", "#c45c4a");
-        kid(ctx, cx + 8, parapetY - 2, "wind", "#3a6db0");
+        kid(ctx, cx + 6, parapetY - 2, "wind", "#3a6db0");
         kid(ctx, cx + 28, parapetY + 2, "stand", "#e8a030");
       },
     },
@@ -1693,7 +1762,8 @@ function makeTowerKidsJump(scene: Phaser.Scene): void {
       key: "tower_kids_1",
       draw: (ctx) => {
         kid(ctx, cx - 14, parapetY, "stand", "#c45c4a");
-        kid(ctx, cx + 18, parapetY + 28, "leap", "#3a6db0");
+        // Off the seaward lip — up toward the Solent
+        kid(ctx, cx + 10, parapetY - 26, "leap", "#3a6db0");
         kid(ctx, cx + 28, parapetY + 2, "wind", "#e8a030");
       },
     },
@@ -1701,18 +1771,18 @@ function makeTowerKidsJump(scene: Phaser.Scene): void {
       key: "tower_kids_2",
       draw: (ctx) => {
         kid(ctx, cx - 10, parapetY - 2, "wind", "#c45c4a");
-        kid(ctx, cx + 22, waterY - 36, "dive", "#3a6db0");
+        kid(ctx, cx + 4, seaY + 8, "dive", "#3a6db0");
         kid(ctx, cx + 30, parapetY + 4, "stand", "#e8a030");
-        splash(ctx, cx + 20, waterY - 4, false);
+        splash(ctx, cx + 2, seaY + 2, false);
       },
     },
     {
       key: "tower_kids_3",
       draw: (ctx) => {
-        kid(ctx, cx - 8, parapetY + 20, "leap", "#c45c4a");
-        kid(ctx, cx + 24, waterY - 6, "swim", "#3a6db0");
+        kid(ctx, cx - 4, parapetY - 22, "leap", "#c45c4a");
+        kid(ctx, cx + 8, seaY + 4, "swim", "#3a6db0");
         kid(ctx, cx + 32, parapetY, "wind", "#e8a030");
-        splash(ctx, cx + 22, waterY, true);
+        splash(ctx, cx + 6, seaY, true);
       },
     },
   ];
@@ -2065,121 +2135,125 @@ function makeHovercraftPort(scene: Phaser.Scene): void {
 
   for (const frame of [0, 1] as const) {
     const key = `hovercraft_${frame}`;
-    // Stern-on: you only see the back — twin fans facing the promenade
-    const cw = 220;
-    const ch = 200;
+    // True stern-on — only the back faces the promenade (fans high, skirt low)
+    const cw = 200;
+    const ch = 170;
     const ht = scene.textures.createCanvas(key, cw, ch)!;
     const c = ht.getContext();
     c.clearRect(0, 0, cw, ch);
     scratchStroke(c, () => {
       const cx = cw * 0.5;
 
-      // Far hull tapering toward the Island (top of canvas = bow going away)
-      c.fillStyle = "#2a2a28";
+      // Thin roof lip at the very top (bow is away — you barely see it)
+      c.fillStyle = "#c8c4bc";
       c.beginPath();
-      c.moveTo(cx - 28, 22);
-      c.quadraticCurveTo(cx, 8, cx + 28, 22);
-      c.lineTo(cx + 62, 118);
-      c.quadraticCurveTo(cx + 70, 155, cx + 66, 175);
-      c.lineTo(cx - 66, 175);
-      c.quadraticCurveTo(cx - 70, 155, cx - 62, 118);
+      c.moveTo(cx - 52, 18);
+      c.lineTo(cx + 52, 18);
+      c.lineTo(cx + 58, 28);
+      c.lineTo(cx - 58, 28);
       c.closePath();
       c.fill();
       c.stroke();
 
-      // Deck roof receding
-      c.fillStyle = "#d8d4cc";
-      c.beginPath();
-      c.moveTo(cx - 22, 30);
-      c.quadraticCurveTo(cx, 18, cx + 22, 30);
-      c.lineTo(cx + 48, 100);
-      c.lineTo(cx - 48, 100);
-      c.closePath();
-      c.fill();
-      c.stroke();
-
-      // Cabin back wall (what you actually see)
+      // Flat stern wall — the only face you really see
       c.fillStyle = "#e8e4dc";
       c.beginPath();
-      c.moveTo(cx - 58, 100);
-      c.lineTo(cx - 62, 168);
-      c.lineTo(cx + 62, 168);
-      c.lineTo(cx + 58, 100);
+      c.moveTo(cx - 72, 28);
+      c.lineTo(cx + 72, 28);
+      c.lineTo(cx + 78, 128);
+      c.lineTo(cx - 78, 128);
       c.closePath();
       c.fill();
       c.stroke();
 
-      // Rear windows
-      c.fillStyle = "#3a6aaa";
-      c.fillRect(cx - 44, 112, 28, 22);
-      c.fillRect(cx - 8, 110, 32, 24);
-      c.fillRect(cx + 30, 112, 20, 22);
-      c.strokeRect(cx - 44, 112, 28, 22);
-      c.strokeRect(cx - 8, 110, 32, 24);
-      c.strokeRect(cx + 30, 112, 20, 22);
-      c.fillStyle = "#8ec8e8";
-      c.fillRect(cx - 40, 116, 20, 12);
-      c.fillRect(cx - 2, 114, 22, 14);
-      c.fillRect(cx + 34, 116, 12, 12);
-
-      // Red rear stripe + name
-      c.fillStyle = "#c02828";
-      c.fillRect(cx - 54, 148, 108, 10);
-      c.strokeRect(cx - 54, 148, 108, 10);
-      c.fillStyle = "#f2e6d8";
-      c.font = "bold 11px Comic Sans MS, cursive";
-      c.fillText("HOVERTRAVEL", cx - 42, 157);
-
-      // Skirt lip under the stern
-      c.fillStyle = "#3a3a38";
-      c.beginPath();
-      c.ellipse(cx, 178, 78, 14, 0, 0, Math.PI * 2);
-      c.fill();
-      c.stroke();
+      // Soft vertical panels so it reads as a rear bulkhead, not a side hull
+      c.strokeStyle = "rgba(26,20,16,0.25)";
+      c.lineWidth = 1.4;
+      for (const x of [cx - 36, cx, cx + 36]) {
+        c.beginPath();
+        c.moveTo(x, 32);
+        c.lineTo(x + (x - cx) * 0.04, 126);
+        c.stroke();
+      }
+      c.strokeStyle = "#1a1410";
+      c.lineWidth = 2.2;
 
       const drawFan = (fx: number, fy: number, phase: number) => {
-        // Duct housing
+        // Duct housing — high on the stern
         c.fillStyle = "#5a5a58";
         c.beginPath();
-        c.arc(fx, fy, 32, 0, Math.PI * 2);
+        c.arc(fx, fy, 30, 0, Math.PI * 2);
         c.fill();
         c.stroke();
         c.fillStyle = "#2a2a2a";
         c.beginPath();
-        c.arc(fx, fy, 26, 0, Math.PI * 2);
+        c.arc(fx, fy, 24, 0, Math.PI * 2);
         c.fill();
         c.stroke();
-        // Blades
         c.strokeStyle = "#c8c4b8";
-        c.lineWidth = 3.2;
+        c.lineWidth = 3;
         c.lineCap = "round";
         for (let i = 0; i < 4; i++) {
           const a = phase + (i * Math.PI) / 2;
           c.beginPath();
-          c.moveTo(fx + Math.cos(a) * 5, fy + Math.sin(a) * 5);
-          c.lineTo(fx + Math.cos(a) * 22, fy + Math.sin(a) * 22);
+          c.moveTo(fx + Math.cos(a) * 4, fy + Math.sin(a) * 4);
+          c.lineTo(fx + Math.cos(a) * 20, fy + Math.sin(a) * 20);
           c.stroke();
         }
         c.fillStyle = "#1a1410";
         c.beginPath();
-        c.arc(fx, fy, 5, 0, Math.PI * 2);
+        c.arc(fx, fy, 4.5, 0, Math.PI * 2);
         c.fill();
         c.strokeStyle = "#1a1410";
-        c.lineWidth = 2.4;
+        c.lineWidth = 2.3;
         c.beginPath();
-        c.arc(fx, fy, 32, 0, Math.PI * 2);
+        c.arc(fx, fy, 30, 0, Math.PI * 2);
         c.stroke();
-        // Safety grille hint
         c.strokeStyle = "rgba(26,20,16,0.35)";
         c.lineWidth = 1.2;
         c.beginPath();
-        c.arc(fx, fy, 20, 0, Math.PI * 2);
+        c.arc(fx, fy, 18, 0, Math.PI * 2);
         c.stroke();
+        c.strokeStyle = "#1a1410";
+        c.lineWidth = 2.2;
       };
       const phase = frame === 0 ? 0.15 : 0.15 + Math.PI / 4;
-      // Twin ducts fill the stern — facing the fight lane
-      drawFan(cx - 40, 168, phase);
-      drawFan(cx + 40, 168, phase + 0.45);
+      // Twin ducts near the top of the stern face
+      drawFan(cx - 38, 52, phase);
+      drawFan(cx + 38, 52, phase + 0.45);
+
+      // Rear windows under the fans
+      c.fillStyle = "#3a6aaa";
+      c.fillRect(cx - 48, 88, 30, 20);
+      c.fillRect(cx - 8, 86, 34, 22);
+      c.fillRect(cx + 32, 88, 24, 20);
+      c.strokeRect(cx - 48, 88, 30, 20);
+      c.strokeRect(cx - 8, 86, 34, 22);
+      c.strokeRect(cx + 32, 88, 24, 20);
+      c.fillStyle = "#8ec8e8";
+      c.fillRect(cx - 44, 92, 20, 10);
+      c.fillRect(cx - 2, 90, 22, 12);
+      c.fillRect(cx + 36, 92, 14, 10);
+
+      // Red rear stripe + name
+      c.fillStyle = "#c02828";
+      c.fillRect(cx - 60, 114, 120, 10);
+      c.strokeRect(cx - 60, 114, 120, 10);
+      c.fillStyle = "#f2e6d8";
+      c.font = "bold 11px Comic Sans MS, cursive";
+      c.fillText("HOVERTRAVEL", cx - 42, 123);
+
+      // Rubber skirt under the stern
+      c.fillStyle = "#3a3a38";
+      c.beginPath();
+      c.ellipse(cx, 142, 82, 16, 0, 0, Math.PI * 2);
+      c.fill();
+      c.stroke();
+      c.fillStyle = "#2a2a28";
+      c.beginPath();
+      c.ellipse(cx, 148, 74, 10, 0, 0, Math.PI * 2);
+      c.fill();
+      c.stroke();
     }, "#1a1410", 2.2);
     ht.refresh();
   }
@@ -3658,6 +3732,10 @@ function aliasLook(scene: Phaser.Scene, oldPrefix: string, lookId: string): void
     "bloodied",
     "film",
     "phone",
+    "phone0",
+    "phone1",
+    "phone2",
+    "phone3",
     "block",
     "block0",
     "block1",
@@ -3741,6 +3819,10 @@ function makeLookSheet(scene: Phaser.Scene, look: PersonLook): void {
     "bloodied",
     "film",
     "phone",
+    "phone0",
+    "phone1",
+    "phone2",
+    "phone3",
     "block",
     "block0",
     "block1",

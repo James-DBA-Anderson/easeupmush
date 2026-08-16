@@ -2,13 +2,13 @@
   "name": "easeupmush",
   "version": "0.1.0",
   "private": true,
-  "description": "Ease Up Mush — hand-drawn browser games from the South Coast.",
+  "description": "Ease Up Mush — browser games from Pompey for Pompey.",
   "type": "module",
   "workspaces": [
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm run dev -w @easeupmush/site",
+    "dev": "node scripts/dev.mjs",
     "dev:site": "npm run dev -w @easeupmush/site",
     "dev:game": "npm run dev -w @easeupmush/pompey-punch-up",
     "debug": "npm run debug -w @easeupmush/pompey-punch-up",

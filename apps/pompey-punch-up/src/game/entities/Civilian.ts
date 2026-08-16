@@ -59,6 +59,73 @@ const MISSUS_HURT_LINES = [
   "Have a squinny at yourself!",
 ];
 
+/** Locals stepping over floored lads on the prom. */
+const BODY_STEP_LINES = [
+  "Mind the floor mush…",
+  "Excuse me love — bit of a mess.",
+  "Ooh, sorry mate — didn't see you there.",
+  "They're having a lie-down then.",
+  "Don't mind me — just stepping over.",
+  "Rough night for someone.",
+  "Watch your step — bodies about.",
+  "Charming. Absolute state of the prom.",
+  "I'll just… go round. Or over. Over's fine.",
+  "Is he alright? No? Right then.",
+];
+
+/** Locals stepping over ditched bikes / scooters. */
+const WRECK_STEP_LINES = [
+  "Mind the bike mush…",
+  "Who left that there?",
+  "Watch the wheels love.",
+  "Bit of a scrapheap on the prom.",
+  "I'll just step over — cheers.",
+  "Scooter's had it then.",
+  "Don't mind me — just clearing the bike.",
+  "Absolute state. Bike's gone.",
+];
+
+/** Crashed bike / scooter left on the lane — walk-over, never a wall. */
+export type MountWreck = {
+  x: number;
+  y: number;
+  rx: number;
+  ry: number;
+  sprite: Phaser.GameObjects.Image;
+};
+
+const mountWrecks: MountWreck[] = [];
+
+/** Active crashed mounts on the prom (prunes destroyed sprites). */
+export function getMountWrecks(): readonly MountWreck[] {
+  for (let i = mountWrecks.length - 1; i >= 0; i--) {
+    if (!mountWrecks[i]!.sprite.active) mountWrecks.splice(i, 1);
+  }
+  return mountWrecks;
+}
+
+function leaveMountWreck(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  key: string,
+  passDir: 1 | -1,
+): void {
+  const dump = scene.add
+    .image(x, y, key)
+    .setOrigin(0.5, 1)
+    .setAngle(passDir * 55)
+    .setDepth(6)
+    .setAlpha(0.9);
+  const wreck: MountWreck = { x, y, rx: 38, ry: 20, sprite: dump };
+  mountWrecks.push(wreck);
+  scene.tweens.add({
+    targets: dump,
+    alpha: 0.4,
+    duration: 8000,
+    delay: 5000,
+  });
+}
 /** One-sided overheard calls — odd locals nattering while they stroll. */
 const PHONE_CHATS: string[][] = [
   [
@@ -172,7 +239,7 @@ function isThroughTraveller(v: CivilianVariant): boolean {
   return v === "jogger" || isPasser(v);
 }
 
-/** Beach wanderers — hitting them raises wanted. Steer around corpses & props. */
+/** Beach wanderers — hitting them raises wanted. Steer around props; step over bodies & wrecks. */
 export class Civilian extends Fighter {
   readonly variant: CivilianVariant;
   private wanderDir = Math.random() < 0.5 ? 1 : -1;
@@ -209,6 +276,8 @@ export class Civilian extends Fighter {
   private phoneScript: string[] = [];
   private phoneLineIdx = 0;
   private phoneCooldownUntil = 0;
+  /** Don't spam "stepping over bodies" lines. */
+  private bodyRemarkUntil = 0;
   /** Walking with someone — him sticks up for her if she's clipped. */
   partner: Civilian | null = null;
   coupleRole: "him" | "her" | null = null;
@@ -279,6 +348,38 @@ export class Civilian extends Fighter {
     const line = this.pendingLine;
     this.pendingLine = null;
     return line;
+  }
+
+  /** Occasional mutter when stepping over floored fighters or ditched bikes. */
+  private maybeRemarkOnBodies(now: number, threats: Fighter[]): void {
+    if (now < this.bodyRemarkUntil) return;
+    if (this.ally || this.isProtecting || this.pendingLine) return;
+    if (now < this.phoneUntil) return;
+    let onBody = false;
+    for (const t of threats) {
+      if (t === this) continue;
+      if (!t.structure.isOut() && !t.structure.downed) continue;
+      if (Math.abs(t.x - this.x) > 30 || Math.abs(t.laneY - this.y) > 24) continue;
+      onBody = true;
+      break;
+    }
+    let onWreck = false;
+    if (!onBody) {
+      for (const w of getMountWrecks()) {
+        if (Math.abs(w.x - this.x) > w.rx || Math.abs(w.y - this.y) > w.ry + 4) continue;
+        onWreck = true;
+        break;
+      }
+    }
+    if (!onBody && !onWreck) return;
+    // Most steps are silent — only the odd local pipes up
+    if (Math.random() > 0.18) {
+      this.bodyRemarkUntil = now + 3500 + Math.random() * 4500;
+      return;
+    }
+    const lines = onWreck ? WRECK_STEP_LINES : BODY_STEP_LINES;
+    this.pendingLine = lines[Math.floor(Math.random() * lines.length)]!;
+    this.bodyRemarkUntil = now + 14000 + Math.random() * 12000;
   }
 
   /** Enemy just hit this local — often piles in with you. */
@@ -591,19 +692,14 @@ export class Civilian extends Fighter {
       if (this.variant === "skater") {
         this.droppedBoard = { x: this.x - this.passDir * 16, y: this.y + 4 };
       } else {
-        // Leave bike on the ground as a visual (detach position)
-        const dump = this.scene.add
-          .image(this.x - this.passDir * 20, this.y + 4, this.mount.texture.key)
-          .setOrigin(0.5, 1)
-          .setAngle(this.passDir * 55)
-          .setDepth(6)
-          .setAlpha(0.9);
-        this.scene.tweens.add({
-          targets: dump,
-          alpha: 0.35,
-          duration: 8000,
-          delay: 4000,
-        });
+        // Leave bike / scooter on the ground — walk-over wreck, not a wall
+        leaveMountWreck(
+          this.scene,
+          this.x - this.passDir * 20,
+          this.y + 4,
+          this.mount.texture.key,
+          this.passDir,
+        );
       }
     }
 
@@ -731,8 +827,11 @@ export class Civilian extends Fighter {
       if (this.variant === "bike") return frame === 0 ? "ride0" : "ride1";
       return frame === 0 ? "ride_scooter0" : "ride_scooter1";
     }
-    // Phone to the ear while they keep strolling
-    if (now < this.phoneUntil) return "phone";
+    // Phone to the ear while they keep strolling — legs still walk
+    if (now < this.phoneUntil) {
+      const frame = Math.floor(this.walkPhase * 4) % 4;
+      return (`phone${frame}` as "phone0" | "phone1" | "phone2" | "phone3");
+    }
     return super.poseForState(now);
   }
 
@@ -772,12 +871,13 @@ export class Civilian extends Fighter {
     }
     // Sit on the saddle / deck so fists meet the bars and feet meet pedals/deck
     this.sprite.y = this.variant === "bike" ? -12 : -6;
-    this.sprite.x = this.facing * (this.variant === "bike" ? -2 : 4);
+    // Scooter: stand over the deck, not piled on the stem
+    this.sprite.x = this.facing * (this.variant === "bike" ? -2 : -10);
     this.mount.setVisible(true);
     this.mount.setFlipX(this.facing < 0);
     this.mount.y = this.variant === "bike" ? 2 + pedal * 0.8 : 2 + pedal * 0.6;
     // Nudge stem/T-bar under the hands (facing-aware)
-    this.mount.x = this.facing * (this.variant === "scooter" ? -6 : 2);
+    this.mount.x = this.facing * (this.variant === "scooter" ? -4 : 2);
     const wheelFrame = Math.floor(this.walkPhase * 2) % 2;
     const base = this.variant === "bike" ? "mount_bike" : "mount_scooter";
     const key = wheelFrame === 0 ? base : `${base}_1`;
@@ -819,6 +919,7 @@ export class Civilian extends Fighter {
       }
     }
     for (const o of obstacles) {
+      if (o.kind !== "prop") continue;
       const dx = (o.x - this.x) * this.passDir;
       const dy = Math.abs(o.y - this.y);
       if (dx > -o.rx * 0.2 && dx < look + o.rx && dy < o.ry + 18 && dx < hazardDist) {
@@ -880,15 +981,13 @@ export class Civilian extends Fighter {
       this.nearCrashMs = Math.max(0, this.nearCrashMs - dt * 2800);
     }
 
-    const floorBodies: Obstacle[] = threats
-      .filter((t) => t.structure.isOut() || t.structure.downed)
-      .map((t) => ({ x: t.x, y: t.laneY, rx: 40, ry: 24, kind: "corpse" as const }));
+    // Floored bodies are walk-over scenery — only props / living folk block riders
     const steered = steerAway(
       this.x,
       this.y,
       vx,
       vy,
-      [...obstacles, ...floorBodies],
+      obstacles,
       110,
       strollMin,
       strollMax,
@@ -905,6 +1004,7 @@ export class Civilian extends Fighter {
 
     // Props — hard shove aside; if still buried, that's a crash
     for (const o of obstacles) {
+      if (o.kind !== "prop") continue;
       if (
         Math.abs(this.x - o.x) < o.rx + 14 &&
         Math.abs(this.y - o.y) < o.ry + 10
@@ -974,6 +1074,7 @@ export class Civilian extends Fighter {
       }
     }
     for (const o of obstacles) {
+      if (o.kind !== "prop") continue;
       const dx = (o.x - this.x) * this.passDir;
       const dy = Math.abs(o.y - this.y);
       if (dx > -o.rx * 0.2 && dx < look + o.rx && dy < o.ry + 20 && dx < hazardDist) {
@@ -1056,15 +1157,13 @@ export class Civilian extends Fighter {
       }
     }
 
-    const corpses: Obstacle[] = threats
-      .filter((t) => t.structure.isOut())
-      .map((t) => ({ x: t.x, y: t.laneY, rx: 36, ry: 24, kind: "corpse" as const }));
+    // Step over floored lads — steering around every body jammed the prom
     const steered = steerAway(
       this.x,
       this.y,
       vx,
       vy,
-      [...obstacles, ...corpses],
+      obstacles,
       68,
       strollMin,
       strollMax,
@@ -1095,6 +1194,7 @@ export class Civilian extends Fighter {
     this.running = true;
     this.action = "run";
     this.setFacing(this.passDir, now);
+    this.maybeRemarkOnBodies(now, threats);
 
     this.wrapPastScreen();
   }
@@ -1128,11 +1228,8 @@ export class Civilian extends Fighter {
       .filter((c) => c !== this && c.isCycling)
       .map((c) => ({ x: c.x, y: c.y, rx: 50, ry: 30, kind: "prop" as const }));
 
-    const corpses: Obstacle[] = threats
-      .filter((t) => t.structure.isOut())
-      .map((t) => ({ x: t.x, y: t.laneY, rx: 40, ry: 28, kind: "corpse" as const }));
-
-    const allObs = [...obstacles, ...corpses, ...cyclists];
+    // Bodies on the floor aren't walls — walk straight over them
+    const allObs = [...obstacles, ...cyclists];
 
     // Couples stroll as a pair — missus keeps beside him
     if (
@@ -1353,6 +1450,7 @@ export class Civilian extends Fighter {
     this.x = Phaser.Math.Clamp(this.x, LANE.minX, LANE.maxX);
     this.clampStrollY();
     this.noteStuckProgress(dt, Math.abs(vx) > 0.15 || Math.abs(vy) > 0.15);
+    this.maybeRemarkOnBodies(now, threats);
   }
 
   /** Track whether walking is actually progressing — used to walk round props. */

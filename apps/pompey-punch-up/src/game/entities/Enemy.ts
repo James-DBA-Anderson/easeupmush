@@ -636,10 +636,21 @@ export class Enemy extends Fighter {
         return;
       }
 
-      if (this.structure.downed && now < this.structure.groundedUntil) {
+      if (
+        this.structure.downed &&
+        now < this.structure.groundedUntil &&
+        !this.airborne &&
+        !this.isBeingTossed
+      ) {
         if (this.callActive) this.finishCall(this.callSaidWhere);
         this.action = "down";
         return;
+      }
+
+      // Stale down action after a soft floor cleared — don't pose-flicker
+      if (this.action === "down" && !this.structure.downed && !this.structure.isOut()) {
+        this.action = "idle";
+        this.actionUntil = now;
       }
 
       // Split-second hitstun — no chase / swing until it clears

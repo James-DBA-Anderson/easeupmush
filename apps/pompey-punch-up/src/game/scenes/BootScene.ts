@@ -17,12 +17,16 @@ type DemoFrame = {
   enemyAngle?: number;
   /** Default true = faces left toward the player. */
   enemyFlip?: boolean;
-  /** Slight lean on the player (degrees). */
+  /** Slight lean / flip angle on the player (degrees). */
   heroAngle?: number;
+  /** Spin around the torso (backflip) instead of the feet. */
+  heroSpin?: boolean;
   /** Block / hit spark — shake + flash + clack mark. */
   impact?: boolean;
   /** Impact without the chalk spark streaks (throw slam). */
   impactNoSparks?: boolean;
+  /** Hit weight for SFX (defaults from impact / block / slam). */
+  hitSfx?: "light" | "mid" | "heavy" | "block" | "critical";
   /** Floored body jerks under a stomp. */
   twitch?: boolean;
   showBin?: boolean;
@@ -104,38 +108,79 @@ const DEMOS: DemoClip[] = [
     title: "Backflip the sneaks",
     highlight: "backflip",
     frames: [
-      { pose: "jump0", enemy: "idle", enemyBehind: true, lift: 20, nudge: -6, ms: 100 },
+      // Match in-game: jump0 → kick1 → jump1 with a full backward tuck
+      {
+        pose: "jump0",
+        enemy: "idle",
+        enemyBehind: true,
+        lift: 18,
+        nudge: -4,
+        heroSpin: true,
+        heroAngle: -25,
+        ms: 90,
+      },
+      {
+        pose: "jump0",
+        enemy: "idle",
+        enemyBehind: true,
+        lift: 40,
+        nudge: -10,
+        heroSpin: true,
+        heroAngle: -80,
+        ms: 85,
+      },
+      {
+        pose: "kick1",
+        enemy: "idle",
+        enemyBehind: true,
+        lift: 54,
+        nudge: -18,
+        heroSpin: true,
+        heroAngle: -150,
+        ms: 85,
+      },
       {
         pose: "kick1",
         enemy: "hurt",
         enemyBehind: true,
-        lift: 48,
-        nudge: -18,
-        enemyNudge: -16,
-        heroAngle: -40,
-        ms: 140,
+        lift: 50,
+        nudge: -30,
+        enemyNudge: -14,
+        heroSpin: true,
+        heroAngle: -220,
+        impact: true,
+        ms: 100,
       },
       {
         pose: "jump1",
         enemy: "hurt",
         enemyBehind: true,
-        lift: 56,
-        nudge: -28,
+        lift: 36,
+        nudge: -38,
         enemyNudge: -28,
-        heroAngle: -120,
-        ms: 140,
+        heroSpin: true,
+        heroAngle: -295,
+        ms: 85,
       },
       {
-        pose: "kick1",
+        pose: "jump1",
         enemy: "down",
         enemyBehind: true,
-        lift: 30,
-        nudge: -36,
+        lift: 10,
+        nudge: -34,
         enemyNudge: -40,
-        heroAngle: -220,
-        ms: 140,
+        heroSpin: true,
+        heroAngle: -350,
+        ms: 80,
       },
-      { pose: "idle", enemy: "down", enemyBehind: true, nudge: -20, enemyNudge: -44, ms: 280 },
+      {
+        pose: "idle",
+        enemy: "down",
+        enemyBehind: true,
+        nudge: -18,
+        enemyNudge: -44,
+        ms: 300,
+      },
     ],
   },
   {
@@ -412,6 +457,8 @@ export class BootScene extends Phaser.Scene {
   private foePlant = { x: 0, y: 0 };
   private twitchUntil = 0;
   private twitchDir = 1;
+  /** Last demo enemy pose — used to fire hit SFX on connect frames. */
+  private lastDemoEnemy: string | undefined;
 
   constructor() {
     super("BootScene");
@@ -504,10 +551,12 @@ export class BootScene extends Phaser.Scene {
 
     this.buildControlsPanel(width * 0.76, 148, height - 52);
 
-    // First click unlocks audio — chip rock under the title demo
-    this.input.once("pointerdown", () => {
+    // First gesture unlocks audio — chip rock + hit SFX under the title demo
+    const unlockAudio = () => {
       void this.armChipRock(0.28);
-    });
+    };
+    this.input.once("pointerdown", unlockAudio);
+    this.input.keyboard?.once("keydown", unlockAudio);
 
     const practice = this.add
       .text(20, height - 22, "Practice →", {
@@ -528,7 +577,11 @@ export class BootScene extends Phaser.Scene {
     });
 
     const startHint = this.add
-      .text(width * 0.32, height - 22, "press any key · or click here to wake up on the beach", {
+      .text(
+        width * 0.32,
+        height - 22,
+        "tap here · or any key — wake up on the beach",
+        {
         fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
         fontSize: "14px",
         color: "#e8d4b8",
@@ -536,7 +589,8 @@ export class BootScene extends Phaser.Scene {
         padding: { x: 12, y: 5 },
         wordWrap: { width: 420 },
         align: "center",
-      })
+      },
+      )
       .setOrigin(0.5, 1)
       .setDepth(10)
       .setInteractive({ useHandCursor: true });
@@ -569,9 +623,11 @@ export class BootScene extends Phaser.Scene {
       if (this.loopIndex >= DEMO_LOOPS) {
         this.loopIndex = 0;
         this.clipIndex = (this.clipIndex + 1) % DEMOS.length;
+        this.lastDemoEnemy = undefined;
         pause = DEMO_CLIP_PAUSE_MS;
       } else {
         // Short beat between the two plays of the same move
+        this.lastDemoEnemy = undefined;
         pause = 220;
       }
     }
@@ -637,6 +693,7 @@ export class BootScene extends Phaser.Scene {
     this.clipIndex = idx;
     this.frameIndex = 0;
     this.loopIndex = 0;
+    this.lastDemoEnemy = undefined;
     const clip = DEMOS[idx]!;
     const frame = clip.frames[0]!;
     this.applyFrame(frame, clip);
@@ -648,8 +705,18 @@ export class BootScene extends Phaser.Scene {
     if (this.textures.exists(heroKey)) this.hero.setTexture(heroKey);
 
     const heroX = this.heroHome.x + (frame.nudge ?? 0);
-    const heroY = this.heroHome.y - (frame.lift ?? 0);
-    this.hero.setPosition(heroX, heroY);
+    const lift = frame.lift ?? 0;
+    // Feet stay on the ground line; lift raises the whole body
+    const heroY = this.heroHome.y - lift;
+    // Backflip (and other aerial spins) rotate around the torso, not the feet
+    if (frame.heroSpin) {
+      this.hero.setOrigin(0.5, 0.5);
+      const halfH = this.hero.displayHeight * 0.5;
+      this.hero.setPosition(heroX, heroY - halfH);
+    } else {
+      this.hero.setOrigin(0.5, 1);
+      this.hero.setPosition(heroX, heroY);
+    }
     this.hero.setAngle(frame.heroAngle ?? 0);
 
     const showEnemy = frame.enemy !== undefined;
@@ -716,7 +783,19 @@ export class BootScene extends Phaser.Scene {
     this.callout.setText(clip.title);
     this.highlightControl(clip.highlight);
 
-    if (frame.impact || frame.impactNoSparks) {
+    const prevEnemy = this.lastDemoEnemy;
+    this.lastDemoEnemy = frame.enemy;
+
+    // Connect SFX: tagged impacts, first hurt/down frame, or stomp twitch
+    const justConnected =
+      showEnemy &&
+      (frame.enemy === "hurt" || frame.enemy === "down") &&
+      prevEnemy !== "hurt" &&
+      prevEnemy !== "down";
+    const playHit =
+      frame.impact || frame.impactNoSparks || frame.twitch || justConnected;
+
+    if (playHit) {
       const impactX =
         showEnemy && frame.enemy === "down"
           ? this.foePlant.x
@@ -725,7 +804,16 @@ export class BootScene extends Phaser.Scene {
         showEnemy && frame.enemy === "down"
           ? this.foePlant.y - 18
           : heroY - 58;
-      this.playImpact(impactX, impactY, !frame.impactNoSparks);
+      const weight =
+        frame.hitSfx ??
+        (frame.pose === "block" || clip.highlight === "block"
+          ? "block"
+          : frame.impactNoSparks || frame.twitch || frame.enemy === "down"
+            ? "heavy"
+            : frame.pose.startsWith("jab")
+              ? "light"
+              : "mid");
+      this.playImpact(impactX, impactY, !frame.impactNoSparks && !frame.twitch, weight);
     } else {
       this.hero.clearTint();
     }
@@ -753,15 +841,22 @@ export class BootScene extends Phaser.Scene {
     this.foe.setAngle(this.twitchDir * (kick * 16 + jolt * 8) * strength);
   }
 
-  private playImpact(x: number, y: number, sparks = true): void {
-    this.cameras.main.shake(70, 0.006);
-    void chipSfx.hit(sparks ? "mid" : "heavy");
-    this.hero.setTint(0xffe8c8);
-    this.time.delayedCall(70, () => {
-      if (!this.started) this.hero.clearTint();
-    });
+  private playImpact(
+    x: number,
+    y: number,
+    sparks = true,
+    weight: "light" | "mid" | "heavy" | "block" | "critical" = "mid",
+  ): void {
+    this.cameras.main.shake(weight === "block" ? 45 : 70, weight === "heavy" ? 0.008 : 0.006);
+    void chipSfx.hit(weight);
+    if (weight !== "block") {
+      this.hero.setTint(0xffe8c8);
+      this.time.delayedCall(70, () => {
+        if (!this.started) this.hero.clearTint();
+      });
+    }
 
-    if (!sparks) return;
+    if (!sparks || weight === "block") return;
 
     // Chalk spark at the gloves — no silly onomatopoeia
     for (let i = 0; i < 6; i++) {

@@ -26,6 +26,11 @@ import type { FoodStall } from "../world/FoodStall";
 import type { WeaponShop } from "../world/WeaponShop";
 import type { Obstacle } from "../world/obstacles";
 import { separateObstacles } from "../world/obstacles";
+import {
+  consumeConfirmJust,
+  consumeRestartJust,
+  setMobilePadActive,
+} from "../input/mobilePad";
 
 /** Idle banter when the lads haven't clocked you yet. */
 const IDLE_CHATTER: [string, string][] = [
@@ -207,6 +212,7 @@ export class BeachScene extends Phaser.Scene {
 
   create() {
     generateDoodleTextures(this);
+    setMobilePadActive(true);
 
     // Keep the chip rock rolling from the title — L1 starts as a quiet bed
     void chipRock.unlock().then(() => {
@@ -811,6 +817,26 @@ export class BeachScene extends Phaser.Scene {
     this.thrown = still;
   }
 
+  /** Ambient beach loops — drone buzz, hover fans, Spitfire Doppler, passing motors. */
+  private syncAmbientSfx(): void {
+    const camX = this.cameras.main.scrollX;
+    const drone = this.skyDrone.getAudio(camX);
+    chipSfx.setDrone(drone.active, drone.intensity, drone.pan);
+
+    const hover = this.parallax.getHovercraftAudio(camX);
+    chipSfx.setHovercraft(hover.active, hover.intensity, hover.pan, hover.spin);
+
+    const spit = this.parallax.getSpitfireAudio();
+    chipSfx.setSpitfire(spit.active, spit.progress, spit.pan);
+
+    const car = this.parallax.getPassingCarAudio(camX);
+    chipSfx.setPassingCar(car.active, car.intensity, car.pan, car.pitch);
+
+    if (this.parallax.takeWaveBreak()) {
+      void chipSfx.waveBreak((Math.random() - 0.5) * 0.7);
+    }
+  }
+
   /** Ambient flybys along the front; swoops when Clarence King is live. */
   private updateSkyDrone(now: number, dt: number): void {
     if (this.introPhase !== "done") return;
@@ -855,6 +881,7 @@ export class BeachScene extends Phaser.Scene {
     });
     this.cameras.main.shake(100, 0.006);
     this.spawnFloat(this.player.x, this.player.y - 64, "swoop!");
+    void chipSfx.whoosh(true);
     if (result !== "blocked") {
       this.hitsTaken += 1;
       this.banner.setText("Drone dive — that one's from Clarence.");
@@ -929,15 +956,26 @@ export class BeachScene extends Phaser.Scene {
     if (this.introPhase !== "done") return;
     if (this.pendingEnemies.length === 0) return;
 
-    const nextWave = this.pendingEnemies[0];
     const reach = this.player.x;
-    if (reach < nextWave.unlockX) return;
 
-    // Bosses always arrive once you hit their gate — nearby scraps used to
-    // soft-lock Clarence King forever (L1 leftovers / Funfair Scout).
+    // Reached the boss gate — drop everything queued in front so stuck
+    // phone-calls / soft-downs can't soft-lock Clarence King forever.
+    const bossIdx = this.pendingEnemies.findIndex((p) => p.boss);
+    if (bossIdx > 0 && reach >= this.pendingEnemies[bossIdx]!.unlockX) {
+      this.pendingEnemies.splice(0, bossIdx);
+      this.callArmedUnlock = null;
+      this.activeCaller = null;
+    }
+
+    const nextWave = this.pendingEnemies[0];
+    if (!nextWave || reach < nextWave.unlockX) return;
+
+    // Bosses always arrive once you hit their gate. Soft-downed lads must not
+    // block the next wave either — only upright scrap counts.
     if (!nextWave.boss) {
       const blocking = this.enemies.filter((e) => {
         if (e.structure.isOut() || e.isBackground) return false;
+        if (e.structure.downed) return false;
         return e.x - this.player.x > -380;
       }).length;
       if (blocking >= 1) return;
@@ -1188,6 +1226,10 @@ export class BeachScene extends Phaser.Scene {
     for (const s of this.gulls.takeSquawks(now)) {
       this.spawnFloat(s.x, s.y, Math.random() < 0.5 ? "kaa!" : "mine!");
     }
+    for (const cry of this.gulls.takeCries()) {
+      void chipSfx.gullCry(cry.loud);
+    }
+    this.syncAmbientSfx();
     this.wanted.update(dt);
     this.syncChipRockHeat();
     this.syncBackupCalls();
@@ -1249,7 +1291,10 @@ export class BeachScene extends Phaser.Scene {
       // Only Bill's cuffs keep the R card; any other defeat state gets hauled up
       if (!this.player.structure.cuffed) {
         this.forcePickupAfterDefeat(now);
-      } else if (Phaser.Input.Keyboard.JustDown(this.restartKey)) {
+      } else if (
+        Phaser.Input.Keyboard.JustDown(this.restartKey) ||
+        consumeRestartJust()
+      ) {
         this.restartFromCheckpoint();
       }
       return;
@@ -1257,8 +1302,8 @@ export class BeachScene extends Phaser.Scene {
 
     // R only restarts from the cuff card / level-clear screen — not mid scrap
     if (
-      Phaser.Input.Keyboard.JustDown(this.restartKey) &&
-      this.endingState === "complete"
+      this.endingState === "complete" &&
+      (Phaser.Input.Keyboard.JustDown(this.restartKey) || consumeRestartJust())
     ) {
       this.scene.restart();
       return;
@@ -1636,7 +1681,7 @@ export class BeachScene extends Phaser.Scene {
     if (line.banner) this.banner.setText(line.banner);
     this.continueHint?.destroy();
     this.continueHint = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 52, "Space / E — continue", {
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - 52, "Space / E / tap Jump — continue", {
         fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
         fontSize: "16px",
         color: "#1a1410",
@@ -1652,7 +1697,8 @@ export class BeachScene extends Phaser.Scene {
     if (!this.caseyChat) return;
     const pressed =
       Phaser.Input.Keyboard.JustDown(this.continueKey) ||
-      Phaser.Input.Keyboard.JustDown(this.continueAltKey);
+      Phaser.Input.Keyboard.JustDown(this.continueAltKey) ||
+      consumeConfirmJust();
     if (!pressed) return;
     this.caseyChat.index += 1;
     if (this.caseyChat.index >= this.caseyChat.lines.length) {
@@ -1892,6 +1938,7 @@ export class BeachScene extends Phaser.Scene {
     );
 
     // Folk along the Level 2 stretch — beach, sea wall, funfair
+    const px = this.player.x;
     const extras: Civilian[] = [
       new Civilian(this, 7700, GAME_HEIGHT * 0.68, "Pier End Mum", "walker", 1, {
         present: "fem",
@@ -1916,20 +1963,25 @@ export class BeachScene extends Phaser.Scene {
         present: "fem",
         lookId: "look_c18",
       }),
-      new Civilian(this, 8200, GAME_HEIGHT * 0.7, "Deck Dave", "skater", -1, {
+      // Skaters near the L2 start so you meet them (and can knock one for a board)
+      new Civilian(this, px + 380, GAME_HEIGHT * 0.7, "Deck Dave", "skater", -1, {
         present: "masc",
         lookId: "look_c10",
       }),
-      new Civilian(this, 9100, GAME_HEIGHT * 0.68, "Board Bella", "skater", -1, {
+      new Civilian(this, px + 720, GAME_HEIGHT * 0.68, "Board Bella", "skater", 1, {
         present: "fem",
         lookId: "look_c18",
       }),
       new Civilian(this, 9800, GAME_HEIGHT * 0.68, "Defence Cyclist", "bike", 1, {
         present: "masc",
       }),
-      new Civilian(this, 10200, GAME_HEIGHT * 0.71, "Ollie Ollie", "skater", 1, {
+      new Civilian(this, px + 1100, GAME_HEIGHT * 0.68, "Ollie Ollie", "skater", -1, {
         present: "masc",
         lookId: "look_c06",
+      }),
+      new Civilian(this, 10800, GAME_HEIGHT * 0.66, "Rip-Rap Skater", "skater", 1, {
+        present: "masc",
+        lookId: "look_c10",
       }),
       new Civilian(this, 10380, GAME_HEIGHT * 0.66, "Phone Filmer", "walker", -1, {
         present: "fem",
@@ -1970,6 +2022,11 @@ export class BeachScene extends Phaser.Scene {
     Civilian.linkCouple(l2Dave, l2Sue);
     extras.push(l2Dave, l2Sue);
     this.civilians.push(...extras);
+
+    // Spare boards on the L2 stretch if you don't knock a skater
+    this.spawnSkateboard(px + 520, GAME_HEIGHT * 0.72);
+    this.spawnSkateboard(9200, GAME_HEIGHT * 0.71);
+    this.spawnSkateboard(11200, GAME_HEIGHT * 0.7);
 
     if (withCasey && this.captive instanceof Civilian) {
       this.banner.setText(

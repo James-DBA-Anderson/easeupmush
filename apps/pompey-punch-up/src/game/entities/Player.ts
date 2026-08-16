@@ -3,8 +3,42 @@ import { Fighter, inReach } from "./Fighter";
 import { pickLookPresent } from "../assets/pompeyLooks";
 import { ROAD } from "../constants";
 import { chipSfx } from "../audio/ChipSfx";
+import {
+  consumeInteractJust,
+  consumeLootJust,
+  takeMobilePad,
+  type MobilePadFrame,
+} from "../input/mobilePad";
 
 type Dir = "left" | "right" | "up" | "down";
+
+const EMPTY_PAD: MobilePadFrame = {
+  left: false,
+  right: false,
+  up: false,
+  down: false,
+  leftJust: false,
+  rightJust: false,
+  upJust: false,
+  downJust: false,
+  punch: false,
+  kick: false,
+  jump: false,
+  grab: false,
+  block: false,
+  run: false,
+  interact: false,
+  loot: false,
+  cover: false,
+  punchJust: false,
+  kickJust: false,
+  jumpJust: false,
+  grabJust: false,
+  interactJust: false,
+  lootJust: false,
+  confirmJust: false,
+  restartJust: false,
+};
 
 export class Player extends Fighter {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -21,6 +55,8 @@ export class Player extends Fighter {
     pickup: Phaser.Input.Keyboard.Key;
     cover: Phaser.Input.Keyboard.Key;
   };
+  /** Latest mobile pad snapshot for this frame (also used by hide / duck). */
+  private pad: MobilePadFrame = EMPTY_PAD;
 
   /** Double-tap a direction within this window to start running. */
   private readonly doubleTapMs = 280;
@@ -95,11 +131,54 @@ export class Player extends Fighter {
   }
 
   wantsLoot(_now: number): boolean {
-    return Phaser.Input.Keyboard.JustDown(this.keys.loot) && !this.structure.isOut();
+    if (this.structure.isOut()) return false;
+    return Phaser.Input.Keyboard.JustDown(this.keys.loot) || consumeLootJust();
   }
 
   wantsPickup(): boolean {
-    return Phaser.Input.Keyboard.JustDown(this.keys.pickup) && !this.structure.isOut();
+    if (this.structure.isOut()) return false;
+    return Phaser.Input.Keyboard.JustDown(this.keys.pickup) || consumeInteractJust();
+  }
+
+  private leftDown(): boolean {
+    return this.cursors.left!.isDown || this.wasd.left.isDown || this.pad.left;
+  }
+  private rightDown(): boolean {
+    return this.cursors.right!.isDown || this.wasd.right.isDown || this.pad.right;
+  }
+  private upDown(): boolean {
+    return this.cursors.up!.isDown || this.wasd.up.isDown || this.pad.up;
+  }
+  private downDown(): boolean {
+    return this.cursors.down!.isDown || this.wasd.down.isDown || this.pad.down;
+  }
+  private leftJust(): boolean {
+    return (
+      Phaser.Input.Keyboard.JustDown(this.cursors.left!) ||
+      Phaser.Input.Keyboard.JustDown(this.wasd.left) ||
+      this.pad.leftJust
+    );
+  }
+  private rightJust(): boolean {
+    return (
+      Phaser.Input.Keyboard.JustDown(this.cursors.right!) ||
+      Phaser.Input.Keyboard.JustDown(this.wasd.right) ||
+      this.pad.rightJust
+    );
+  }
+  private upJust(): boolean {
+    return (
+      Phaser.Input.Keyboard.JustDown(this.cursors.up!) ||
+      Phaser.Input.Keyboard.JustDown(this.wasd.up) ||
+      this.pad.upJust
+    );
+  }
+  private downJust(): boolean {
+    return (
+      Phaser.Input.Keyboard.JustDown(this.cursors.down!) ||
+      Phaser.Input.Keyboard.JustDown(this.wasd.down) ||
+      this.pad.downJust
+    );
   }
 
   override get isHidden(): boolean {
@@ -120,7 +199,7 @@ export class Player extends Fighter {
   }
 
   isDuckingInput(): boolean {
-    return this.keys.cover.isDown;
+    return this.keys.cover.isDown || this.pad.cover;
   }
 
   /** Someone under / beside the motor — for Swanton aim or a hurricanrana. */
@@ -201,8 +280,8 @@ export class Player extends Fighter {
       }
 
       let want = 0;
-      if (this.cursors.left!.isDown || this.wasd.left.isDown) want = -1;
-      else if (this.cursors.right!.isDown || this.wasd.right.isDown) want = 1;
+      if (this.leftDown()) want = -1;
+      else if (this.rightDown()) want = 1;
 
       // Stay on the cover — peek out toward the rim, not clear of it
       const maxPeek = Phaser.Math.Clamp(cover.rx * 0.55, 16, 30);
@@ -243,10 +322,10 @@ export class Player extends Fighter {
 
   private pollDoubleTap(now: number): void {
     const taps: { dir: Dir; down: boolean }[] = [
-      { dir: "left", down: Phaser.Input.Keyboard.JustDown(this.cursors.left!) || Phaser.Input.Keyboard.JustDown(this.wasd.left) },
-      { dir: "right", down: Phaser.Input.Keyboard.JustDown(this.cursors.right!) || Phaser.Input.Keyboard.JustDown(this.wasd.right) },
-      { dir: "up", down: Phaser.Input.Keyboard.JustDown(this.cursors.up!) || Phaser.Input.Keyboard.JustDown(this.wasd.up) },
-      { dir: "down", down: Phaser.Input.Keyboard.JustDown(this.cursors.down!) || Phaser.Input.Keyboard.JustDown(this.wasd.down) },
+      { dir: "left", down: this.leftJust() },
+      { dir: "right", down: this.rightJust() },
+      { dir: "up", down: this.upJust() },
+      { dir: "down", down: this.downJust() },
     ];
 
     for (const t of taps) {
@@ -266,13 +345,13 @@ export class Player extends Fighter {
     if (!this.lastTap) return false;
     switch (this.lastTap.dir) {
       case "left":
-        return this.cursors.left!.isDown || this.wasd.left.isDown;
+        return this.leftDown();
       case "right":
-        return this.cursors.right!.isDown || this.wasd.right.isDown;
+        return this.rightDown();
       case "up":
-        return this.cursors.up!.isDown || this.wasd.up.isDown;
+        return this.upDown();
       case "down":
-        return this.cursors.down!.isDown || this.wasd.down.isDown;
+        return this.downDown();
     }
   }
 
@@ -318,13 +397,12 @@ export class Player extends Fighter {
       return;
     }
 
+    this.pad = takeMobilePad();
     this.pollDoubleTap(now);
 
-    if (Phaser.Input.Keyboard.JustDown(this.keys.jump)) {
-      const left =
-        this.cursors.left!.isDown || this.wasd.left.isDown;
-      const right =
-        this.cursors.right!.isDown || this.wasd.right.isDown;
+    if (Phaser.Input.Keyboard.JustDown(this.keys.jump) || this.pad.jumpJust) {
+      const left = this.leftDown();
+      const right = this.rightDown();
       const holdingBack =
         (this.facing > 0 && left && !right) ||
         (this.facing < 0 && right && !left);
@@ -336,38 +414,36 @@ export class Player extends Fighter {
     }
 
     const wantRun =
-      this.keys.run.isDown || (this.runFromDoubleTap && this.holdingRunDir());
-    if (this.runFromDoubleTap && !this.holdingRunDir() && !this.keys.run.isDown) {
+      this.keys.run.isDown ||
+      this.pad.run ||
+      (this.runFromDoubleTap && this.holdingRunDir());
+    if (
+      this.runFromDoubleTap &&
+      !this.holdingRunDir() &&
+      !this.keys.run.isDown &&
+      !this.pad.run
+    ) {
       this.runFromDoubleTap = false;
     }
 
     this.running = false;
 
     const moveHeld =
-      this.cursors.left!.isDown ||
-      this.wasd.left.isDown ||
-      this.cursors.right!.isDown ||
-      this.wasd.right.isDown ||
-      (!this.airborne &&
-        (this.cursors.up!.isDown ||
-          this.wasd.up.isDown ||
-          this.cursors.down!.isDown ||
-          this.wasd.down.isDown));
-    const horizHeld =
-      this.cursors.left!.isDown ||
-      this.wasd.left.isDown ||
-      this.cursors.right!.isDown ||
-      this.wasd.right.isDown;
-    const downHeld =
-      this.cursors.down!.isDown || this.wasd.down.isDown;
+      this.leftDown() ||
+      this.rightDown() ||
+      (!this.airborne && (this.upDown() || this.downDown()));
+    const horizHeld = this.leftDown() || this.rightDown();
+    const downHeld = this.downDown();
     // Down + roll = manual (nose up). Needs lateral speed, not just lane step.
     this.boardManual =
       this.skating && !this.airborne && downHeld && horizHeld;
     // Rolling skate = run-attack rules (headbutt / slide / weapon drive-by)
     this.boardRolling = this.skating && !this.airborne && (moveHeld || this.boardManual);
 
-    const punchJust = Phaser.Input.Keyboard.JustDown(this.keys.punch);
-    const kickJust = Phaser.Input.Keyboard.JustDown(this.keys.kick);
+    const punchJust =
+      Phaser.Input.Keyboard.JustDown(this.keys.punch) || this.pad.punchJust;
+    const kickJust =
+      Phaser.Input.Keyboard.JustDown(this.keys.kick) || this.pad.kickJust;
     const lowJust = Phaser.Input.Keyboard.JustDown(this.keys.low);
 
     // Queue J/K so near-simultaneous taps still read as a back attack
@@ -389,12 +465,14 @@ export class Player extends Fighter {
     const canStrike = this.canAct(now) || this.airborne;
     // Instant chord if one is held and the other taps (no buffer wait)
     const heldChord =
-      (punchJust && this.keys.kick.isDown) || (kickJust && this.keys.punch.isDown);
+      (punchJust && (this.keys.kick.isDown || this.pad.kick)) ||
+      (kickJust && (this.keys.punch.isDown || this.pad.punch));
     const wantBackCombo = canStrike && (chordReady || heldChord);
 
     // Solo J: fire as soon as free — only wait the chord window if K is in play
     const kickInPlay =
       this.keys.kick.isDown ||
+      this.pad.kick ||
       (this.kickQueuedAt > 0 && now - this.kickQueuedAt <= this.attackChordMs);
     const punchCommit =
       canStrike &&
@@ -404,6 +482,7 @@ export class Player extends Fighter {
       (now - this.punchQueuedAt >= this.attackChordMs || !kickInPlay);
     const punchInPlay =
       this.keys.punch.isDown ||
+      this.pad.punch ||
       (this.punchQueuedAt > 0 && now - this.punchQueuedAt <= this.attackChordMs);
     const kickCommit =
       canStrike &&
@@ -438,7 +517,8 @@ export class Player extends Fighter {
       if (
         punchJust ||
         kickJust ||
-        Phaser.Input.Keyboard.JustDown(this.keys.grab)
+        Phaser.Input.Keyboard.JustDown(this.keys.grab) ||
+        this.pad.grabJust
       ) {
         this.tryBodyToss(now);
         this.comboStep = 0;
@@ -446,8 +526,8 @@ export class Player extends Fighter {
       // Slow shuffle while clinching
       if (this.action === "hold") {
         let hx = 0;
-        if (this.cursors.left!.isDown || this.wasd.left.isDown) hx -= 1;
-        if (this.cursors.right!.isDown || this.wasd.right.isDown) hx += 1;
+        if (this.leftDown()) hx -= 1;
+        if (this.rightDown()) hx += 1;
         if (hx !== 0) {
           this.x += hx * this.speed * 0.35 * dt;
           this.x = Phaser.Math.Clamp(this.x, bounds.minX, bounds.maxX);
@@ -458,7 +538,8 @@ export class Player extends Fighter {
       return;
     }
 
-    const grabJust = Phaser.Input.Keyboard.JustDown(this.keys.grab);
+    const grabJust =
+      Phaser.Input.Keyboard.JustDown(this.keys.grab) || this.pad.grabJust;
     // Include queues so H doesn't snap back to block during the chord wait
     const wantAttack =
       wantBackCombo ||
@@ -472,7 +553,7 @@ export class Player extends Fighter {
       grabJust;
 
     // H — hold to block; attacks cancel the guard
-    if (!wantAttack && this.keys.block.isDown) {
+    if (!wantAttack && (this.keys.block.isDown || this.pad.block)) {
       this.tryBlock(now);
     } else if (this.action === "block") {
       this.dropBlock(now);
@@ -686,16 +767,13 @@ export class Player extends Fighter {
     let vy = 0;
     // Horizontal while ducked is peek (handled in updateHide) — don't walk out of cover
     if (!this.hiding) {
-      if (this.cursors.left!.isDown || this.wasd.left.isDown) vx -= 1;
-      if (this.cursors.right!.isDown || this.wasd.right.isDown) vx += 1;
+      if (this.leftDown()) vx -= 1;
+      if (this.rightDown()) vx += 1;
     }
     if (!this.airborne) {
-      if (this.cursors.up!.isDown || this.wasd.up.isDown) vy -= 1;
+      if (this.upDown()) vy -= 1;
       // C is cover — Down steps south, unless you're manualing on the board
-      if (
-        (this.cursors.down!.isDown || this.wasd.down.isDown) &&
-        !this.boardManual
-      ) {
+      if (this.downDown() && !this.boardManual) {
         vy += 1;
       }
     }
@@ -719,9 +797,7 @@ export class Player extends Fighter {
           // On a car: slide along X; Up is tap-to-climb/dismount (held Up would
           // immediately hop off the roof after a bonnet climb finishes)
           this.y = this.platformY;
-          const upTap =
-            Phaser.Input.Keyboard.JustDown(this.cursors.up!) ||
-            Phaser.Input.Keyboard.JustDown(this.wasd.up);
+          const upTap = this.upJust();
           if (upTap && !this.climbing) {
             const car = this.mountedCar;
             const onHood =

@@ -6,6 +6,12 @@ type DroneMode = "idle" | "flyby" | "film" | "orbit" | "swoop" | "climb";
 
 export type DroneEvent = "filming" | "flyby";
 
+export type DroneAudio = {
+  active: boolean;
+  intensity: number;
+  pan: number;
+};
+
 /**
  * Occasional sky drone along the front — sometimes just buzzing past,
  * sometimes hanging off your shoulder filming. During the Clarence Pier
@@ -43,6 +49,25 @@ export class SkyDrone {
     const e = this.pendingEvent;
     this.pendingEvent = null;
     return e;
+  }
+
+  /** Screen-space pan / intensity for the buzz loop. */
+  getAudio(camScrollX: number): DroneAudio {
+    if (this.mode === "idle" || !this.image) {
+      return { active: false, intensity: 0, pan: 0 };
+    }
+    const screenX = this.screenSpace ? this.x : this.x - camScrollX;
+    const pan = Phaser.Math.Clamp((screenX / GAME_WIDTH) * 2 - 1, -1, 1);
+    let intensity = 0.35;
+    if (this.mode === "film") intensity = 0.55;
+    else if (this.mode === "orbit") intensity = 0.72;
+    else if (this.mode === "swoop") intensity = 1;
+    else if (this.mode === "climb") intensity = 0.45;
+    else if (this.mode === "flyby") intensity = 0.4;
+    // Soft falloff at the edges of the screen
+    const edge = 1 - Math.min(1, Math.abs(pan));
+    intensity *= 0.35 + edge * 0.65;
+    return { active: true, intensity, pan };
   }
 
   update(

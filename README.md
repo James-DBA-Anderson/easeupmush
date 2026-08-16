@@ -1,6 +1,6 @@
 # Ease Up Mush
 
-Hand-drawn browser games from the South Coast. Site: [easeupmush.com](https://easeupmush.com).
+Browser games from Pompey for Pompey. Site: [easeupmush.com](https://easeupmush.com).
 
 This is a **monorepo** — the marketing site plus games that ship under it.
 
@@ -14,13 +14,13 @@ apps/
 
 ```bash
 npm install
-npm run dev          # homepage → http://localhost:5300/
-npm run dev:game     # Pompey Punch-Up → http://localhost:5299/
+npm run dev          # homepage + game → http://localhost:5300/ (Play works)
+npm run dev:site     # homepage only (Play needs the game proxy target)
+npm run dev:game     # Pompey Punch-Up alone → http://localhost:5299/
 npm run debug        # fight sandbox → http://localhost:5299/debug
 ```
 
-Stop any leftover Vite from before the monorepo move (Ctrl+C), then use those URLs — the old `:5173` / root game server will 404 or look empty.
-
+`npm run dev` starts the site on **:5300** and the game on **:5299**, and proxies `/games/pompey-punch-up/` so Play / Debug match production.
 Production URLs after deploy:
 
 | Path | What |

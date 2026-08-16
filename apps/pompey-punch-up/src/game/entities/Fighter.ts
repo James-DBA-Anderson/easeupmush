@@ -10,6 +10,7 @@ import {
 import type { BodyBuild, Present } from "../assets/pompeyLooks";
 import type { CarSurface, DestructibleProp } from "../world/DestructibleProp";
 import { isThrowable } from "../world/ThrownWeapon";
+import { chipSfx } from "../audio/ChipSfx";
 
 /** Kickflip spin duration (ms) — keep pose + board spin in sync. */
 export const KICKFLIP_MS = 320;
@@ -138,6 +139,10 @@ export type PoseKey =
   | "bloodied"
   | "film"
   | "phone"
+  | "phone0"
+  | "phone1"
+  | "phone2"
+  | "phone3"
   | "block"
   | "block0"
   | "block1"
@@ -536,7 +541,7 @@ export class Fighter extends Phaser.GameObjects.Container {
           return true;
         }
         this.rushStrike = true;
-        this.setAction("weapon_swing", now, 480);
+        this.beginWeaponSwing(now);
         return true;
       }
       this.rushStrike = true;
@@ -549,7 +554,7 @@ export class Fighter extends Phaser.GameObjects.Container {
       return this.tryThrow(now);
     }
     if (this.weapon !== "none") {
-      this.setAction("weapon_swing", now, 480);
+      this.beginWeaponSwing(now);
       return true;
     }
     // Generic scrap punch (enemies) — solid hook
@@ -564,7 +569,7 @@ export class Fighter extends Phaser.GameObjects.Container {
     if (!this.structure.armsUsable()) return false;
     if (isThrowable(this.weapon)) return this.tryThrow(now);
     if (this.weapon !== "none") {
-      this.setAction("weapon_swing", now, 480);
+      this.beginWeaponSwing(now);
       return true;
     }
     this.setAction("jab", now, 280);
@@ -578,7 +583,7 @@ export class Fighter extends Phaser.GameObjects.Container {
     if (!this.structure.armsUsable()) return false;
     if (isThrowable(this.weapon)) return this.tryThrow(now);
     if (this.weapon !== "none") {
-      this.setAction("weapon_swing", now, 480);
+      this.beginWeaponSwing(now);
       return true;
     }
     this.setAction("hook", now, 360);
@@ -592,11 +597,16 @@ export class Fighter extends Phaser.GameObjects.Container {
     if (!this.structure.armsUsable()) return false;
     if (isThrowable(this.weapon)) return this.tryThrow(now);
     if (this.weapon !== "none") {
-      this.setAction("weapon_swing", now, 480);
+      this.beginWeaponSwing(now);
       return true;
     }
     this.setAction("upper", now, 440);
     return true;
+  }
+
+  private beginWeaponSwing(now: number): void {
+    this.setAction("weapon_swing", now, 480);
+    void chipSfx.weaponSwing(this.weapon);
   }
 
   /** Start a throw wind-up. Scene consumes the weapon when the projectile spawns. */
@@ -746,6 +756,10 @@ export class Fighter extends Phaser.GameObjects.Container {
     victim.clearPlantLock();
     victim.structure.downed = false;
     victim.structure.groundedUntil = 0;
+    // Soft crawl from a prior scrap must not stick through the bomb
+    if (victim.structure.crawling && !victim.structure.outCold) {
+      victim.structure.crawling = false;
+    }
     victim.airborne = false;
     victim.jumpVy = 0;
     victim.tossVx = 0;
@@ -865,31 +879,20 @@ export class Fighter extends Phaser.GameObjects.Container {
     victim.tossUntil = now + flyMs;
     victim.airborne = true;
     victim.jumpVy = flyY;
-    victim.invulnUntil = Math.max(victim.invulnUntil, now + 80);
     this.diveAimX = null;
 
-    // Slams are heavy soft-downs; only finish if they're already battered.
-    // critical+onOpening used to always hit finish() → permanent KO/crawl.
-    const worn = victim.structure.wornFactor();
-    const slamFinish = worn >= 0.48;
+    // Slam: can KO/crawl when they're worn; survivors bounce up on landing
     victim.receiveStrike({
-      kind: slamFinish && rana ? "jump_kick" : "hook",
-      power: bomb ? 0.72 : suplex ? 0.65 : rana ? 0.78 : 0.55,
-      critical: slamFinish,
+      kind: "hook",
+      power: bomb ? 0.72 : suplex ? 0.62 : rana ? 0.78 : 0.55,
+      critical: false,
       dirty: false,
-      onOpening: slamFinish,
+      onOpening: false,
+      softFloorOnly: true,
       now,
       bodyPart: rana ? "head" : "body",
       knockDir: suplex || rana ? -dir : dir,
     });
-    if (!victim.structure.isOut() && !victim.structure.crawling) {
-      const floorMs = bomb ? 1500 : suplex || rana ? 1300 : 900;
-      victim.structure.putOnFloor(now, floorMs);
-      if (victim.action !== "out_cold" && victim.action !== "crawl") {
-        victim.setAction("down", now, 400);
-        victim.markPlantHere();
-      }
-    }
 
     victim.clearPlantLock();
     victim.tossVx = dir * flyX;
@@ -900,9 +903,20 @@ export class Fighter extends Phaser.GameObjects.Container {
       victim.jumpVy = flyY;
     }
     victim.clearCarMount();
-    // Brief toss i-frames only — soft-down get-up grace is granted when they stand
-    victim.invulnUntil = Math.max(victim.invulnUntil, now + 80);
-    if (!victim.structure.isOut()) {
+    // Cover the flight so mid-air punches don't soft-floor / flicker them
+    victim.invulnUntil = Math.max(victim.invulnUntil, now + flyMs + 40);
+
+    if (victim.structure.isOut()) {
+      // Finished — stay down after the plant
+      if (victim.structure.outCold) victim.setAction("out_cold", now, 999999);
+      else if (victim.structure.crawling) victim.setAction("crawl", now, 999999);
+    } else {
+      // Still going — no soft floor; hop up as soon as they land
+      victim.structure.downed = false;
+      victim.structure.groundedUntil = 0;
+      if (victim.structure.crawling && !victim.structure.outCold) {
+        victim.structure.crawling = false;
+      }
       victim.action = "hitstun";
       victim.actionUntil = victim.tossUntil;
     }
@@ -1453,7 +1467,8 @@ export class Fighter extends Phaser.GameObjects.Container {
       this.y = floor;
       this.airborne = false;
       this.jumpVy = 0;
-      // Landed — stop skating along the ground from a toss
+      // Remember before endToss() — that clears tossUntil / tossVx
+      const landedFromToss = this.tossVx !== 0 || this.tossUntil > 0;
       this.endToss();
       if (this.action === "jump") this.action = "idle";
       if (this.action === "backflip") {
@@ -1476,6 +1491,23 @@ export class Fighter extends Phaser.GameObjects.Container {
         this.sprite.y = 0;
         this.sprite.setRotation(0);
         this.markPlantHere();
+        if (
+          this.structure.downed &&
+          !this.structure.isOut() &&
+          Number.isFinite(this.structure.groundedUntil)
+        ) {
+          this.action = "down";
+          this.actionUntil = this.structure.groundedUntil;
+        }
+      } else if (landedFromToss) {
+        // Survived a body toss — on your feet straight away (with get-up grace)
+        this.sprite.setOrigin(0.5, 1);
+        this.sprite.y = 0;
+        this.sprite.setRotation(0);
+        this.action = "idle";
+        this.actionUntil = 0;
+        this.clearPlantLock();
+        this.grantGetUpGrace(this.scene.time.now);
       }
     } else {
       this.y = Math.min(this.y, floor);
@@ -1485,8 +1517,9 @@ export class Fighter extends Phaser.GameObjects.Container {
 
   receiveStrike(hit: StrikeInput): StrikeResult {
     const floored = this.structure.downed || this.structure.isOut();
-    // Short i-frames: still let a boot jolt a body on the floor
-    if (hit.now < this.invulnUntil) {
+    // Short i-frames: still let a boot jolt a body on the floor,
+    // and always allow toss soft-plants through
+    if (hit.now < this.invulnUntil && !hit.softFloorOnly) {
       if (floored && hit.kind === "boot_head") {
         this.triggerFloorTwitch(hit.now, hit.knockDir ?? this.facing, true);
         this.refreshVisuals(hit.now, 0);
@@ -1900,7 +1933,7 @@ export class Fighter extends Phaser.GameObjects.Container {
             : this.airborne || this.action === "ollie"
               ? -1
               : this.boardManual
-                ? 4
+                ? 6
                 : this.boardRolling
                   ? 10
                   : 8;
@@ -2368,14 +2401,28 @@ export class Fighter extends Phaser.GameObjects.Container {
       now >= this.structure.groundedUntil
     ) {
       this.structure.downed = false;
+      this.structure.groundedUntil = 0;
     }
     if (stood || (!this.structure.downed && !this.structure.isOut())) {
-      if (this.action === "down" || this.action === "hitstun") {
-        this.action = "idle";
-        this.actionUntil = now;
-        this.clearPlantLock();
-        this.grantGetUpGrace(now);
+      if (
+        this.action === "down" ||
+        this.action === "hitstun" ||
+        this.action === "crawl"
+      ) {
+        // Soft-down ended — never leave them in crawl/down after a finite plant
+        if (!this.structure.crawling && !this.structure.outCold) {
+          this.action = "idle";
+          this.actionUntil = now;
+          this.clearPlantLock();
+          this.grantGetUpGrace(now);
+        }
       }
+    }
+    // Don't re-assert "down" from a stale action timer after we just stood
+    if (!this.structure.downed && !this.structure.isOut() && this.action === "down") {
+      this.action = "idle";
+      this.actionUntil = now;
+      this.clearPlantLock();
     }
     this.clearActionIfDue(now);
   }
