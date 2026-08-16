@@ -282,7 +282,8 @@ class ChipSfxEngine {
       return;
     }
     if (!this.droneVoice) this.droneVoice = this.startDroneLoop(ctx);
-    this.applyAmbient(this.droneVoice, intensity * 0.11, pan, 1);
+    // Quiet under the bed/fight cut — audible, not a fridge-hum takeover
+    this.applyAmbient(this.droneVoice, intensity * 0.19, pan, 1);
   }
 
   setHovercraft(active: boolean, intensity = 0, pan = 0, spin = 1): void {
@@ -378,50 +379,61 @@ class ChipSfxEngine {
     pan.connect(gain);
     gain.connect(this.bus!);
 
+    // Low motor + mid prop whir — reads as a quadcopter without shouting
     const osc = ctx.createOscillator();
     osc.type = "sawtooth";
-    osc.frequency.value = 165;
+    osc.frequency.value = 148;
     const filt = ctx.createBiquadFilter();
     filt.type = "bandpass";
-    filt.frequency.value = 520;
-    filt.Q.value = 2.4;
+    filt.frequency.value = 640;
+    filt.Q.value = 1.6;
     const og = ctx.createGain();
-    og.gain.value = 0.55;
+    og.gain.value = 0.62;
     osc.connect(filt);
     filt.connect(og);
     og.connect(pan);
 
     const osc2 = ctx.createOscillator();
     osc2.type = "square";
-    osc2.frequency.value = 248;
+    osc2.frequency.value = 222;
     const og2 = ctx.createGain();
-    og2.gain.value = 0.22;
+    og2.gain.value = 0.28;
     osc2.connect(og2);
     og2.connect(pan);
 
-    const noise = this.loopNoise(ctx, 0.18, 2400, 0.35);
+    const osc3 = ctx.createOscillator();
+    osc3.type = "triangle";
+    osc3.frequency.value = 296;
+    const og3 = ctx.createGain();
+    og3.gain.value = 0.16;
+    osc3.connect(og3);
+    og3.connect(pan);
+
+    const noise = this.loopNoise(ctx, 0.26, 2800, 0.42);
     noise.connect(pan);
 
     const lfo = ctx.createOscillator();
     const lfoG = ctx.createGain();
-    lfo.frequency.value = 28;
-    lfoG.gain.value = 18;
+    lfo.frequency.value = 32;
+    lfoG.gain.value = 22;
     lfo.connect(lfoG);
     lfoG.connect(filt.frequency);
 
     osc.start();
     osc2.start();
+    osc3.start();
     lfo.start();
 
     return {
       gain,
       pan,
-      freqs: [osc, osc2],
-      baseHz: [165, 248],
+      freqs: [osc, osc2, osc3],
+      baseHz: [148, 222, 296],
       stop: () => {
         try {
           osc.stop();
           osc2.stop();
+          osc3.stop();
           lfo.stop();
           noise.disconnect();
         } catch {

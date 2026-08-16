@@ -58,15 +58,15 @@ export class SkyDrone {
     }
     const screenX = this.screenSpace ? this.x : this.x - camScrollX;
     const pan = Phaser.Math.Clamp((screenX / GAME_WIDTH) * 2 - 1, -1, 1);
-    let intensity = 0.35;
-    if (this.mode === "film") intensity = 0.55;
-    else if (this.mode === "orbit") intensity = 0.72;
+    let intensity = 0.48;
+    if (this.mode === "film") intensity = 0.62;
+    else if (this.mode === "orbit") intensity = 0.78;
     else if (this.mode === "swoop") intensity = 1;
-    else if (this.mode === "climb") intensity = 0.45;
-    else if (this.mode === "flyby") intensity = 0.4;
-    // Soft falloff at the edges of the screen
+    else if (this.mode === "climb") intensity = 0.52;
+    else if (this.mode === "flyby") intensity = 0.55;
+    // Soft falloff at the edges of the screen — keep a floor so it still buzzes
     const edge = 1 - Math.min(1, Math.abs(pan));
-    intensity *= 0.35 + edge * 0.65;
+    intensity *= 0.55 + edge * 0.45;
     return { active: true, intensity, pan };
   }
 

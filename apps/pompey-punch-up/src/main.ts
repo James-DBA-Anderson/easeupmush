@@ -30,4 +30,20 @@ if (isMobilePlay()) {
   window.addEventListener("resize", syncPadVisibility);
 }
 
-new Phaser.Game({ ...gameConfig, parent });
+const game = new Phaser.Game({ ...gameConfig, parent });
+
+/** Keep FIT sizing in sync when the mobile URL bar shows / hides. */
+function refreshMobileScale(): void {
+  if (!game.scale) return;
+  game.scale.refresh();
+  syncPadVisibility();
+}
+
+window.addEventListener("resize", refreshMobileScale);
+window.addEventListener("orientationchange", () => {
+  window.setTimeout(refreshMobileScale, 120);
+});
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", refreshMobileScale);
+  window.visualViewport.addEventListener("scroll", refreshMobileScale);
+}

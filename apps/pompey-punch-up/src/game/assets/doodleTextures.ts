@@ -49,10 +49,12 @@ function wobble(n: number, amp = 2): number {
 
 export function generateDoodleTextures(scene: Phaser.Scene): void {
   // Bump this when poses/assets change so hot reload regenerates.
-  const VERSION = "doodle_v112";
+  const VERSION = "doodle_v114";
   if (scene.textures.exists(VERSION)) return;
   if (
     scene.textures.exists("sky") ||
+    scene.textures.exists("doodle_v113") ||
+    scene.textures.exists("doodle_v112") ||
     scene.textures.exists("doodle_v111") ||
     scene.textures.exists("doodle_v110") ||
     scene.textures.exists("doodle_v109") ||
@@ -174,6 +176,8 @@ export function generateDoodleTextures(scene: Phaser.Scene): void {
           "traffic_van",
           "traffic_bike",
           "traffic_bus",
+          "traffic_scooter_0",
+          "traffic_scooter_1",
           "prop_bin",
           "prop_bin_green",
           "prop_bin_broken",
@@ -3740,6 +3744,169 @@ function makePassingTraffic(scene: Phaser.Scene): void {
       ctx.strokeRect(234, 70, 10, 12);
     }, "#1a1410", 2.5);
     tex.refresh();
+  }
+
+  // E-scooter with rider — faces left like other traffic (stem/front on left).
+  {
+    const w = 110;
+    const h = 100;
+    const paint = (ctx: CanvasRenderingContext2D, frame: number) => {
+      ctx.clearRect(0, 0, w, h);
+      const rot = frame * 0.85;
+      const deckY = h - 28;
+      const frontX = 16;
+      const rearX = w - 18;
+      const hubY = h - 12;
+      const stemBaseX = frontX + 2;
+      const stemTopX = frontX;
+      const gripY = 22;
+
+      const spinWheel = (cx: number, cy: number, spin: number, radius: number) => {
+        ctx.fillStyle = "#1a1a1a";
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#d8d0c4";
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius - 2.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.strokeStyle = "#7a786e";
+        ctx.lineWidth = 1.1;
+        for (let i = 0; i < 3; i++) {
+          const a = spin + (i * Math.PI * 2) / 3;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(
+            cx + Math.cos(a) * (radius - 2.5),
+            cy + Math.sin(a) * (radius - 2.5),
+          );
+          ctx.stroke();
+        }
+        ctx.strokeStyle = "#1a1410";
+        ctx.lineWidth = 2.2;
+        ctx.fillStyle = "#3a3a38";
+        ctx.beginPath();
+        ctx.arc(cx, cy, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      };
+
+      scratchStroke(ctx, () => {
+        shadow(ctx, w / 2, h - 4, 42);
+
+        // Rider — standing, leaning toward bars (left)
+        ctx.fillStyle = "#2a5080";
+        ctx.beginPath();
+        ctx.moveTo(48, 38);
+        ctx.lineTo(62, 36);
+        ctx.lineTo(60, deckY - 2);
+        ctx.lineTo(46, deckY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        // Legs / feet on deck
+        ctx.fillStyle = "#1a2438";
+        ctx.beginPath();
+        ctx.moveTo(48, deckY - 4);
+        ctx.lineTo(58, deckY - 6);
+        ctx.lineTo(64, deckY + 4);
+        ctx.lineTo(42, deckY + 5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        // Arms to bars
+        ctx.strokeStyle = "#1a1410";
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.moveTo(50, 44);
+        ctx.lineTo(stemTopX + 8, gripY + 6);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(56, 42);
+        ctx.lineTo(stemTopX + 2, gripY + 4);
+        ctx.stroke();
+        // Head
+        ctx.fillStyle = "#c4a882";
+        ctx.beginPath();
+        ctx.arc(52, 28, 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#1a1410";
+        ctx.beginPath();
+        ctx.ellipse(50, 24, 7.5, 3.5, -0.15, Math.PI, Math.PI * 2);
+        ctx.fill();
+
+        // Deck board (front left → rear right)
+        ctx.fillStyle = "#3d7a9a";
+        ctx.beginPath();
+        ctx.moveTo(frontX + 4, deckY);
+        ctx.lineTo(rearX - 4, deckY + 1);
+        ctx.quadraticCurveTo(rearX + 1, deckY + 2, rearX, deckY + 6);
+        ctx.lineTo(frontX + 6, deckY + 7);
+        ctx.quadraticCurveTo(frontX + 2, deckY + 4, frontX + 4, deckY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#2a2a30";
+        ctx.fillRect(frontX + 10, deckY + 2, rearX - frontX - 20, 3);
+
+        // Stem / fork (front = left)
+        ctx.strokeStyle = "#c45a2a";
+        ctx.lineWidth = 3.4;
+        ctx.beginPath();
+        ctx.moveTo(stemBaseX, deckY + 2);
+        ctx.lineTo(stemTopX, gripY + 8);
+        ctx.stroke();
+        ctx.strokeStyle = "#1a1410";
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(stemBaseX, deckY + 2);
+        ctx.lineTo(stemTopX, gripY + 8);
+        ctx.stroke();
+        ctx.strokeStyle = "#c45a2a";
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        ctx.moveTo(stemBaseX, deckY + 2);
+        ctx.lineTo(frontX, hubY);
+        ctx.stroke();
+        ctx.strokeStyle = "#1a1410";
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(stemBaseX, deckY + 2);
+        ctx.lineTo(frontX, hubY);
+        ctx.stroke();
+
+        // T-bar reaches back toward rider
+        ctx.strokeStyle = "#1a1410";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(stemTopX - 2, gripY + 1);
+        ctx.lineTo(stemTopX + 22, gripY + 4);
+        ctx.stroke();
+        ctx.fillStyle = "#c45a2a";
+        ctx.beginPath();
+        ctx.arc(stemTopX + 2, gripY + 6, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#1a1a1a";
+        ctx.beginPath();
+        ctx.arc(stemTopX - 2, gripY + 1, 3, 0, Math.PI * 2);
+        ctx.arc(stemTopX + 22, gripY + 4, 3.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        spinWheel(frontX, hubY, rot, 7);
+        spinWheel(rearX, hubY, rot + 0.4, 7);
+      }, "#1a1410", 2.2);
+    };
+
+    for (const frame of [0, 1] as const) {
+      const key = `traffic_scooter_${frame}`;
+      const tex = scene.textures.createCanvas(key, w, h)!;
+      paint(tex.getContext(), frame);
+      tex.refresh();
+    }
   }
 
   // Motorbike — longer, lower

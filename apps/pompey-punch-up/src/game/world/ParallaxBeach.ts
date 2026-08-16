@@ -49,6 +49,9 @@ interface PassingCar {
   vx: number;
   /** Doppler base — bikes/scooters higher, vans/buses lower. */
   pitch: number;
+  frames?: string[];
+  animPhase?: number;
+  animSpeed?: number;
 }
 
 type TrafficSpec = {
@@ -61,6 +64,9 @@ type TrafficSpec = {
   pitch: number;
   /** Skip body tint — painted vehicles (taxi yellow, etc.). */
   noTint?: boolean;
+  /** Optional wheel / rider animation keys. */
+  frames?: string[];
+  animSpeed?: number;
 };
 
 /** Weighted seafront traffic — saloons common, bus rare. */
@@ -85,14 +91,16 @@ const PASSING_TRAFFIC: TrafficSpec[] = [
     pitch: 0.82,
   },
   {
-    key: "mount_scooter",
+    key: "traffic_scooter_0",
     weight: 14,
     speedMin: 150,
     speedMax: 250,
-    scaleMin: 1.35,
-    scaleMax: 1.65,
+    scaleMin: 1.25,
+    scaleMax: 1.45,
     pitch: 1.38,
     noTint: true,
+    frames: ["traffic_scooter_0", "traffic_scooter_1"],
+    animSpeed: 12,
   },
   {
     key: "traffic_bike",
@@ -481,8 +489,8 @@ export class ParallaxBeach {
       depth: -11,
     });
     this.addLandmark("beach_bbq_0", 2100, GAME_HEIGHT * 0.505, 0.62, {
-      scale: 1.15,
-      alpha: 0.92,
+      scale: 0.72,
+      alpha: 0.9,
       depth: -10,
       frames: ["beach_bbq_0", "beach_bbq_1", "beach_bbq_2", "beach_bbq_3"],
       animSpeed: 1.55,
@@ -493,7 +501,7 @@ export class ParallaxBeach {
       depth: -11,
     });
     this.addLandmark("beach_bbq_0", 5200, GAME_HEIGHT * 0.5, 0.6, {
-      scale: 1.05,
+      scale: 0.68,
       alpha: 0.88,
       depth: -10,
       frames: ["beach_bbq_0", "beach_bbq_1", "beach_bbq_2", "beach_bbq_3"],
@@ -526,8 +534,8 @@ export class ParallaxBeach {
       depth: -9,
     });
     this.addLandmark("beach_bbq_0", 8100, LANE.minY + 6, 1, {
-      scale: 1.2,
-      alpha: 0.95,
+      scale: 0.78,
+      alpha: 0.92,
       depth: -9,
       frames: ["beach_bbq_0", "beach_bbq_1", "beach_bbq_2", "beach_bbq_3"],
       animSpeed: 1.45,
@@ -607,7 +615,7 @@ export class ParallaxBeach {
       depth: -9,
     });
     this.addLandmark("beach_bbq_0", 12450, LANE.minY + 6, 1, {
-      scale: 1.18,
+      scale: 0.76,
       depth: -9,
       frames: ["beach_bbq_0", "beach_bbq_1", "beach_bbq_2", "beach_bbq_3"],
       animSpeed: 1.25,
@@ -850,6 +858,9 @@ export class ParallaxBeach {
       y,
       vx: goingRight ? speed : -speed,
       pitch: spec.pitch,
+      frames: spec.frames,
+      animPhase: Math.random() * 2,
+      animSpeed: spec.animSpeed,
     });
   }
 
@@ -1022,6 +1033,15 @@ export class ParallaxBeach {
       car.worldX += car.vx * dt;
       car.image.x = car.worldX;
       car.image.y = car.y;
+      if (car.frames && car.animSpeed && car.animSpeed > 0) {
+        car.animPhase = (car.animPhase ?? 0) + dt * car.animSpeed;
+        const frame = car.frames[Math.floor(car.animPhase) % car.frames.length]!;
+        if (car.image.texture.key !== frame && this.scene.textures.exists(frame)) {
+          const flipX = car.image.flipX;
+          car.image.setTexture(frame);
+          car.image.setFlipX(flipX);
+        }
+      }
       const margin = 280;
       const off =
         car.worldX < cameraScrollX - margin ||

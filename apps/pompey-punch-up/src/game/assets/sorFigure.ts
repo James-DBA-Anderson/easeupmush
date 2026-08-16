@@ -2258,178 +2258,84 @@ export function drawBeachBbq(
   h: number,
   frame = 0,
 ): void {
-  // Disposable tray BBQ + a little shingle party. `frame` 0..3 loops smoke / tongs / chat.
+  // Compact shingle BBQ party — tray first, then small figures so legs aren't buried.
   const f = ((frame % 4) + 4) % 4;
-  const grillY = h * 0.78;
+  const grillY = h * 0.72;
   const glowPulse = f === 1 || f === 2 ? 1 : f === 3 ? 0.75 : 0.55;
-  const smokeLift = f * 5;
+  const smokeLift = f * 4;
   const tongsFlip = f === 1 || f === 2;
   const tongsUp = f === 2;
-  const sitterLean = f === 1 || f === 3 ? 3 : 0;
+  const sitterLean = f === 1 || f === 3 ? 2 : 0;
   const sitterArm = f === 3;
+  const mateNod = f === 2 ? 1.5 : 0;
 
   // Soft ground shadow
   fillOnly(ctx, () => {
     ctx.beginPath();
-    ctx.ellipse(w * 0.5, h * 0.92, w * 0.38, 5, 0, 0, Math.PI * 2);
+    ctx.ellipse(w * 0.5, h * 0.9, w * 0.34, 4.5, 0, 0, Math.PI * 2);
     ctx.fill();
-  }, "rgba(20,14,10,0.28)");
+  }, "rgba(20,14,10,0.26)");
 
-  // ── Left sitter (hoodie, bottle) ─────────────────────────────────
-  const lx = w * 0.2 + sitterLean;
+  // ── Grill tray (drawn early so people can sit around it) ─────────
   strokeFill(ctx, () => {
-    // Legs stretched toward the grill
-    ctx.strokeStyle = "#2a3344";
-    ctx.lineWidth = 3.2;
-    ctx.beginPath();
-    ctx.moveTo(lx - 2, h * 0.62);
-    ctx.lineTo(lx + 10, h * 0.78);
-    ctx.lineTo(lx + 18, h * 0.8);
-    ctx.moveTo(lx + 2, h * 0.62);
-    ctx.lineTo(lx + 6, h * 0.76);
-    ctx.lineTo(lx + 14, h * 0.78);
-    ctx.stroke();
-    // Trainers
-    ctx.fillStyle = "#e8dcc8";
-    ctx.beginPath();
-    ctx.ellipse(lx + 20, h * 0.81, 4, 2.2, 0.2, 0, Math.PI * 2);
-    ctx.ellipse(lx + 15, h * 0.79, 3.5, 2, 0.15, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-  }, "#2a3344", "#1a1410", 1.4);
-
-  strokeFill(ctx, () => {
-    // Torso / hoodie
-    ctx.fillStyle = "#3a6a9a";
-    ctx.beginPath();
-    ctx.moveTo(lx - 9, h * 0.42);
-    ctx.lineTo(lx + 10, h * 0.44);
-    ctx.lineTo(lx + 9, h * 0.64);
-    ctx.lineTo(lx - 8, h * 0.63);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    // Hood
-    ctx.fillStyle = "#2e5580";
-    ctx.beginPath();
-    ctx.ellipse(lx + 1, h * 0.4, 8, 4, 0, Math.PI, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-  }, "#3a6a9a", "#1a1410", 1.5);
-
-  strokeFill(ctx, () => {
-    // Head
-    ctx.fillStyle = "#c4a882";
-    ctx.beginPath();
-    ctx.ellipse(lx + 1, h * 0.34, 5.2, 5.6, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    // Hair tuft
-    ctx.fillStyle = "#2a2218";
-    ctx.beginPath();
-    ctx.ellipse(lx + 1, h * 0.3, 5.4, 3.2, 0, Math.PI, Math.PI * 2);
-    ctx.fill();
-  }, "#c4a882", "#1a1410", 1.3);
-
-  strokeFill(ctx, () => {
-    // Near arm — drink or chat gesture
-    ctx.strokeStyle = "#c4a882";
-    ctx.lineWidth = 2.8;
-    ctx.beginPath();
-    ctx.moveTo(lx + 8, h * 0.48);
-    if (sitterArm) {
-      ctx.lineTo(lx + 16, h * 0.4);
-      ctx.lineTo(lx + 18, h * 0.34);
-    } else {
-      ctx.lineTo(lx + 14, h * 0.54);
-      ctx.lineTo(lx + 18, h * 0.58);
-    }
-    ctx.stroke();
-    // Bottle
-    ctx.fillStyle = sitterArm ? "#3a7a4a" : "#2a5a3a";
-    const bx = sitterArm ? lx + 18 : lx + 18;
-    const by = sitterArm ? h * 0.3 : h * 0.56;
-    ctx.fillRect(bx - 2, by, 4, 10);
-    ctx.strokeRect(bx - 2, by, 4, 10);
-    ctx.fillStyle = "#c4a882";
-    ctx.fillRect(bx - 1, by - 3, 2, 3);
-  }, "#c4a882", "#1a1410", 1.2);
-
-  // ── Grill tray ───────────────────────────────────────────────────
-  strokeFill(ctx, () => {
-    // Legs
     ctx.strokeStyle = "#3a3a40";
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.8;
     ctx.beginPath();
-    ctx.moveTo(w * 0.36, grillY + 2);
-    ctx.lineTo(w * 0.34, grillY + 12);
-    ctx.moveTo(w * 0.64, grillY + 2);
-    ctx.lineTo(w * 0.66, grillY + 12);
-    ctx.moveTo(w * 0.42, grillY + 2);
-    ctx.lineTo(w * 0.4, grillY + 11);
-    ctx.moveTo(w * 0.58, grillY + 2);
-    ctx.lineTo(w * 0.6, grillY + 11);
+    ctx.moveTo(w * 0.38, grillY + 2);
+    ctx.lineTo(w * 0.36, grillY + 10);
+    ctx.moveTo(w * 0.62, grillY + 2);
+    ctx.lineTo(w * 0.64, grillY + 10);
+    ctx.moveTo(w * 0.44, grillY + 2);
+    ctx.lineTo(w * 0.42, grillY + 9);
+    ctx.moveTo(w * 0.56, grillY + 2);
+    ctx.lineTo(w * 0.58, grillY + 9);
     ctx.stroke();
 
-    // Foil tray body
     ctx.fillStyle = "#7a7a82";
     ctx.beginPath();
-    ctx.moveTo(w * 0.3, grillY);
-    ctx.lineTo(w * 0.7, grillY);
-    ctx.lineTo(w * 0.66, grillY + 9);
-    ctx.lineTo(w * 0.34, grillY + 9);
+    ctx.moveTo(w * 0.34, grillY);
+    ctx.lineTo(w * 0.66, grillY);
+    ctx.lineTo(w * 0.63, grillY + 7);
+    ctx.lineTo(w * 0.37, grillY + 7);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    // Rim
     ctx.fillStyle = "#9a9aa2";
-    ctx.fillRect(w * 0.29, grillY - 5, w * 0.42, 6);
-    ctx.strokeRect(w * 0.29, grillY - 5, w * 0.42, 6);
+    ctx.fillRect(w * 0.33, grillY - 4, w * 0.34, 5);
+    ctx.strokeRect(w * 0.33, grillY - 4, w * 0.34, 5);
 
-    // Coal bed glow
-    const glow = ctx.createRadialGradient(
-      w * 0.5,
-      grillY,
-      2,
-      w * 0.5,
-      grillY,
-      22,
-    );
+    const glow = ctx.createRadialGradient(w * 0.5, grillY, 2, w * 0.5, grillY, 18);
     glow.addColorStop(0, `rgba(255,180,60,${0.55 * glowPulse})`);
-    glow.addColorStop(0.45, `rgba(220,70,20,${0.4 * glowPulse})`);
+    glow.addColorStop(0.45, `rgba(220,70,20,${0.38 * glowPulse})`);
     glow.addColorStop(1, "rgba(180,40,10,0)");
     ctx.fillStyle = glow;
-    ctx.fillRect(w * 0.32, grillY - 10, w * 0.36, 14);
+    ctx.fillRect(w * 0.36, grillY - 8, w * 0.28, 11);
 
-    // Charcoal lumps
     ctx.fillStyle = "#2a2218";
     for (const [cx, cy, r] of [
-      [0.38, -1, 2.2],
-      [0.45, 0, 2.5],
-      [0.52, -1.5, 2],
-      [0.58, 0.5, 2.3],
-      [0.48, 1.5, 1.8],
+      [0.4, -0.5, 1.8],
+      [0.46, 0.2, 2],
+      [0.52, -1, 1.6],
+      [0.58, 0.4, 1.9],
     ] as const) {
       ctx.beginPath();
       ctx.arc(w * cx, grillY + cy, r, 0, Math.PI * 2);
       ctx.fill();
     }
-
-    // Hot coals
     ctx.fillStyle = `rgba(255,120,40,${0.7 * glowPulse})`;
     for (const [cx, cy] of [
-      [0.4, -0.5],
+      [0.42, -0.3],
       [0.5, 0],
-      [0.56, -1],
+      [0.55, -0.8],
     ] as const) {
       ctx.beginPath();
-      ctx.arc(w * cx, grillY + cy, 1.6, 0, Math.PI * 2);
+      ctx.arc(w * cx, grillY + cy, 1.3, 0, Math.PI * 2);
       ctx.fill();
     }
-  }, "#7a7a82", "#1a1410", 1.5);
+  }, "#7a7a82", "#1a1410", 1.4);
 
-  // Sausages on the grill (one lifts with tongs on flip frames)
+  // Sausages on the grill
   strokeFill(ctx, () => {
     const drawBanger = (x: number, y: number, ang: number, lifted: boolean) => {
       ctx.save();
@@ -2437,185 +2343,266 @@ export function drawBeachBbq(
       ctx.rotate(ang);
       ctx.fillStyle = lifted ? "#c45a3a" : "#a04830";
       ctx.beginPath();
-      ctx.ellipse(0, 0, 9, 2.8, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, 7, 2.2, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      // Grill marks
       ctx.strokeStyle = "rgba(40,20,10,0.45)";
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(-5, -1);
-      ctx.lineTo(-5, 1);
-      ctx.moveTo(0, -1.2);
-      ctx.lineTo(0, 1.2);
-      ctx.moveTo(5, -1);
-      ctx.lineTo(5, 1);
+      ctx.moveTo(-4, -0.8);
+      ctx.lineTo(-4, 0.8);
+      ctx.moveTo(0, -1);
+      ctx.lineTo(0, 1);
+      ctx.moveTo(4, -0.8);
+      ctx.lineTo(4, 0.8);
       ctx.stroke();
       ctx.restore();
     };
-    drawBanger(w * 0.4, grillY - 3, -0.15, false);
-    if (!tongsFlip) {
-      drawBanger(w * 0.52, grillY - 4, 0.1, false);
-    }
-    drawBanger(w * 0.6, grillY - 2.5, -0.05, false);
-  }, "#a04830", "#1a1410", 1.2);
+    drawBanger(w * 0.42, grillY - 2.5, -0.12, false);
+    if (!tongsFlip) drawBanger(w * 0.5, grillY - 3, 0.08, false);
+    drawBanger(w * 0.58, grillY - 2, -0.04, false);
+  }, "#a04830", "#1a1410", 1.1);
 
-  // Smoke wisps — rise & drift per frame
+  // Smoke
   strokeFill(ctx, () => {
-    for (let i = 0; i < 4; i++) {
-      const sx = w * 0.38 + i * 9;
+    for (let i = 0; i < 3; i++) {
+      const sx = w * 0.4 + i * 8;
       const phase = f * 0.9 + i * 1.1;
-      const top = grillY - 28 - smokeLift - i * 3;
-      ctx.globalAlpha = 0.28 + (i % 2) * 0.1;
+      const top = grillY - 22 - smokeLift - i * 2.5;
+      ctx.globalAlpha = 0.26 + (i % 2) * 0.1;
       ctx.strokeStyle = i % 2 === 0 ? "rgba(90,90,95,0.7)" : "rgba(70,70,75,0.55)";
-      ctx.lineWidth = 2.2 - i * 0.2;
+      ctx.lineWidth = 2 - i * 0.25;
       ctx.beginPath();
-      ctx.moveTo(sx, grillY - 8);
+      ctx.moveTo(sx, grillY - 6);
       ctx.bezierCurveTo(
-        sx + Math.sin(phase) * 8,
-        grillY - 18 - smokeLift * 0.4,
-        sx + Math.cos(phase * 0.8) * 10,
-        grillY - 30 - smokeLift * 0.7,
-        sx + Math.sin(phase + 1) * 6,
+        sx + Math.sin(phase) * 6,
+        grillY - 14 - smokeLift * 0.4,
+        sx + Math.cos(phase * 0.8) * 8,
+        grillY - 24 - smokeLift * 0.7,
+        sx + Math.sin(phase + 1) * 5,
         top,
       );
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
-  }, "rgba(80,80,85,0.4)", "rgba(80,80,85,0.4)", 1.5);
+  }, "rgba(80,80,85,0.4)", "rgba(80,80,85,0.4)", 1.4);
 
-  // Soft flame lick on hot frames
   if (f === 1 || f === 2) {
     fillOnly(ctx, () => {
-      ctx.globalAlpha = 0.55;
+      ctx.globalAlpha = 0.5;
       ctx.beginPath();
-      ctx.moveTo(w * 0.46, grillY - 4);
-      ctx.quadraticCurveTo(w * 0.48, grillY - 14, w * 0.5, grillY - 6);
-      ctx.quadraticCurveTo(w * 0.52, grillY - 16, w * 0.54, grillY - 4);
+      ctx.moveTo(w * 0.47, grillY - 3);
+      ctx.quadraticCurveTo(w * 0.485, grillY - 11, w * 0.5, grillY - 5);
+      ctx.quadraticCurveTo(w * 0.515, grillY - 12, w * 0.53, grillY - 3);
       ctx.closePath();
       ctx.fill();
       ctx.globalAlpha = 1;
     }, "#ffe08a");
   }
 
-  // ── Standing cook (right) with tongs ─────────────────────────────
-  const rx = w * 0.78;
-  const ry = tongsUp ? -2 : 0;
+  // ── Left sitter — knees up, not stretched under the tray ─────────
+  const lx = w * 0.18 + sitterLean;
+  const lHip = h * 0.68;
   strokeFill(ctx, () => {
-    // Legs
-    ctx.strokeStyle = "#3a4558";
-    ctx.lineWidth = 3.4;
+    // Bent legs (visible in front of grill)
+    ctx.strokeStyle = "#2a3344";
+    ctx.lineWidth = 2.8;
     ctx.beginPath();
-    ctx.moveTo(rx - 3, h * 0.58 + ry);
-    ctx.lineTo(rx - 6, h * 0.86);
-    ctx.moveTo(rx + 4, h * 0.58 + ry);
-    ctx.lineTo(rx + 8, h * 0.86);
+    ctx.moveTo(lx - 1, lHip - 8);
+    ctx.lineTo(lx + 6, lHip + 2);
+    ctx.lineTo(lx + 2, lHip + 10);
+    ctx.moveTo(lx + 3, lHip - 8);
+    ctx.lineTo(lx + 11, lHip);
+    ctx.lineTo(lx + 8, lHip + 9);
     ctx.stroke();
-    // Shoes
-    ctx.fillStyle = "#2a2218";
+    ctx.fillStyle = "#e8dcc8";
     ctx.beginPath();
-    ctx.ellipse(rx - 7, h * 0.88, 4.5, 2.2, 0, 0, Math.PI * 2);
-    ctx.ellipse(rx + 9, h * 0.88, 4.5, 2.2, 0, 0, Math.PI * 2);
+    ctx.ellipse(lx + 1, lHip + 11, 3.2, 1.7, 0.15, 0, Math.PI * 2);
+    ctx.ellipse(lx + 8, lHip + 10, 3, 1.6, 0.1, 0, Math.PI * 2);
     ctx.fill();
-  }, "#3a4558", "#1a1410", 1.4);
+    ctx.stroke();
+  }, "#2a3344", "#1a1410", 1.2);
 
   strokeFill(ctx, () => {
-    // Torso — warm brick shirt
-    ctx.fillStyle = "#a04838";
+    ctx.fillStyle = "#3a6a9a";
     ctx.beginPath();
-    ctx.moveTo(rx - 9, h * 0.36 + ry);
-    ctx.lineTo(rx + 10, h * 0.37 + ry);
-    ctx.lineTo(rx + 9, h * 0.6 + ry);
-    ctx.lineTo(rx - 8, h * 0.59 + ry);
+    ctx.moveTo(lx - 6, h * 0.48);
+    ctx.lineTo(lx + 7, h * 0.49);
+    ctx.lineTo(lx + 6, lHip - 6);
+    ctx.lineTo(lx - 5, lHip - 7);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-  }, "#a04838", "#1a1410", 1.5);
+    ctx.fillStyle = "#2e5580";
+    ctx.beginPath();
+    ctx.ellipse(lx + 0.5, h * 0.47, 5.5, 3, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }, "#3a6a9a", "#1a1410", 1.3);
 
   strokeFill(ctx, () => {
-    // Head
     ctx.fillStyle = "#c4a882";
     ctx.beginPath();
-    ctx.ellipse(rx + 1, h * 0.28 + ry, 5.4, 5.8, 0, 0, Math.PI * 2);
+    ctx.ellipse(lx + 0.5, h * 0.42, 3.8, 4.1, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    // Cap / hair
-    ctx.fillStyle = "#1a3048";
+    ctx.fillStyle = "#2a2218";
     ctx.beginPath();
-    ctx.ellipse(rx + 1, h * 0.23 + ry, 5.8, 3.4, 0, Math.PI, Math.PI * 2);
+    ctx.ellipse(lx + 0.5, h * 0.39, 4, 2.4, 0, Math.PI, Math.PI * 2);
     ctx.fill();
-    ctx.stroke();
-    ctx.fillRect(rx - 2, h * 0.22 + ry, 8, 2.5);
-  }, "#c4a882", "#1a1410", 1.3);
-
-  // Arms + tongs reaching the tray
-  strokeFill(ctx, () => {
-    const handX = tongsUp ? w * 0.56 : tongsFlip ? w * 0.52 : w * 0.58;
-    const handY = tongsUp ? grillY - 18 : tongsFlip ? grillY - 6 : grillY - 10;
-    ctx.strokeStyle = "#c4a882";
-    ctx.lineWidth = 2.8;
-    ctx.beginPath();
-    ctx.moveTo(rx - 6, h * 0.44 + ry);
-    ctx.lineTo(handX + 8, handY + 4);
-    ctx.lineTo(handX, handY);
-    ctx.stroke();
-    // Far arm akimbo / pocket
-    ctx.beginPath();
-    ctx.moveTo(rx + 8, h * 0.44 + ry);
-    ctx.lineTo(rx + 12, h * 0.54 + ry);
-    ctx.lineTo(rx + 6, h * 0.58 + ry);
-    ctx.stroke();
-
-    // Metal tongs
-    ctx.strokeStyle = "#5a6068";
-    ctx.lineWidth = 1.8;
-    ctx.beginPath();
-    ctx.moveTo(handX + 6, handY + 2);
-    ctx.lineTo(handX - 2, handY + (tongsUp ? 4 : 8));
-    ctx.moveTo(handX + 4, handY);
-    ctx.lineTo(handX - 4, handY + (tongsUp ? 2 : 6));
-    ctx.stroke();
-    // Tip grip
-    ctx.beginPath();
-    ctx.arc(handX - 3, handY + (tongsUp ? 3 : 7), 1.5, 0, Math.PI * 2);
-    ctx.stroke();
   }, "#c4a882", "#1a1410", 1.2);
 
-  // Lifted banger in the tongs
-  if (tongsFlip) {
-    strokeFill(ctx, () => {
-      const hx = tongsUp ? w * 0.54 : w * 0.5;
-      const hy = tongsUp ? grillY - 16 : grillY - 5;
-      ctx.fillStyle = "#c45a3a";
-      ctx.beginPath();
-      ctx.ellipse(hx, hy, 8, 2.5, tongsUp ? -0.6 : 0.35, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }, "#c45a3a", "#1a1410", 1.2);
-  }
-
-  // ── Third mate — crouched behind / left of tray (chat) ───────────
-  const mx = w * 0.48;
-  const my = f === 2 ? 1 : 0;
   strokeFill(ctx, () => {
-    // Small crouch silhouette so the party reads as three
+    ctx.strokeStyle = "#c4a882";
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(lx + 5, h * 0.52);
+    if (sitterArm) {
+      ctx.lineTo(lx + 11, h * 0.46);
+      ctx.lineTo(lx + 13, h * 0.4);
+    } else {
+      ctx.lineTo(lx + 10, h * 0.58);
+      ctx.lineTo(lx + 13, h * 0.62);
+    }
+    ctx.stroke();
+    ctx.fillStyle = sitterArm ? "#3a7a4a" : "#2a5a3a";
+    const bx = lx + 13;
+    const by = sitterArm ? h * 0.36 : h * 0.6;
+    ctx.fillRect(bx - 1.5, by, 3.2, 8);
+    ctx.strokeRect(bx - 1.5, by, 3.2, 8);
+  }, "#c4a882", "#1a1410", 1.1);
+
+  // ── Crouched mate behind the tray (full little body) ─────────────
+  const mx = w * 0.46;
+  const mHip = h * 0.66 + mateNod * 0.2;
+  strokeFill(ctx, () => {
+    // Kneeling legs
+    ctx.strokeStyle = "#3a4558";
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.moveTo(mx - 4, mHip - 4);
+    ctx.lineTo(mx - 10, mHip + 8);
+    ctx.moveTo(mx + 3, mHip - 4);
+    ctx.lineTo(mx + 8, mHip + 7);
+    ctx.stroke();
+    ctx.fillStyle = "#2a2218";
+    ctx.beginPath();
+    ctx.ellipse(mx - 11, mHip + 9, 3, 1.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(mx + 9, mHip + 8, 3, 1.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }, "#3a4558", "#1a1410", 1.1);
+
+  strokeFill(ctx, () => {
     ctx.fillStyle = "#5a7a4a";
     ctx.beginPath();
-    ctx.ellipse(mx, h * 0.52 + my, 7, 5, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "#c4a882";
-    ctx.beginPath();
-    ctx.ellipse(mx + 1, h * 0.44 + my, 4.2, 4.5, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    // Beanie
-    ctx.fillStyle = "#c45a3a";
-    ctx.beginPath();
-    ctx.ellipse(mx + 1, h * 0.4 + my, 4.5, 2.8, 0, Math.PI, Math.PI * 2);
+    ctx.moveTo(mx - 5.5, h * 0.5 + mateNod);
+    ctx.lineTo(mx + 6, h * 0.5 + mateNod);
+    ctx.lineTo(mx + 5, mHip - 2);
+    ctx.lineTo(mx - 5, mHip - 2);
+    ctx.closePath();
     ctx.fill();
     ctx.stroke();
   }, "#5a7a4a", "#1a1410", 1.2);
+
+  strokeFill(ctx, () => {
+    ctx.fillStyle = "#c4a882";
+    ctx.beginPath();
+    ctx.ellipse(mx + 0.5, h * 0.45 + mateNod, 3.4, 3.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#c45a3a";
+    ctx.beginPath();
+    ctx.ellipse(mx + 0.5, h * 0.42 + mateNod, 3.6, 2.2, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }, "#c4a882", "#1a1410", 1.1);
+
+  // ── Standing cook (right) — shorter so he fits the beach prop ────
+  const rx = w * 0.76;
+  const ry = tongsUp ? -1.5 : 0;
+  const rHip = h * 0.62 + ry;
+  strokeFill(ctx, () => {
+    ctx.strokeStyle = "#3a4558";
+    ctx.lineWidth = 2.9;
+    ctx.beginPath();
+    ctx.moveTo(rx - 2.5, rHip);
+    ctx.lineTo(rx - 5, h * 0.84);
+    ctx.moveTo(rx + 3, rHip);
+    ctx.lineTo(rx + 6.5, h * 0.84);
+    ctx.stroke();
+    ctx.fillStyle = "#2a2218";
+    ctx.beginPath();
+    ctx.ellipse(rx - 6, h * 0.86, 3.6, 1.8, 0, 0, Math.PI * 2);
+    ctx.ellipse(rx + 7.5, h * 0.86, 3.6, 1.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }, "#3a4558", "#1a1410", 1.2);
+
+  strokeFill(ctx, () => {
+    ctx.fillStyle = "#a04838";
+    ctx.beginPath();
+    ctx.moveTo(rx - 6.5, h * 0.4 + ry);
+    ctx.lineTo(rx + 7.5, h * 0.41 + ry);
+    ctx.lineTo(rx + 6.5, rHip + 2);
+    ctx.lineTo(rx - 5.5, rHip + 1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }, "#a04838", "#1a1410", 1.3);
+
+  strokeFill(ctx, () => {
+    ctx.fillStyle = "#c4a882";
+    ctx.beginPath();
+    ctx.ellipse(rx + 0.5, h * 0.34 + ry, 4, 4.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#1a3048";
+    ctx.beginPath();
+    ctx.ellipse(rx + 0.5, h * 0.3 + ry, 4.3, 2.5, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillRect(rx - 1.5, h * 0.29 + ry, 6, 2);
+  }, "#c4a882", "#1a1410", 1.2);
+
+  strokeFill(ctx, () => {
+    const handX = tongsUp ? w * 0.55 : tongsFlip ? w * 0.51 : w * 0.57;
+    const handY = tongsUp ? grillY - 14 : tongsFlip ? grillY - 5 : grillY - 8;
+    ctx.strokeStyle = "#c4a882";
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(rx - 4, h * 0.46 + ry);
+    ctx.lineTo(handX + 6, handY + 3);
+    ctx.lineTo(handX, handY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(rx + 6, h * 0.46 + ry);
+    ctx.lineTo(rx + 9, h * 0.54 + ry);
+    ctx.lineTo(rx + 4, h * 0.58 + ry);
+    ctx.stroke();
+
+    ctx.strokeStyle = "#5a6068";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(handX + 5, handY + 1.5);
+    ctx.lineTo(handX - 1.5, handY + (tongsUp ? 3 : 6));
+    ctx.moveTo(handX + 3.5, handY);
+    ctx.lineTo(handX - 3, handY + (tongsUp ? 1.5 : 5));
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(handX - 2.5, handY + (tongsUp ? 2.5 : 5.5), 1.2, 0, Math.PI * 2);
+    ctx.stroke();
+  }, "#c4a882", "#1a1410", 1.1);
+
+  if (tongsFlip) {
+    strokeFill(ctx, () => {
+      const hx = tongsUp ? w * 0.53 : w * 0.49;
+      const hy = tongsUp ? grillY - 13 : grillY - 4;
+      ctx.fillStyle = "#c45a3a";
+      ctx.beginPath();
+      ctx.ellipse(hx, hy, 6.5, 2, tongsUp ? -0.55 : 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }, "#c45a3a", "#1a1410", 1.1);
+  }
 }
 
 export function drawCoffeeVan(ctx: CanvasRenderingContext2D, w: number, h: number): void {
