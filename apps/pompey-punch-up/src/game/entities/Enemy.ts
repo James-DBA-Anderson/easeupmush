@@ -231,12 +231,12 @@ export class Enemy extends Fighter {
 
   private applyBackgroundLook(bg: boolean): void {
     if (bg) {
-      this.sprite.setScale(this.baseScaleX * 0.82, this.baseScaleY * 0.82);
       this.setAlpha(0.88);
       this.setDepth(3);
+      this.applyPerspectiveScale();
     } else {
-      this.sprite.setScale(this.baseScaleX, this.baseScaleY);
       this.setAlpha(1);
+      this.applyPerspectiveScale();
     }
   }
 

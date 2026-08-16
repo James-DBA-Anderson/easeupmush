@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { LANE } from "../constants";
+import { GAME_HEIGHT, LANE } from "../constants";
 import { Structure, type StrikeInput, type StrikeResult } from "../combat/Structure";
 import {
   sampleToss,
@@ -379,8 +379,23 @@ export class Fighter extends Phaser.GameObjects.Container {
     return 0.84 + t * 0.28;
   }
 
+  /**
+   * Common / shingle loiterers — shrink with distance from the fight lane
+   * so they match foreshore walkers / BBQ folk, not full scrap size.
+   */
+  protected backgroundDepthScale(): number {
+    const farY = GAME_HEIGHT * 0.32 + 60;
+    const nearY = LANE.minY;
+    const t = Phaser.Math.Clamp(
+      (this.laneY - farY) / Math.max(1, nearY - farY),
+      0,
+      1,
+    );
+    return 0.58 + t * 0.2;
+  }
+
   applyPerspectiveScale(): void {
-    const d = this.isBackground ? 0.82 : this.depthScale();
+    const d = this.isBackground ? this.backgroundDepthScale() : this.depthScale();
     const sx = this.baseScaleX * d;
     const sy = this.baseScaleY * d;
     if (sx === this.visScaleX && sy === this.visScaleY) return;
@@ -906,7 +921,7 @@ export class Fighter extends Phaser.GameObjects.Container {
     victim.headbangChecked = false;
     this.diveAimX = null;
 
-    // Slam: can KO/crawl when they're worn; survivors bounce up on landing
+    // Slam: can KO/crawl when they're worn; powerbomb survivors stay stunned on the mat
     victim.receiveStrike({
       kind: "hook",
       power: bomb ? 0.72 : suplex ? 0.62 : rana ? 0.78 : 0.55,
@@ -935,8 +950,14 @@ export class Fighter extends Phaser.GameObjects.Container {
       // Finished — stay down after the plant
       if (victim.structure.outCold) victim.setAction("out_cold", now, 999999);
       else if (victim.structure.crawling) victim.setAction("crawl", now, 999999);
+    } else if (bomb) {
+      // Powerbomb stun — short bounce then stay planted
+      const stunMs = 1700;
+      victim.structure.putOnFloor(now, stunMs, true);
+      victim.action = "down";
+      victim.actionUntil = now + stunMs;
     } else {
-      // Still going — no soft floor; hop up as soon as they land
+      // Suplex / rana survivors bounce up on landing
       victim.structure.downed = false;
       victim.structure.groundedUntil = 0;
       if (victim.structure.crawling && !victim.structure.outCold) {
@@ -1392,7 +1413,7 @@ export class Fighter extends Phaser.GameObjects.Container {
     return true;
   }
 
-  /** After a successful grab — clinch so you can toss them. */
+  /** Latch a grab target so tryBodyToss can fire (no standing clinch). */
   startHoldOn(target: Fighter, now: number, fromBehind = false): void {
     this.heldTarget = target;
     this.holdFromBehind = fromBehind;
@@ -1401,21 +1422,21 @@ export class Fighter extends Phaser.GameObjects.Container {
     this.pendingGrabWhiffFx = false;
     target.heldBy = this;
     target.clearPlantLock();
-    // Standing clinch — don't dump them until the toss
     target.structure.downed = false;
     target.structure.groundedUntil = 0;
     target.airborne = false;
     target.jumpVy = 0;
     target.endToss();
     target.action = "hitstun";
-    target.actionUntil = now + 1400;
+    target.actionUntil = now + 200;
     if (fromBehind) {
       // Waist lock — square up behind them, same facing
       const face = target.facing < 0 ? -1 : 1;
       this.setFacing(face, now);
       target.x = this.x + this.facing * 14;
     }
-    this.setAction("hold", now, 1400);
+    // Brief hold latch — resolveCombat immediately calls tryBodyToss
+    this.setAction("hold", now, 200);
   }
 
   /** Active throw sheet (powerbomb vs German suplex). */

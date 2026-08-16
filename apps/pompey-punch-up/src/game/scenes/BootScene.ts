@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { generateDoodleTextures } from "../assets/doodleTextures";
 import { chipRock } from "../audio/ChipRock";
 import { chipSfx } from "../audio/ChipSfx";
+import { GAME_HEIGHT, GAME_WIDTH } from "../constants";
 import { isMobilePlay } from "../input/mobilePad";
 import { dismissBootLoader } from "../ui/bootLoader";
 
@@ -59,7 +60,7 @@ const CONTROLS_DESKTOP: { id: string; keys: string; action: string }[] = [
   { id: "kick", keys: "K", action: "kick" },
   { id: "back", keys: "J + K", action: "back attack" },
   { id: "block", keys: "H", action: "block (hold)" },
-  { id: "grab", keys: "L", action: "grab / toss" },
+  { id: "grab", keys: "L", action: "grab / throw" },
   { id: "jumpkick", keys: "Space + J", action: "jump kick" },
   { id: "stomp", keys: "Down + K", action: "stomp floored" },
   { id: "cover", keys: "C", action: "cover" },
@@ -77,7 +78,7 @@ const CONTROLS_MOBILE: { id: string; keys: string; action: string }[] = [
   { id: "kick", keys: "Kick", action: "kick" },
   { id: "back", keys: "Punch + Kick", action: "back attack" },
   { id: "block", keys: "Block", action: "hold to block" },
-  { id: "grab", keys: "Grab", action: "grab · again to toss" },
+  { id: "grab", keys: "Grab", action: "grab / throw" },
   { id: "jumpkick", keys: "Jump + Punch", action: "jump kick" },
   { id: "stomp", keys: "Stick down + Kick", action: "stomp floored" },
   { id: "cover", keys: "Stick down", action: "cover · hop off board" },
@@ -468,6 +469,11 @@ export class BootScene extends Phaser.Scene {
   private foe!: Phaser.GameObjects.Image;
   private bin!: Phaser.GameObjects.Image;
   private callout!: Phaser.GameObjects.Text;
+  private logo!: Phaser.GameObjects.Image;
+  private groundMark!: Phaser.GameObjects.Rectangle;
+  private startHint!: Phaser.GameObjects.Text;
+  private practiceHint?: Phaser.GameObjects.Text;
+  private bg!: Phaser.GameObjects.Graphics;
   private controlsList: { id: string; keys: string; action: string }[] = [];
   private heroHome = { x: 0, y: 0 };
   private foeHome = { x: 0, y: 0 };
@@ -491,74 +497,47 @@ export class BootScene extends Phaser.Scene {
   create() {
     generateDoodleTextures(this);
     this.controlsList = controlsForDevice();
-
-    const { width, height } = this.scale;
     const mobile = isMobilePlay();
 
-    const bg = this.add.graphics();
-    bg.fillGradientStyle(0x241c16, 0x241c16, 0x3a2c22, 0x3a2c22, 1);
-    bg.fillRect(0, 0, width, height);
+    this.bg = this.add.graphics().setDepth(0);
 
-    // Top band: chrome wordmark + tagline
-    const logo = this.add
-      .image(width / 2, mobile ? 52 : 66, "title_logo")
+    // Title composition is always 960×540. Scale.EXPAND can grow the canvas
+    // (especially while the phone is still portrait under the rotate gate);
+    // pinning to the design size keeps demo + Start on-camera after rotate.
+    this.logo = this.add
+      .image(0, 0, "title_logo")
       .setOrigin(0.5)
       .setDepth(5)
-      .setScale(mobile ? 0.58 : 0.7);
+      .setScale(mobile ? 0.82 : 0.7);
 
-    this.tweens.add({
-      targets: logo,
-      scaleX: mobile ? 0.6 : 0.72,
-      scaleY: mobile ? 0.6 : 0.72,
-      duration: 1800,
-      yoyo: true,
-      repeat: -1,
-      ease: "Sine.easeInOut",
-    });
-    this.tweens.add({
-      targets: logo,
-      y: mobile ? 49 : 63,
-      duration: 2400,
-      yoyo: true,
-      repeat: -1,
-      ease: "Sine.easeInOut",
-    });
-
-    // Centre the scrap demo with the current move's keys underneath
-    const groundY = height * 0.58;
-    this.add
-      .rectangle(width / 2, groundY + 6, 300, 10, 0x1a1410, 0.45)
-      .setOrigin(0.5);
-
-    this.heroHome = { x: width / 2 - 28, y: groundY };
-    this.foeHome = { x: width / 2 + 42, y: groundY };
-    this.foeBehindHome = { x: width / 2 - 88, y: groundY };
-    this.binHome = { x: width / 2 + 6, y: groundY };
+    this.groundMark = this.add
+      .rectangle(0, 0, 300, 10, 0x1a1410, 0.45)
+      .setOrigin(0.5)
+      .setDepth(1);
 
     this.bin = this.add
-      .image(this.binHome.x, this.binHome.y, "prop_bin")
+      .image(0, 0, "prop_bin")
       .setOrigin(0.5, 1)
       .setScale(1.15)
       .setVisible(false)
       .setDepth(1);
 
     this.foe = this.add
-      .image(this.foeHome.x, this.foeHome.y, "enemy_idle")
+      .image(0, 0, "enemy_idle")
       .setOrigin(0.5, 1)
-      .setScale(mobile ? 1.35 : 1.45)
+      .setScale(mobile ? 1.45 : 1.45)
       .setFlipX(true)
       .setVisible(false)
       .setDepth(2);
 
     this.hero = this.add
-      .image(this.heroHome.x, this.heroHome.y, "player_idle")
+      .image(0, 0, "player_idle")
       .setOrigin(0.5, 1)
-      .setScale(mobile ? 1.35 : 1.45)
+      .setScale(mobile ? 1.45 : 1.45)
       .setDepth(3);
 
-    // Current move's keys — sits under the lads
     this.callout = this.add
-      .text(width / 2, groundY + 36, "", {
+      .text(0, 0, "", {
         fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
         fontSize: mobile ? "18px" : "20px",
         color: "#ffe08a",
@@ -569,16 +548,9 @@ export class BootScene extends Phaser.Scene {
       .setOrigin(0.5, 0)
       .setDepth(10);
 
-    // First gesture unlocks audio — chip rock + hit SFX under the title demo
-    const unlockAudio = () => {
-      void this.armChipRock(0.28);
-    };
-    this.input.once("pointerdown", unlockAudio);
-    this.input.keyboard?.once("keydown", unlockAudio);
-
     if (!mobile) {
-      const practice = this.add
-        .text(20, height - 22, "Practice →", {
+      this.practiceHint = this.add
+        .text(0, 0, "Practice →", {
           fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
           fontSize: "15px",
           color: "#c4a882",
@@ -589,15 +561,15 @@ export class BootScene extends Phaser.Scene {
         .setDepth(10)
         .setInteractive({ useHandCursor: true });
 
-      practice.on("pointerover", () => practice.setColor("#ffe08a"));
-      practice.on("pointerout", () => practice.setColor("#c4a882"));
-      practice.on("pointerdown", () => {
+      this.practiceHint.on("pointerover", () => this.practiceHint?.setColor("#ffe08a"));
+      this.practiceHint.on("pointerout", () => this.practiceHint?.setColor("#c4a882"));
+      this.practiceHint.on("pointerdown", () => {
         window.location.assign(new URL("debug.html", window.location.href).href);
       });
     }
 
-    const startHint = this.add
-      .text(width / 2, height - 22, "Start", {
+    this.startHint = this.add
+      .text(0, 0, "Start", {
         fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
         fontSize: mobile ? "28px" : "32px",
         color: "#1a1410",
@@ -609,9 +581,26 @@ export class BootScene extends Phaser.Scene {
       .setDepth(10)
       .setInteractive({ useHandCursor: true });
 
-    startHint.on("pointerover", () => startHint.setStyle({ backgroundColor: "#ffd060" }));
-    startHint.on("pointerout", () => startHint.setStyle({ backgroundColor: "#ffe08a" }));
-    startHint.on("pointerdown", () => this.startBeach());
+    this.startHint.on("pointerover", () =>
+      this.startHint.setStyle({ backgroundColor: "#ffd060" }),
+    );
+    this.startHint.on("pointerout", () =>
+      this.startHint.setStyle({ backgroundColor: "#ffe08a" }),
+    );
+    this.startHint.on("pointerdown", () => this.startBeach());
+
+    this.layoutTitle();
+    this.scale.on("resize", this.layoutTitle, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.scale.off("resize", this.layoutTitle, this);
+    });
+
+    // First gesture unlocks audio — chip rock + hit SFX under the title demo
+    const unlockAudio = () => {
+      void this.armChipRock(0.28);
+    };
+    this.input.once("pointerdown", unlockAudio);
+    this.input.keyboard?.once("keydown", unlockAudio);
 
     this.clipIndex = 0;
     this.frameIndex = 0;
@@ -624,6 +613,68 @@ export class BootScene extends Phaser.Scene {
     // Let the first title frame paint, then drop the HTML loading screen
     this.time.delayedCall(0, () => dismissBootLoader());
   }
+
+  /**
+   * Place the title UI in a fixed 960×540 band centred in the current view.
+   * EXPAND may be tall (portrait boot) or wide (landscape play) — without this,
+   * rotate leaves the demo + Start stranded below the camera.
+   */
+  private layoutTitle = (): void => {
+    if (this.started) return;
+    const mobile = isMobilePlay();
+    const viewW = this.scale.width;
+    const viewH = this.scale.height;
+    const ox = Math.max(0, (viewW - GAME_WIDTH) / 2);
+    const oy = Math.max(0, (viewH - GAME_HEIGHT) / 2);
+
+    this.bg.clear();
+    this.bg.fillGradientStyle(0x241c16, 0x241c16, 0x3a2c22, 0x3a2c22, 1);
+    this.bg.fillRect(0, 0, viewW, viewH);
+
+    const cx = ox + GAME_WIDTH / 2;
+    const logoY = oy + (mobile ? 58 : 66);
+    this.logo.setPosition(cx, logoY);
+    // Kill any stale bob tween target drift after a resize
+    this.tweens.killTweensOf(this.logo);
+    this.logo.setScale(mobile ? 0.82 : 0.7);
+    this.tweens.add({
+      targets: this.logo,
+      scaleX: mobile ? 0.86 : 0.72,
+      scaleY: mobile ? 0.86 : 0.72,
+      duration: 1800,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+    });
+    this.tweens.add({
+      targets: this.logo,
+      y: logoY - 3,
+      duration: 2400,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+    });
+
+    const groundY = oy + GAME_HEIGHT * 0.58;
+    this.groundMark.setPosition(cx, groundY + 6);
+
+    this.heroHome = { x: cx - 28, y: groundY };
+    this.foeHome = { x: cx + 42, y: groundY };
+    this.foeBehindHome = { x: cx - 88, y: groundY };
+    this.binHome = { x: cx + 6, y: groundY };
+
+    this.bin.setPosition(this.binHome.x, this.binHome.y);
+    this.foe.setPosition(this.foeHome.x, this.foeHome.y);
+    this.hero.setPosition(this.heroHome.x, this.heroHome.y);
+    this.callout.setPosition(cx, groundY + 36);
+    this.startHint.setPosition(cx, oy + GAME_HEIGHT - 22);
+    this.practiceHint?.setPosition(ox + 20, oy + GAME_HEIGHT - 22);
+
+    // Snap the live demo frame onto the new homes
+    const clip = DEMOS[this.clipIndex];
+    const frame = clip?.frames[this.frameIndex];
+    if (clip && frame) this.applyFrame(frame, clip);
+  };
 
   update(_time: number, _delta: number): void {
     if (this.started) return;

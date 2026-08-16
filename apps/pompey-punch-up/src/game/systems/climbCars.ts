@@ -68,18 +68,19 @@ export function updateCarPlatforms(
     for (const car of cars) {
       if (car.key !== "car") continue;
       const dx = Math.abs(f.x - car.x);
-      if (dx > car.rx + 36) continue;
+      if (dx > car.rx + 22) continue;
 
       const bonnet = car.bonnetY;
       const roof = car.roofY;
       const onThisCar = f.mountedCar === car || (f.platformY !== null && Math.abs(f.groundY - car.y) < 28);
       const wasOnThisCar = f.mountedCar === car || Math.abs(f.groundY - car.y) < 28;
       const onRoad = f.laneY >= ROAD.top - 14;
-      const overlapX = dx <= car.rx + 28;
+      // Climb / land only when you're actually at the body — not a wide aura
+      const overlapX = dx <= car.rx + 14;
       const fromLeft = f.x < car.x;
-      const atFront = fromLeft && dx > car.rx * 0.32 && dx <= car.rx + 32;
-      const atRear = !fromLeft && dx > car.rx * 0.32 && dx <= car.rx + 32;
-      const alongSide = dx <= car.rx + 10 && Math.abs(f.y - car.y) < 46;
+      const atFront = fromLeft && dx > car.rx * 0.32 && dx <= car.rx + 18;
+      const atRear = !fromLeft && dx > car.rx * 0.32 && dx <= car.rx + 18;
+      const alongSide = dx <= car.rx + 4 && Math.abs(f.y - car.y) < 40;
       const canRemount = now >= f.carDismountUntil;
 
       // Bounce the motor when you hop on it
@@ -224,7 +225,7 @@ export function updateCarPlatforms(
       const current = f.carSurface ?? car.surfaceAt(f.x);
       const offFront = current === "bonnet" && f.x < car.bonnetMinX - 4;
       const offRear = current === "boot" && f.x > car.bootMaxX + 4;
-      const offWhole = Math.abs(f.x - car.x) > car.rx + 28;
+      const offWhole = Math.abs(f.x - car.x) > car.rx + 16;
       if (offFront || offRear || offWhole) {
         dropToRoad(f, car, now);
       } else if (stuckTo && surface) {

@@ -49,10 +49,18 @@ function wobble(n: number, amp = 2): number {
 
 export function generateDoodleTextures(scene: Phaser.Scene): void {
   // Bump this when poses/assets change so hot reload regenerates.
-  const VERSION = "doodle_v118";
+  const VERSION = "doodle_v126";
   if (scene.textures.exists(VERSION)) return;
   if (
     scene.textures.exists("sky") ||
+    scene.textures.exists("doodle_v125") ||
+    scene.textures.exists("doodle_v124") ||
+    scene.textures.exists("doodle_v123") ||
+    scene.textures.exists("doodle_v122") ||
+    scene.textures.exists("doodle_v121") ||
+    scene.textures.exists("doodle_v120") ||
+    scene.textures.exists("doodle_v119") ||
+    scene.textures.exists("doodle_v118") ||
     scene.textures.exists("doodle_v117") ||
     scene.textures.exists("doodle_v116") ||
     scene.textures.exists("doodle_v115") ||
@@ -179,6 +187,7 @@ export function generateDoodleTextures(scene: Phaser.Scene): void {
           "traffic_van",
           "traffic_bike",
           "traffic_bus",
+          "traffic_rubbish",
           "traffic_scooter_0",
           "traffic_scooter_1",
           "prop_bin",
@@ -199,6 +208,8 @@ export function generateDoodleTextures(scene: Phaser.Scene): void {
           "sea_jetski",
           "sea_kayak_0",
           "sea_kayak_1",
+          "sea_kayak_2",
+          "sea_kayak_3",
           "dog",
           "coffee_van",
           "coffee_cup_cafe",
@@ -294,6 +305,16 @@ function makeSceneryExtras(scene: Phaser.Scene): void {
   {
     const tex = scene.textures.createCanvas("sea_kayak_1", 64, 40)!;
     drawKayak(tex.getContext(), 64, 40, 1);
+    tex.refresh();
+  }
+  {
+    const tex = scene.textures.createCanvas("sea_kayak_2", 64, 40)!;
+    drawKayak(tex.getContext(), 64, 40, 2);
+    tex.refresh();
+  }
+  {
+    const tex = scene.textures.createCanvas("sea_kayak_3", 64, 40)!;
+    drawKayak(tex.getContext(), 64, 40, 3);
     tex.refresh();
   }
   {
@@ -1434,39 +1455,6 @@ function makeSeaDefences(scene: Phaser.Scene): void {
     pod(92, h - 18, 12);
     pod(w - 70, h - 20, 13);
     pod(w - 36, h - 16, 11);
-
-    // Warning signs dropped / bolted onto the wall face (not floating plaques)
-    const wallSign = (cx: number, cy: number, tilt: number) => {
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(tilt);
-      // Short stub post into the concrete
-      ctx.fillStyle = "#4a5058";
-      ctx.fillRect(-2, 6, 4, 10);
-      ctx.strokeRect(-2, 6, 4, 10);
-      // Yellow board resting on the wall
-      ctx.fillStyle = "#e8c028";
-      ctx.fillRect(-22, -10, 44, 18);
-      ctx.strokeStyle = "#1a1410";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(-22, -10, 44, 18);
-      ctx.fillStyle = "#1a1410";
-      ctx.font = "bold 8px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("SEA WALL", 0, 2);
-      ctx.textAlign = "start";
-      // Bolt heads
-      ctx.fillStyle = "#3a4048";
-      ctx.beginPath();
-      ctx.arc(-16, -6, 1.6, 0, Math.PI * 2);
-      ctx.arc(16, -6, 1.6, 0, Math.PI * 2);
-      ctx.arc(-16, 4, 1.6, 0, Math.PI * 2);
-      ctx.arc(16, 4, 1.6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    };
-    wallSign(w * 0.32, h * 0.3, -0.08);
-    wallSign(w * 0.72, h * 0.32, 0.12);
   }, "#1a1410", 2.2);
 
   tex.refresh();
@@ -1589,119 +1577,156 @@ function makeRoundTower(scene: Phaser.Scene): void {
   tex.refresh();
 }
 
-/** Kids bombing off the Round Tower into the sea (north / up-screen). */
+/** Kids bombing off the Round Tower — leap off the seaward flank into the Solent. */
 function makeTowerKidsJump(scene: Phaser.Scene): void {
-  const w = 160;
+  // Wider than the tower so the dive arc + splash sit beside the drum (left = sea)
+  const w = 220;
   const h = 168;
-  const cx = w * 0.5;
-  const parapetY = 36;
-  // Sea sits above the tower in world space — splash / swim up here
-  const seaY = 10;
+  const towerCx = 110; // canvas centre — matches landmark_round_tower when both origin 0.5
+  const parapetY = 38;
+  // Water at tower base, clear of the left (seaward) flank
+  const seaX = 22;
+  const seaY = 148;
+  // Tower drum left edge ~ cx-48 on the 160 tower; on this canvas that's ~62
+  const rimX = towerCx - 42;
 
   const kid = (
     ctx: CanvasRenderingContext2D,
     x: number,
     y: number,
-    pose: "stand" | "wind" | "leap" | "dive" | "swim",
+    pose: "stand" | "wind" | "run" | "leap" | "dive" | "swim",
     shirt: string,
   ) => {
     ctx.save();
     ctx.translate(x, y);
-    // Leap / dive tip toward the sea (up the canvas)
-    if (pose === "leap") ctx.rotate(-0.55);
-    if (pose === "dive") ctx.rotate(-1.05);
-    if (pose === "swim") ctx.rotate(0.15);
+    // Leap/dive rotate so head points seaward (left) and down
+    if (pose === "leap") ctx.rotate(-2.2);
+    if (pose === "dive") ctx.rotate(-2.55);
+    if (pose === "swim") ctx.rotate(0.35);
+    if (pose === "run") ctx.rotate(-0.2);
+
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#1a1410";
+    ctx.lineWidth = 1.8;
 
     // Legs
-    ctx.strokeStyle = "#1a1410";
-    ctx.lineWidth = 2;
-    ctx.fillStyle = "#3a4558";
     if (pose === "stand" || pose === "wind") {
-      ctx.fillRect(-4, 4, 3, 8);
-      ctx.fillRect(1, 4, 3, 8);
-      ctx.strokeRect(-4, 4, 3, 8);
-      ctx.strokeRect(1, 4, 3, 8);
-    } else if (pose === "leap") {
-      ctx.fillRect(-6, 2, 3, 7);
-      ctx.fillRect(2, 0, 3, 8);
-      ctx.strokeRect(-6, 2, 3, 7);
-      ctx.strokeRect(2, 0, 3, 8);
-    } else if (pose === "dive") {
-      ctx.fillRect(-2, 6, 3, 8);
-      ctx.fillRect(1, 5, 3, 9);
-      ctx.strokeRect(-2, 6, 3, 8);
-      ctx.strokeRect(1, 5, 3, 9);
+      ctx.beginPath();
+      ctx.moveTo(-3, 3);
+      ctx.lineTo(-5, 12);
+      ctx.moveTo(3, 3);
+      ctx.lineTo(5, 12);
+      ctx.stroke();
+      ctx.fillStyle = "#1a1410";
+      ctx.fillRect(-7, 11, 4, 2);
+      ctx.fillRect(3, 11, 4, 2);
+    } else if (pose === "run") {
+      ctx.beginPath();
+      ctx.moveTo(-4, 2);
+      ctx.lineTo(-10, 9);
+      ctx.moveTo(2, 2);
+      ctx.lineTo(8, 11);
+      ctx.stroke();
+    } else if (pose === "leap" || pose === "dive") {
+      // Tucked — cannonball toward the water
+      ctx.beginPath();
+      ctx.moveTo(-2, 3);
+      ctx.lineTo(-6, 9);
+      ctx.moveTo(3, 3);
+      ctx.lineTo(7, 8);
+      ctx.stroke();
     } else {
-      ctx.fillRect(-5, 2, 4, 3);
-      ctx.fillRect(2, 2, 4, 3);
-      ctx.strokeRect(-5, 2, 4, 3);
-      ctx.strokeRect(2, 2, 4, 3);
+      ctx.beginPath();
+      ctx.moveTo(-3, 4);
+      ctx.lineTo(-8, 6);
+      ctx.moveTo(3, 4);
+      ctx.lineTo(8, 7);
+      ctx.stroke();
     }
 
     // Torso
     ctx.fillStyle = shirt;
-    ctx.fillRect(-5, -6, 10, 11);
-    ctx.strokeRect(-5, -6, 10, 11);
+    ctx.beginPath();
+    ctx.moveTo(-5, -7);
+    ctx.lineTo(5, -7);
+    ctx.lineTo(4, 4);
+    ctx.lineTo(-4, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
 
     // Arms
-    ctx.fillStyle = "#d8b090";
+    ctx.fillStyle = "#d4a882";
+    ctx.strokeStyle = "#1a1410";
     if (pose === "wind") {
-      ctx.fillRect(-9, -8, 4, 3);
-      ctx.fillRect(5, -10, 3, 6);
-      ctx.strokeRect(-9, -8, 4, 3);
-      ctx.strokeRect(5, -10, 3, 6);
-    } else if (pose === "leap") {
-      ctx.fillRect(-10, -4, 5, 3);
-      ctx.fillRect(5, -6, 5, 3);
-      ctx.strokeRect(-10, -4, 5, 3);
-      ctx.strokeRect(5, -6, 5, 3);
-    } else if (pose === "dive") {
-      ctx.fillRect(-3, -12, 3, 7);
-      ctx.fillRect(1, -12, 3, 7);
-      ctx.strokeRect(-3, -12, 3, 7);
-      ctx.strokeRect(1, -12, 3, 7);
+      ctx.beginPath();
+      ctx.moveTo(-4, -4);
+      ctx.lineTo(-11, -10);
+      ctx.moveTo(4, -4);
+      ctx.lineTo(10, -12);
+      ctx.stroke();
+    } else if (pose === "run") {
+      ctx.beginPath();
+      ctx.moveTo(-4, -3);
+      ctx.lineTo(-10, 1);
+      ctx.moveTo(4, -4);
+      ctx.lineTo(10, -2);
+      ctx.stroke();
+    } else if (pose === "leap" || pose === "dive") {
+      // Arms forward into the dive
+      ctx.beginPath();
+      ctx.moveTo(-2, -6);
+      ctx.lineTo(-2, -15);
+      ctx.moveTo(2, -6);
+      ctx.lineTo(2, -15);
+      ctx.stroke();
     } else if (pose === "swim") {
-      ctx.fillRect(-9, -2, 5, 3);
-      ctx.fillRect(4, -4, 5, 3);
-      ctx.strokeRect(-9, -2, 5, 3);
-      ctx.strokeRect(4, -4, 5, 3);
+      ctx.beginPath();
+      ctx.moveTo(-4, -3);
+      ctx.lineTo(-12, -1);
+      ctx.moveTo(4, -3);
+      ctx.lineTo(12, -5);
+      ctx.stroke();
     } else {
-      ctx.fillRect(-7, -2, 3, 6);
-      ctx.fillRect(4, -2, 3, 6);
-      ctx.strokeRect(-7, -2, 3, 6);
-      ctx.strokeRect(4, -2, 3, 6);
+      ctx.beginPath();
+      ctx.moveTo(-4, -3);
+      ctx.lineTo(-7, 4);
+      ctx.moveTo(4, -3);
+      ctx.lineTo(7, 4);
+      ctx.stroke();
     }
 
     // Head
     ctx.fillStyle = "#e8c8a8";
     ctx.beginPath();
-    ctx.arc(0, -10, 4.2, 0, Math.PI * 2);
+    ctx.arc(0, -11, 4.5, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    // Hair
-    ctx.fillStyle = pose === "stand" ? "#2a2018" : "#3a2818";
+    ctx.fillStyle = "#2a2018";
     ctx.beginPath();
-    ctx.arc(-1, -12, 3.2, Math.PI, 0);
+    ctx.ellipse(-0.5, -13, 4.2, 2.6, 0, Math.PI, Math.PI * 2);
     ctx.fill();
+
     ctx.restore();
   };
 
   const splash = (ctx: CanvasRenderingContext2D, x: number, y: number, big: boolean) => {
     ctx.strokeStyle = "#7ec8de";
-    ctx.lineWidth = 2;
-    const n = big ? 7 : 4;
+    ctx.lineWidth = 2.2;
+    const n = big ? 9 : 5;
     for (let i = 0; i < n; i++) {
-      // Spray mostly upward into the Solent
-      const a = -Math.PI / 2 + (i - (n - 1) / 2) * 0.38;
-      const len = (big ? 14 : 8) + (i % 2) * 4;
+      // Spray up and seaward (left)
+      const a = Math.PI * 0.55 + (i / (n - 1)) * Math.PI * 0.95;
+      const len = (big ? 18 : 10) + (i % 2) * 5;
       ctx.beginPath();
       ctx.moveTo(x, y);
-      ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len);
+      ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len * 0.85);
       ctx.stroke();
     }
-    ctx.fillStyle = "rgba(120,190,210,0.5)";
+    ctx.fillStyle = "rgba(120,190,210,0.6)";
     ctx.beginPath();
-    ctx.ellipse(x, y + 1, big ? 16 : 10, big ? 5 : 3, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, y + 3, big ? 20 : 12, big ? 7 : 4, -0.15, 0, Math.PI * 2);
     ctx.fill();
   };
 
@@ -1709,37 +1734,38 @@ function makeTowerKidsJump(scene: Phaser.Scene): void {
     {
       key: "tower_kids_0",
       draw: (ctx) => {
-        // On the parapet, winding up for a sea bomb
-        kid(ctx, cx - 14, parapetY, "stand", "#c45c4a");
-        kid(ctx, cx + 6, parapetY - 2, "wind", "#3a6db0");
-        kid(ctx, cx + 28, parapetY + 2, "stand", "#e8a030");
+        // On the parapet; blue shirt winding up on the seaward rim
+        kid(ctx, towerCx + 10, parapetY + 2, "stand", "#e8a030");
+        kid(ctx, rimX + 6, parapetY, "wind", "#3a6db0");
+        kid(ctx, towerCx + 28, parapetY + 4, "stand", "#c45c4a");
       },
     },
     {
       key: "tower_kids_1",
       draw: (ctx) => {
-        kid(ctx, cx - 14, parapetY, "stand", "#c45c4a");
-        // Off the seaward lip — up toward the Solent
-        kid(ctx, cx + 10, parapetY - 26, "leap", "#3a6db0");
-        kid(ctx, cx + 28, parapetY + 2, "wind", "#e8a030");
+        // Blue shirt steps off the left flank
+        kid(ctx, towerCx + 12, parapetY + 2, "stand", "#e8a030");
+        kid(ctx, rimX - 8, parapetY - 4, "run", "#3a6db0");
+        kid(ctx, towerCx + 28, parapetY + 2, "wind", "#c45c4a");
       },
     },
     {
       key: "tower_kids_2",
       draw: (ctx) => {
-        kid(ctx, cx - 10, parapetY - 2, "wind", "#c45c4a");
-        kid(ctx, cx + 4, seaY + 8, "dive", "#3a6db0");
-        kid(ctx, cx + 30, parapetY + 4, "stand", "#e8a030");
-        splash(ctx, cx + 2, seaY + 2, false);
+        // Mid-plunge beside the drum, falling toward the Solent
+        kid(ctx, towerCx + 8, parapetY + 2, "wind", "#e8a030");
+        kid(ctx, seaX + 28, 88, "leap", "#3a6db0");
+        kid(ctx, towerCx + 28, parapetY + 4, "stand", "#c45c4a");
       },
     },
     {
       key: "tower_kids_3",
       draw: (ctx) => {
-        kid(ctx, cx - 4, parapetY - 22, "leap", "#c45c4a");
-        kid(ctx, cx + 8, seaY + 4, "swim", "#3a6db0");
-        kid(ctx, cx + 32, parapetY, "wind", "#e8a030");
-        splash(ctx, cx + 6, seaY, true);
+        // Splash at the waterline left of the tower; next lad winding up
+        kid(ctx, rimX + 4, parapetY, "wind", "#e8a030");
+        kid(ctx, seaX + 10, seaY - 4, "dive", "#3a6db0");
+        kid(ctx, towerCx + 28, parapetY + 2, "stand", "#c45c4a");
+        splash(ctx, seaX + 14, seaY + 8, true);
       },
     },
   ];
@@ -1902,44 +1928,39 @@ function makeClarenceFunfair(scene: Phaser.Scene): void {
     ctx.font = "bold 11px sans-serif";
     ctx.fillText("FUNFAIR", ax - 24, h * 0.42);
 
-    // —— Candy / ticket stalls ——
+    // —— Candy / ticket stalls on the deck ——
+    const deckY = h - 22;
     const stalls: { x: number; roof: string; label: string }[] = [
-      { x: w * 0.78, roof: "#c02828", label: "WIN" },
-      { x: w * 0.9, roof: "#3a6db0", label: "EATS" },
+      { x: w * 0.6, roof: "#c02828", label: "WIN" },
+      { x: w * 0.86, roof: "#3a6db0", label: "EATS" },
+      { x: w * 0.96, roof: "#2a8a6a", label: "TICKETS" },
     ];
     for (const st of stalls) {
+      const stallH = 48;
+      const top = deckY - stallH;
       ctx.fillStyle = "#f2e6d8";
-      ctx.fillRect(st.x - 26, h * 0.52, 52, 46);
+      ctx.fillRect(st.x - 26, top, 52, stallH);
       ctx.strokeStyle = "#1a1410";
       ctx.lineWidth = 2;
-      ctx.strokeRect(st.x - 26, h * 0.52, 52, 46);
+      ctx.strokeRect(st.x - 26, top, 52, stallH);
       // scalloped awning
       for (let i = 0; i < 6; i++) {
         ctx.fillStyle = i % 2 === 0 ? st.roof : "#f2e6d8";
         ctx.beginPath();
-        ctx.arc(st.x - 22 + i * 9, h * 0.52, 5, Math.PI, 0);
+        ctx.arc(st.x - 22 + i * 9, top, 5, Math.PI, 0);
         ctx.fill();
         ctx.stroke();
       }
       ctx.fillStyle = st.roof;
-      ctx.fillRect(st.x - 26, h * 0.46, 52, 10);
-      ctx.strokeRect(st.x - 26, h * 0.46, 52, 10);
+      ctx.fillRect(st.x - 26, top - 10, 52, 10);
+      ctx.strokeRect(st.x - 26, top - 10, 52, 10);
       // counter window
       ctx.fillStyle = "#1a1410";
-      ctx.fillRect(st.x - 18, h * 0.58, 36, 14);
+      ctx.fillRect(st.x - 18, top + 14, 36, 14);
       ctx.fillStyle = "#f2e6d8";
-      ctx.font = "bold 10px sans-serif";
-      ctx.fillText(st.label, st.x - 12, h * 0.68);
+      ctx.font = "bold 9px sans-serif";
+      ctx.fillText(st.label, st.x - 14, top + 38);
     }
-
-    // Bumper-car shed hint behind stalls
-    ctx.fillStyle = "#6a7a4a";
-    ctx.fillRect(w * 0.62, h * 0.58, 36, 28);
-    ctx.strokeStyle = "#1a1410";
-    ctx.strokeRect(w * 0.62, h * 0.58, 36, 28);
-    ctx.fillStyle = "#e8b43c";
-    ctx.font = "bold 8px sans-serif";
-    ctx.fillText("DODGEMS", w * 0.625, h * 0.7);
 
     // Main neon sign
     ctx.fillStyle = "#1a4060";
@@ -1973,18 +1994,6 @@ function makeClarenceFunfair(scene: Phaser.Scene): void {
       ctx.fill();
     }
 
-    // Tiny crowd silhouettes on the deck
-    ctx.fillStyle = "#1a1410";
-    for (const px of [70, 110, 200, 250, 310, 400, 440]) {
-      const ph = 10 + (px % 7);
-      ctx.beginPath();
-      ctx.ellipse(px, h - 28 - ph, 4, ph, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(px, h - 28 - ph * 2 + 2, 3.2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
     // Flags on poles
     for (const fx of [w * 0.08, w * 0.95]) {
       ctx.strokeStyle = "#1a1410";
@@ -2008,9 +2017,9 @@ function makeClarenceFunfair(scene: Phaser.Scene): void {
 }
 
 /**
- * Hovertravel slip — short concrete cut through the beach to the Solent.
- * Canvas height matches the beach band (prom → waterline), not the sky.
- * Sea is painted at the top so the cut reads as water, not empty air.
+ * Hovertravel slip — concrete apron + terminal only.
+ * Sea / beach stay transparent so the parallax behind shows through.
+ * Craft sits behind this layer so the apron fence covers the air cushion.
  */
 function makeHovercraftPort(scene: Phaser.Scene): void {
   const w = 480;
@@ -2020,96 +2029,51 @@ function makeHovercraftPort(scene: Phaser.Scene): void {
   ctx.clearRect(0, 0, w, h);
 
   scratchStroke(ctx, () => {
-    // Solent strip across the top — replaces beach so the cut shows sea
-    ctx.fillStyle = "#6a9ab8";
-    ctx.fillRect(0, 0, w, 28);
-    ctx.fillStyle = "#8ec4dc";
-    ctx.fillRect(0, 0, w, 14);
-    ctx.strokeStyle = "rgba(240,248,252,0.65)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(8, 26);
-    ctx.quadraticCurveTo(w * 0.5, 18, w - 8, 26);
-    ctx.stroke();
-    ctx.strokeStyle = "#1a1410";
-    ctx.lineWidth = 2.2;
-
-    // Shingle banks either side of the slip cut
-    ctx.fillStyle = "#c4b49a";
-    ctx.beginPath();
-    ctx.moveTo(0, h);
-    ctx.lineTo(108, h);
-    ctx.lineTo(148, 28);
-    ctx.lineTo(0, 28);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(w, h);
-    ctx.lineTo(w - 108, h);
-    ctx.lineTo(w - 148, 28);
-    ctx.lineTo(w, 28);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "#a89880";
-    for (const [bx, by] of [
-      [28, h - 22],
-      [52, h - 38],
-      [36, 48],
-      [w - 34, h - 24],
-      [w - 58, h - 40],
-      [w - 40, 50],
-    ] as const) {
-      ctx.beginPath();
-      ctx.ellipse(bx, by, 5, 3.2, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Concrete slip — wider on the prom (bottom), narrower at the water
+    // Flatter, lower slip — mild taper so it lines up with the beach band
+    const slipTop = 58;
     ctx.fillStyle = "#8a8a82";
     ctx.beginPath();
-    ctx.moveTo(102, h - 2);
-    ctx.lineTo(w - 102, h - 2);
-    ctx.lineTo(w - 152, 30);
-    ctx.lineTo(152, 30);
+    ctx.moveTo(78, h - 2);
+    ctx.lineTo(w - 78, h - 2);
+    ctx.lineTo(w - 102, slipTop);
+    ctx.lineTo(102, slipTop);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
     ctx.strokeStyle = "#6a6a62";
     ctx.lineWidth = 1.2;
     for (let i = 0; i < 5; i++) {
-      const t = 0.1 + i * 0.18;
-      const x0 = 110 + t * (w - 220);
-      const x1 = 158 + t * (w - 316);
+      const t = 0.08 + i * 0.18;
+      const x0 = 86 + t * (w - 172);
+      const x1 = 106 + t * (w - 212);
       ctx.beginPath();
       ctx.moveTo(x0, h - 4);
-      ctx.lineTo(x1, 32);
+      ctx.lineTo(x1, slipTop + 2);
       ctx.stroke();
     }
     for (let i = 0; i < 3; i++) {
-      const ty = h - 14 - i * 18;
-      const inset = 6 + i * 12;
+      const ty = h - 12 - i * 12;
+      const inset = 4 + i * 5;
       ctx.beginPath();
-      ctx.moveTo(110 + inset, ty);
-      ctx.lineTo(w - 110 - inset, ty);
+      ctx.moveTo(86 + inset, ty);
+      ctx.lineTo(w - 86 - inset, ty);
       ctx.stroke();
     }
     ctx.strokeStyle = "#1a1410";
     ctx.lineWidth = 2.2;
 
-    // Wet concrete lip into the water
+    // Wet lip at the water end (no painted sea — Solent shows behind)
     ctx.fillStyle = "#7a9aaa";
     ctx.beginPath();
-    ctx.moveTo(148, 32);
-    ctx.lineTo(w - 148, 32);
-    ctx.lineTo(w - 156, 24);
-    ctx.lineTo(156, 24);
+    ctx.moveTo(104, slipTop + 2);
+    ctx.lineTo(w - 104, slipTop + 2);
+    ctx.lineTo(w - 108, slipTop - 4);
+    ctx.lineTo(108, slipTop - 4);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    // Terminal hut — landward, right bank (keeps height in the beach band)
+    // Terminal hut — landward right (HOVERTRAVEL lives here only)
     ctx.fillStyle = "#d8d0c4";
     ctx.fillRect(w - 102, h - 54, 68, 40);
     ctx.strokeRect(w - 102, h - 54, 68, 40);
@@ -2134,66 +2098,95 @@ function makeHovercraftPort(scene: Phaser.Scene): void {
     ctx.font = "bold 7px Comic Sans MS, cursive";
     ctx.fillText("HOVERTRAVEL", w - 96, h - 54);
 
-    // Bollards on the apron lip
+    // Apron fence / bollards last — sits in front of the craft cushion
     ctx.fillStyle = "#5a5a5a";
-    for (const x of [130, 180, 230, 280, 330]) {
-      ctx.fillRect(x, h - 20, 4, 12);
-      ctx.strokeRect(x, h - 20, 4, 12);
+    for (const x of [118, 168, 218, 268, 318, 360]) {
+      ctx.fillRect(x, h - 22, 5, 14);
+      ctx.strokeRect(x, h - 22, 5, 14);
     }
+    ctx.strokeStyle = "#1a1410";
+    ctx.lineWidth = 2.4;
     ctx.beginPath();
-    ctx.moveTo(130, h - 16);
-    ctx.lineTo(334, h - 16);
+    ctx.moveTo(118, h - 18);
+    ctx.lineTo(365, h - 18);
     ctx.stroke();
+    ctx.strokeStyle = "#6a6a62";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(118, h - 12);
+    ctx.lineTo(365, h - 12);
+    ctx.stroke();
+    ctx.strokeStyle = "#1a1410";
+    ctx.lineWidth = 2.2;
   }, "#1a1410", 2.2);
   tex.refresh();
 
   for (const frame of [0, 1] as const) {
     const key = `hovercraft_${frame}`;
-    // True stern-on — only the back faces the promenade (fans high, skirt low)
-    const cw = 200;
-    const ch = 170;
+    // Stern-on — fans high, big air cushion low (drawn behind the port fence)
+    const cw = 220;
+    const ch = 188;
     const ht = scene.textures.createCanvas(key, cw, ch)!;
     const c = ht.getContext();
     c.clearRect(0, 0, cw, ch);
     scratchStroke(c, () => {
       const cx = cw * 0.5;
 
-      // Thin roof lip at the very top (bow is away — you barely see it)
+      // Big rubber air cushion first (sits under / behind the apron fence)
+      c.fillStyle = "#3a3a38";
+      c.beginPath();
+      c.ellipse(cx, 158, 108, 28, 0, 0, Math.PI * 2);
+      c.fill();
+      c.stroke();
+      c.fillStyle = "#2a2a28";
+      c.beginPath();
+      c.ellipse(cx, 168, 100, 18, 0, 0, Math.PI * 2);
+      c.fill();
+      c.stroke();
+      // Skirt bags
+      c.fillStyle = "#343430";
+      for (let i = -4; i <= 4; i++) {
+        const bx = cx + i * 22;
+        c.beginPath();
+        c.ellipse(bx, 172, 14, 10, 0, 0, Math.PI * 2);
+        c.fill();
+        c.stroke();
+      }
+
+      // Thin roof lip (bow away)
       c.fillStyle = "#c8c4bc";
       c.beginPath();
-      c.moveTo(cx - 52, 18);
-      c.lineTo(cx + 52, 18);
-      c.lineTo(cx + 58, 28);
-      c.lineTo(cx - 58, 28);
+      c.moveTo(cx - 52, 14);
+      c.lineTo(cx + 52, 14);
+      c.lineTo(cx + 58, 24);
+      c.lineTo(cx - 58, 24);
       c.closePath();
       c.fill();
       c.stroke();
 
-      // Flat stern wall — the only face you really see
+      // Flat stern wall
       c.fillStyle = "#e8e4dc";
       c.beginPath();
-      c.moveTo(cx - 72, 28);
-      c.lineTo(cx + 72, 28);
-      c.lineTo(cx + 78, 128);
-      c.lineTo(cx - 78, 128);
+      c.moveTo(cx - 72, 24);
+      c.lineTo(cx + 72, 24);
+      c.lineTo(cx + 78, 132);
+      c.lineTo(cx - 78, 132);
       c.closePath();
       c.fill();
       c.stroke();
 
-      // Soft vertical panels so it reads as a rear bulkhead, not a side hull
       c.strokeStyle = "rgba(26,20,16,0.25)";
       c.lineWidth = 1.4;
       for (const x of [cx - 36, cx, cx + 36]) {
         c.beginPath();
-        c.moveTo(x, 32);
-        c.lineTo(x + (x - cx) * 0.04, 126);
+        c.moveTo(x, 28);
+        c.lineTo(x + (x - cx) * 0.04, 130);
         c.stroke();
       }
       c.strokeStyle = "#1a1410";
       c.lineWidth = 2.2;
 
       const drawFan = (fx: number, fy: number, phase: number) => {
-        // Duct housing — high on the stern
         c.fillStyle = "#5a5a58";
         c.beginPath();
         c.arc(fx, fy, 30, 0, Math.PI * 2);
@@ -2232,40 +2225,30 @@ function makeHovercraftPort(scene: Phaser.Scene): void {
         c.lineWidth = 2.2;
       };
       const phase = frame === 0 ? 0.15 : 0.15 + Math.PI / 4;
-      // Twin ducts near the top of the stern face
-      drawFan(cx - 38, 52, phase);
-      drawFan(cx + 38, 52, phase + 0.45);
+      drawFan(cx - 38, 48, phase);
+      drawFan(cx + 38, 48, phase + 0.45);
 
-      // Rear windows under the fans
       c.fillStyle = "#3a6aaa";
-      c.fillRect(cx - 48, 88, 30, 20);
-      c.fillRect(cx - 8, 86, 34, 22);
-      c.fillRect(cx + 32, 88, 24, 20);
-      c.strokeRect(cx - 48, 88, 30, 20);
-      c.strokeRect(cx - 8, 86, 34, 22);
-      c.strokeRect(cx + 32, 88, 24, 20);
+      c.fillRect(cx - 48, 84, 30, 20);
+      c.fillRect(cx - 8, 82, 34, 22);
+      c.fillRect(cx + 32, 84, 24, 20);
+      c.strokeRect(cx - 48, 84, 30, 20);
+      c.strokeRect(cx - 8, 82, 34, 22);
+      c.strokeRect(cx + 32, 84, 24, 20);
       c.fillStyle = "#8ec8e8";
-      c.fillRect(cx - 44, 92, 20, 10);
-      c.fillRect(cx - 2, 90, 22, 12);
-      c.fillRect(cx + 36, 92, 14, 10);
+      c.fillRect(cx - 44, 88, 20, 10);
+      c.fillRect(cx - 2, 86, 22, 12);
+      c.fillRect(cx + 36, 88, 14, 10);
 
-      // Red rear stripe + name
+      // Red rear stripe only — name is on the terminal hut
       c.fillStyle = "#c02828";
-      c.fillRect(cx - 60, 114, 120, 10);
-      c.strokeRect(cx - 60, 114, 120, 10);
-      c.fillStyle = "#f2e6d8";
-      c.font = "bold 11px Comic Sans MS, cursive";
-      c.fillText("HOVERTRAVEL", cx - 42, 123);
+      c.fillRect(cx - 60, 112, 120, 10);
+      c.strokeRect(cx - 60, 112, 120, 10);
 
-      // Rubber skirt under the stern
+      // Hull sit on the cushion
       c.fillStyle = "#3a3a38";
       c.beginPath();
-      c.ellipse(cx, 142, 82, 16, 0, 0, Math.PI * 2);
-      c.fill();
-      c.stroke();
-      c.fillStyle = "#2a2a28";
-      c.beginPath();
-      c.ellipse(cx, 148, 74, 10, 0, 0, Math.PI * 2);
+      c.ellipse(cx, 138, 86, 12, 0, 0, Math.PI * 2);
       c.fill();
       c.stroke();
     }, "#1a1410", 2.2);
@@ -3902,54 +3885,127 @@ function makePassingTraffic(scene: Phaser.Scene): void {
 
   // Mini coach / bus — long, rare
   {
-    const w = 320;
-    const h = 140;
+    const w = 360;
+    const h = 160;
     const tex = scene.textures.createCanvas("traffic_bus", w, h)!;
     const ctx = tex.getContext();
     ctx.clearRect(0, 0, w, h);
     scratchStroke(ctx, () => {
-      shadow(ctx, w / 2, h - 4, 130);
+      shadow(ctx, w / 2, h - 4, 148);
       ctx.fillStyle = "#2a6a9a";
       ctx.beginPath();
-      ctx.moveTo(12, 100);
-      ctx.lineTo(20, 36);
-      ctx.lineTo(50, 28);
-      ctx.lineTo(280, 28);
-      ctx.lineTo(304, 42);
-      ctx.lineTo(308, 108);
-      ctx.lineTo(12, 108);
+      ctx.moveTo(14, 118);
+      ctx.lineTo(24, 42);
+      ctx.lineTo(58, 32);
+      ctx.lineTo(318, 32);
+      ctx.lineTo(344, 48);
+      ctx.lineTo(348, 126);
+      ctx.lineTo(14, 126);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
       // Windows row
       ctx.fillStyle = "#9ec4d8";
-      for (let i = 0; i < 5; i++) {
-        const x = 58 + i * 42;
-        ctx.fillRect(x, 40, 34, 28);
-        ctx.strokeRect(x, 40, 34, 28);
+      for (let i = 0; i < 6; i++) {
+        const x = 64 + i * 42;
+        ctx.fillRect(x, 46, 34, 32);
+        ctx.strokeRect(x, 46, 34, 32);
       }
       // Cab window
       ctx.beginPath();
-      ctx.moveTo(24, 42);
-      ctx.lineTo(48, 34);
-      ctx.lineTo(52, 68);
-      ctx.lineTo(28, 70);
+      ctx.moveTo(28, 48);
+      ctx.lineTo(54, 38);
+      ctx.lineTo(58, 78);
+      ctx.lineTo(32, 80);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
       // Cream stripe
       ctx.fillStyle = "#f2e6d8";
-      ctx.fillRect(14, 78, 290, 8);
-      ctx.strokeRect(14, 78, 290, 8);
-      wheel(ctx, 55, 108, 16);
-      wheel(ctx, 140, 108, 14);
-      wheel(ctx, 250, 108, 16);
+      ctx.fillRect(16, 92, 328, 10);
+      ctx.strokeRect(16, 92, 328, 10);
+      wheel(ctx, 62, 126, 18);
+      wheel(ctx, 286, 126, 18);
       ctx.fillStyle = "#e8d080";
-      ctx.fillRect(12, 84, 14, 12);
-      ctx.strokeRect(12, 84, 14, 12);
+      ctx.fillRect(14, 98, 16, 14);
+      ctx.strokeRect(14, 98, 16, 14);
       ctx.fillStyle = "#c04040";
-      ctx.fillRect(296, 84, 10, 12);
-      ctx.strokeRect(296, 84, 10, 12);
+      ctx.fillRect(334, 98, 12, 14);
+      ctx.strokeRect(334, 98, 12, 14);
+    }, "#1a1410", 2.6);
+    tex.refresh();
+  }
+
+  // Council rubbish truck / dustcart — cab + hopper, rare heavy pass
+  {
+    const w = 340;
+    const h = 155;
+    const tex = scene.textures.createCanvas("traffic_rubbish", w, h)!;
+    const ctx = tex.getContext();
+    ctx.clearRect(0, 0, w, h);
+    scratchStroke(ctx, () => {
+      shadow(ctx, w / 2, h - 4, 138);
+      // Hopper body (olive council green)
+      ctx.fillStyle = "#3a6a48";
+      ctx.beginPath();
+      ctx.moveTo(88, 118);
+      ctx.lineTo(96, 36);
+      ctx.lineTo(300, 34);
+      ctx.lineTo(318, 48);
+      ctx.lineTo(322, 122);
+      ctx.lineTo(88, 122);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Hopper ribs
+      ctx.strokeStyle = "#2a4a34";
+      for (const x of [130, 170, 210, 250, 290]) {
+        ctx.beginPath();
+        ctx.moveTo(x, 40);
+        ctx.lineTo(x, 116);
+        ctx.stroke();
+      }
+      // Cab
+      ctx.fillStyle = "#4a7a58";
+      ctx.beginPath();
+      ctx.moveTo(12, 108);
+      ctx.lineTo(28, 52);
+      ctx.lineTo(78, 44);
+      ctx.lineTo(92, 58);
+      ctx.lineTo(92, 118);
+      ctx.lineTo(12, 118);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Cab window
+      ctx.fillStyle = "#8ab0c4";
+      ctx.beginPath();
+      ctx.moveTo(34, 58);
+      ctx.lineTo(72, 50);
+      ctx.lineTo(76, 82);
+      ctx.lineTo(38, 86);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Amber beacon
+      ctx.fillStyle = "#e8a030";
+      ctx.beginPath();
+      ctx.ellipse(58, 42, 8, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Rear packer lip
+      ctx.fillStyle = "#2a4a34";
+      ctx.fillRect(304, 52, 16, 64);
+      ctx.strokeRect(304, 52, 16, 64);
+      wheel(ctx, 52, 122, 17);
+      wheel(ctx, 150, 122, 15);
+      wheel(ctx, 250, 122, 17);
+      ctx.fillStyle = "#e8d080";
+      ctx.fillRect(12, 92, 14, 12);
+      ctx.strokeRect(12, 92, 14, 12);
+      ctx.fillStyle = "#c04040";
+      ctx.fillRect(310, 96, 10, 12);
+      ctx.strokeRect(310, 96, 10, 12);
     }, "#1a1410", 2.6);
     tex.refresh();
   }

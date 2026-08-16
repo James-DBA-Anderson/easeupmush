@@ -336,7 +336,7 @@ export class DebugArenaScene extends Phaser.Scene {
         this.spawnPolice(x, y);
         break;
       case "car":
-        this.spawnProp("car", x, GAME_HEIGHT - 10, 92, 32, 1.2);
+        this.spawnProp("car", x, GAME_HEIGHT - 10, 70, 22, 1.2);
         break;
       case "coffee_van":
         this.spawnProp("coffee_van", x, GAME_HEIGHT - 8, 100, 42, 1.05);

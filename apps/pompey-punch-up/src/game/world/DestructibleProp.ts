@@ -176,8 +176,10 @@ export class DestructibleProp {
     if (!this.offersCover) return false;
     const dx = Math.abs(px - this.x);
     const dy = Math.abs(py - this.y);
-    if (dx > this.rx + 18) return false;
-    if (dy > this.ry + 28) return false;
+    const padX = this.isOccluder ? 8 : 18;
+    const padY = this.isOccluder ? 16 : 28;
+    if (dx > this.rx + padX) return false;
+    if (dy > this.ry + padY) return false;
     // Prefer the fight-lane side of motors (north), or tight to bins
     if (this.isOccluder && py > this.y - 6) return false;
     return true;
@@ -295,8 +297,8 @@ export class DestructibleProp {
       return {
         x: this.x,
         y: this.y - 6,
-        rx: this.rx * 0.62,
-        ry: 16,
+        rx: this.rx * 0.5,
+        ry: this.isCar ? 12 : 14,
         kind: "prop",
       };
     }
@@ -337,18 +339,25 @@ export class DestructibleProp {
 
   inReach(attackerX: number, attackerY: number, reach: number, facing: number): boolean {
     const dx = this.x - attackerX;
-    const spriteTop = this.y - this.image.displayHeight - 8;
+    const motor = this.isOccluder;
+    const spriteTop = this.y - this.image.displayHeight * (motor ? 0.85 : 1) - 4;
+    const bodyPad = motor ? 10 : 28;
+    const lanePad = motor ? 24 : 56;
+    const hugPad = motor ? 6 : 18;
     const overlappingSprite =
-      attackerY >= spriteTop && attackerY <= this.y + 18 && Math.abs(dx) <= this.rx + 28;
-    const closeOnLane = Math.abs(this.y - attackerY) <= this.ry + 56;
+      attackerY >= spriteTop &&
+      attackerY <= this.y + (motor ? 8 : 18) &&
+      Math.abs(dx) <= this.rx + bodyPad;
+    const closeOnLane = Math.abs(this.y - attackerY) <= this.ry + lanePad;
     if (!overlappingSprite && !closeOnLane) return false;
 
     // Already on it / hugging the body — facing doesn't matter
-    if (Math.abs(dx) <= this.rx + 18) return true;
+    if (Math.abs(dx) <= this.rx + hugPad) return true;
 
     if (facing > 0 && dx < -8) return false;
     if (facing < 0 && dx > 8) return false;
-    return Math.abs(dx) <= reach + this.rx * 0.75;
+    const reachMul = motor ? 0.45 : 0.75;
+    return Math.abs(dx) <= reach + this.rx * reachMul;
   }
 
   takeHit(

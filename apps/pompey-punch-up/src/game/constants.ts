@@ -14,8 +14,9 @@ export function viewportWidth(scene: {
   return Math.max(GAME_WIDTH, Math.round(fromCam || fromScale || GAME_WIDTH));
 }
 
-/** Side-scrolling Southsea strip (Eastney → South Parade Pier → sea defences → Clarence Pier). */
-export const WORLD_WIDTH = 14500;
+/** Side-scrolling Southsea strip (Eastney → South Parade Pier → sea defences → Clarence Pier).
+ *  World ends at the funfair — Level 2 destination. */
+export const WORLD_WIDTH = 14400;
 
 export const LANE = {
   minX: 80,

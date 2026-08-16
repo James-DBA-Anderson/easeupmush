@@ -54,13 +54,13 @@ export function resolveCombat(
         const fromBehind = (attacker.x - best.x) * best.facing < -8;
         best.structure.createOpening(now, 1000);
         if (attacker.team === "player") {
-          // Clinch upright — the toss is what puts them on the mat
+          // Straight into the throw — no standing clinch
           attacker.startHoldOn(best, now, fromBehind);
-          // Keep victim stuck to you briefly
           best.x = attacker.x + attacker.facing * (fromBehind ? 14 : 22);
           best.y = attacker.y;
           best.groundY = best.y;
           if (fromBehind) best.facing = attacker.facing;
+          attacker.tryBodyToss(now);
         } else {
           // Enemy/police grabs still dump you
           best.takeDown(now);

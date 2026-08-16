@@ -169,6 +169,8 @@ export class BeachScene extends Phaser.Scene {
   }[] = [];
   private bossAnnounced = false;
   private droneAssistAnnounced = false;
+  /** Screen lock while a Hardman is live — no scrolling back or ahead. */
+  private bossArena: { scrollX: number; minX: number; maxX: number } | null = null;
   /** Unlock X whose call succeeded — wave can spawn. */
   private callArmedUnlock: number | null = null;
   /** Who's currently on the blower. */
@@ -253,6 +255,7 @@ export class BeachScene extends Phaser.Scene {
     this.pauseOverlay = undefined;
     this.bossAnnounced = false;
     this.droneAssistAnnounced = false;
+    this.bossArena = null;
     this.callArmedUnlock = null;
     this.activeCaller = null;
     this.wasHiding = false;
@@ -1209,6 +1212,73 @@ export class BeachScene extends Phaser.Scene {
     }
   }
 
+  /** Lane X bounds — tightened to the locked screen during a Hardman scrap. */
+  private fightLaneBounds(): {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+  } {
+    if (!this.bossArena) return LANE;
+    return {
+      minX: this.bossArena.minX,
+      maxX: this.bossArena.maxX,
+      minY: LANE.minY,
+      maxY: LANE.maxY,
+    };
+  }
+
+  /**
+   * Boss fights lock the camera to one screen — no walking back or ahead until
+   * the Hardman drops.
+   */
+  private syncBossArenaLock(): void {
+    const boss = this.enemies.find((e) => e.isBoss && !e.structure.isOut());
+    if (!boss) {
+      if (this.bossArena) this.clearBossArenaLock();
+      return;
+    }
+    if (!this.bossArena) this.engageBossArenaLock(boss);
+    else this.applyBossArenaCamera();
+  }
+
+  private engageBossArenaLock(boss: Enemy): void {
+    const cam = this.cameras.main;
+    const pad = 56;
+    const maxScroll = Math.max(0, WORLD_WIDTH - this.viewW);
+    // Prefer the current view so the walk-in doesn't jump; nudge if the boss
+    // is still off the right edge so he lands inside the locked frame.
+    let scrollX = Phaser.Math.Clamp(Math.round(cam.scrollX), 0, maxScroll);
+    const bossWant = boss.x - this.viewW + pad + 40;
+    if (boss.x > scrollX + this.viewW - pad) {
+      scrollX = Phaser.Math.Clamp(Math.round(bossWant), 0, maxScroll);
+    }
+    this.bossArena = {
+      scrollX,
+      minX: scrollX + pad,
+      maxX: scrollX + this.viewW - pad,
+    };
+    this.player.x = Phaser.Math.Clamp(
+      this.player.x,
+      this.bossArena.minX,
+      this.bossArena.maxX,
+    );
+    boss.x = Phaser.Math.Clamp(boss.x, this.bossArena.minX, this.bossArena.maxX);
+    this.applyBossArenaCamera();
+  }
+
+  private applyBossArenaCamera(): void {
+    if (!this.bossArena) return;
+    const cam = this.cameras.main;
+    cam.setBounds(this.bossArena.scrollX, 0, this.viewW, GAME_HEIGHT);
+    cam.setScroll(this.bossArena.scrollX, 0);
+  }
+
+  private clearBossArenaLock(): void {
+    this.bossArena = null;
+    this.cameras.main.setBounds(0, 0, WORLD_WIDTH, GAME_HEIGHT);
+  }
+
   /**
    * Place reinforcements outside the camera. Prefer their world patch if it's
    * already off-screen; otherwise slide them to the east (or west for ambush).
@@ -1272,6 +1342,7 @@ export class BeachScene extends Phaser.Scene {
     }
 
     this.parallax.update(this.cameras.main.scrollX, delta, now);
+    this.syncBossArenaLock();
     this.updateSkyDrone(now, dt);
     this.gulls.update(now, dt, this.fighters);
     for (const s of this.gulls.takeSquawks(now)) {
@@ -1360,11 +1431,12 @@ export class BeachScene extends Phaser.Scene {
       return;
     }
 
+    const bounds = this.fightLaneBounds();
     if (this.introPhase !== "done") {
       this.updateIntro(now, dt);
     } else {
       this.tryMobilePunchContext();
-      this.player.updatePlayer(now, dt, LANE, this.fighters);
+      this.player.updatePlayer(now, dt, bounds, this.fighters);
       if (this.player.action === "body_toss") {
         this.techniquesUsed.add(
           this.player.isGermanSuplex ? "german_suplex" : "body_toss",
@@ -1418,7 +1490,7 @@ export class BeachScene extends Phaser.Scene {
     this.syncPlayerWondering(now);
     this.syncEngagementCap();
     for (const f of this.fighters) {
-      f.applyTossFlight(now, dt, LANE.minX, LANE.maxX);
+      f.applyTossFlight(now, dt, bounds.minX, bounds.maxX);
       // Player already runs updatePhysics in updatePlayer
       if (f !== this.player && f.airborne) f.updatePhysics(dt, LANE.minY, LANE.maxY);
       // Flying body into the Hovertravel fans
@@ -1431,16 +1503,14 @@ export class BeachScene extends Phaser.Scene {
       ...this.obstacles,
       ...this.destructibles
         .filter((d) => d.isOccluder)
-        .map((d) => ({
-          x: d.x,
-          y: d.y,
-          rx: d.rx,
-          ry: d.ry,
-          kind: "prop" as const,
-        })),
+        .map((d) => d.asObstacle())
+        .filter((o): o is Obstacle => o !== null),
     ];
     for (const e of this.enemies) {
       e.updateEnemy(now, dt, this.fighters, riderObs);
+      if (this.bossArena && !e.isBackground && !e.structure.isOut()) {
+        e.x = Phaser.Math.Clamp(e.x, this.bossArena.minX, this.bossArena.maxX);
+      }
       const line = e.takeInsult();
       if (line) this.bubbles.say(e, line);
       if (e.takeShadesBreak()) {
@@ -1925,6 +1995,7 @@ export class BeachScene extends Phaser.Scene {
     this.stage = 2;
     this.bossAnnounced = false;
     this.droneAssistAnnounced = false;
+    this.bossArena = null;
     this.callArmedUnlock = null;
     this.activeCaller = null;
     this.captiveStragglers = [];
@@ -2541,13 +2612,8 @@ export class BeachScene extends Phaser.Scene {
       ...this.obstacles,
       ...this.destructibles
         .filter((d) => d.isOccluder)
-        .map((d) => ({
-          x: d.x,
-          y: d.y,
-          rx: d.rx,
-          ry: d.ry,
-          kind: "prop" as const,
-        })),
+        .map((d) => d.asObstacle())
+        .filter((o): o is Obstacle => o !== null),
     ];
     for (const c of this.civilians) {
       c.updateCivilian(now, dt, this.fighters, riderObsDowned, this.civilians);

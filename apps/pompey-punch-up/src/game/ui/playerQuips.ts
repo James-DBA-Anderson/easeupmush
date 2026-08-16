@@ -1,11 +1,11 @@
 /**
- * Spidey-style wisecracks — Portsmouth edition.
+ * Cheeky wisecracks — Portsmouth edition.
  * Fired when you put a lad on the floor.
  */
 
 const QUIPS: string[] = [
-  // Classic Spidey energy, Pompey voice
-  "With great power comes great responsibility… and a thick ear.",
+  // Classic cocky energy, Pompey voice
+  "With great fists comes a thick ear.",
   "Another one for the Fratton scrapheap.",
   "That's going on the Southsea highlight reel.",
   "You've been Punch-Upped.",
@@ -64,21 +64,21 @@ const QUIPS: string[] = [
   "Saveloy's got more backbone.",
 
   // Weather / Solent
-  "Blown over like a windbreak in a Force 8.",
+  "Blown over like a windbreaker in a Force 8.",
   "Grey as the Solent, soft as a sponge.",
   "That hit had more bite than a Channel wind.",
   "Rain or shine — you're horizontal.",
   "Cloudier judgement than a misty morning on the pier.",
 
-  // Cocky / Spidey banter
-  "Friendly neighbourhood… wait, no. Unfriendly.",
-  "Does whatever a spider can — plus a right hook.",
-  "My spider-sense said you'd fold. It was right.",
-  "Thwip. Metaphorically. With fists.",
-  "Great power. Greater cheek.",
-  "Don't make me get the webs out. I haven't got any.",
-  "Your villain monologue needed work.",
-  "Bad guys finish last. You finished early.",
+  // Cocky banter (no cape required)
+  "Mouthy Southsea pest — that's me.",
+  "I do whatever a Pompey lad can — plus a right hook.",
+  "My gut said you'd fold. It was right.",
+  "Whoosh. Metaphorically. With fists.",
+  "Great fists. Greater cheek.",
+  "Don't make me get the deckchair out. For you.",
+  "Your tough-guy speech needed work.",
+  "Hard men finish last. You finished early.",
   "Another satisfied customer. Of unconsciousness.",
   "I'd say 'my work here is done' but there's more of you.",
 
@@ -126,15 +126,15 @@ const QUIPS: string[] = [
   "Wanted poster material. For you.",
   "The front's quieter already.",
 
-  // More Spidey / comic
-  "Excelsior! …is that still a thing?",
-  "Your origin story ends here.",
-  "Sidekick energy. Villain results.",
-  "I'm not saying I'm a hero. I'm just saying you're horizontal.",
-  "Power and responsibility. Mostly power just then.",
-  "Wall-crawler? Nah. Floor-provider.",
-  "That's a mid-credit stinger.",
-  "Post-credits scene: you snoring.",
+  // Show-off banter
+  "Encore? You're having a nap instead.",
+  "Your big entrance ends here.",
+  "All bark. No legs left.",
+  "I'm not saying I'm special. I'm just saying you're horizontal.",
+  "Fists first. Questions never.",
+  "No climbing needed. Just the floor.",
+  "That's a mid-stroll stinger.",
+  "Closing scene: you snoring on the shingle.",
 
   // More local texture
   "Gunwharf wouldn't let you in looking like that.",
@@ -153,7 +153,7 @@ const QUIPS: string[] = [
   "Lights out, Southsea.",
   "Pompey 1, ego 0.",
   "Night night, tough guy.",
-  "Horizontal hero.",
+  "Horizontal holiday.",
   "That's a wrap dinlo.",
   "Next!",
   "Too easy mush.",
@@ -177,7 +177,7 @@ const QUIPS: string[] = [
   // Extra variety
   "I'd say unlucky, but it was skill.",
   "You brought fists to a personality contest. And lost both.",
-  "Your mum's gonna ask who did that. Say a friendly neighbourhood pest.",
+  "Your mum's gonna ask who did that. Say a mouthy lad from Southsea.",
   "That's not a concussion — that's a lifestyle choice.",
   "Gravity's undefeated. I just helped.",
   "You blinked. I rearranged your evening.",

@@ -44,7 +44,7 @@ interface SeaCraft {
   bobAmp: number;
   kind: "kayak" | "jet" | "boat";
   /** Optional paddle / motion frames. */
-  frames?: [string, string];
+  frames?: string[];
   animPhase: number;
   animSpeed: number;
 }
@@ -91,11 +91,11 @@ const PASSING_TRAFFIC: TrafficSpec[] = [
   },
   {
     key: "traffic_van",
-    weight: 14,
+    weight: 12,
     speedMin: 150,
     speedMax: 230,
-    scaleMin: 1.15,
-    scaleMax: 1.32,
+    scaleMin: 1.22,
+    scaleMax: 1.38,
     pitch: 0.82,
   },
   {
@@ -123,11 +123,21 @@ const PASSING_TRAFFIC: TrafficSpec[] = [
   {
     key: "traffic_bus",
     weight: 6,
-    speedMin: 110,
-    speedMax: 170,
-    scaleMin: 1.05,
-    scaleMax: 1.2,
+    speedMin: 100,
+    speedMax: 155,
+    scaleMin: 1.48,
+    scaleMax: 1.62,
     pitch: 0.68,
+    noTint: true,
+  },
+  {
+    key: "traffic_rubbish",
+    weight: 5,
+    speedMin: 95,
+    speedMax: 145,
+    scaleMin: 1.42,
+    scaleMax: 1.56,
+    pitch: 0.62,
     noTint: true,
   },
 ];
@@ -366,6 +376,27 @@ export class ParallaxBeach {
     return item;
   }
 
+  /**
+   * Target on-screen height for a beach person at this foot Y.
+   * Foreshore (near the sea) is small; nearer the fight lane is larger —
+   * still under in-lane fighters so scenery never dominates the scrap.
+   */
+  private beachPersonWantPx(screenY: number): number {
+    const farY = GAME_HEIGHT * 0.32 + 70;
+    const nearY = LANE.minY + 8;
+    const t = Phaser.Math.Clamp(
+      (screenY - farY) / Math.max(1, nearY - farY),
+      0,
+      1,
+    );
+    return 17 + t * 17; // ~17px far → ~34px near
+  }
+
+  /** Phaser scale so a doodle figure of `figurePx` tall reads at the right depth. */
+  private beachPersonScale(screenY: number, figurePx: number): number {
+    return this.beachPersonWantPx(screenY) / Math.max(8, figurePx);
+  }
+
   private build(): void {
     const s = this.scene;
     const viewW = this.viewW;
@@ -476,64 +507,41 @@ export class ParallaxBeach {
       depth: -25,
     });
 
-    // Distant beach folk — factor ~0.5 so they drift slower than the prom
-    this.addLandmark("distant_walker", 800, GAME_HEIGHT * 0.48, 0.5, {
-      scale: 0.7,
-      alpha: 0.55,
-      depth: -11,
-    });
-    this.addLandmark("distant_walker", 1800, GAME_HEIGHT * 0.475, 0.48, {
-      scale: 0.65,
-      alpha: 0.5,
-      depth: -11,
-    });
-    // Feet on the wet foreshore — same parallax as the sea so they don't skate
+    // Foreshore fishermen + beach BBQ — same parallax as the sea so they don't skate
     // on the waterline. worldX = screenX + cameraAnchor * factor.
     const SEA_PX = 0.38;
     const fishermanY = seaY + 78;
     const fishWorld = (cameraAnchor: number, screenX: number) =>
       screenX + cameraAnchor * SEA_PX;
+    // Fisherman sheet person ≈ 42px tall — must shrink hard on the foreshore
+    // or he reads bigger than the BBQ party further up the beach.
+    const fishScale = this.beachPersonScale(fishermanY, 42);
     this.addLandmark(
       "distant_fisherman_0",
       fishWorld(2600, 380),
       fishermanY,
       SEA_PX,
       {
-        scale: 0.95,
+        scale: fishScale,
         alpha: 0.72,
         depth: -11,
         frames: ["distant_fisherman_0", "distant_fisherman_1"],
         animSpeed: 1.1,
       },
     );
-    this.addLandmark("distant_walker", 3800, GAME_HEIGHT * 0.47, 0.5, {
-      scale: 0.7,
-      alpha: 0.5,
-      depth: -11,
-    });
     this.addLandmark("beach_bbq_0", 2100, GAME_HEIGHT * 0.505, 0.62, {
-      scale: 0.72,
+      scale: this.beachPersonScale(GAME_HEIGHT * 0.505, 34),
       alpha: 0.9,
       depth: -10,
       frames: ["beach_bbq_0", "beach_bbq_1", "beach_bbq_2", "beach_bbq_3"],
       animSpeed: 1.55,
     });
-    this.addLandmark("distant_walker", 5000, GAME_HEIGHT * 0.485, 0.5, {
-      scale: 0.75,
-      alpha: 0.55,
-      depth: -11,
-    });
     this.addLandmark("beach_bbq_0", 5200, GAME_HEIGHT * 0.5, 0.6, {
-      scale: 0.68,
+      scale: this.beachPersonScale(GAME_HEIGHT * 0.5, 34),
       alpha: 0.88,
       depth: -10,
       frames: ["beach_bbq_0", "beach_bbq_1", "beach_bbq_2", "beach_bbq_3"],
       animSpeed: 1.35,
-    });
-    this.addLandmark("distant_walker", 6100, GAME_HEIGHT * 0.475, 0.5, {
-      scale: 0.7,
-      alpha: 0.5,
-      depth: -11,
     });
     this.addLandmark(
       "distant_fisherman_0",
@@ -541,7 +549,7 @@ export class ParallaxBeach {
       fishermanY,
       SEA_PX,
       {
-        scale: 0.9,
+        scale: fishScale * 0.96,
         alpha: 0.7,
         depth: -11,
         frames: ["distant_fisherman_0", "distant_fisherman_1"],
@@ -551,13 +559,8 @@ export class ParallaxBeach {
 
     // Past South Parade — beach continues on the fight-lane parallax (factor 1)
     // so these actually sit where you walk (slower factors never reach the screen).
-    this.addLandmark("distant_walker", 7800, LANE.minY + 8, 1, {
-      scale: 0.85,
-      alpha: 0.7,
-      depth: -9,
-    });
     this.addLandmark("beach_bbq_0", 8100, LANE.minY + 6, 1, {
-      scale: 0.78,
+      scale: this.beachPersonScale(LANE.minY + 6, 34),
       alpha: 0.92,
       depth: -9,
       frames: ["beach_bbq_0", "beach_bbq_1", "beach_bbq_2", "beach_bbq_3"],
@@ -570,7 +573,7 @@ export class ParallaxBeach {
       fishermanY,
       SEA_PX,
       {
-        scale: 1.0,
+        scale: fishScale * 1.05,
         alpha: 0.85,
         depth: -9,
         frames: ["distant_fisherman_0", "distant_fisherman_1"],
@@ -592,7 +595,7 @@ export class ParallaxBeach {
       scale: 1.55,
       depth: -7,
       frames: ["tower_kids_0", "tower_kids_1", "tower_kids_2", "tower_kids_3"],
-      animSpeed: 1.35,
+      animSpeed: 1.15,
     });
     this.addLandmark("landmark_sea_defences", 9600, LANE.minY + 14, 1, {
       scale: 1.4,
@@ -603,19 +606,19 @@ export class ParallaxBeach {
       depth: -8,
     });
 
-    // Hovertravel — slip replaces a beach cut down to the Solent (top ≈ seaY)
+    // Hovertravel — slip + hut in front; craft (inc. cushion) behind the apron fence
     const hoverX = 11200;
     const hoverY = LANE.minY + 10;
     const hoverScale = 1.05;
-    this.addLandmark("landmark_hovercraft_port", hoverX, LANE.minY + 8, 1, {
-      scale: 1.2,
-      depth: -8,
-    });
     this.hoverCraft = this.addLandmark("hovercraft_0", hoverX, hoverY, 1, {
       scale: hoverScale,
-      depth: -7,
+      depth: -9,
       frames: ["hovercraft_0", "hovercraft_1"],
       animSpeed: 8.5,
+    });
+    this.addLandmark("landmark_hovercraft_port", hoverX, LANE.minY + 8, 1, {
+      scale: 1.2,
+      depth: -7,
     });
     // Stern intakes facing the scrap — fight-lane hazards (not the sprite fan centres
     // high on the craft, which sit ~180px above the promenade and never catch a toss).
@@ -633,12 +636,9 @@ export class ParallaxBeach {
     });
 
     // Stretch past Hovertravel before the funfair
-    this.addLandmark("distant_walker", 12000, LANE.minY + 8, 1, {
-      scale: 0.95,
-      depth: -9,
-    });
     this.addLandmark("beach_bbq_0", 12450, LANE.minY + 6, 1, {
-      scale: 0.76,
+      scale: this.beachPersonScale(LANE.minY + 6, 34),
+      alpha: 0.9,
       depth: -9,
       frames: ["beach_bbq_0", "beach_bbq_1", "beach_bbq_2", "beach_bbq_3"],
       animSpeed: 1.25,
@@ -733,16 +733,16 @@ export class ParallaxBeach {
     const kerbY = ROAD.top - 2;
     const raw: DestructibleSpawn[] = [
       // Cars on the road — sized to read next to fighters (~2.5 people long)
-      { key: "car", x: 720, y: GAME_HEIGHT - 8, rx: 92, ry: 32, scale: 1.28, depth: 22 },
-      { key: "car", x: 2200, y: GAME_HEIGHT - 10, rx: 92, ry: 32, scale: 1.26, depth: 22 },
-      { key: "car", x: 4100, y: GAME_HEIGHT - 8, rx: 92, ry: 32, scale: 1.3, depth: 22 },
-      { key: "car", x: 5800, y: GAME_HEIGHT - 9, rx: 92, ry: 32, scale: 1.27, depth: 22 },
-      { key: "car", x: 7200, y: GAME_HEIGHT - 8, rx: 92, ry: 32, scale: 1.28, depth: 22 },
-      { key: "car", x: 8600, y: GAME_HEIGHT - 9, rx: 92, ry: 32, scale: 1.26, depth: 22 },
-      { key: "car", x: 10200, y: GAME_HEIGHT - 8, rx: 92, ry: 32, scale: 1.29, depth: 22 },
-      { key: "car", x: 11200, y: GAME_HEIGHT - 10, rx: 92, ry: 32, scale: 1.27, depth: 22 },
+      { key: "car", x: 720, y: GAME_HEIGHT - 8, rx: 70, ry: 22, scale: 1.28, depth: 22 },
+      { key: "car", x: 2200, y: GAME_HEIGHT - 10, rx: 70, ry: 22, scale: 1.26, depth: 22 },
+      { key: "car", x: 4100, y: GAME_HEIGHT - 8, rx: 70, ry: 22, scale: 1.3, depth: 22 },
+      { key: "car", x: 5800, y: GAME_HEIGHT - 9, rx: 70, ry: 22, scale: 1.27, depth: 22 },
+      { key: "car", x: 7200, y: GAME_HEIGHT - 8, rx: 70, ry: 22, scale: 1.28, depth: 22 },
+      { key: "car", x: 8600, y: GAME_HEIGHT - 9, rx: 70, ry: 22, scale: 1.26, depth: 22 },
+      { key: "car", x: 10200, y: GAME_HEIGHT - 8, rx: 70, ry: 22, scale: 1.29, depth: 22 },
+      { key: "car", x: 11200, y: GAME_HEIGHT - 10, rx: 70, ry: 22, scale: 1.27, depth: 22 },
       // Steel coffee van on the road (Eastney end) — solid footprint, not climbable
-      { key: "coffee_van", x: 300, y: GAME_HEIGHT - 8, rx: 124, ry: 48, scale: 1.32, depth: 22 },
+      { key: "coffee_van", x: 300, y: GAME_HEIGHT - 8, rx: 98, ry: 36, scale: 1.32, depth: 22 },
       // Keep clear of the wake-up stroll onto the front (intro lands ~320, 0.68)
       { key: "prop_bin", x: 520, y: LANE.minY + 55, rx: 18, ry: 12, depth: 12 },
       { key: "prop_bollard", x: 680, y: kerbY, rx: 14, ry: 10, depth: 20 },
@@ -845,13 +845,16 @@ export class ParallaxBeach {
     const goingRight = Math.random() < 0.55;
     const speed =
       spec.speedMin + Math.random() * (spec.speedMax - spec.speedMin);
-    const worldX = goingRight
-      ? cameraScrollX - 280
-      : cameraScrollX + this.viewW + 280;
-    // Closer to camera than the parked motors (those sit ~GAME_HEIGHT - 8)
-    const y = GAME_HEIGHT - 2 - Math.random() * 4;
     const scale =
       spec.scaleMin + Math.random() * (spec.scaleMax - spec.scaleMin);
+    // Big motors need more off-screen lead-in so they don't pop in half-visible
+    const lead =
+      spec.key === "traffic_bus" || spec.key === "traffic_rubbish" ? 420 : 280;
+    const worldX = goingRight
+      ? cameraScrollX - lead
+      : cameraScrollX + this.viewW + lead;
+    // Closer to camera than the parked motors (those sit ~GAME_HEIGHT - 8)
+    const y = GAME_HEIGHT - 2 - Math.random() * 4;
     const image = this.scene.add
       .image(worldX, y, spec.key)
       .setOrigin(0.5, 1)
@@ -894,7 +897,14 @@ export class ParallaxBeach {
     const key =
       kind === "kayak" ? "sea_kayak_0" : kind === "jet" ? "sea_jetski" : "sea_boat";
     if (!this.scene.textures.exists(key)) return;
-    if (kind === "kayak" && !this.scene.textures.exists("sea_kayak_1")) return;
+    if (
+      kind === "kayak" &&
+      (!this.scene.textures.exists("sea_kayak_1") ||
+        !this.scene.textures.exists("sea_kayak_2") ||
+        !this.scene.textures.exists("sea_kayak_3"))
+    ) {
+      return;
+    }
 
     const goingRight = Math.random() < 0.5;
     const midSeaY = GAME_HEIGHT * (0.34 + Math.random() * 0.06);
@@ -923,9 +933,12 @@ export class ParallaxBeach {
       bobPhase: Math.random() * Math.PI * 2,
       bobAmp: kind === "jet" ? 2.5 : kind === "kayak" ? 2.2 : 1.8,
       kind,
-      frames: kind === "kayak" ? ["sea_kayak_0", "sea_kayak_1"] : undefined,
+      frames:
+        kind === "kayak"
+          ? ["sea_kayak_0", "sea_kayak_1", "sea_kayak_2", "sea_kayak_3"]
+          : undefined,
       animPhase: Math.random() * Math.PI * 2,
-      animSpeed: kind === "kayak" ? 3.4 : 0,
+      animSpeed: kind === "kayak" ? 5.2 : 0,
     });
   }
 
@@ -1028,7 +1041,7 @@ export class ParallaxBeach {
       c.image.y = c.y + Math.sin(c.bobPhase) * c.bobAmp;
       if (c.frames && c.animSpeed > 0) {
         c.animPhase += dt * c.animSpeed;
-        const frame = c.frames[Math.floor(c.animPhase) % 2]!;
+        const frame = c.frames[Math.floor(c.animPhase) % c.frames.length]!;
         if (c.image.texture.key !== frame && this.scene.textures.exists(frame)) {
           const flipX = c.image.flipX;
           c.image.setTexture(frame);
@@ -1064,7 +1077,7 @@ export class ParallaxBeach {
           car.image.setFlipX(flipX);
         }
       }
-      const margin = 280;
+      const margin = 420;
       const off =
         car.worldX < cameraScrollX - margin ||
         car.worldX > cameraScrollX + this.viewW + margin;
@@ -1108,7 +1121,7 @@ export class ParallaxBeach {
       .image(startX, y, "sky_spitfire")
       .setScrollFactor(0)
       .setDepth(-36)
-      .setScale(0.85 + Math.random() * 0.25)
+      .setScale(0.62 + Math.random() * 0.18)
       .setFlipX(!goingRight)
       .setAlpha(0.88);
     this.spitfire = {

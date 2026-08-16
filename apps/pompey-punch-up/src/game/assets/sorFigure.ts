@@ -3125,14 +3125,40 @@ export function drawJetSki(ctx: CanvasRenderingContext2D, w: number, h: number):
   }, "#1a1410", "#1a1410", 1.4);
 }
 
-/** Solo kayaker — frame 0 paddle forward, frame 1 paddle back. Facing right. */
+/** Solo kayaker — 4-frame paddle cycle. Facing right. */
 export function drawKayak(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
   frame = 0,
 ): void {
-  const paddleFwd = frame === 0;
+  // 0 catch → 1 mid-pull → 2 reverse catch → 3 mid-recover
+  const phase = ((frame % 4) + 4) % 4;
+  // Shaft angle: swings ~±50° through the stroke
+  const ang = (-0.95 + phase * 0.55) % (Math.PI * 2);
+  const cx = w * 0.48;
+  const cy = h * 0.5;
+  const shaftLen = w * 0.42;
+  const tipA = {
+    x: cx + Math.cos(ang) * shaftLen,
+    y: cy + Math.sin(ang) * shaftLen * 0.85,
+  };
+  const tipB = {
+    x: cx - Math.cos(ang) * shaftLen,
+    y: cy - Math.sin(ang) * shaftLen * 0.85,
+  };
+  // Lean toward the dipped blade
+  const lean = tipA.y > tipB.y ? 3 : -3;
+  const handT = 0.28;
+  const handL = {
+    x: tipA.x + (tipB.x - tipA.x) * handT,
+    y: tipA.y + (tipB.y - tipA.y) * handT,
+  };
+  const handR = {
+    x: tipA.x + (tipB.x - tipA.x) * (1 - handT),
+    y: tipA.y + (tipB.y - tipA.y) * (1 - handT),
+  };
+
   drawSeaGel(ctx, w * 0.5, h * 0.74, w * 0.42);
   strokeFill(ctx, () => {
     // Hull
@@ -3152,8 +3178,7 @@ export function drawKayak(
     ctx.fill();
     ctx.stroke();
 
-    // Paddler — leans with the stroke so the frames read at distance
-    const lean = paddleFwd ? -3 : 3;
+    // Paddler — leans with the stroke
     ctx.fillStyle = "#2a6db0";
     ctx.beginPath();
     ctx.moveTo(w * 0.42 + lean, h * 0.4);
@@ -3163,7 +3188,6 @@ export function drawKayak(
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    // Head + lifejacket hint
     ctx.fillStyle = "#e8c4a0";
     ctx.beginPath();
     ctx.arc(w * 0.48 + lean, h * 0.32, 4.2, 0, Math.PI * 2);
@@ -3172,11 +3196,9 @@ export function drawKayak(
     ctx.fillStyle = "#c02828";
     ctx.fillRect(w * 0.43 + lean, h * 0.42, 10, 5);
 
-    // Arms reaching the shaft
+    // Arms
     ctx.strokeStyle = "#e8c4a0";
     ctx.lineWidth = 2.2;
-    const handL = { x: w * (paddleFwd ? 0.34 : 0.38), y: h * (paddleFwd ? 0.4 : 0.56) };
-    const handR = { x: w * (paddleFwd ? 0.62 : 0.58), y: h * (paddleFwd ? 0.56 : 0.4) };
     ctx.beginPath();
     ctx.moveTo(w * 0.46 + lean, h * 0.46);
     ctx.lineTo(handL.x, handL.y);
@@ -3184,31 +3206,23 @@ export function drawKayak(
     ctx.lineTo(handR.x, handR.y);
     ctx.stroke();
 
-    // Double paddle — big diagonal swing (must differ clearly between frames)
-    const tipA = paddleFwd
-      ? { x: w * 0.08, y: h * 0.18 }
-      : { x: w * 0.1, y: h * 0.88 };
-    const tipB = paddleFwd
-      ? { x: w * 0.92, y: h * 0.88 }
-      : { x: w * 0.9, y: h * 0.18 };
+    // Double paddle
     ctx.strokeStyle = "#5a4030";
     ctx.lineWidth = 2.4;
     ctx.beginPath();
     ctx.moveTo(tipA.x, tipA.y);
     ctx.lineTo(tipB.x, tipB.y);
     ctx.stroke();
-    // Blades
     ctx.fillStyle = "#3a6db0";
     ctx.beginPath();
-    ctx.ellipse(tipA.x, tipA.y, 6.5, 3.2, paddleFwd ? -0.85 : 0.85, 0, Math.PI * 2);
+    ctx.ellipse(tipA.x, tipA.y, 6.5, 3.2, ang - 0.4, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
     ctx.beginPath();
-    ctx.ellipse(tipB.x, tipB.y, 6.5, 3.2, paddleFwd ? 0.85 : -0.85, 0, Math.PI * 2);
+    ctx.ellipse(tipB.x, tipB.y, 6.5, 3.2, ang + Math.PI - 0.4, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    // Hands on shaft
     ctx.fillStyle = "#e8c4a0";
     ctx.beginPath();
     ctx.arc(handL.x, handL.y, 2.4, 0, Math.PI * 2);
@@ -3216,13 +3230,15 @@ export function drawKayak(
     ctx.fill();
 
     // Splash at the dipped blade
-    const splash = paddleFwd ? tipB : tipA;
-    ctx.strokeStyle = "rgba(220,236,244,0.75)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(splash.x - 5, splash.y - 2);
-    ctx.quadraticCurveTo(splash.x, splash.y - 8, splash.x + 5, splash.y - 2);
-    ctx.stroke();
+    const splash = tipA.y > tipB.y ? tipA : tipB;
+    if (splash.y > h * 0.62) {
+      ctx.strokeStyle = "rgba(220,236,244,0.75)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(splash.x - 5, splash.y - 2);
+      ctx.quadraticCurveTo(splash.x, splash.y - 8, splash.x + 5, splash.y - 2);
+      ctx.stroke();
+    }
   }, "#1a1410", "#1a1410", 1.4);
 }
 

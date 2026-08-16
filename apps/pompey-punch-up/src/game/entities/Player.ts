@@ -75,6 +75,12 @@ export class Player extends Fighter {
   private readonly attackChordMs = 70;
   /** Keep a buffered J/K until recovery frees you (uppers are ~440ms). */
   private readonly attackQueueExpireMs = 720;
+  /**
+   * After a run/skate attack, ignore held / key-repeat J or K until release.
+   * Otherwise holding punch chains headbutts forever.
+   */
+  private rushPunchNeedsRelease = false;
+  private rushKickNeedsRelease = false;
 
   /** Ducked behind a motor / bin — patrols walk past. */
   hiding = false;
@@ -453,6 +459,10 @@ export class Player extends Fighter {
       Phaser.Input.Keyboard.JustDown(this.keys.kick) || this.pad.kickJust;
     const lowJust = Phaser.Input.Keyboard.JustDown(this.keys.low);
 
+    // Held / OS key-repeat must not re-arm a rush attack
+    if (!(this.keys.punch.isDown || this.pad.punch)) this.rushPunchNeedsRelease = false;
+    if (!(this.keys.kick.isDown || this.pad.kick)) this.rushKickNeedsRelease = false;
+
     // Queue J/K so near-simultaneous taps still read as a back attack
     if (punchJust) this.punchQueuedAt = now;
     if (kickJust) this.kickQueuedAt = now;
@@ -621,15 +631,23 @@ export class Player extends Fighter {
         void chipSfx.whoosh(true);
       }
     } else if (kickCommit && (wantRun || this.isRushing)) {
-      // Run / skate + K — slide through a line
-      if (this.trySlide(now)) {
+      // Run / skate + K — slide through a line (one per press)
+      if (this.rushKickNeedsRelease) {
+        this.kickQueuedAt = 0;
+      } else if (this.trySlide(now)) {
+        this.rushKickNeedsRelease = true;
         this.comboStep = 0;
         this.kickQueuedAt = 0;
         this.punchQueuedAt = 0;
         void chipSfx.whoosh(true);
       }
     } else if (punchCommit) {
-      if (this.tryComboPunch(now, wantRun || this.isRushing)) {
+      const rushing = wantRun || this.isRushing;
+      if (rushing && this.rushPunchNeedsRelease) {
+        // Still holding J after a headbutt / rush swing — don't loop
+        this.punchQueuedAt = 0;
+      } else if (this.tryComboPunch(now, rushing)) {
+        if (rushing) this.rushPunchNeedsRelease = true;
         this.punchQueuedAt = 0;
         this.kickQueuedAt = 0;
         void chipSfx.whoosh(false);
