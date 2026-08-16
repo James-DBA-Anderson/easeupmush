@@ -636,14 +636,15 @@ export class Enemy extends Fighter {
         return;
       }
 
+      // Soft floor — stay limp. Don't face/chase (that mirrored the KO doodle
+      // when the player jumped past). Airborne toss flight still animates above.
       if (
         this.structure.downed &&
         now < this.structure.groundedUntil &&
-        !this.airborne &&
         !this.isBeingTossed
       ) {
         if (this.callActive) this.finishCall(this.callSaidWhere);
-        this.action = "down";
+        if (!this.airborne) this.action = "down";
         return;
       }
 

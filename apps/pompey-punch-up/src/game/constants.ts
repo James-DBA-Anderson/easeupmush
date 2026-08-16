@@ -28,6 +28,15 @@ export const ROAD = {
 } as const;
 
 /**
+ * Draw-order bands (Phaser depth).
+ * Fight-lane folk sort by laneY inside [FIGHT_DEPTH_BASE .. PASSING_TRAFFIC_DEPTH).
+ * Passing motors sit on the road in front of the promenade — always above people.
+ */
+export const FIGHT_DEPTH_BASE = 10;
+/** Ambient traffic — closer to camera than anyone on the fight strip. */
+export const PASSING_TRAFFIC_DEPTH = 58;
+
+/**
  * Where civilians amble — promenade only, not the road.
  * Fight lane still includes the road for the player / scraps.
  */

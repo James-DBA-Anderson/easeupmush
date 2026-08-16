@@ -775,6 +775,15 @@ export class Civilian extends Fighter {
         this.vengefulTarget = null;
         return;
       }
+      // Soft floor — don't wander/face (mirrors the KO doodle when jumped past)
+      if (
+        this.structure.downed &&
+        now < this.structure.groundedUntil &&
+        !this.isBeingTossed
+      ) {
+        if (!this.airborne) this.action = "down";
+        return;
+      }
       // Clinched by a grab — don't wander or swing until tossed
       if (this.heldBy) {
         this.action = "down";

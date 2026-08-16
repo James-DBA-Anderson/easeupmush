@@ -353,24 +353,9 @@ export class Structure {
 
     const t = this.toughness;
 
-    // Soft temporary floor — punches wear them; only a boot (or wreck) finishes.
-    // Without this, open+chin upgrades from resolveCombat called finish() and
-    // permanently planted fresh powerbomb victims mid-air.
+    // Soft temporary floor — only a stomp / Swanton (boot_head) lands; other strikes miss
     if (this.downed && hit.kind !== "boot_head") {
-      this.wind = clamp(this.wind - (0.05 + hit.power * 0.07) / t);
-      this.balance = clamp(this.balance - (0.04 + hit.power * 0.05) / t);
-      this.guard = clamp(this.guard - (0.06 * hit.power) / t);
-      if (hit.bodyPart === "head" || hit.bodyPart === "face" || hit.critical) {
-        this.facePain = clamp(this.facePain + 0.12 + hit.power * 0.1);
-      } else {
-        this.gutPain = clamp(this.gutPain + 0.1 + hit.power * 0.08);
-      }
-      const wornNow = this.wornFactor();
-      if (wornNow >= 0.58 && (hit.power >= 0.55 || hit.critical)) {
-        return this.finish(hit, hit.critical || hit.kind === "headbutt");
-      }
-      this.createOpening(hit.now, 180);
-      return "flinch";
+      return "blocked";
     }
 
     const open = hit.onOpening || this.isOpen(hit.now) || this.downed;

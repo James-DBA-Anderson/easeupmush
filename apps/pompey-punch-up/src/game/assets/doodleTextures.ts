@@ -23,6 +23,7 @@ import {
   type SorPose,
 } from "./sorFigure";
 import { POMPEY_LOOKS, type PersonLook } from "./pompeyLooks";
+import { drawTitleLogo, TITLE_LOGO_H, TITLE_LOGO_W } from "./titleLogo";
 
 /** Procedural SOR2-inspired doodle textures — swap for scanned art later. */
 
@@ -48,10 +49,13 @@ function wobble(n: number, amp = 2): number {
 
 export function generateDoodleTextures(scene: Phaser.Scene): void {
   // Bump this when poses/assets change so hot reload regenerates.
-  const VERSION = "doodle_v109";
+  const VERSION = "doodle_v112";
   if (scene.textures.exists(VERSION)) return;
   if (
     scene.textures.exists("sky") ||
+    scene.textures.exists("doodle_v111") ||
+    scene.textures.exists("doodle_v110") ||
+    scene.textures.exists("doodle_v109") ||
     scene.textures.exists("doodle_v108") ||
     scene.textures.exists("doodle_v107") ||
     scene.textures.exists("doodle_v103") ||
@@ -166,6 +170,10 @@ export function generateDoodleTextures(scene: Phaser.Scene): void {
           "car_dent1",
           "car_dent2",
           "car_wrecked",
+          "traffic_hatch",
+          "traffic_van",
+          "traffic_bike",
+          "traffic_bus",
           "prop_bin",
           "prop_bin_green",
           "prop_bin_broken",
@@ -190,6 +198,9 @@ export function generateDoodleTextures(scene: Phaser.Scene): void {
           "kids_park",
           "beach_bbq",
           "beach_bbq_1",
+          "beach_bbq_0",
+          "beach_bbq_2",
+          "beach_bbq_3",
           "distant_fisherman_0",
           "distant_fisherman_1",
           "title_logo",
@@ -236,6 +247,7 @@ export function generateDoodleTextures(scene: Phaser.Scene): void {
   makeSolentFort(scene);
   makeForeground(scene);
   makeCar(scene);
+  makePassingTraffic(scene);
   makeFoodStalls(scene);
   makeWeapons(scene);
   makeSceneryExtras(scene);
@@ -246,86 +258,8 @@ export function generateDoodleTextures(scene: Phaser.Scene): void {
 
 /** Streets of Rage–style chrome italic wordmark for the title screen. */
 function makeTitleLogo(scene: Phaser.Scene): void {
-  const w = 820;
-  const h = 178;
-  const tex = scene.textures.createCanvas("title_logo", w, h)!;
-  const ctx = tex.getContext();
-  ctx.clearRect(0, 0, w, h);
-
-  const lines: { text: string; size: number; y: number }[] = [
-    { text: "POMPEY", size: 78, y: 62 },
-    { text: "PUNCH-UP", size: 68, y: 136 },
-  ];
-
-  const paint = (
-    mode: "fill" | "stroke",
-    ox: number,
-    oy: number,
-  ): void => {
-    for (const line of lines) {
-      ctx.font = `900 ${line.size}px Impact, "Arial Black", "Helvetica Neue", sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.letterSpacing = "-2px";
-      const x = w * 0.5 - 28 + ox;
-      const y = line.y + oy;
-      if (mode === "fill") ctx.fillText(line.text, x, y);
-      else ctx.strokeText(line.text, x, y);
-    }
-  };
-
-  ctx.save();
-  // Hard italic lean — classic 16-bit brawler wordmark
-  ctx.transform(1, 0, -0.32, 1, 78, 0);
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-  ctx.miterLimit = 2;
-
-  // Deep navy extrusion (fake 3D block)
-  for (let i = 10; i >= 1; i--) {
-    const t = i / 10;
-    ctx.fillStyle = t > 0.55 ? "#061018" : "#0c1c30";
-    paint("fill", i * 1.15, i * 1.35);
-  }
-
-  // Hot outer rim (arcade punch)
-  ctx.strokeStyle = "#ff2a1a";
-  ctx.lineWidth = 18;
-  paint("stroke", 0, 0);
-  ctx.strokeStyle = "#ffcc33";
-  ctx.lineWidth = 12;
-  paint("stroke", 0, 0);
-
-  // Heavy black outline
-  ctx.strokeStyle = "#050508";
-  ctx.lineWidth = 8;
-  paint("stroke", 0, 0);
-
-  // Chrome / steel fill with blue Pompey flash
-  const chrome = ctx.createLinearGradient(0, 12, 0, 168);
-  chrome.addColorStop(0, "#ffffff");
-  chrome.addColorStop(0.18, "#dcefff");
-  chrome.addColorStop(0.34, "#7eb0e0");
-  chrome.addColorStop(0.48, "#f4f8ff");
-  chrome.addColorStop(0.58, "#3a6ea5");
-  chrome.addColorStop(0.74, "#c5ddf5");
-  chrome.addColorStop(0.88, "#1e4a7a");
-  chrome.addColorStop(1, "#9bb8d4");
-  ctx.fillStyle = chrome;
-  paint("fill", 0, 0);
-
-  // Crisp inner edge highlight
-  ctx.strokeStyle = "rgba(255,255,255,0.55)";
-  ctx.lineWidth = 2.2;
-  paint("stroke", -0.5, -1.2);
-
-  // Top ridge glint (SoR chrome catch-light)
-  ctx.strokeStyle = "rgba(255,255,255,0.7)";
-  ctx.lineWidth = 1.4;
-  paint("stroke", -1.2, -2.4);
-
-  ctx.restore();
-
+  const tex = scene.textures.createCanvas("title_logo", TITLE_LOGO_W, TITLE_LOGO_H)!;
+  drawTitleLogo(tex.getContext(), TITLE_LOGO_W, TITLE_LOGO_H);
   tex.refresh();
 }
 
@@ -376,13 +310,29 @@ function makeSceneryExtras(scene: Phaser.Scene): void {
     tex.refresh();
   }
   {
-    const tex = scene.textures.createCanvas("beach_bbq", 72, 64)!;
-    drawBeachBbq(tex.getContext(), 72, 64, 0);
+    const tex = scene.textures.createCanvas("beach_bbq_0", 120, 96)!;
+    drawBeachBbq(tex.getContext(), 120, 96, 0);
     tex.refresh();
   }
   {
-    const tex = scene.textures.createCanvas("beach_bbq_1", 72, 64)!;
-    drawBeachBbq(tex.getContext(), 72, 64, 10);
+    const tex = scene.textures.createCanvas("beach_bbq_1", 120, 96)!;
+    drawBeachBbq(tex.getContext(), 120, 96, 1);
+    tex.refresh();
+  }
+  {
+    const tex = scene.textures.createCanvas("beach_bbq_2", 120, 96)!;
+    drawBeachBbq(tex.getContext(), 120, 96, 2);
+    tex.refresh();
+  }
+  {
+    const tex = scene.textures.createCanvas("beach_bbq_3", 120, 96)!;
+    drawBeachBbq(tex.getContext(), 120, 96, 3);
+    tex.refresh();
+  }
+  // Alias for landmarks that still seed from "beach_bbq"
+  {
+    const tex = scene.textures.createCanvas("beach_bbq", 120, 96)!;
+    drawBeachBbq(tex.getContext(), 120, 96, 0);
     tex.refresh();
   }
   {
@@ -3662,6 +3612,243 @@ function makeCar(scene: Phaser.Scene): void {
   }
 }
 
+/** Ambient road passers — silhouettes distinct from the climbable parkers. */
+function makePassingTraffic(scene: Phaser.Scene): void {
+  const wheel = (
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    r: number,
+  ) => {
+    ctx.fillStyle = "#1a1410";
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#888";
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.38, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  const shadow = (
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    rx: number,
+  ) => {
+    ctx.fillStyle = "rgba(0,0,0,0.2)";
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  // Compact hatch — stubbier roof, short boot
+  {
+    const w = 200;
+    const h = 100;
+    const tex = scene.textures.createCanvas("traffic_hatch", w, h)!;
+    const ctx = tex.getContext();
+    ctx.clearRect(0, 0, w, h);
+    scratchStroke(ctx, () => {
+      shadow(ctx, w / 2, h - 4, 78);
+      ctx.fillStyle = "#4a6a7a";
+      ctx.beginPath();
+      ctx.moveTo(12, 72);
+      ctx.lineTo(28, 48);
+      ctx.lineTo(55, 42);
+      ctx.lineTo(78, 24);
+      ctx.lineTo(145, 24);
+      ctx.lineTo(168, 44);
+      ctx.lineTo(188, 52);
+      ctx.lineTo(190, 78);
+      ctx.lineTo(12, 78);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#9ec4d8";
+      ctx.beginPath();
+      ctx.moveTo(86, 30);
+      ctx.lineTo(138, 30);
+      ctx.lineTo(152, 48);
+      ctx.lineTo(92, 48);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(62, 48);
+      ctx.lineTo(84, 30);
+      ctx.lineTo(88, 48);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      wheel(ctx, 48, 78, 14);
+      wheel(ctx, 148, 78, 14);
+      ctx.fillStyle = "#e8d080";
+      ctx.fillRect(12, 58, 10, 10);
+      ctx.strokeRect(12, 58, 10, 10);
+      ctx.fillStyle = "#c04040";
+      ctx.fillRect(178, 58, 9, 10);
+      ctx.strokeRect(178, 58, 9, 10);
+    }, "#1a1410", 2.4);
+    tex.refresh();
+  }
+
+  // White van — high box, Portsmouth tradesman energy
+  {
+    const w = 260;
+    const h = 130;
+    const tex = scene.textures.createCanvas("traffic_van", w, h)!;
+    const ctx = tex.getContext();
+    ctx.clearRect(0, 0, w, h);
+    scratchStroke(ctx, () => {
+      shadow(ctx, w / 2, h - 4, 100);
+      ctx.fillStyle = "#d8dce0";
+      ctx.beginPath();
+      ctx.moveTo(14, 88);
+      ctx.lineTo(30, 38);
+      ctx.lineTo(70, 28);
+      ctx.lineTo(210, 28);
+      ctx.lineTo(238, 42);
+      ctx.lineTo(246, 96);
+      ctx.lineTo(14, 96);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Cab window
+      ctx.fillStyle = "#7aa0b8";
+      ctx.beginPath();
+      ctx.moveTo(42, 40);
+      ctx.lineTo(72, 34);
+      ctx.lineTo(78, 62);
+      ctx.lineTo(48, 64);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Side panel seam
+      ctx.beginPath();
+      ctx.moveTo(88, 32);
+      ctx.lineTo(88, 92);
+      ctx.stroke();
+      wheel(ctx, 58, 96, 16);
+      wheel(ctx, 198, 96, 16);
+      ctx.fillStyle = "#e8d080";
+      ctx.fillRect(14, 70, 12, 12);
+      ctx.strokeRect(14, 70, 12, 12);
+      ctx.fillStyle = "#c04040";
+      ctx.fillRect(234, 70, 10, 12);
+      ctx.strokeRect(234, 70, 10, 12);
+    }, "#1a1410", 2.5);
+    tex.refresh();
+  }
+
+  // Motorbike — longer, lower
+  {
+    const w = 140;
+    const h = 85;
+    const tex = scene.textures.createCanvas("traffic_bike", w, h)!;
+    const ctx = tex.getContext();
+    ctx.clearRect(0, 0, w, h);
+    scratchStroke(ctx, () => {
+      shadow(ctx, w / 2, h - 3, 52);
+      // Rider lean
+      ctx.fillStyle = "#2a3040";
+      ctx.beginPath();
+      ctx.ellipse(68, 34, 11, 16, -0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#c4a882";
+      ctx.beginPath();
+      ctx.arc(74, 18, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#1a1410";
+      ctx.beginPath();
+      ctx.ellipse(74, 14, 6.5, 3.2, 0, Math.PI, Math.PI * 2);
+      ctx.fill();
+      // Tank + seat
+      ctx.fillStyle = "#6a3040";
+      ctx.beginPath();
+      ctx.moveTo(40, 52);
+      ctx.lineTo(55, 40);
+      ctx.lineTo(95, 42);
+      ctx.lineTo(110, 54);
+      ctx.lineTo(100, 60);
+      ctx.lineTo(48, 58);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Forks
+      ctx.beginPath();
+      ctx.moveTo(42, 48);
+      ctx.lineTo(28, 62);
+      ctx.stroke();
+      wheel(ctx, 30, 64, 13);
+      wheel(ctx, 108, 64, 13);
+      // Exhaust
+      ctx.beginPath();
+      ctx.moveTo(90, 58);
+      ctx.lineTo(118, 62);
+      ctx.stroke();
+    }, "#1a1410", 2.2);
+    tex.refresh();
+  }
+
+  // Mini coach / bus — long, rare
+  {
+    const w = 320;
+    const h = 140;
+    const tex = scene.textures.createCanvas("traffic_bus", w, h)!;
+    const ctx = tex.getContext();
+    ctx.clearRect(0, 0, w, h);
+    scratchStroke(ctx, () => {
+      shadow(ctx, w / 2, h - 4, 130);
+      ctx.fillStyle = "#2a6a9a";
+      ctx.beginPath();
+      ctx.moveTo(12, 100);
+      ctx.lineTo(20, 36);
+      ctx.lineTo(50, 28);
+      ctx.lineTo(280, 28);
+      ctx.lineTo(304, 42);
+      ctx.lineTo(308, 108);
+      ctx.lineTo(12, 108);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Windows row
+      ctx.fillStyle = "#9ec4d8";
+      for (let i = 0; i < 5; i++) {
+        const x = 58 + i * 42;
+        ctx.fillRect(x, 40, 34, 28);
+        ctx.strokeRect(x, 40, 34, 28);
+      }
+      // Cab window
+      ctx.beginPath();
+      ctx.moveTo(24, 42);
+      ctx.lineTo(48, 34);
+      ctx.lineTo(52, 68);
+      ctx.lineTo(28, 70);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Cream stripe
+      ctx.fillStyle = "#f2e6d8";
+      ctx.fillRect(14, 78, 290, 8);
+      ctx.strokeRect(14, 78, 290, 8);
+      wheel(ctx, 55, 108, 16);
+      wheel(ctx, 140, 108, 14);
+      wheel(ctx, 250, 108, 16);
+      ctx.fillStyle = "#e8d080";
+      ctx.fillRect(12, 84, 14, 12);
+      ctx.strokeRect(12, 84, 14, 12);
+      ctx.fillStyle = "#c04040";
+      ctx.fillRect(296, 84, 10, 12);
+      ctx.strokeRect(296, 84, 10, 12);
+    }, "#1a1410", 2.6);
+    tex.refresh();
+  }
+}
+
 export type Pose = SorPose;
 
 function makeAllLookSheets(scene: Phaser.Scene): void {
@@ -3856,7 +4043,8 @@ function makeLookSheet(scene: Phaser.Scene, look: PersonLook): void {
       pose === "stomp" ||
       pose === "stomp_up";
     const fw = wide ? 100 : punchy ? 140 : 84;
-    const fh = wide ? 56 : 92;
+    // Custodian helmet needs a bit of headroom
+    const fh = wide ? 56 : look.kit === "police" ? 100 : 92;
     const tex = scene.textures.createCanvas(key, fw, fh)!;
     const ctx = tex.getContext();
     ctx.clearRect(0, 0, fw, fh);
@@ -3867,6 +4055,7 @@ function makeLookSheet(scene: Phaser.Scene, look: PersonLook): void {
         build: look.build,
         present: look.present,
         hairStyle: look.hairStyle,
+        kit: look.kit,
       });
     } else if (wide) {
       drawSorDown(ctx, fw, fh, look.skin, look.shirt, pose === "cuffed", false, {
@@ -3875,6 +4064,7 @@ function makeLookSheet(scene: Phaser.Scene, look: PersonLook): void {
         build: look.build,
         present: look.present,
         hairStyle: look.hairStyle,
+        kit: look.kit,
       });
     } else {
       drawSorFighter(ctx, fw / 2, fh - 4, look.skin, look.shirt, pose, {
@@ -3884,6 +4074,7 @@ function makeLookSheet(scene: Phaser.Scene, look: PersonLook): void {
         present: look.present,
         hairStyle: look.hairStyle,
         bottom: look.bottom,
+        kit: look.kit,
         bloodied: pose === "bloodied",
       });
     }

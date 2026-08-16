@@ -6,6 +6,7 @@ import {
   type BodyBuild,
   type BottomStyle,
   type HairStyle,
+  type KitStyle,
   type Present,
 } from "./pompeyLooks";
 
@@ -170,6 +171,151 @@ function fillOnly(
 }
 
 const OUTLINE = "#1a1410";
+const POLICE_NAVY = "#1a2840";
+const POLICE_HIVIS = "#e8d020";
+const POLICE_HIVIS_EDGE = "#c8b018";
+const POLICE_REFLECT = "#f4f0e0";
+
+/**
+ * Custodian helmet (bobby hat) — dome + brim + Sillitoe check band.
+ * Sits on the crown so eyes/mouth stay readable underneath.
+ */
+function drawPoliceHelmet(
+  ctx: CanvasRenderingContext2D,
+  hx: number,
+  hy: number,
+  hs: number,
+  headTilt = 0.1,
+): void {
+  const crownX = hx;
+  const crownY = hy - 11 * hs;
+  // Dome
+  strokeFill(ctx, () => {
+    ctx.beginPath();
+    ctx.ellipse(crownX, crownY, 11.2 * hs, 9 * hs, headTilt * 0.45, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }, POLICE_NAVY, OUTLINE, 2);
+  // Peak / brim — above the eye line
+  strokeFill(ctx, () => {
+    ctx.beginPath();
+    ctx.ellipse(hx + 6.5 * hs, hy - 5 * hs, 7.2 * hs, 2.2 * hs, headTilt + 0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }, shadeSkin(POLICE_NAVY, 0.15), OUTLINE, 1.8);
+  // Sillitoe tartan band
+  const bandY = hy - 4.8 * hs;
+  const bandL = hx - 9.5 * hs;
+  const bandR = hx + 8 * hs;
+  const bandH = 3.3 * hs;
+  fillOnly(ctx, () => {
+    ctx.beginPath();
+    ctx.rect(bandL, bandY - bandH * 0.5, bandR - bandL, bandH);
+    ctx.fill();
+  }, "#f4f0e8");
+  const checks = 7;
+  for (let i = 0; i < checks; i++) {
+    if (i % 2 === 0) continue;
+    const cw = (bandR - bandL) / checks;
+    fillOnly(ctx, () => {
+      ctx.beginPath();
+      ctx.rect(bandL + i * cw, bandY - bandH * 0.5, cw, bandH);
+      ctx.fill();
+    }, "#1a1410");
+  }
+  strokeFill(ctx, () => {
+    ctx.beginPath();
+    ctx.rect(bandL, bandY - bandH * 0.5, bandR - bandL, bandH);
+    ctx.stroke();
+  }, "transparent", OUTLINE, 1.4);
+  // Silver badge on the dome
+  strokeFill(ctx, () => {
+    ctx.beginPath();
+    ctx.ellipse(hx + 3.5 * hs, hy - 11 * hs, 2.1 * hs, 2.6 * hs, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }, "#c8c4b8", OUTLINE, 1.2);
+}
+
+/** Hi-vis tabard over the navy tunic — yellow with reflective strips. */
+function drawPoliceVest(
+  ctx: CanvasRenderingContext2D,
+  shoulder: { x: number; y: number },
+  hip: { x: number; y: number },
+  tw: number,
+): void {
+  const top = shoulder.y + 4;
+  const bot = hip.y - 2;
+  const midX = (shoulder.x + hip.x) * 0.5 + 1;
+  const halfW = 11 * tw;
+  strokeFill(ctx, () => {
+    ctx.beginPath();
+    ctx.moveTo(midX - halfW + 1, top);
+    ctx.lineTo(midX + halfW - 2, top + 1);
+    ctx.lineTo(midX + halfW - 1, bot);
+    ctx.lineTo(midX - halfW, bot - 1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }, POLICE_HIVIS, OUTLINE, 1.8);
+  // Reflective bands
+  for (const t of [0.28, 0.58] as const) {
+    const y = top + (bot - top) * t;
+    strokeFill(ctx, () => {
+      ctx.beginPath();
+      ctx.rect(midX - halfW + 2, y - 1.4, halfW * 2 - 5, 2.8);
+      ctx.fill();
+      ctx.stroke();
+    }, POLICE_REFLECT, POLICE_HIVIS_EDGE, 1);
+  }
+  // Tiny epaulette / radio hint on the near shoulder
+  strokeFill(ctx, () => {
+    ctx.beginPath();
+    ctx.rect(midX + halfW - 5, top - 1, 4.5, 7);
+    ctx.fill();
+    ctx.stroke();
+  }, "#2a2a32", OUTLINE, 1.2);
+  fillOnly(ctx, () => {
+    ctx.beginPath();
+    ctx.arc(midX + halfW - 2.5, top + 1.5, 1.3, 0, Math.PI * 2);
+    ctx.fill();
+  }, "#6a9a40");
+}
+
+/** Side-on helmet for floored / crawling coppers. */
+function drawPoliceHelmetSide(
+  ctx: CanvasRenderingContext2D,
+  hx: number,
+  hy: number,
+  scale = 1,
+): void {
+  strokeFill(ctx, () => {
+    ctx.beginPath();
+    ctx.ellipse(hx, hy - 3 * scale, 12 * scale, 9 * scale, -0.25, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }, POLICE_NAVY, OUTLINE, 2);
+  // Check band along the side
+  fillOnly(ctx, () => {
+    ctx.beginPath();
+    ctx.rect(hx - 10 * scale, hy - 1 * scale, 18 * scale, 3.2 * scale);
+    ctx.fill();
+  }, "#f4f0e8");
+  for (let i = 0; i < 6; i++) {
+    if (i % 2 === 0) continue;
+    fillOnly(ctx, () => {
+      ctx.beginPath();
+      ctx.rect(hx - 10 * scale + i * 3 * scale, hy - 1 * scale, 3 * scale, 3.2 * scale);
+      ctx.fill();
+    }, "#1a1410");
+  }
+  strokeFill(ctx, () => {
+    ctx.beginPath();
+    ctx.ellipse(hx + 8 * scale, hy + 1 * scale, 5 * scale, 2 * scale, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }, shadeSkin(POLICE_NAVY, 0.12), OUTLINE, 1.5);
+}
 
 /** Capsule limb — fill only so segments blend; torso/head carry the outer outline. */
 function limb(
@@ -573,6 +719,7 @@ export function drawSorFighter(
     present?: Present;
     hairStyle?: HairStyle;
     bottom?: BottomStyle;
+    kit?: KitStyle;
   } = {},
 ): void {
   const punchInfo = punchAnim(pose);
@@ -634,6 +781,7 @@ export function drawSorFighter(
   const hairStyle: HairStyle =
     opts.hairStyle ?? (fem ? "shoulder" : "crop");
   const bottom: BottomStyle = opts.bottom ?? (fem ? "skirt" : "pants");
+  const police = opts.kit === "police";
   // Facial expression driven by what they're doing / taking
   type FaceExpr = "calm" | "angry" | "grit" | "snarl" | "hurt" | "strain";
   const face: FaceExpr = (() => {
@@ -1427,6 +1575,10 @@ export function drawSorFighter(
     ctx.fill();
   }, shadeSkin(shirt, 0.12));
 
+  if (police) {
+    drawPoliceVest(ctx, { x: shoulder.x, y: shoulderY }, hip, tw);
+  }
+
   // Compact hip join (not a wide oval — keeps them looking lean)
   jointCap(ctx, hip.x + 1, hip.y + 1, (fem ? 7.4 : 6.2) * tw, pants);
 
@@ -1550,7 +1702,9 @@ export function drawSorFighter(
   }, skin);
 
   // Hair mass behind the skull (crop for lads; fuller styles for women)
-  drawProfileHairBack(ctx, hx, hy, hs, hair, hairStyle, headSnap);
+  if (!police) {
+    drawProfileHairBack(ctx, hx, hy, hs, hair, hairStyle, headSnap);
+  }
 
   // face oval — flush when shouting / hit
   const faceFlush =
@@ -1567,6 +1721,11 @@ export function drawSorFighter(
     ctx.fill();
     ctx.stroke();
   }, faceFlush, OUTLINE, 2);
+
+  if (police) {
+    drawPoliceHelmet(ctx, hx, hy, hs, headTilt);
+  }
+
   // nose — tipped skyward when the head snaps back
   strokeFill(ctx, () => {
     ctx.beginPath();
@@ -1599,7 +1758,9 @@ export function drawSorFighter(
   }
 
   // Fringe / hanging hair over the shoulders (after face so it layers right)
-  drawProfileHairFront(ctx, hx, hy, hs, hair, hairStyle, headSnap, shoulderY);
+  if (!police) {
+    drawProfileHairFront(ctx, hx, hy, hs, hair, hairStyle, headSnap, shoulderY);
+  }
 
   // eye + mouth — expression by combat state
   strokeFill(ctx, () => {
@@ -1738,6 +1899,7 @@ export function drawSorDown(
     build?: BodyBuild;
     present?: Present;
     hairStyle?: HairStyle;
+    kit?: KitStyle;
   } = {},
 ): void {
   const y = fh - 12;
@@ -1748,6 +1910,7 @@ export function drawSorDown(
   const fem = opts.present === "fem";
   const hairStyle: HairStyle =
     opts.hairStyle ?? (fem ? "shoulder" : "crop");
+  const police = opts.kit === "police";
   // Side-on KO — body along the ground, head to the left, feet flopped toes-up
   const hipX = fw * 0.5;
   const nearKnee = { x: fw * 0.64, y: y - 3 };
@@ -1776,6 +1939,25 @@ export function drawSorDown(
     ctx.stroke();
   }, shirt);
 
+  if (police) {
+    // Hi-vis strip along the floored torso
+    strokeFill(ctx, () => {
+      ctx.beginPath();
+      ctx.moveTo(fw * 0.24, y - 2);
+      ctx.lineTo(fw * 0.5, y - 3);
+      ctx.lineTo(fw * 0.5, y + 5 * tw);
+      ctx.lineTo(fw * 0.23, y + 4 * tw);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }, POLICE_HIVIS, OUTLINE, 1.5);
+    fillOnly(ctx, () => {
+      ctx.beginPath();
+      ctx.rect(fw * 0.26, y + 0.5, fw * 0.22, 2.2);
+      ctx.fill();
+    }, POLICE_REFLECT);
+  }
+
   if (cuffed) {
     limb(ctx, fw * 0.34, y, fw * 0.4, y + 10, 4 * lr, 3.5 * lr, skin);
     limb(ctx, fw * 0.36, y, fw * 0.46, y + 10, 4 * lr, 3.5 * lr, skin);
@@ -1789,20 +1971,22 @@ export function drawSorDown(
 
   const hair = opts.hair ?? "#2a2220";
   // Longer hair pool under the head when she's KO'd
-  if (hairStyle !== "crop") {
-    strokeFill(ctx, () => {
-      ctx.beginPath();
-      ctx.ellipse(fw * 0.1, y - 2, 14, 11, -0.35, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }, hair);
-  } else {
-    strokeFill(ctx, () => {
-      ctx.beginPath();
-      ctx.ellipse(fw * 0.14, y - 4, 10, 9, -0.3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }, hair);
+  if (!police) {
+    if (hairStyle !== "crop") {
+      strokeFill(ctx, () => {
+        ctx.beginPath();
+        ctx.ellipse(fw * 0.1, y - 2, 14, 11, -0.35, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }, hair);
+    } else {
+      strokeFill(ctx, () => {
+        ctx.beginPath();
+        ctx.ellipse(fw * 0.14, y - 4, 10, 9, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }, hair);
+    }
   }
 
   strokeFill(ctx, () => {
@@ -1811,6 +1995,9 @@ export function drawSorDown(
     ctx.fill();
     ctx.stroke();
   }, bloodied ? shadeSkin(skin, -0.1) : skin);
+  if (police) {
+    drawPoliceHelmetSide(ctx, fw * 0.14, y - 4, 0.95);
+  }
   strokeFill(ctx, () => {
     ctx.beginPath();
     ctx.moveTo(fw * 0.12, y - 5);
@@ -1848,6 +2035,7 @@ export function drawSorCrawl(
     build?: BodyBuild;
     present?: Present;
     hairStyle?: HairStyle;
+    kit?: KitStyle;
   } = {},
 ): void {
   const y = fh - 12;
@@ -1859,6 +2047,7 @@ export function drawSorCrawl(
   const fem = opts.present === "fem";
   const hairStyle: HairStyle =
     opts.hairStyle ?? (fem ? "shoulder" : "crop");
+  const police = opts.kit === "police";
   const swing = Math.sin(phase * Math.PI * 2);
   // Whole body inches forward within the frame as the pull completes
   const shove = swing * 3;
@@ -1884,6 +2073,19 @@ export function drawSorCrawl(
     ctx.stroke();
   }, shirt);
 
+  if (police) {
+    strokeFill(ctx, () => {
+      ctx.beginPath();
+      ctx.moveTo(hipX, y - 1);
+      ctx.lineTo(shoulderX - 2, y - 5);
+      ctx.lineTo(shoulderX - 2, y + 4 * tw);
+      ctx.lineTo(hipX - 1, y + 5 * tw);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }, POLICE_HIVIS, OUTLINE, 1.5);
+  }
+
   // Reaching arm claws forward, the other props the chest up
   const reach = 14 + Math.max(0, -swing) * 10;
   limb(ctx, shoulderX - 2, y - 3, shoulderX + reach, y + 4, 4 * lr, 3.5 * lr, shadeSkin(skin, 0.18));
@@ -1892,26 +2094,31 @@ export function drawSorCrawl(
   const headX = shoulderX + 9;
   const headLift = Math.max(0, swing) * 2;
   const hair = opts.hair ?? "#2a2220";
-  strokeFill(ctx, () => {
-    ctx.beginPath();
-    ctx.ellipse(
-      headX - 2,
-      y - 8 - headLift,
-      hairStyle === "crop" ? 10 : 13,
-      hairStyle === "crop" ? 9 : 11,
-      0.25,
-      0,
-      Math.PI * 2,
-    );
-    ctx.fill();
-    ctx.stroke();
-  }, hair);
+  if (!police) {
+    strokeFill(ctx, () => {
+      ctx.beginPath();
+      ctx.ellipse(
+        headX - 2,
+        y - 8 - headLift,
+        hairStyle === "crop" ? 10 : 13,
+        hairStyle === "crop" ? 9 : 11,
+        0.25,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
+      ctx.stroke();
+    }, hair);
+  }
   strokeFill(ctx, () => {
     ctx.beginPath();
     ctx.ellipse(headX, y - 6 - headLift, fem ? 10 : 11, fem ? 9 : 10, 0.25, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
   }, bloodied ? shadeSkin(skin, -0.1) : skin);
+  if (police) {
+    drawPoliceHelmetSide(ctx, headX - 1, y - 8 - headLift, 0.9);
+  }
   // Screwed-up face — still conscious, just done in
   strokeFill(ctx, () => {
     ctx.beginPath();
@@ -2045,78 +2252,370 @@ export function drawFisherman(
   }, "#2a2218", "#2a2218", 1.4);
 }
 
-export function drawBeachBbq(ctx: CanvasRenderingContext2D, w: number, h: number, smoke = 0): void {
-  // Two locals round a disposable BBQ on the shingle
-  const grillY = h * 0.72;
-  strokeFill(ctx, () => {
-    // grill tin
-    ctx.fillStyle = "#4a4a50";
-    ctx.fillRect(w * 0.32, grillY, w * 0.36, 10);
-    ctx.strokeRect(w * 0.32, grillY, w * 0.36, 10);
-    ctx.fillStyle = "#6a6a70";
-    ctx.fillRect(w * 0.34, grillY - 4, w * 0.32, 5);
-    ctx.strokeRect(w * 0.34, grillY - 4, w * 0.32, 5);
-    // glow
-    ctx.fillStyle = "rgba(220,90,30,0.55)";
-    ctx.fillRect(w * 0.36, grillY - 2, w * 0.28, 3);
-  }, "#4a4a50", "#1a1410", 1.3);
+export function drawBeachBbq(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  frame = 0,
+): void {
+  // Disposable tray BBQ + a little shingle party. `frame` 0..3 loops smoke / tongs / chat.
+  const f = ((frame % 4) + 4) % 4;
+  const grillY = h * 0.78;
+  const glowPulse = f === 1 || f === 2 ? 1 : f === 3 ? 0.75 : 0.55;
+  const smokeLift = f * 5;
+  const tongsFlip = f === 1 || f === 2;
+  const tongsUp = f === 2;
+  const sitterLean = f === 1 || f === 3 ? 3 : 0;
+  const sitterArm = f === 3;
 
-  // smoke wisps
+  // Soft ground shadow
+  fillOnly(ctx, () => {
+    ctx.beginPath();
+    ctx.ellipse(w * 0.5, h * 0.92, w * 0.38, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }, "rgba(20,14,10,0.28)");
+
+  // ── Left sitter (hoodie, bottle) ─────────────────────────────────
+  const lx = w * 0.2 + sitterLean;
   strokeFill(ctx, () => {
-    ctx.strokeStyle = "rgba(80,80,80,0.45)";
+    // Legs stretched toward the grill
+    ctx.strokeStyle = "#2a3344";
+    ctx.lineWidth = 3.2;
+    ctx.beginPath();
+    ctx.moveTo(lx - 2, h * 0.62);
+    ctx.lineTo(lx + 10, h * 0.78);
+    ctx.lineTo(lx + 18, h * 0.8);
+    ctx.moveTo(lx + 2, h * 0.62);
+    ctx.lineTo(lx + 6, h * 0.76);
+    ctx.lineTo(lx + 14, h * 0.78);
+    ctx.stroke();
+    // Trainers
+    ctx.fillStyle = "#e8dcc8";
+    ctx.beginPath();
+    ctx.ellipse(lx + 20, h * 0.81, 4, 2.2, 0.2, 0, Math.PI * 2);
+    ctx.ellipse(lx + 15, h * 0.79, 3.5, 2, 0.15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }, "#2a3344", "#1a1410", 1.4);
+
+  strokeFill(ctx, () => {
+    // Torso / hoodie
+    ctx.fillStyle = "#3a6a9a";
+    ctx.beginPath();
+    ctx.moveTo(lx - 9, h * 0.42);
+    ctx.lineTo(lx + 10, h * 0.44);
+    ctx.lineTo(lx + 9, h * 0.64);
+    ctx.lineTo(lx - 8, h * 0.63);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Hood
+    ctx.fillStyle = "#2e5580";
+    ctx.beginPath();
+    ctx.ellipse(lx + 1, h * 0.4, 8, 4, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }, "#3a6a9a", "#1a1410", 1.5);
+
+  strokeFill(ctx, () => {
+    // Head
+    ctx.fillStyle = "#c4a882";
+    ctx.beginPath();
+    ctx.ellipse(lx + 1, h * 0.34, 5.2, 5.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // Hair tuft
+    ctx.fillStyle = "#2a2218";
+    ctx.beginPath();
+    ctx.ellipse(lx + 1, h * 0.3, 5.4, 3.2, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+  }, "#c4a882", "#1a1410", 1.3);
+
+  strokeFill(ctx, () => {
+    // Near arm — drink or chat gesture
+    ctx.strokeStyle = "#c4a882";
+    ctx.lineWidth = 2.8;
+    ctx.beginPath();
+    ctx.moveTo(lx + 8, h * 0.48);
+    if (sitterArm) {
+      ctx.lineTo(lx + 16, h * 0.4);
+      ctx.lineTo(lx + 18, h * 0.34);
+    } else {
+      ctx.lineTo(lx + 14, h * 0.54);
+      ctx.lineTo(lx + 18, h * 0.58);
+    }
+    ctx.stroke();
+    // Bottle
+    ctx.fillStyle = sitterArm ? "#3a7a4a" : "#2a5a3a";
+    const bx = sitterArm ? lx + 18 : lx + 18;
+    const by = sitterArm ? h * 0.3 : h * 0.56;
+    ctx.fillRect(bx - 2, by, 4, 10);
+    ctx.strokeRect(bx - 2, by, 4, 10);
+    ctx.fillStyle = "#c4a882";
+    ctx.fillRect(bx - 1, by - 3, 2, 3);
+  }, "#c4a882", "#1a1410", 1.2);
+
+  // ── Grill tray ───────────────────────────────────────────────────
+  strokeFill(ctx, () => {
+    // Legs
+    ctx.strokeStyle = "#3a3a40";
     ctx.lineWidth = 2;
-    for (let i = 0; i < 3; i++) {
-      const sx = w * 0.42 + i * 8;
-      const phase = smoke * 0.02 + i;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.36, grillY + 2);
+    ctx.lineTo(w * 0.34, grillY + 12);
+    ctx.moveTo(w * 0.64, grillY + 2);
+    ctx.lineTo(w * 0.66, grillY + 12);
+    ctx.moveTo(w * 0.42, grillY + 2);
+    ctx.lineTo(w * 0.4, grillY + 11);
+    ctx.moveTo(w * 0.58, grillY + 2);
+    ctx.lineTo(w * 0.6, grillY + 11);
+    ctx.stroke();
+
+    // Foil tray body
+    ctx.fillStyle = "#7a7a82";
+    ctx.beginPath();
+    ctx.moveTo(w * 0.3, grillY);
+    ctx.lineTo(w * 0.7, grillY);
+    ctx.lineTo(w * 0.66, grillY + 9);
+    ctx.lineTo(w * 0.34, grillY + 9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Rim
+    ctx.fillStyle = "#9a9aa2";
+    ctx.fillRect(w * 0.29, grillY - 5, w * 0.42, 6);
+    ctx.strokeRect(w * 0.29, grillY - 5, w * 0.42, 6);
+
+    // Coal bed glow
+    const glow = ctx.createRadialGradient(
+      w * 0.5,
+      grillY,
+      2,
+      w * 0.5,
+      grillY,
+      22,
+    );
+    glow.addColorStop(0, `rgba(255,180,60,${0.55 * glowPulse})`);
+    glow.addColorStop(0.45, `rgba(220,70,20,${0.4 * glowPulse})`);
+    glow.addColorStop(1, "rgba(180,40,10,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(w * 0.32, grillY - 10, w * 0.36, 14);
+
+    // Charcoal lumps
+    ctx.fillStyle = "#2a2218";
+    for (const [cx, cy, r] of [
+      [0.38, -1, 2.2],
+      [0.45, 0, 2.5],
+      [0.52, -1.5, 2],
+      [0.58, 0.5, 2.3],
+      [0.48, 1.5, 1.8],
+    ] as const) {
       ctx.beginPath();
-      ctx.moveTo(sx, grillY - 6);
-      ctx.quadraticCurveTo(
-        sx + Math.sin(phase) * 6,
-        grillY - 22,
-        sx + Math.cos(phase) * 4,
-        grillY - 38 - (smoke % 8),
+      ctx.arc(w * cx, grillY + cy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Hot coals
+    ctx.fillStyle = `rgba(255,120,40,${0.7 * glowPulse})`;
+    for (const [cx, cy] of [
+      [0.4, -0.5],
+      [0.5, 0],
+      [0.56, -1],
+    ] as const) {
+      ctx.beginPath();
+      ctx.arc(w * cx, grillY + cy, 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }, "#7a7a82", "#1a1410", 1.5);
+
+  // Sausages on the grill (one lifts with tongs on flip frames)
+  strokeFill(ctx, () => {
+    const drawBanger = (x: number, y: number, ang: number, lifted: boolean) => {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(ang);
+      ctx.fillStyle = lifted ? "#c45a3a" : "#a04830";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 9, 2.8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Grill marks
+      ctx.strokeStyle = "rgba(40,20,10,0.45)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-5, -1);
+      ctx.lineTo(-5, 1);
+      ctx.moveTo(0, -1.2);
+      ctx.lineTo(0, 1.2);
+      ctx.moveTo(5, -1);
+      ctx.lineTo(5, 1);
+      ctx.stroke();
+      ctx.restore();
+    };
+    drawBanger(w * 0.4, grillY - 3, -0.15, false);
+    if (!tongsFlip) {
+      drawBanger(w * 0.52, grillY - 4, 0.1, false);
+    }
+    drawBanger(w * 0.6, grillY - 2.5, -0.05, false);
+  }, "#a04830", "#1a1410", 1.2);
+
+  // Smoke wisps — rise & drift per frame
+  strokeFill(ctx, () => {
+    for (let i = 0; i < 4; i++) {
+      const sx = w * 0.38 + i * 9;
+      const phase = f * 0.9 + i * 1.1;
+      const top = grillY - 28 - smokeLift - i * 3;
+      ctx.globalAlpha = 0.28 + (i % 2) * 0.1;
+      ctx.strokeStyle = i % 2 === 0 ? "rgba(90,90,95,0.7)" : "rgba(70,70,75,0.55)";
+      ctx.lineWidth = 2.2 - i * 0.2;
+      ctx.beginPath();
+      ctx.moveTo(sx, grillY - 8);
+      ctx.bezierCurveTo(
+        sx + Math.sin(phase) * 8,
+        grillY - 18 - smokeLift * 0.4,
+        sx + Math.cos(phase * 0.8) * 10,
+        grillY - 30 - smokeLift * 0.7,
+        sx + Math.sin(phase + 1) * 6,
+        top,
       );
       ctx.stroke();
     }
-  }, "rgba(80,80,80,0.4)", "rgba(80,80,80,0.4)", 1.5);
+    ctx.globalAlpha = 1;
+  }, "rgba(80,80,85,0.4)", "rgba(80,80,85,0.4)", 1.5);
 
-  // seated person left
+  // Soft flame lick on hot frames
+  if (f === 1 || f === 2) {
+    fillOnly(ctx, () => {
+      ctx.globalAlpha = 0.55;
+      ctx.beginPath();
+      ctx.moveTo(w * 0.46, grillY - 4);
+      ctx.quadraticCurveTo(w * 0.48, grillY - 14, w * 0.5, grillY - 6);
+      ctx.quadraticCurveTo(w * 0.52, grillY - 16, w * 0.54, grillY - 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }, "#ffe08a");
+  }
+
+  // ── Standing cook (right) with tongs ─────────────────────────────
+  const rx = w * 0.78;
+  const ry = tongsUp ? -2 : 0;
   strokeFill(ctx, () => {
-    ctx.fillStyle = "#c4a882";
+    // Legs
+    ctx.strokeStyle = "#3a4558";
+    ctx.lineWidth = 3.4;
     ctx.beginPath();
-    ctx.ellipse(w * 0.22, h * 0.42, 4.5, 5, 0, 0, Math.PI * 2);
+    ctx.moveTo(rx - 3, h * 0.58 + ry);
+    ctx.lineTo(rx - 6, h * 0.86);
+    ctx.moveTo(rx + 4, h * 0.58 + ry);
+    ctx.lineTo(rx + 8, h * 0.86);
+    ctx.stroke();
+    // Shoes
+    ctx.fillStyle = "#2a2218";
+    ctx.beginPath();
+    ctx.ellipse(rx - 7, h * 0.88, 4.5, 2.2, 0, 0, Math.PI * 2);
+    ctx.ellipse(rx + 9, h * 0.88, 4.5, 2.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }, "#3a4558", "#1a1410", 1.4);
+
+  strokeFill(ctx, () => {
+    // Torso — warm brick shirt
+    ctx.fillStyle = "#a04838";
+    ctx.beginPath();
+    ctx.moveTo(rx - 9, h * 0.36 + ry);
+    ctx.lineTo(rx + 10, h * 0.37 + ry);
+    ctx.lineTo(rx + 9, h * 0.6 + ry);
+    ctx.lineTo(rx - 8, h * 0.59 + ry);
+    ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = "#4a6a9a";
-    ctx.fillRect(w * 0.17, h * 0.48, 10, 14);
-    ctx.strokeRect(w * 0.17, h * 0.48, 10, 14);
-    ctx.fillStyle = "#3a4558";
-    ctx.fillRect(w * 0.16, h * 0.62, 12, 10);
-  }, "#4a6a9a", "#1a1410", 1.2);
+  }, "#a04838", "#1a1410", 1.5);
 
-  // standing person right with tongs
   strokeFill(ctx, () => {
+    // Head
     ctx.fillStyle = "#c4a882";
     ctx.beginPath();
-    ctx.ellipse(w * 0.78, h * 0.3, 4.5, 5, 0, 0, Math.PI * 2);
+    ctx.ellipse(rx + 1, h * 0.28 + ry, 5.4, 5.8, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = "#8a4a3a";
-    ctx.fillRect(w * 0.73, h * 0.36, 10, 18);
-    ctx.strokeRect(w * 0.73, h * 0.36, 10, 18);
-    ctx.strokeStyle = "#1a1410";
+    // Cap / hair
+    ctx.fillStyle = "#1a3048";
     ctx.beginPath();
-    ctx.moveTo(w * 0.72, h * 0.48);
-    ctx.lineTo(w * 0.55, h * 0.62);
+    ctx.ellipse(rx + 1, h * 0.23 + ry, 5.8, 3.4, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = "#3a4558";
+    ctx.fillRect(rx - 2, h * 0.22 + ry, 8, 2.5);
+  }, "#c4a882", "#1a1410", 1.3);
+
+  // Arms + tongs reaching the tray
+  strokeFill(ctx, () => {
+    const handX = tongsUp ? w * 0.56 : tongsFlip ? w * 0.52 : w * 0.58;
+    const handY = tongsUp ? grillY - 18 : tongsFlip ? grillY - 6 : grillY - 10;
+    ctx.strokeStyle = "#c4a882";
+    ctx.lineWidth = 2.8;
     ctx.beginPath();
-    ctx.moveTo(w * 0.74, h * 0.54);
-    ctx.lineTo(w * 0.7, h * 0.78);
-    ctx.moveTo(w * 0.82, h * 0.54);
-    ctx.lineTo(w * 0.86, h * 0.78);
+    ctx.moveTo(rx - 6, h * 0.44 + ry);
+    ctx.lineTo(handX + 8, handY + 4);
+    ctx.lineTo(handX, handY);
     ctx.stroke();
-  }, "#8a4a3a", "#1a1410", 1.2);
+    // Far arm akimbo / pocket
+    ctx.beginPath();
+    ctx.moveTo(rx + 8, h * 0.44 + ry);
+    ctx.lineTo(rx + 12, h * 0.54 + ry);
+    ctx.lineTo(rx + 6, h * 0.58 + ry);
+    ctx.stroke();
+
+    // Metal tongs
+    ctx.strokeStyle = "#5a6068";
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(handX + 6, handY + 2);
+    ctx.lineTo(handX - 2, handY + (tongsUp ? 4 : 8));
+    ctx.moveTo(handX + 4, handY);
+    ctx.lineTo(handX - 4, handY + (tongsUp ? 2 : 6));
+    ctx.stroke();
+    // Tip grip
+    ctx.beginPath();
+    ctx.arc(handX - 3, handY + (tongsUp ? 3 : 7), 1.5, 0, Math.PI * 2);
+    ctx.stroke();
+  }, "#c4a882", "#1a1410", 1.2);
+
+  // Lifted banger in the tongs
+  if (tongsFlip) {
+    strokeFill(ctx, () => {
+      const hx = tongsUp ? w * 0.54 : w * 0.5;
+      const hy = tongsUp ? grillY - 16 : grillY - 5;
+      ctx.fillStyle = "#c45a3a";
+      ctx.beginPath();
+      ctx.ellipse(hx, hy, 8, 2.5, tongsUp ? -0.6 : 0.35, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }, "#c45a3a", "#1a1410", 1.2);
+  }
+
+  // ── Third mate — crouched behind / left of tray (chat) ───────────
+  const mx = w * 0.48;
+  const my = f === 2 ? 1 : 0;
+  strokeFill(ctx, () => {
+    // Small crouch silhouette so the party reads as three
+    ctx.fillStyle = "#5a7a4a";
+    ctx.beginPath();
+    ctx.ellipse(mx, h * 0.52 + my, 7, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#c4a882";
+    ctx.beginPath();
+    ctx.ellipse(mx + 1, h * 0.44 + my, 4.2, 4.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // Beanie
+    ctx.fillStyle = "#c45a3a";
+    ctx.beginPath();
+    ctx.ellipse(mx + 1, h * 0.4 + my, 4.5, 2.8, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }, "#5a7a4a", "#1a1410", 1.2);
 }
 
 export function drawCoffeeVan(ctx: CanvasRenderingContext2D, w: number, h: number): void {

@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import type { StrikeKind } from "../combat/Structure";
 import { Fighter, inReach } from "../entities/Fighter";
 import { Civilian } from "../entities/Civilian";
+import { fightPlaneDepth } from "../systems/climbCars";
 
 export interface CombatEvent {
   attacker: Fighter;
@@ -113,14 +114,15 @@ export function resolveCombat(
           continue;
         }
       }
-      // Crawlers / KO'd bodies still take a finishing boot (floor twitch)
+      // Floor finishers only — stomps / Swanton splash. Punches & kicks pass over.
       const crawling =
         target.structure.crawling && !target.structure.outCold && !target.structure.cuffed;
       const softFloored = target.structure.downed && !target.structure.isOut();
-      const stomping =
-        attacker.action === "stomp" || (strike?.kind === "boot_head");
-      if (target.structure.isOut() && !crawling && !stomping) continue;
-      if (crawling && !stomping) continue;
+      const floorAttack =
+        attacker.action === "stomp" || attacker.action === "swanton";
+      if (softFloored && !floorAttack) continue;
+      if (target.structure.isOut() && !crawling && !floorAttack) continue;
+      if (crawling && !floorAttack) continue;
       if (target === attacker.heldTarget) continue;
       if (!inReach(attacker, target, attacker.attackReach, attacker.attackDir)) continue;
       if (!attacker.markHit(target)) continue;
@@ -130,9 +132,7 @@ export function resolveCombat(
         target.structure.downed ||
         crawling ||
         target.structure.outCold;
-      const bootHead =
-        (attacker.action === "kick" || attacker.action === "stomp") &&
-        (target.structure.downed || crawling || target.structure.isOut());
+      const onFloor = softFloored || crawling || target.structure.isOut();
       // Soft floors are openings for boots, not free chin-shot finishers
       const critical =
         strike.critical ||
@@ -144,7 +144,7 @@ export function resolveCombat(
             strike.kind === "boot_head"));
 
       let kind: StrikeKind = strike.kind;
-      if (bootHead || strike.kind === "boot_head") kind = "boot_head";
+      if (floorAttack && onFloor) kind = "boot_head";
       else if (
         !softFloored &&
         critical &&
@@ -161,10 +161,11 @@ export function resolveCombat(
 
       const result = target.receiveStrike({
         kind,
-        power: bootHead
-          ? Math.max(strike.power, 0.75)
-          : strike.power + attacker.structure.anger * 0.1,
-        critical: bootHead || critical,
+        power:
+          floorAttack && onFloor
+            ? Math.max(strike.power, 0.75)
+            : strike.power + attacker.structure.anger * 0.1,
+        critical: (floorAttack && onFloor) || critical,
         dirty: strike.dirty,
         onOpening: open,
         now,
@@ -188,9 +189,7 @@ export function resolveCombat(
   fighters.forEach((f, i) => {
     const depth = f.isBackground
       ? 3
-      : f.platformY !== null
-        ? 26 + Math.floor(f.y * 0.02) + i
-        : 10 + Math.floor(f.laneY * 0.05) + i;
+      : fightPlaneDepth(f.laneY, i, f.platformY !== null);
     if (f.depth !== depth) f.setDepth(depth);
   });
 }
@@ -207,7 +206,8 @@ function resolveBodyTosses(
     }
     for (const target of fighters) {
       if (target === missile) continue;
-      if (target.structure.isOut()) continue;
+      // Floor finishers only — flying bodies skip planted / KO'd lads
+      if (target.structure.downed || target.structure.isOut()) continue;
       if (target.team === "civilian" && missile.team === "civilian") continue;
       const dx = Math.abs(target.x - missile.x);
       const dy = Math.abs(target.laneY - missile.laneY);

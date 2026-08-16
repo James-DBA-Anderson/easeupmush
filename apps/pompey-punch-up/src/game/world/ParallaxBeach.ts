@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GAME_HEIGHT, GAME_WIDTH, LANE, ROAD, WORLD_WIDTH } from "../constants";
+import { GAME_HEIGHT, GAME_WIDTH, LANE, PASSING_TRAFFIC_DEPTH, ROAD, WORLD_WIDTH } from "../constants";
 import { separateObstacles, type Obstacle } from "./obstacles";
 import { DestructibleProp, type DestructibleSpawn } from "./DestructibleProp";
 import { FoodStall, type FoodStallSpawn } from "./FoodStall";
@@ -47,7 +47,74 @@ interface PassingCar {
   worldX: number;
   y: number;
   vx: number;
+  /** Doppler base — bikes/scooters higher, vans/buses lower. */
+  pitch: number;
 }
+
+type TrafficSpec = {
+  key: string;
+  weight: number;
+  speedMin: number;
+  speedMax: number;
+  scaleMin: number;
+  scaleMax: number;
+  pitch: number;
+  /** Skip body tint — painted vehicles (taxi yellow, etc.). */
+  noTint?: boolean;
+};
+
+/** Weighted seafront traffic — saloons common, bus rare. */
+const PASSING_TRAFFIC: TrafficSpec[] = [
+  { key: "car", weight: 26, speedMin: 200, speedMax: 320, scaleMin: 1.18, scaleMax: 1.3, pitch: 1 },
+  {
+    key: "traffic_hatch",
+    weight: 20,
+    speedMin: 220,
+    speedMax: 340,
+    scaleMin: 1.05,
+    scaleMax: 1.2,
+    pitch: 1.06,
+  },
+  {
+    key: "traffic_van",
+    weight: 14,
+    speedMin: 150,
+    speedMax: 230,
+    scaleMin: 1.15,
+    scaleMax: 1.32,
+    pitch: 0.82,
+  },
+  {
+    key: "mount_scooter",
+    weight: 14,
+    speedMin: 150,
+    speedMax: 250,
+    scaleMin: 1.35,
+    scaleMax: 1.65,
+    pitch: 1.38,
+    noTint: true,
+  },
+  {
+    key: "traffic_bike",
+    weight: 10,
+    speedMin: 280,
+    speedMax: 430,
+    scaleMin: 0.9,
+    scaleMax: 1.1,
+    pitch: 1.55,
+    noTint: true,
+  },
+  {
+    key: "traffic_bus",
+    weight: 6,
+    speedMin: 110,
+    speedMax: 170,
+    scaleMin: 1.05,
+    scaleMax: 1.2,
+    pitch: 0.68,
+    noTint: true,
+  },
+];
 
 interface SkySpitfire {
   image: Phaser.GameObjects.Image;
@@ -113,10 +180,10 @@ export class ParallaxBeach {
   }
 
   /** True if a thrower is close enough that a toss feeds the fans. */
-  isNearHoverFans(x: number, y: number, reach = 150): boolean {
+  isNearHoverFans(x: number, y: number, reach = 210): boolean {
     if (this.hoverDeparting || this.hoverGone) return false;
     for (const f of this.hoverFans) {
-      if (Math.hypot(x - f.x, y - f.y) < reach) return true;
+      if (Math.hypot(x - f.x, y - f.y) < reach + Math.max(f.rx, f.ry)) return true;
     }
     return false;
   }
@@ -206,8 +273,8 @@ export class ParallaxBeach {
     const across = Phaser.Math.Clamp(screenX / GAME_WIDTH, -0.15, 1.15);
     const progress = Phaser.Math.Clamp(across, 0, 1);
     const travel = car.vx >= 0 ? progress : 1 - progress;
-    // Higher pitch on approach, drops as it rolls away
-    const pitch = 1.2 - travel * 0.45;
+    // Higher pitch on approach, drops as it rolls away — scaled by vehicle type
+    const pitch = (1.2 - travel * 0.45) * car.pitch;
     const near =
       1 -
       Phaser.Math.Clamp(
@@ -218,6 +285,11 @@ export class ParallaxBeach {
     const edge = Math.sin(Math.max(0.02, Math.min(0.98, progress)) * Math.PI);
     const intensity = near * 0.5 + edge * 0.55;
     return { active: true, intensity, pan, pitch };
+  }
+
+  /** Live road passers — for draw-order vs promenade fighters. */
+  getPassingCarImages(): Phaser.GameObjects.Image[] {
+    return this.passingCars.map((c) => c.image);
   }
 
   /** Soft shore break ready to play (once). */
@@ -408,24 +480,24 @@ export class ParallaxBeach {
       alpha: 0.5,
       depth: -11,
     });
-    this.addLandmark("beach_bbq", 2100, GAME_HEIGHT * 0.505, 0.62, {
-      scale: 1.05,
-      alpha: 0.9,
+    this.addLandmark("beach_bbq_0", 2100, GAME_HEIGHT * 0.505, 0.62, {
+      scale: 1.15,
+      alpha: 0.92,
       depth: -10,
-      frames: ["beach_bbq", "beach_bbq_1"],
-      animSpeed: 2.2,
+      frames: ["beach_bbq_0", "beach_bbq_1", "beach_bbq_2", "beach_bbq_3"],
+      animSpeed: 1.55,
     });
     this.addLandmark("distant_walker", 5000, GAME_HEIGHT * 0.485, 0.5, {
       scale: 0.75,
       alpha: 0.55,
       depth: -11,
     });
-    this.addLandmark("beach_bbq", 5200, GAME_HEIGHT * 0.5, 0.6, {
-      scale: 0.95,
-      alpha: 0.85,
+    this.addLandmark("beach_bbq_0", 5200, GAME_HEIGHT * 0.5, 0.6, {
+      scale: 1.05,
+      alpha: 0.88,
       depth: -10,
-      frames: ["beach_bbq", "beach_bbq_1"],
-      animSpeed: 1.8,
+      frames: ["beach_bbq_0", "beach_bbq_1", "beach_bbq_2", "beach_bbq_3"],
+      animSpeed: 1.35,
     });
     this.addLandmark("distant_walker", 6100, GAME_HEIGHT * 0.475, 0.5, {
       scale: 0.7,
@@ -453,12 +525,12 @@ export class ParallaxBeach {
       alpha: 0.7,
       depth: -9,
     });
-    this.addLandmark("beach_bbq", 8100, LANE.minY + 6, 1, {
-      scale: 1.05,
-      alpha: 0.9,
+    this.addLandmark("beach_bbq_0", 8100, LANE.minY + 6, 1, {
+      scale: 1.2,
+      alpha: 0.95,
       depth: -9,
-      frames: ["beach_bbq", "beach_bbq_1"],
-      animSpeed: 1.7,
+      frames: ["beach_bbq_0", "beach_bbq_1", "beach_bbq_2", "beach_bbq_3"],
+      animSpeed: 1.45,
     });
     // Still sea-parallax so he stays glued to the waterline past the pier.
     this.addLandmark(
@@ -514,11 +586,12 @@ export class ParallaxBeach {
       frames: ["hovercraft_0", "hovercraft_1"],
       animSpeed: 8.5,
     });
-    // Twin ducts high on the stern face (canvas y≈52 of 170, origin at feet)
-    const fanLift = (170 - 52) * hoverScale;
+    // Stern intakes facing the scrap — fight-lane hazards (not the sprite fan centres
+    // high on the craft, which sit ~180px above the promenade and never catch a toss).
+    const intakeY = Math.max(LANE.minY + 10, hoverY - 36);
     this.hoverFans.push(
-      { x: hoverX - 38 * hoverScale, y: hoverY - fanLift, rx: 36, ry: 32 },
-      { x: hoverX + 38 * hoverScale, y: hoverY - fanLift, rx: 36, ry: 32 },
+      { x: hoverX - 48 * hoverScale, y: intakeY, rx: 52, ry: 56 },
+      { x: hoverX + 48 * hoverScale, y: intakeY, rx: 52, ry: 56 },
     );
     this.hoverHull.push({
       x: hoverX,
@@ -533,11 +606,11 @@ export class ParallaxBeach {
       scale: 0.95,
       depth: -9,
     });
-    this.addLandmark("beach_bbq", 12450, LANE.minY + 6, 1, {
-      scale: 1.05,
+    this.addLandmark("beach_bbq_0", 12450, LANE.minY + 6, 1, {
+      scale: 1.18,
       depth: -9,
-      frames: ["beach_bbq", "beach_bbq_1"],
-      animSpeed: 1.4,
+      frames: ["beach_bbq_0", "beach_bbq_1", "beach_bbq_2", "beach_bbq_3"],
+      animSpeed: 1.25,
     });
     this.addLandmark("landmark_sea_defences", 12850, LANE.minY + 14, 1, {
       scale: 1.3,
@@ -722,34 +795,61 @@ export class ParallaxBeach {
 
   private spawnPassingCar(cameraScrollX: number): void {
     if (this.passingCars.length >= 1) return;
-    if (!this.scene.textures.exists("car")) return;
+
+    const pool = PASSING_TRAFFIC.filter((t) =>
+      this.scene.textures.exists(t.key),
+    );
+    if (pool.length === 0) return;
+
+    let total = 0;
+    for (const t of pool) total += t.weight;
+    let roll = Math.random() * total;
+    let spec = pool[0]!;
+    for (const t of pool) {
+      roll -= t.weight;
+      if (roll <= 0) {
+        spec = t;
+        break;
+      }
+    }
 
     const goingRight = Math.random() < 0.55;
-    const speed = 210 + Math.random() * 120;
+    const speed =
+      spec.speedMin + Math.random() * (spec.speedMax - spec.speedMin);
     const worldX = goingRight
-      ? cameraScrollX - 220
-      : cameraScrollX + GAME_WIDTH + 220;
+      ? cameraScrollX - 280
+      : cameraScrollX + GAME_WIDTH + 280;
     // Closer to camera than the parked motors (those sit ~GAME_HEIGHT - 8)
     const y = GAME_HEIGHT - 2 - Math.random() * 4;
-    const scale = 1.22 + Math.random() * 0.1;
-    // Above all fight-lane depths (promenade folk ~27–40) so traffic isn't
-    // drawn behind people standing further up the beach.
-    const depth = 12 + Math.floor(y * 0.05) + 28;
+    const scale =
+      spec.scaleMin + Math.random() * (spec.scaleMax - spec.scaleMin);
     const image = this.scene.add
-      .image(worldX, y, "car")
+      .image(worldX, y, spec.key)
       .setOrigin(0.5, 1)
       .setScale(scale)
-      .setDepth(depth)
+      .setDepth(PASSING_TRAFFIC_DEPTH)
       .setFlipX(goingRight);
-    // Fresh paint so passers don't look like the dented parkers
-    const paints = [0xffffff, 0xd8e4f0, 0xf0e0c8, 0xc8d8c0, 0xe8d0d0, 0xc0c8d8];
-    image.setTint(paints[Math.floor(Math.random() * paints.length)]!);
+
+    if (!spec.noTint) {
+      const paints = [
+        0xffffff,
+        0xd8e4f0,
+        0xf0e0c8,
+        0xc8d8c0,
+        0xe8d0d0,
+        0xc0c8d8,
+        0xe8e0a8,
+        0xb0c0d8,
+      ];
+      image.setTint(paints[Math.floor(Math.random() * paints.length)]!);
+    }
 
     this.passingCars.push({
       image,
       worldX,
       y,
       vx: goingRight ? speed : -speed,
+      pitch: spec.pitch,
     });
   }
 

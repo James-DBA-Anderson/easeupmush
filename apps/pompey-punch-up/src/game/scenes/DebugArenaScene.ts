@@ -740,12 +740,13 @@ export class DebugArenaScene extends Phaser.Scene {
       for (const target of this.fighters) {
         if (!t.canHit(target)) continue;
         if (t.owner.team === target.team && target.team !== "player") continue;
+        if (target.structure.downed || target.structure.isOut()) continue;
         target.receiveStrike({
           kind: "thrown",
           power: t.kind === "brick" ? 0.72 : 0.52,
           critical: false,
           dirty: false,
-          onOpening: target.structure.isOpen(now) || target.structure.downed,
+          onOpening: target.structure.isOpen(now),
           now,
           bodyPart: "head",
         });

@@ -214,10 +214,10 @@ export class BeachScene extends Phaser.Scene {
     generateDoodleTextures(this);
     setMobilePadActive(true);
 
-    // Keep the chip rock rolling from the title — L1 starts as a quiet bed
+    // Title → calm promenade bed; fight cut drops in once someone clocks you
     void chipRock.unlock().then(() => {
       chipRock.setMode("bed");
-      chipRock.setHeat(0.25);
+      chipRock.setHeat(0.18);
       return chipRock.start();
     });
     this.input.keyboard?.on("keydown-M", () => {
@@ -758,6 +758,8 @@ export class BeachScene extends Phaser.Scene {
         if (t.owner.team === "enemy" && target.team === "enemy") continue;
         if (t.owner.team === "police" && target.team === "police") continue;
         if (t.owner.team === "civilian") continue;
+        // Floor work is boots only — bottles bounce off a planted body
+        if (target.structure.downed || target.structure.isOut()) continue;
 
         const power = t.kind === "brick" ? 0.72 : 0.52;
         const result = target.receiveStrike({
@@ -868,13 +870,19 @@ export class BeachScene extends Phaser.Scene {
   }
 
   private onDroneSwoop(now: number, knockDir: number): void {
-    if (this.player.structure.isOut() || this.player.structure.cuffed) return;
+    if (
+      this.player.structure.isOut() ||
+      this.player.structure.cuffed ||
+      this.player.structure.downed
+    ) {
+      return;
+    }
     const result = this.player.receiveStrike({
       kind: "jump_kick",
       power: 0.78,
       critical: false,
       dirty: false,
-      onOpening: this.player.structure.isOpen(now) || this.player.structure.downed,
+      onOpening: this.player.structure.isOpen(now),
       now,
       bodyPart: "head",
       knockDir,
@@ -888,7 +896,7 @@ export class BeachScene extends Phaser.Scene {
     }
   }
 
-  /** Quiet bed on L1 until someone clocks you — then the drop kicks in. */
+  /** Calm promenade bed until the scrap starts — then crossfade into the fight cut. */
   private syncChipRockHeat(): void {
     let live = 0;
     let spotted = false;
@@ -899,14 +907,16 @@ export class BeachScene extends Phaser.Scene {
     }
     const bossHot = this.enemies.some((e) => e.isBoss && !e.structure.isOut());
     const fighting =
-      spotted ||
-      this.hitsTaken > 0 ||
-      this.wanted.level >= 1 ||
-      bossHot;
+      this.introPhase === "done" &&
+      (spotted ||
+        this.hitsTaken > 0 ||
+        this.wanted.level >= 1 ||
+        bossHot);
 
-    if (this.stage === 1 && !fighting) {
+    // Wake-up / stroll — keep the calm bed under everything
+    if (this.introPhase !== "done" || (this.stage === 1 && !fighting)) {
       chipRock.setMode("bed");
-      chipRock.setHeat(0.2);
+      chipRock.setHeat(0.18);
       return;
     }
 
@@ -1554,7 +1564,11 @@ export class BeachScene extends Phaser.Scene {
       this.onPropHit(ev.attacker, ev.prop, ev.result.destroyed, ev.result.scrap);
     });
     for (const f of this.fighters) f.pinToFloor();
-    syncCarOcclusion(this.fighters, this.destructibles);
+    syncCarOcclusion(
+      this.fighters,
+      this.destructibles,
+      this.parallax.getPassingCarImages(),
+    );
 
     if (this.player.structure.isOut()) {
       if (this.player.structure.cuffed) this.showDefeat();
@@ -3384,19 +3398,26 @@ export class BeachScene extends Phaser.Scene {
    * `force` = just launched while standing by the fans (aim them in).
    */
   private tryFeedHoverFans(victim: Fighter, now: number, force: boolean): boolean {
-    if (victim.structure.isOut() || victim.structure.cuffed) return false;
+    // Cuffs stay out; fresh slam KOs can still get sucked into the ducts
+    if (victim.structure.cuffed) return false;
+    if (!force && victim.structure.isOut()) return false;
     const fans = this.parallax.getHovercraftFans();
     if (fans.length === 0) return false;
 
     if (force) {
-      if (!this.parallax.isNearHoverFans(this.player.x, this.player.y, 160)) {
+      const px = this.player.x;
+      const py = this.player.laneY;
+      if (!this.parallax.isNearHoverFans(px, py, 200)) {
         return false;
       }
-      // Pick the nearer fan duct
+      // Prefer the duct the throw faces / the victim is closer to
       let best = fans[0]!;
       let bestD = Infinity;
       for (const f of fans) {
-        const d = Math.hypot(victim.x - f.x, victim.y - f.y);
+        const faceBias =
+          Math.sign(f.x - px) === Math.sign(this.player.facing) ? 0 : 40;
+        const d =
+          Math.hypot(victim.x - f.x, victim.laneY - f.y) + faceBias;
         if (d < bestD) {
           bestD = d;
           best = f;
@@ -3408,8 +3429,8 @@ export class BeachScene extends Phaser.Scene {
 
     for (const f of fans) {
       if (
-        Math.abs(victim.x - f.x) < f.rx + 22 &&
-        Math.abs(victim.y - f.y) < f.ry + 28
+        Math.abs(victim.x - f.x) < f.rx + 36 &&
+        Math.abs(victim.y - f.y) < f.ry + 48
       ) {
         this.chopInHoverFans(victim, f, now);
         return true;
@@ -3423,19 +3444,37 @@ export class BeachScene extends Phaser.Scene {
     fan: { x: number; y: number; rx: number; ry: number },
     now: number,
   ): void {
-    if (victim.structure.isOut()) return;
+    if (victim.structure.cuffed) return;
     victim.tossVx = 0;
     victim.tossUntil = 0;
-    victim.airborne = false;
-    victim.jumpVy = 0;
+    victim.airborne = true;
+    victim.jumpVy = -220;
     victim.clearCarMount();
-    victim.x = fan.x;
-    victim.y = Phaser.Math.Clamp(fan.y, LANE.minY, LANE.maxY);
-    victim.groundY = victim.y;
+    victim.clearPlantLock();
+    // Yank into the duct mouth, then plant in the blades
+    const landY = Phaser.Math.Clamp(fan.y, LANE.minY, LANE.maxY);
+    this.tweens.add({
+      targets: victim,
+      x: fan.x,
+      y: landY - 28,
+      duration: 160,
+      ease: "Quad.easeIn",
+      onComplete: () => {
+        if (!victim.active) return;
+        victim.airborne = false;
+        victim.jumpVy = 0;
+        victim.x = fan.x;
+        victim.y = landY;
+        victim.groundY = landY;
+        victim.structure.knockOutCold();
+        victim.setAction("out_cold", now, 999999);
+        victim.markPlantHere();
+        victim.invulnUntil = now + 800;
+      },
+    });
     victim.structure.knockOutCold();
     victim.setAction("out_cold", now, 999999);
-    victim.markPlantHere();
-    victim.invulnUntil = now + 800;
+    victim.invulnUntil = now + 900;
 
     this.cameras.main.shake(220, 0.014);
     this.tweens.add({
@@ -3452,7 +3491,7 @@ export class BeachScene extends Phaser.Scene {
       const blob = this.add
         .circle(
           fan.x + (Math.random() - 0.5) * 20,
-          fan.y - 10 + (Math.random() - 0.5) * 16,
+          landY - 10 + (Math.random() - 0.5) * 16,
           3 + Math.random() * 4,
           0xa01818,
           0.85,
@@ -3469,13 +3508,13 @@ export class BeachScene extends Phaser.Scene {
         onComplete: () => blob.destroy(),
       });
     }
-    this.spawnFloat(fan.x, fan.y - 70, "CHOPPED!");
+    this.spawnFloat(fan.x, landY - 70, "CHOPPED!");
     this.banner.setText("Into the fans — Hovertravel's scarpering to the Isle of Wight.");
     this.playThrowImpact(this.player, victim, "pileup");
     void chipSfx.chop();
     this.time.delayedCall(420, () => {
       if (this.parallax.departHovercraftToIsle()) {
-        this.spawnFloat(fan.x, fan.y - 100, "off to the Island!");
+        this.spawnFloat(fan.x, landY - 100, "off to the Island!");
         void chipSfx.whoosh(true);
       }
     });

@@ -266,6 +266,11 @@ export class Fighter extends Phaser.GameObjects.Container {
   /** Floored body still reacting to a stomp — shake without sliding. */
   private twitchUntil = 0;
   private twitchDir: 1 | -1 = 1;
+  /**
+   * Facing locked when they hit the deck. Down art is side-on / asymmetric, so
+   * any mid-floor flipX change looks like they rolled over (e.g. when you jump past).
+   */
+  private floorFacing: 1 | -1 | null = null;
   /** Walk/run cycle 0..1 */
   protected walkPhase = Math.random();
   /** Drag-yourself-along cycle 0..1 */
@@ -458,11 +463,19 @@ export class Fighter extends Phaser.GameObjects.Container {
     this.plantX = this.x;
     this.plantY = this.y;
     this.groundY = this.y;
+    this.lockFloorFacing();
     this.endToss();
   }
 
   clearPlantLock(): void {
     this.plantLock = false;
+    this.floorFacing = null;
+  }
+
+  /** Freeze which way the down pose faces until they stand / crawl off. */
+  private lockFloorFacing(): void {
+    if (this.floorFacing !== null) return;
+    this.floorFacing = this.facing < 0 ? -1 : 1;
   }
 
   /** Haul yourself along the floor in time with the crawl cycle — lurch, not glide. */
@@ -517,6 +530,15 @@ export class Fighter extends Phaser.GameObjects.Container {
 
   /** Change facing with a short lock so left/right don't strobe. */
   setFacing(dir: number, now = 0): void {
+    // Planted bodies stay put — facing them mid-floor mirrors the KO doodle.
+    if (
+      (this.structure.downed || this.structure.isOut()) &&
+      !this.isCrawlingAway &&
+      !this.heldBy &&
+      !this.isInThrowArc
+    ) {
+      return;
+    }
     const next = dir >= 0 ? 1 : -1;
     if (next === this.facing) return;
     if (now > 0 && now < this.facingLockUntil) return;
@@ -1782,8 +1804,14 @@ export class Fighter extends Phaser.GameObjects.Container {
       }
     }
 
-    // Drawn facing right; flip for left — feet stay planted (no vertical bob)
-    const flip = this.facing < 0;
+    // Drawn facing right; flip for left — feet stay planted (no vertical bob).
+    // Soft-down / KO doodles are asymmetric; freeze flipX so a jump past
+    // doesn't look like they rolled over. Crawl still faces the drag direction.
+    const pinnedFloorPose = pose === "down" || pose === "cuffed";
+    if (pinnedFloorPose) this.lockFloorFacing();
+    const face =
+      pinnedFloorPose && this.floorFacing !== null ? this.floorFacing : this.facing;
+    const flip = face < 0;
     if (flip !== this.visFlip) {
       this.visFlip = flip;
       this.sprite.setFlipX(flip);
@@ -1836,14 +1864,15 @@ export class Fighter extends Phaser.GameObjects.Container {
       this.sprite.setRotation((frame.heroAngle * Math.PI) / 180);
     } else if (now < this.twitchUntil) {
       // Stomp / pile-on — body stays planted but jerks under the boot
+      // (Keep rotation small — big rolls read as flipping when you jump past.)
       const left = this.twitchUntil - now;
       const strength = Phaser.Math.Clamp(left / 520, 0.35, 1);
       const kick = Math.sin(now * 0.045) * Math.cos(now * 0.028);
       const jolt = Math.sin(now * 0.09) * 0.7;
       this.sprite.setOrigin(0.5, 1);
-      this.sprite.x = this.twitchDir * (kick * 10 + jolt * 5) * strength;
-      this.sprite.y = -Math.abs(Math.sin(now * 0.07)) * 9 * strength;
-      this.sprite.setRotation(this.twitchDir * (kick * 0.28 + jolt * 0.14) * strength);
+      this.sprite.x = this.twitchDir * (kick * 6 + jolt * 3) * strength;
+      this.sprite.y = -Math.abs(Math.sin(now * 0.07)) * 5 * strength;
+      this.sprite.setRotation(this.twitchDir * (kick * 0.08 + jolt * 0.04) * strength);
     } else {
       this.sprite.setOrigin(0.5, 1);
       this.sprite.x = 0;

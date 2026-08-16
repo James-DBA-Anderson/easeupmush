@@ -1,7 +1,18 @@
 import Phaser from "phaser";
 import type { Fighter } from "../entities/Fighter";
 import type { CarSurface, DestructibleProp, PropHitResult } from "../world/DestructibleProp";
-import { LANE, ROAD } from "../constants";
+import { LANE, ROAD, FIGHT_DEPTH_BASE, PASSING_TRAFFIC_DEPTH } from "../constants";
+
+/** Lane-Y draw order — fractional index so crowds can't overtake road traffic. */
+export function fightPlaneDepth(
+  laneY: number,
+  index: number,
+  onPlatform = false,
+): number {
+  const tie = index * 0.001;
+  if (onPlatform) return 40 + laneY * 0.02 + tie;
+  return FIGHT_DEPTH_BASE + laneY * 0.05 + tie;
+}
 
 function decksOf(car: DestructibleProp, surface: CarSurface) {
   return {
@@ -247,9 +258,20 @@ export function wreckCarUnderThrower(
 /**
  * Draw fighters under cars / coffee van when standing north of them,
  * and above when in front / on the platform.
+ * Passing road traffic (optional) always paints in front of the promenade.
  */
-export function syncCarOcclusion(fighters: Fighter[], props: DestructibleProp[]): void {
+export function syncCarOcclusion(
+  fighters: Fighter[],
+  props: DestructibleProp[],
+  passingTraffic: Phaser.GameObjects.Image[] = [],
+): void {
   const motors = props.filter((c) => c.isOccluder);
+  for (const t of passingTraffic) {
+    if (t.active) t.setDepth(PASSING_TRAFFIC_DEPTH);
+  }
+  const trafficCap =
+    passingTraffic.some((t) => t.active) ? PASSING_TRAFFIC_DEPTH - 1 : null;
+
   fighters.sort((a, b) => a.laneY - b.laneY || a.y - b.y);
   fighters.forEach((f, i) => {
     if (f.isBackground) {
@@ -257,7 +279,7 @@ export function syncCarOcclusion(fighters: Fighter[], props: DestructibleProp[])
       return;
     }
 
-    let depth = 10 + Math.floor(f.laneY * 0.05) + i;
+    let depth = fightPlaneDepth(f.laneY, i, f.platformY !== null);
 
     for (const car of motors) {
       if (Math.abs(f.x - car.x) > car.rx + 28) continue;
@@ -279,9 +301,12 @@ export function syncCarOcclusion(fighters: Fighter[], props: DestructibleProp[])
       if (f.laneY < hinge) {
         depth = Math.min(depth, carD - 2);
       } else {
-        depth = Math.max(depth, carD + 2 + (i % 4));
+        depth = Math.max(depth, carD + 2 + (i % 4) * 0.01);
       }
     }
+
+    // Road passers are closer to camera than the fight strip
+    if (trafficCap !== null) depth = Math.min(depth, trafficCap);
 
     f.setDepth(depth);
   });

@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { generateDoodleTextures } from "../assets/doodleTextures";
 import { chipRock } from "../audio/ChipRock";
 import { chipSfx } from "../audio/ChipSfx";
+import { dismissBootLoader } from "../ui/bootLoader";
 
 type DemoFrame = {
   pose: string;
@@ -573,7 +574,8 @@ export class BootScene extends Phaser.Scene {
     practice.on("pointerover", () => practice.setColor("#ffe08a"));
     practice.on("pointerout", () => practice.setColor("#c4a882"));
     practice.on("pointerdown", () => {
-      window.location.assign("/debug");
+      // Same folder as the game — works under /games/pompey-punch-up/ and solo :5299
+      window.location.assign(new URL("debug.html", window.location.href).href);
     });
 
     const startHint = this.add
@@ -606,6 +608,9 @@ export class BootScene extends Phaser.Scene {
     this.frameUntil = this.time.now + this.frameDuration(DEMOS[0]!.frames[0]!);
 
     this.input.keyboard?.once("keydown", () => this.startBeach());
+
+    // Let the first title frame paint, then drop the HTML loading screen
+    this.time.delayedCall(0, () => dismissBootLoader());
   }
 
   update(_time: number, _delta: number): void {
@@ -899,8 +904,12 @@ export class BootScene extends Phaser.Scene {
   private startBeach() {
     if (this.started) return;
     this.started = true;
-    // BeachScene.create swaps to the quiet L1 bed
-    void chipRock.unlock().then(() => chipRock.start());
+    // Ease title down; BeachScene.create takes over with the calm bed
+    void chipRock.unlock().then(() => {
+      chipRock.setMode("bed");
+      chipRock.setHeat(0.18);
+      return chipRock.start();
+    });
     this.scene.start("BeachScene");
   }
 }

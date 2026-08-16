@@ -14,11 +14,12 @@ export type ChipRockMode = "bed" | "fight" | "boss" | "title";
 const TEMPO_FIGHT = 148;
 const TEMPO_TITLE = 126;
 const TEMPO_BOSS = 118;
+const TEMPO_BED = 92;
 const STEPS_PER_BEAT = 4; // 16th notes
 const LOOKAHEAD = 0.05;
 const SCHEDULE_AHEAD = 0.2;
 
-const MASTER_BED = 0.034;
+const MASTER_BED = 0.062;
 const MASTER_TITLE = 0.098;
 const MASTER_FIGHT = 0.112;
 const MASTER_BOSS = 0.132;
@@ -32,6 +33,7 @@ const b2 = 123.47;
 const c3 = 130.81;
 const d3 = 146.83;
 const e3 = 164.81;
+const fs3 = 185;
 const g3 = 196;
 const a3 = 220;
 const b3 = 246.94;
@@ -291,27 +293,57 @@ const BOSS_DRUMS: Pattern = [
   4, 3, 2, 3, 2, 3, 5, 2, 4, 2, 6, 2, 4, 2, 4, 2,
 ];
 
-/** Soft bed pad chord roots (every half bar). */
+/**
+ * Quiet promenade bed — Em stroll before the scrap.
+ * Slow pulse + soft fifths + sparse melody (no kit).
+ */
 const BED_PULSE: Pattern = [
+  // Em
   e2, null, null, null, null, null, null, null,
+  null, null, null, null, e2, null, null, null,
+  // G
+  g2, null, null, null, null, null, null, null,
   null, null, null, null, g2, null, null, null,
+  // Am
   a2, null, null, null, null, null, null, null,
-  null, null, null, null, e2, null, g2, null,
-  e2, null, null, null, null, null, null, null,
-  null, null, null, null, c3, null, null, null,
-  a2, null, null, null, null, null, null, null,
-  null, null, b2, null, a2, null, g2, null,
+  null, null, null, null, a2, null, null, null,
+  // B7 → home
+  b2, null, null, null, null, null, null, null,
+  a2, null, null, null, g2, null, e2, null,
+];
+
+const BED_FIFTH: Pattern = [
+  b2, null, null, null, null, null, null, null,
+  null, null, null, null, b2, null, null, null,
+  d3, null, null, null, null, null, null, null,
+  null, null, null, null, d3, null, null, null,
+  e3, null, null, null, null, null, null, null,
+  null, null, null, null, e3, null, null, null,
+  fs2, null, null, null, null, null, null, null,
+  e3, null, null, null, d3, null, b2, null,
 ];
 
 const BED_ARP: Pattern = [
   null, null, e4, null, null, g4, null, null,
   null, b4, null, null, null, null, null, null,
-  null, null, a4, null, null, c5, null, null,
-  null, e4, null, null, null, null, null, null,
   null, null, g4, null, null, b4, null, null,
+  null, d5, null, null, null, null, null, null,
+  null, null, a4, null, null, c5, null, null,
   null, e5, null, null, null, null, null, null,
-  null, null, a4, null, null, e4, null, null,
-  null, g4, null, null, null, null, null, null,
+  null, null, b4, null, null, a4, null, null,
+  null, g4, null, null, e4, null, null, null,
+];
+
+/** Soft whistled lead — one note every beat or two. */
+const BED_LEAD: Pattern = [
+  e4, null, null, null, null, null, g4, null,
+  null, null, null, null, b4, null, null, null,
+  a4, null, null, null, null, null, g4, null,
+  null, null, e4, null, null, null, null, null,
+  g4, null, null, null, null, null, a4, null,
+  null, null, null, null, b4, null, null, null,
+  a4, null, null, null, g4, null, e4, null,
+  null, null, d4, null, e4, null, null, null,
 ];
 
 class ChipRockEngine {
@@ -380,7 +412,8 @@ class ChipRockEngine {
     if (mode === "bed") {
       this.dropTarget = 0;
       this.drop = Math.min(this.drop, 0.08);
-      this.applyMaster(MASTER_BED, 0.6);
+      // From title: ease down into the calm promenade bed
+      this.applyMaster(MASTER_BED, was === "title" ? 1.6 : 0.7);
     } else if (mode === "title") {
       this.dropTarget = 0.75;
       this.drop = 0.75;
@@ -394,9 +427,11 @@ class ChipRockEngine {
       }
       this.applyMaster(MASTER_BOSS, was === "fight" ? 0.55 : 1.1);
     } else {
+      // Fight drop — keep bed under it while drop rises (see scheduleStep)
       this.dropTarget = 1;
       if (was === "bed" || this.drop < 0.3) {
-        this.applyMaster(MASTER_FIGHT, 1.4);
+        this.drop = Math.min(this.drop, 0.12);
+        this.applyMaster(MASTER_FIGHT, 2.4);
       } else if (was === "boss") {
         this.step = 0;
         this.applyMaster(MASTER_FIGHT, 0.7);
@@ -470,6 +505,11 @@ class ChipRockEngine {
   private tempo(): number {
     if (this.mode === "boss") return TEMPO_BOSS;
     if (this.mode === "title") return TEMPO_TITLE;
+    if (this.mode === "bed") return TEMPO_BED;
+    // Fight still climbing out of the bed — ease tempo up with the drop
+    if (this.drop < 0.55) {
+      return TEMPO_BED + (TEMPO_FIGHT - TEMPO_BED) * (this.drop / 0.55);
+    }
     return TEMPO_FIGHT;
   }
 
@@ -477,7 +517,9 @@ class ChipRockEngine {
     if (!this.playing || !this.ctx) return;
     const dt = LOOKAHEAD;
     if (this.drop < this.dropTarget) {
-      this.drop = Math.min(this.dropTarget, this.drop + dt / 1.15);
+      // Bed → fight takes ~2.6s so the calm bed bleeds under the drop
+      const riseSec = this.mode === "fight" && this.drop < 0.55 ? 2.6 : 1.15;
+      this.drop = Math.min(this.dropTarget, this.drop + dt / riseSec);
     } else if (this.drop > this.dropTarget) {
       this.drop = Math.max(this.dropTarget, this.drop - dt / 0.8);
     }
@@ -510,10 +552,10 @@ class ChipRockEngine {
       this.scheduleBedStep(step % 64, time);
       return;
     }
-    // fight — soft bed bleed while the drop is still rising
-    if (this.drop < 0.28) {
-      this.scheduleBedStep(step % 64, time);
-      if (this.drop < 0.18) return;
+    // Fight — keep the calm bed under the rising drop, then hand off
+    if (this.drop < 0.55) {
+      this.scheduleBedStep(step % 64, time, 1 - this.drop / 0.55);
+      if (this.drop < 0.22) return;
     }
     this.scheduleFightStep(step, time);
   }
@@ -522,20 +564,36 @@ class ChipRockEngine {
     return Math.floor(step / 64) % 2 === 1;
   }
 
-  private scheduleBedStep(step: number, time: number): void {
+  private scheduleBedStep(step: number, time: number, level = 1): void {
     const out = this.master!;
-    const pulse = BED_PULSE[step % BED_PULSE.length]!;
-    const arp = BED_ARP[step % BED_ARP.length]!;
+    const mul = Math.max(0, Math.min(1, level));
+    if (mul < 0.05) return;
+    const i = step % 64;
+    const pulse = BED_PULSE[i]!;
+    const fifth = BED_FIFTH[i]!;
+    const arp = BED_ARP[i]!;
+    const lead = BED_LEAD[i]!;
+
     if (pulse !== null) {
-      this.tone(pulse, time, 0.28, "triangle", 0.045, out);
-      this.tone(pulse * 2, time, 0.22, "sine", 0.02, out);
+      this.tone(pulse, time, 0.42, "triangle", 0.052 * mul, out);
+      this.tone(pulse * 2, time, 0.5, "sine", 0.028 * mul, out);
+      this.tone(pulse * 3, time, 0.35, "sine", 0.012 * mul, out);
+    }
+    if (fifth !== null) {
+      this.tone(fifth, time, 0.36, "triangle", 0.022 * mul, out);
+      this.tone(fifth * 2, time, 0.3, "sine", 0.01 * mul, out);
     }
     if (arp !== null) {
-      this.tone(arp, time, 0.12, "triangle", 0.028, out);
+      this.tone(arp, time, 0.16, "triangle", 0.026 * mul, out);
+      this.tone(arp * 0.5, time, 0.14, "sine", 0.01 * mul, out);
     }
-    // Soft coastal hat every other beat
-    if (step % 8 === 4) this.hat(time, out, 0.014);
-    if (step % 16 === 0) this.hat(time, out, 0.01);
+    if (lead !== null) {
+      this.tone(lead, time, 0.2, "triangle", 0.034 * mul, out, 0.0012);
+      this.tone(lead * 2, time, 0.12, "sine", 0.01 * mul, out);
+    }
+    // Soft coastal hush — no kick/snare on the bed
+    if (i % 8 === 4) this.hat(time, out, 0.012 * mul);
+    if (i % 16 === 0) this.hat(time, out, 0.009 * mul);
   }
 
   private scheduleTitleStep(step: number, time: number): void {

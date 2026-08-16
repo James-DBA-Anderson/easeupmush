@@ -14,6 +14,9 @@ export type HairStyle = "crop" | "bob" | "shoulder" | "ponytail" | "bun";
 
 export type BottomStyle = "pants" | "skirt";
 
+/** Extra kit over the base doodle — police get helmet + hi-vis. */
+export type KitStyle = "none" | "police";
+
 export interface PersonLook {
   id: string;
   skin: string;
@@ -24,6 +27,7 @@ export interface PersonLook {
   present: Present;
   hairStyle: HairStyle;
   bottom: BottomStyle;
+  kit: KitStyle;
   /** Drawn height / width tweaks applied as sprite scale */
   scaleX: number;
   scaleY: number;
@@ -82,6 +86,7 @@ function L(
   bottom?: BottomStyle,
   scaleX = 1,
   scaleY = 1,
+  kit: KitStyle = "none",
 ): PersonLook {
   return {
     id,
@@ -93,6 +98,7 @@ function L(
     present,
     hairStyle: hairStyle ?? (present === "fem" ? "shoulder" : "crop"),
     bottom: bottom ?? (present === "fem" ? "skirt" : "pants"),
+    kit: kit === "none" && roles.includes("police") ? "police" : kit,
     scaleX,
     scaleY,
     roles,
@@ -139,11 +145,11 @@ export const POMPEY_LOOKS: PersonLook[] = [
   L("look_p03", SKIN.deep, HAIR.black, "#2a6db0", "#1a3048", "tall", ["player"], "masc", "crop", "pants", 1, 1.08),
   L("look_p04", SKIN.light, HAIR.blonde, "#2a6db0", "#1a3048", "slim", ["player"], "masc", "crop", "pants", 0.94, 1.0),
 
-  // —— Bill ——
-  L("look_o00", SKIN.fair, HAIR.brown, "#1a3a6e", "#0a1a30", "average", ["police"]),
-  L("look_o01", SKIN.brown, HAIR.black, "#1a3a6e", "#0a1a30", "stocky", ["police"], "masc", "crop", "pants", 1.06, 0.98),
-  L("look_o02", SKIN.olive, HAIR.darkBrown, "#1a3a6e", "#0a1a30", "tall", ["police"], "masc", "crop", "pants", 0.98, 1.08),
-  L("look_o03", SKIN.light, HAIR.grey, "#1a3a6e", "#0a1a30", "heavy", ["police"], "masc", "crop", "pants", 1.1, 0.94),
+  // —— Bill — navy tunic, black trousers, copper kit drawn on top ——
+  L("look_o00", SKIN.fair, HAIR.brown, "#1a3558", "#141820", "average", ["police"]),
+  L("look_o01", SKIN.brown, HAIR.black, "#1a3558", "#141820", "stocky", ["police"], "masc", "crop", "pants", 1.06, 0.98),
+  L("look_o02", SKIN.olive, HAIR.darkBrown, "#1a3558", "#141820", "tall", ["police"], "masc", "crop", "pants", 0.98, 1.08),
+  L("look_o03", SKIN.light, HAIR.grey, "#1a3558", "#141820", "heavy", ["police"], "masc", "crop", "pants", 1.1, 0.94),
 ];
 
 export function looksForRole(role: LookRole): PersonLook[] {
