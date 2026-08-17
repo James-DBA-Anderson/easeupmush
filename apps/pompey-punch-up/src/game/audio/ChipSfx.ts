@@ -152,6 +152,26 @@ class ChipSfxEngine {
     this.blip(ctx, t, 70, 35, 0.2, 0.2, "sawtooth");
   }
 
+  /** Council countdown pip. */
+  async nukeTick(): Promise<void> {
+    const ctx = await this.ensure();
+    if (!ctx || !this.bus) return;
+    const t = ctx.currentTime;
+    this.blip(ctx, t, 980, 420, 0.16, 0.12, "square");
+    this.blip(ctx, t + 0.04, 520, 220, 0.1, 0.08, "square");
+  }
+
+  /** Seafront goes up. */
+  async nukeBlast(): Promise<void> {
+    const ctx = await this.ensure();
+    if (!ctx || !this.bus) return;
+    const t = ctx.currentTime;
+    this.noiseBurst(ctx, t, 0.55, 180, 0.48);
+    this.blip(ctx, t, 90, 28, 0.7, 0.38, "sawtooth");
+    this.noiseBurst(ctx, t + 0.14, 0.85, 90, 0.32);
+    this.blip(ctx, t + 0.18, 55, 22, 0.55, 0.22, "triangle");
+  }
+
   async chop(): Promise<void> {
     const ctx = await this.ensure();
     if (!ctx || !this.bus) return;
@@ -168,6 +188,25 @@ class ChipSfxEngine {
     const t = ctx.currentTime;
     this.blip(ctx, t, 520, 780, 0.07, 0.08, "square");
     this.blip(ctx, t + 0.06, 780, 1040, 0.07, 0.07, "square");
+  }
+
+  /** DBZ charge scream, chip-style. */
+  async buzzCharge(): Promise<void> {
+    const ctx = await this.ensure();
+    if (!ctx || !this.bus) return;
+    const t = ctx.currentTime;
+    this.noiseBurst(ctx, t, 0.55, 700, 0.16);
+    this.blip(ctx, t, 160, 620, 0.55, 0.16, "sawtooth");
+    this.blip(ctx, t + 0.18, 320, 980, 0.5, 0.14, "sawtooth");
+    this.blip(ctx, t + 0.4, 540, 1400, 0.45, 0.12, "square");
+  }
+
+  async buzzFade(): Promise<void> {
+    const ctx = await this.ensure();
+    if (!ctx || !this.bus) return;
+    const t = ctx.currentTime;
+    this.blip(ctx, t, 980, 220, 0.28, 0.1, "triangle");
+    this.noiseBurst(ctx, t, 0.18, 400, 0.1);
   }
 
   async drop(): Promise<void> {

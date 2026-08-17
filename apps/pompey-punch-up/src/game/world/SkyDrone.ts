@@ -42,6 +42,8 @@ export class SkyDrone {
   private swoopHit = false;
   private orbitAng = 0;
   private announcedFilm = false;
+  /** After Clarence — hang about filming so you can still boot it. */
+  private huntPasses = false;
   /** Screen-space flyby vs world-space combat / film. */
   private screenSpace = true;
   private readonly scene: Phaser.Scene;
@@ -186,6 +188,13 @@ export class SkyDrone {
     this.spawnAssist(player, now);
   }
 
+  /** Keep filming after the King drops so a jump-kick can still bring it down. */
+  enableHuntPasses(now: number): void {
+    if (this.assistWrecked) return;
+    this.huntPasses = true;
+    if (this.mode === "idle") this.nextEventAt = Math.min(this.nextEventAt, now + 1400);
+  }
+
   private updateAmbient(
     now: number,
     dt: number,
@@ -193,9 +202,11 @@ export class SkyDrone {
     player: Fighter,
   ): void {
     if (this.mode === "idle") {
+      // Quiet Eastney — no buzzing camera until you're along the huts
+      if (player.x < 2400 && !this.huntPasses) return;
       if (now >= this.nextEventAt) {
-        // Sometimes hang about filming; otherwise a straight flyover
-        if (Math.random() < 0.48) this.spawnFilm(player, now);
+        // Hunt / film passes sit in world space so a jump-kick can connect
+        if (this.huntPasses || Math.random() < 0.48) this.spawnFilm(player, now);
         else this.spawnFlyby();
       }
       return;
@@ -218,7 +229,7 @@ export class SkyDrone {
       if (off) {
         this.destroyImage();
         this.mode = "idle";
-        this.nextEventAt = now + 18000 + Math.random() * 26000;
+        this.nextEventAt = now + (this.huntPasses ? 7000 + Math.random() * 8000 : 18000 + Math.random() * 26000);
       }
     }
   }

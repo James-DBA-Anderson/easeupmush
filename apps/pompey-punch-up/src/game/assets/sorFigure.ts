@@ -869,7 +869,7 @@ export function drawSorFighter(
             : ollie
               ? 6
               : manual
-                ? 10
+                ? 2
                 : rideFrame === 0
                   ? 6
                   : 8
@@ -917,7 +917,7 @@ export function drawSorFighter(
           ? kickflip
             ? -2
             : manual
-              ? -8
+              ? -3
               : ollie
                 ? 4
                 : rideFrame === 0
@@ -1033,11 +1033,11 @@ export function drawSorFighter(
     nearKnee = { x: hip.x + 10, y: hip.y - 4 };
     nearFoot = { x: hip.x + 20, y: hip.y + 6 };
   } else if (manual) {
-    // Sit back over the tail — weight on rear trucks, nose up, body still tall
-    farKnee = { x: hip.x - 6, y: hip.y + 10 };
-    farFoot = { x: hip.x - 14, y: feetY - 2 };
-    nearKnee = { x: hip.x + 8, y: hip.y + 2 };
-    nearFoot = { x: hip.x + 14, y: feetY - 14 };
+    // Weight on the tail, nose up — legs long, torso upright
+    farKnee = { x: hip.x - 4, y: hip.y + 14 };
+    farFoot = { x: hip.x - 12, y: feetY - 1 };
+    nearKnee = { x: hip.x + 6, y: hip.y + 12 };
+    nearFoot = { x: hip.x + 12, y: feetY - 8 };
   } else if (ollie) {
     // Knees up, board rising with the feet
     farKnee = { x: hip.x - 2, y: hip.y + 8 };
@@ -1266,11 +1266,11 @@ export function drawSorFighter(
       nearElbow = { x: shoulder.x + 14, y: shoulder.y + 10 };
       nearHand = { x: shoulder.x + 22, y: shoulder.y + 4 };
     } else if (manual) {
-      // Arms wide and back — counterweight while the nose floats
-      farElbow = { x: shoulder.x - 10, y: shoulder.y + 4 };
-      farHand = { x: shoulder.x - 22, y: shoulder.y - 6 };
-      nearElbow = { x: shoulder.x + 16, y: shoulder.y + 2 };
-      nearHand = { x: shoulder.x + 28, y: shoulder.y - 8 };
+      // Arms out for balance, not folded into a sit
+      farElbow = { x: shoulder.x - 8, y: shoulder.y + 2 };
+      farHand = { x: shoulder.x - 20, y: shoulder.y - 10 };
+      nearElbow = { x: shoulder.x + 14, y: shoulder.y };
+      nearHand = { x: shoulder.x + 26, y: shoulder.y - 12 };
     } else if (ollie) {
       farElbow = { x: shoulder.x - 4, y: shoulder.y + 8 };
       farHand = { x: shoulder.x - 12, y: shoulder.y };

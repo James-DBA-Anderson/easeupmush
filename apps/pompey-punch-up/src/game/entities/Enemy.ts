@@ -5,6 +5,8 @@ import { Fighter, inReach } from "./Fighter";
 import { getLook, pickLook } from "../assets/pompeyLooks";
 import { standingFaceAnchor } from "../assets/sorFigure";
 import { steerAway, type Obstacle } from "../world/obstacles";
+import type { WeaponKind } from "../world/WeaponPickup";
+import { isThrowable } from "../world/ThrownWeapon";
 
 /** Background patrol stays on the common — never up on the sea. */
 const BG_MIN_Y = COMMON.minY;
@@ -65,6 +67,32 @@ type Mood = "patrol" | "alert" | "fight";
 type CallOutcome = "success" | "interrupted";
 export type EnemyRole = "thug" | "scout" | "sergeant";
 
+/** Hardmen always come tooled up; a slice of the pack bring a bottle or bat. */
+function pickLoadoutWeapon(opts: {
+  boss: boolean;
+  named: boolean;
+  role: EnemyRole;
+  mad: boolean;
+}): WeaponKind | null {
+  if (opts.named && !opts.boss) return null;
+  if (opts.boss) {
+    const r = Math.random();
+    if (r < 0.5) return "bat";
+    if (r < 0.7) return "chain";
+    if (r < 0.85) return "cue";
+    return "brick";
+  }
+  let chance = opts.role === "sergeant" ? 0.52 : opts.role === "scout" ? 0.38 : 0.26;
+  if (opts.mad) chance += 0.1;
+  if (Math.random() > chance) return null;
+  const r = Math.random();
+  if (opts.role === "scout") return r < 0.72 ? "bottle" : "brick";
+  if (r < 0.42) return "bottle";
+  if (r < 0.72) return "bat";
+  if (r < 0.88) return "brick";
+  return "chain";
+}
+
 export interface EnemyOptions {
   toughness?: number;
   boss?: boolean;
@@ -91,6 +119,8 @@ export class Enemy extends Fighter {
   readonly isBoss: boolean;
   /** Weaker thugs prefer circling behind rather than trading face-on. */
   readonly likesFlank: boolean;
+  /** Grabs a bat/bottle off the pebbles mid-scrap. */
+  readonly nicksKit: boolean;
   /** Temper — mad means almost no blocking. Can flip true when shades smash. */
   mad: boolean;
   /**
@@ -149,6 +179,13 @@ export class Enemy extends Fighter {
     const boost = opts.scaleBoost ?? (opts.boss ? 1.28 : 1);
     const toughness = opts.toughness ?? (opts.boss ? 3.6 : 0.85);
     const named = !!opts.lookId;
+    const role = opts.role ?? (opts.boss ? "sergeant" : "thug");
+    const kit = pickLoadoutWeapon({
+      boss: !!opts.boss,
+      named,
+      role,
+      mad: !!opts.mad || !!opts.boss,
+    });
     super(scene, x, y, "enemy", look.id, name, {
       toughness,
       scaleX: look.scaleX * boost,
@@ -159,15 +196,13 @@ export class Enemy extends Fighter {
         money: opts.boss
           ? 40 + Math.floor(Math.random() * 40)
           : 8 + Math.floor(Math.random() * 25),
-        weapon: named
+        weapon: kit
           ? "none"
-          : opts.boss
-            ? Math.random() < 0.5
-              ? "bat"
-              : "brick"
-            : Math.random() < 0.4
+          : named
+            ? "none"
+            : Math.random() < 0.22
               ? "bottle"
-              : Math.random() < 0.15
+              : Math.random() < 0.08
                 ? "brick"
                 : "none",
       },
@@ -176,12 +211,14 @@ export class Enemy extends Fighter {
     this.likesFlank = !this.isBoss && toughness < 1.05;
     this.mad = !!opts.mad;
     this.debugStand = !!opts.debugStand;
-    this.role = opts.role ?? (opts.boss ? "sergeant" : "thug");
+    this.role = role;
+    this.nicksKit =
+      this.isBoss || role === "sergeant" || this.mad || Math.random() < 0.28;
     this.inBackground = !!opts.background;
     // Brief scramble so a jab storm can't pin them on the deck forever
-    this.getUpGraceMs = this.isBoss ? 280 : 620;
-    this.speed = opts.boss ? 128 : 95;
-    this.runSpeed = opts.boss ? 245 : 170;
+    this.getUpGraceMs = this.isBoss ? 320 : 560;
+    this.speed = opts.boss ? 136 : 102;
+    this.runSpeed = opts.boss ? 258 : 184;
     this.homeX = x;
     this.homeY = opts.background
       ? Phaser.Math.Clamp(y, BG_MIN_Y, BG_MAX_Y)
@@ -207,13 +244,11 @@ export class Enemy extends Fighter {
       this.structure.anger = 0.15;
     }
     if (opts.boss) {
-      // Hardman comes in steaming and armed more often
+      // Hardman comes in steaming and tooled up
       this.structure.anger = Math.max(this.structure.anger, 0.55);
       this.mad = true;
-      if (this.structure.loot.weapon === "bat" || Math.random() < 0.65) {
-        this.equipWeapon(this.structure.loot.weapon === "brick" ? "brick" : "bat");
-      }
     }
+    if (kit) this.equipWeapon(kit);
   }
 
   override get isBackground(): boolean {
@@ -583,6 +618,7 @@ export class Enemy extends Fighter {
   }
 
   updateEnemy(now: number, dt: number, fighters: Fighter[], obstacles: Obstacle[] = []): void {
+    if (this.inFanMince) return;
     this.frameObstacles = obstacles;
     this.tickKnockdown(now);
 
@@ -842,17 +878,29 @@ export class Enemy extends Fighter {
       return;
     }
 
-    // Already fighting — stick with target unless gone
-    if (this.mood === "fight" && this.target && !this.target.structure.isOut()) {
+    const ranPast =
+      !!player &&
+      !player.isHidden &&
+      player.x > this.x + 56 &&
+      distToPlayer < 780;
+
+    // Already on him — don't clock off because he scarpered up the front
+    if (
+      (this.mood === "fight" || this.mood === "alert") &&
+      this.target &&
+      !this.target.structure.isOut()
+    ) {
+      if (this.target.team === "player" || this.target === player) {
+        this.mood = "fight";
+        if (player) this.target = player;
+        return;
+      }
       const d = Phaser.Math.Distance.Between(this.x, this.y, this.target.x, this.target.y);
       if (d < this.aggroRange * 1.35) return;
-      this.mood = "patrol";
-      this.target = null;
-      return;
     }
 
-    if (nearPlayer && player) {
-      const d = Phaser.Math.Distance.Between(this.x, this.y, player.x, player.y);
+    if ((nearPlayer || ranPast) && player) {
+      const d = distToPlayer;
       const playerScrap =
         player.action === "jab" ||
         player.action === "hook" ||
@@ -864,6 +912,12 @@ export class Enemy extends Fighter {
         player.action === "stomp" ||
         player.action === "hitstun";
       if (this.mood === "patrol") {
+        if (ranPast && !nearPlayer) {
+          this.mood = "fight";
+          this.target = player;
+          this.queueInsult(now, true);
+          return;
+        }
         this.mood = "alert";
         this.target = player;
         // Scrap already going — jump in faster
@@ -888,7 +942,12 @@ export class Enemy extends Fighter {
         } else {
           this.queueInsult(now, true);
         }
-      } else if (d < 70 || this.structure.anger >= 0.3 || (playerScrap && d < 160)) {
+      } else if (
+        ranPast ||
+        d < 70 ||
+        this.structure.anger >= 0.3 ||
+        (playerScrap && d < 160)
+      ) {
         this.mood = "fight";
         this.target = player;
       }
@@ -916,7 +975,7 @@ export class Enemy extends Fighter {
       return;
     }
 
-    if (this.mood !== "patrol" && (!nearPlayer || now > this.alertUntil + 4000)) {
+    if (this.mood !== "patrol" && !player) {
       this.mood = "patrol";
       this.target = null;
     }
@@ -959,7 +1018,7 @@ export class Enemy extends Fighter {
     const dist = Phaser.Math.Distance.Between(this.x, this.y, t.x, t.y);
     this.faceToward(t.x, now);
 
-    if (now >= this.alertUntil || dist < 65) {
+    if (now >= this.alertUntil || dist < 65 || t.x > this.x + 80) {
       this.mood = "fight";
       return;
     }
@@ -1006,6 +1065,7 @@ export class Enemy extends Fighter {
     const floored = t.structure.downed && now < t.structure.groundedUntil;
 
     if (this.holdingBack && !this.isBoss) {
+      if (this.tryRangedThrow(now, t)) return;
       this.updateWaitTurn(now, dt, t);
       return;
     }
@@ -1014,6 +1074,8 @@ export class Enemy extends Fighter {
       this.updateSwarmStomp(now, dt);
       return;
     }
+
+    if (this.tryRangedThrow(now, t)) return;
 
     if (this.likesFlank && t.team === "player") {
       this.updateFlankFight(now, dt);
@@ -1038,12 +1100,22 @@ export class Enemy extends Fighter {
     const dx = t.x - this.x;
     const dy = t.y - this.y;
     const len = Math.hypot(dx, dy) || 1;
+    // Left behind — sprint up before hovering for a slot
+    if (dist > 200) {
+      const spd = this.runSpeed * this.structure.moveSpeedFactor() * 1.12;
+      this.running = true;
+      this.stepAround(dx / len, dy / len, spd, dt);
+      this.clampPos();
+      this.action = "run";
+      return;
+    }
     // Close in if too far, back off if crowding, else shuffle sideways
     const drive = dist > keep + 30 ? 0.7 : dist < keep - 30 ? -0.7 : 0;
     const mx = (dx / len) * drive + this.weaveDir * 0.5;
     const my = (dy / len) * drive * 0.6 + this.weaveDir * 0.25;
     const mLen = Math.hypot(mx, my) || 1;
     const spd = this.speed * this.structure.moveSpeedFactor() * 0.6;
+    this.running = false;
     this.stepAround(mx / mLen, my / mLen, spd, dt);
     this.clampPos();
     this.action = "move";
@@ -1081,7 +1153,9 @@ export class Enemy extends Fighter {
 
   /** Prefer guard when in scrap range — attack only in gaps. */
   private tryFightAction(now: number, t: Fighter): boolean {
-    const close = inReach(this, t, this.attackReach + 8);
+    const meleePad =
+      this.weapon !== "none" && !isThrowable(this.weapon) ? 22 : 8;
+    const close = inReach(this, t, this.attackReach + meleePad);
     if (!close) return false;
     // Hold an existing block briefly, then re-think
     if (now < this.thinkAt && this.action === "block") {
@@ -1090,12 +1164,12 @@ export class Enemy extends Fighter {
     }
     if (now < this.thinkAt) return true;
 
-    this.thinkAt = now + (this.isBoss ? 520 : 820) + Math.random() * 320;
+    this.thinkAt = now + (this.isBoss ? 440 : 680) + Math.random() * 280;
 
     if (this.wantsGuard()) {
       const swing = this.playerIsSwinging(t);
       // Cover up when fists are coming; otherwise mostly swing back
-      const coverChance = swing ? 0.28 : 0.1;
+      const coverChance = swing ? 0.36 : 0.12;
       if (Math.random() < coverChance) {
         this.tryBlock(now);
         if (Math.random() < 0.2) this.queueInsult(now);
@@ -1105,21 +1179,48 @@ export class Enemy extends Fighter {
 
     this.dropBlock(now);
     if (Math.random() < 0.35) this.queueInsult(now);
+    if (this.weapon !== "none") {
+      if (isThrowable(this.weapon)) {
+        this.tryThrow(now);
+        return true;
+      }
+      if (this.isBoss) {
+        const roll = Math.random();
+        if (roll < 0.18) this.tryKick(now);
+        else this.tryPunch(now, roll < 0.42);
+      } else if (Math.random() < 0.22) {
+        this.tryKick(now);
+      } else {
+        this.tryPunch(now, false);
+      }
+      return true;
+    }
     if (this.isBoss) {
-      // Hardman presses harder — headbutts, kicks, weapon swings
+      // Hardman presses harder — headbutts, kicks
       const roll = Math.random();
       if (roll < 0.28) this.tryPunch(now, true);
       else if (roll < 0.5) this.tryKick(now);
-      else if (this.weapon !== "none" && roll < 0.78) this.tryPunch(now, false);
       else this.tryPunch(now, false);
     } else if (this.structure.anger >= 0.4 && Math.random() < 0.55) {
       this.tryKick(now);
-    } else if (this.weapon !== "none" && Math.random() < 0.45) {
-      this.tryPunch(now, false);
     } else {
       this.tryPunch(now, false);
     }
     return true;
+  }
+
+  /** Chuck a bottle / brick from a few steps out, then close in fists. */
+  private tryRangedThrow(now: number, t: Fighter): boolean {
+    if (!isThrowable(this.weapon)) return false;
+    if (now < this.thinkAt) return false;
+    const dist = Phaser.Math.Distance.Between(this.x, this.y, t.x, t.y);
+    if (dist < 64 || dist > 280) return false;
+    if (Math.abs(this.laneY - t.laneY) > 44) return false;
+    this.thinkAt = now + 520 + Math.random() * 180;
+    this.faceToward(t.x, now);
+    this.dropBlock(now);
+    if (Math.random() < 0.45) this.queueInsult(now);
+    return this.tryThrow(now);
   }
 
   /** Rush a floored body and put the boot in. */
@@ -1132,7 +1233,7 @@ export class Enemy extends Fighter {
       this.thinkAt = now + 720 + Math.random() * 420;
       if (Math.random() < 0.4) this.queueInsult(now, true, true);
       // Hesitate more — less stomp-loop when you're scrambling up
-      if (Math.random() < 0.32) this.tryStomp(now);
+      if (Math.random() < 0.42) this.tryStomp(now);
       return;
     }
 
@@ -1151,6 +1252,22 @@ export class Enemy extends Fighter {
   /** Circle to the player's back, then dig in. */
   private updateFlankFight(now: number, dt: number): void {
     const t = this.target!;
+    const dist = Phaser.Math.Distance.Between(this.x, this.y, t.x, t.y);
+    this.faceToward(t.x, now);
+
+    if (dist > 160) {
+      if (this.action === "block") this.dropBlock(now);
+      const dx = t.x - this.x;
+      const dy = t.y - this.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const spd = this.runSpeed * this.structure.moveSpeedFactor() * 1.12;
+      this.running = true;
+      this.stepAround(dx / len, dy / len, spd, dt);
+      this.clampPos();
+      this.action = "run";
+      return;
+    }
+
     const slot = this.flankSlot(t);
     const behind = (this.x - t.x) * t.facing < -10;
     const slotDist = Phaser.Math.Distance.Between(this.x, this.y, slot.x, slot.y);
@@ -1190,6 +1307,7 @@ export class Enemy extends Fighter {
     const dx = t.x - this.x;
     const dy = t.y - this.y;
     const len = Math.hypot(dx, dy) || 1;
+    const catching = dist > 110;
     const rush = this.isBoss ? 1.35 : this.structure.anger >= 0.5 ? 1.2 : 1;
     // Brief cover while closing only if fists are already coming
     if (this.wantsGuard() && dist < 100 && this.playerIsSwinging(t) && Math.random() < 0.4) {
@@ -1199,8 +1317,9 @@ export class Enemy extends Fighter {
       this.clampPos();
       return;
     }
-    const spd = this.speed * this.structure.moveSpeedFactor() * rush;
-    this.running = dist > 100 && this.isBoss;
+    const spd =
+      (catching ? this.runSpeed : this.speed) * this.structure.moveSpeedFactor() * rush;
+    this.running = catching;
     this.stepAround(dx / len, dy / len, spd, dt);
     this.clampPos();
     this.action = this.running ? "run" : "move";

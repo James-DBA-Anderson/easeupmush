@@ -322,6 +322,11 @@ export class SeagullFlock {
     return out;
   }
 
+  /** Blast — they don't hang about. */
+  scatter(): void {
+    for (const g of this.gulls) g.sprite.setVisible(false);
+  }
+
   takeCries(): { loud: boolean }[] {
     const out: { loud: boolean }[] = [];
     for (const g of this.gulls) {

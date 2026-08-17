@@ -161,6 +161,10 @@ export class Fighter extends Phaser.GameObjects.Container {
   action: FighterAction = "idle";
   actionUntil = 0;
   invulnUntil = 0;
+  /** Buzzball — wrecking-ball window. */
+  buzzedUntil = 0;
+  /** Tossed into the Hovertravel fans — skip AI / floor pin while they mince. */
+  inFanMince = false;
   speed = 160;
   runSpeed = 280;
   running = false;
@@ -251,6 +255,8 @@ export class Fighter extends Phaser.GameObjects.Container {
   readonly weaponSprite: Phaser.GameObjects.Image;
   /** Display name for HUD / portrait — not drawn over the sprite. */
   readonly displayName: string;
+  /** Council nuke — char the sprite so refreshVisuals keeps the scorch. */
+  charred = false;
 
   private hitFlashUntil = 0;
   private painPoseUntil = 0;
@@ -348,26 +354,32 @@ export class Fighter extends Phaser.GameObjects.Container {
     return this.y;
   }
 
+  isBuzzed(now = this.scene.time.now): boolean {
+    return now < this.buzzedUntil;
+  }
+
   get attackReach(): number {
-    if (this.action === "whirl") return 72;
-    if (this.action === "slide") return 78;
-    if (this.action === "stomp") return 64;
-    if (this.action === "weapon_swing") return this.rushStrike ? 82 : 70;
-    if (this.action === "jump_kick") return 70;
-    if (this.action === "backflip") return 76;
-    if (this.action === "swanton") return 78;
-    if (this.action === "headbutt") return this.rushStrike && this.skating ? 64 : 56;
-    if (this.action === "backhand") return 64;
-    if (this.action === "kick") return 58;
-    if (this.action === "jab") return 44;
-    if (this.action === "hook" || this.action === "punch") return 52;
-    if (this.action === "upper") return 48;
-    return 52;
+    const extra = this.isBuzzed() ? 28 : 0;
+    if (this.action === "whirl") return 72 + extra;
+    if (this.action === "slide") return 78 + extra;
+    if (this.action === "stomp") return 64 + extra;
+    if (this.action === "weapon_swing") return (this.rushStrike ? 82 : 70) + extra;
+    if (this.action === "jump_kick") return 70 + extra;
+    if (this.action === "backflip") return 76 + extra;
+    if (this.action === "swanton") return 78 + extra;
+    if (this.action === "headbutt") return (this.rushStrike && this.skating ? 64 : 56) + extra;
+    if (this.action === "backhand") return 64 + extra;
+    if (this.action === "kick") return 58 + extra;
+    if (this.action === "jab") return 44 + extra;
+    if (this.action === "hook" || this.action === "punch") return 52 + extra;
+    if (this.action === "upper") return 48 + extra;
+    return 52 + extra;
   }
 
   /** Hits everyone in a circle — whirl / stomps / crowd clearers. */
   get omniStrike(): boolean {
     return (
+      this.isBuzzed() ||
       this.action === "whirl" ||
       this.action === "stomp" ||
       this.action === "swanton"
@@ -460,6 +472,7 @@ export class Fighter extends Phaser.GameObjects.Container {
 
   /** Capture / reassert floor pin so separation, stomps, bikes can't skate bodies. */
   pinToFloor(): void {
+    if (this.inFanMince) return;
     if (!this.planted) {
       this.plantLock = false;
       return;
@@ -856,6 +869,7 @@ export class Fighter extends Phaser.GameObjects.Container {
 
   /** Fly a tossed body along X while airborne / toss window lasts. */
   applyTossFlight(now: number, dt: number, minX: number, maxX: number): void {
+    if (this.inFanMince) return;
     if (this.isThrowFlip && this.tossVictim) {
       this.syncThrowArc(now);
       return;
@@ -1716,6 +1730,11 @@ export class Fighter extends Phaser.GameObjects.Container {
       this.refreshVisuals(hit.now, 0);
       return "blocked";
     }
+    if (this.isBuzzed(hit.now) && !hit.softFloorOnly) {
+      this.hitFlashUntil = hit.now + 70;
+      this.refreshVisuals(hit.now, 0);
+      return "blocked";
+    }
     // Short i-frames: still let a boot jolt a body on the floor,
     // and always allow toss soft-plants through
     if (hit.now < this.invulnUntil && !hit.softFloorOnly) {
@@ -1884,15 +1903,19 @@ export class Fighter extends Phaser.GameObjects.Container {
     this.structure.createOpening(now, extra);
   }
 
+  /** Peel off a thrower so a gag (fans, etc.) can take over the body. */
+  detachFromThrower(): void {
+    if (!this.thrower) return;
+    if (this.thrower.tossVictim === this) this.thrower.tossVictim = null;
+    this.thrower = null;
+  }
+
   takeDown(now: number): void {
     this.structure.putOnFloor(now, 900);
     this.setAction("down", now, 900);
     this.airborne = false;
     this.jumpVy = 0;
-    if (this.thrower) {
-      if (this.thrower.tossVictim === this) this.thrower.tossVictim = null;
-      this.thrower = null;
-    }
+    this.detachFromThrower();
     this.endToss();
     this.grantGetUpGrace(now);
     // Don't pin yet if about to be clinched — pin after hold ends
@@ -1941,6 +1964,7 @@ export class Fighter extends Phaser.GameObjects.Container {
   }
 
   refreshVisuals(now: number, dt: number): void {
+    if (this.inFanMince) return;
     const s = this.structure;
     // recoverFloor is owned by tickKnockdown — don't double-clear mid-frame
     this.tickGrabMissFx(now);
@@ -2061,14 +2085,19 @@ export class Fighter extends Phaser.GameObjects.Container {
 
     this.setRotation(0);
 
-    const wantTint =
-      now < this.hitFlashUntil
-        ? s.bloodied
-          ? 0xffaaaa
-          : 0xffcccc
-        : s.bloodied
-          ? 0xffd0d0
-          : null;
+    const wantTint = this.charred
+      ? 0x3a342c
+      : this.isBuzzed(now)
+        ? now < this.hitFlashUntil
+          ? 0xffffff
+          : 0x7af0ff
+        : now < this.hitFlashUntil
+          ? s.bloodied
+            ? 0xffaaaa
+            : 0xffcccc
+          : s.bloodied
+            ? 0xffd0d0
+            : null;
     if (wantTint !== this.visTint) {
       this.visTint = wantTint;
       if (wantTint === null) this.sprite.clearTint();

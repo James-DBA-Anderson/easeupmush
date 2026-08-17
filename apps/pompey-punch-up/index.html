@@ -360,13 +360,8 @@
         border-color: rgba(255, 200, 120, 0.7);
       }
 
-      .mp-cluster--pause {
-        right: max(10px, var(--safe-r));
-        top: max(10px, var(--safe-t));
-        pointer-events: auto;
-      }
-
       .mp-cluster--fight {
+        pointer-events: none;
         right: max(10px, var(--safe-r));
         bottom: max(12px, var(--safe-b));
         grid-template-columns: 68px 68px;
@@ -440,13 +435,153 @@
       }
 
       .mp-pause {
-        min-width: 44px;
-        min-height: 40px;
-        font-size: 13px;
+        min-width: 48px;
+        min-height: 44px;
+        font-size: 14px;
         font-weight: bold;
         letter-spacing: 0.08em;
         border-radius: 12px;
-        opacity: 0.9;
+        opacity: 0.95;
+      }
+
+      #game-pause-btn {
+        display: none;
+        position: fixed;
+        z-index: 35;
+        top: max(12px, var(--safe-t));
+        right: max(12px, var(--safe-r));
+        pointer-events: auto;
+        cursor: pointer;
+      }
+
+      #game-pause-btn.is-on {
+        display: block;
+      }
+
+      #game-pause-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 32;
+        align-items: center;
+        justify-content: center;
+        background: rgba(26, 20, 16, 0.62);
+        pointer-events: auto;
+      }
+
+      #game-pause-overlay.is-on {
+        display: flex;
+      }
+
+      .game-pause-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        padding: 12px 20px;
+      }
+
+      .game-pause-title {
+        margin: 0 0 8px;
+        font-size: 36px;
+        color: #ffe08a;
+      }
+
+      .game-pause-resume,
+      .game-pause-restart {
+        appearance: none;
+        font: inherit;
+        cursor: pointer;
+        border: 0;
+        pointer-events: auto;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .game-pause-resume {
+        font-size: 22px;
+        color: #1a1410;
+        background: #ffe08a;
+        padding: 10px 22px;
+        min-height: 48px;
+      }
+
+      .game-pause-restart {
+        font-size: 18px;
+        color: #f2e6d8;
+        background: #3a3028;
+        padding: 8px 16px;
+        min-height: 44px;
+      }
+
+      #game-prompt-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 32;
+        align-items: center;
+        justify-content: center;
+        background: rgba(26, 20, 16, 0.62);
+        pointer-events: auto;
+      }
+
+      #game-prompt-overlay.is-on {
+        display: flex;
+      }
+
+      .game-prompt-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        max-width: min(28rem, calc(100vw - 32px));
+        padding: 22px 28px;
+        background: #f2e6d8;
+        color: #1a1410;
+        box-shadow: 0 4px 0 rgba(0, 0, 0, 0.4);
+      }
+
+      .game-prompt-title {
+        margin: 0;
+        font-size: 28px;
+        color: #1a1410;
+        text-align: center;
+        white-space: pre-line;
+      }
+
+      .game-prompt-body {
+        margin: 0;
+        font-size: 16px;
+        color: #1a1410;
+        text-align: center;
+        white-space: pre-line;
+      }
+
+      .game-prompt-btn {
+        appearance: none;
+        font: inherit;
+        font-size: 22px;
+        color: #1a1410;
+        background: #ffe08a;
+        border: 0;
+        padding: 12px 28px;
+        min-height: 48px;
+        cursor: pointer;
+        pointer-events: auto;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .game-prompt-alt {
+        appearance: none;
+        font: inherit;
+        font-size: 18px;
+        color: #f2e6d8;
+        background: #3a3028;
+        border: 0;
+        padding: 8px 16px;
+        min-height: 44px;
+        cursor: pointer;
+        pointer-events: auto;
+        -webkit-tap-highlight-color: transparent;
       }
 
       .mp-btn.is-down {

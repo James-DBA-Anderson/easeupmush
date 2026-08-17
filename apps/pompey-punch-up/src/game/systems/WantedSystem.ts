@@ -8,7 +8,7 @@ export class WantedSystem {
   /** Heat must hold before the first copper turns up. */
   private policeHold = 0;
   /** Longer hold so a scrap doesn't bring Bill every minute. */
-  private readonly policeHoldNeed = 7.5;
+  private readonly policeHoldNeed = 6.2;
 
   bump(amount: number): void {
     this.heat = Math.min(5, this.heat + amount * 0.55);
@@ -21,9 +21,9 @@ export class WantedSystem {
       return;
     }
     this.decayAcc += dt;
-    if (this.decayAcc >= 12) {
+    if (this.decayAcc >= 14) {
       this.decayAcc = 0;
-      this.heat = Math.max(0, this.heat - 0.38);
+      this.heat = Math.max(0, this.heat - 0.3);
       this.syncLevel();
     }
 

@@ -17,13 +17,13 @@ import { SpeechBubbles } from "../ui/SpeechBubbles";
 import { nextPlayerQuip } from "../ui/playerQuips";
 import {
   makeContinueButton,
-  makeKeyPrompt,
   type KeyPromptHandle,
 } from "../ui/KeyPrompt";
 import { separateFighters, separateFightersFromObstacles } from "../systems/separateFighters";
 import { resolvePropHits } from "../systems/resolvePropHits";
 import { updateCarPlatforms, syncCarOcclusion, wreckCarUnderThrower } from "../systems/climbCars";
 import { WeaponPickup, type WeaponKind } from "../world/WeaponPickup";
+import { BuzzballPickup } from "../world/BuzzballPickup";
 import { SkateboardPickup } from "../world/SkateboardPickup";
 import { ThrownWeapon, isThrowable } from "../world/ThrownWeapon";
 import type { DestructibleProp } from "../world/DestructibleProp";
@@ -34,12 +34,16 @@ import { separateObstacles } from "../world/obstacles";
 import {
   clearPunchJust,
   consumeConfirmJust,
+  bindPauseMenu,
   consumeCoverJust,
   consumePauseJust,
   consumeRestartJust,
+  hideHtmlPrompt,
   isMobilePlay,
   peekPunchJust,
   setMobilePadActive,
+  setPauseMenuOpen,
+  showHtmlPrompt,
 } from "../input/mobilePad";
 
 /** Idle banter when the lads haven't clocked you yet. */
@@ -90,6 +94,21 @@ const LEVEL_ONE_TECHNIQUES: Record<string, string> = {
   whirl: "the crowd-clearing whirl",
 };
 
+type AchievementId =
+  | "bigBang"
+  | "blackhawkDown"
+  | "choppedMush"
+  | "dogPound"
+  | "kickFlip";
+
+const ACHIEVEMENTS: { id: AchievementId; name: string }[] = [
+  { id: "bigBang", name: "Big Bang" },
+  { id: "blackhawkDown", name: "Blackhawk Down" },
+  { id: "choppedMush", name: "Chopped Mush" },
+  { id: "dogPound", name: "Dog Pound" },
+  { id: "kickFlip", name: "Kick Flip" },
+];
+
 type IntroPhase = "asleep" | "stir" | "line" | "walk" | "done";
 
 /** Where Bill dumps you after the cuff van — last solid beat you reached. */
@@ -123,6 +142,9 @@ export class BeachScene extends Phaser.Scene {
   private banner!: Phaser.GameObjects.Text;
   private hint!: Phaser.GameObjects.Text;
   private hud!: Phaser.GameObjects.Text;
+  private achievementToast?: Phaser.GameObjects.Container;
+  private readonly unlockedAchievements = new Set<AchievementId>();
+  private levelTwoCleared = false;
   private enemyPortrait!: Phaser.GameObjects.Container;
   private enemyPortraitImage!: Phaser.GameObjects.Image;
   private enemyPortraitName!: Phaser.GameObjects.Text;
@@ -138,8 +160,11 @@ export class BeachScene extends Phaser.Scene {
     | "stall"
     | "board"
     | "wep"
+    | "buzz"
     | null = null;
-  private restartPrompt?: KeyPromptHandle;
+  /** Lads who fled or got wiped without a KO — blocks the seafront massacre. */
+  private massacreEscaped = false;
+  private nukeHud?: Phaser.GameObjects.Container;
   /** Kept for HUD pin math; mobile no longer zooms the camera (EXPAND fills). */
   private viewZoom = 1;
   /** Expanded canvas width on wide phones (Scale.EXPAND). */
@@ -155,6 +180,11 @@ export class BeachScene extends Phaser.Scene {
   private wanted = new WantedSystem();
   private bubbles!: SpeechBubbles;
   private pickups: WeaponPickup[] = [];
+  private buzzballs: BuzzballPickup[] = [];
+  private buzzAura?: Phaser.GameObjects.Graphics;
+  private buzzFadeWarned = false;
+  private buzzAwakening = false;
+  private buzzPowerLive = false;
   private skateboards: SkateboardPickup[] = [];
   private thrown: ThrownWeapon[] = [];
   private destructibles: DestructibleProp[] = [];
@@ -180,8 +210,15 @@ export class BeachScene extends Phaser.Scene {
   private droneAssistAnnounced = false;
   /** Don't scarper until the last fan-chop has finished mincing. */
   private hoverChopLeaveAt = 0;
-  /** Screen lock while a Hardman is live — no scrolling back or ahead. */
+  /** Toast Chopped Mush once the craft has actually left for the Island. */
+  private pendingChoppedMush = false;
+  /** Screen lock while a Hardman scrap (or its post-boss beat) owns this patch. */
   private bossArena: { scrollX: number; minX: number; maxX: number } | null = null;
+  /** Keep the L1 Hardman frame through Casey / Level 2 start until you walk east. */
+  private postBossPierLock = false;
+  /** Defer camera follow until after a boss lock clears — avoids a one-frame recenter. */
+  private cameraFollowHeld = false;
+  private cameraFollowingPlayer = false;
   /** Unlock X whose call succeeded — wave can spawn. */
   private callArmedUnlock: number | null = null;
   /** Who's currently on the blower. */
@@ -203,8 +240,14 @@ export class BeachScene extends Phaser.Scene {
   private dogKicks = 0;
   private propsWrecked = 0;
   private readonly techniquesUsed = new Set<string>();
-  private endingState: "playing" | "assessment" | "companion" | "duel" | "complete" =
-    "playing";
+  private endingState:
+    | "playing"
+    | "assessment"
+    | "companion"
+    | "duel"
+    | "epilogue"
+    | "nuke"
+    | "complete" = "playing";
   private endingResolveAt = 0;
   /** 1 = South Parade stretch; 2 = sea defences → Clarence Pier. */
   private stage: 1 | 2 = 1;
@@ -227,17 +270,19 @@ export class BeachScene extends Phaser.Scene {
   };
   /** Casey's post-boss chat — game pauses until you continue each line. */
   private caseyChat: {
+    kind: "l1" | "l2good";
     speaker: Civilian;
-    lines: { text: string; banner?: string }[];
+    lines: { text: string; banner?: string; who?: "casey" | "player" }[];
     index: number;
-    report: { honour: number; seconds: number; missing: string[] };
+    report?: { honour: number; seconds: number; missing: string[] };
   } | null = null;
   private continueHint?: KeyPromptHandle;
   private continueKey!: Phaser.Input.Keyboard.Key;
   private continueAltKey!: Phaser.Input.Keyboard.Key;
-  /** Mobile pause menu — freezes scrap until Resume / Restart. */
+  private pauseKey!: Phaser.Input.Keyboard.Key;
+  private pauseEscKey!: Phaser.Input.Keyboard.Key;
+  /** Pause menu — freezes scrap until Resume / Restart. */
   private gamePaused = false;
-  private pauseOverlay?: Phaser.GameObjects.Container;
   constructor() {
     super("BeachScene");
   }
@@ -245,6 +290,13 @@ export class BeachScene extends Phaser.Scene {
   create() {
     generateDoodleTextures(this);
     setMobilePadActive(true);
+    bindPauseMenu({
+      resume: () => this.setGamePaused(false),
+      restart: () => {
+        this.setGamePaused(false);
+        this.restartFromCheckpoint();
+      },
+    });
 
     // Title → calm promenade bed; fight cut drops in once someone clocks you
     void chipRock.unlock().then(() => {
@@ -262,11 +314,15 @@ export class BeachScene extends Phaser.Scene {
     this.playerDowned = null;
     this.lastPlayerDefeat = null;
     this.gamePaused = false;
-    this.pauseOverlay?.destroy();
-    this.pauseOverlay = undefined;
+    setPauseMenuOpen(false);
     this.bossAnnounced = false;
     this.droneAssistAnnounced = false;
+    this.hoverChopLeaveAt = 0;
+    this.pendingChoppedMush = false;
     this.bossArena = null;
+    this.postBossPierLock = false;
+    this.cameraFollowHeld = false;
+    this.cameraFollowingPlayer = false;
     this.callArmedUnlock = null;
     this.activeCaller = null;
     this.wasHiding = false;
@@ -275,12 +331,19 @@ export class BeachScene extends Phaser.Scene {
     this.dogKicks = 0;
     this.propsWrecked = 0;
     this.techniquesUsed.clear();
+    this.unlockedAchievements.clear();
+    this.levelTwoCleared = false;
+    this.achievementToast?.destroy(true);
+    this.achievementToast = undefined;
     this.wonderLineIndex = 0;
     this.nextWonderAt = 0;
     this.wonderedUntilSpotted = false;
     this.endingState = "playing";
     this.endingResolveAt = 0;
     this.stage = 1;
+    this.massacreEscaped = false;
+    this.nukeHud?.destroy(true);
+    this.nukeHud = undefined;
     this.handledBosses.clear();
     this.captive = null;
     this.captiveStragglers = [];
@@ -289,12 +352,17 @@ export class BeachScene extends Phaser.Scene {
     this.introPhase = "asleep";
     this.introStartedAt = 0;
     this.introLineSaid = false;
-    this.restartPrompt?.destroy();
+    this.clearRestartPrompt();
     this.continueHint?.destroy();
-    this.restartPrompt = undefined;
     this.continueHint = undefined;
     this.floatTexts = [];
     this.pickups = [];
+    this.buzzballs = [];
+    this.buzzAura?.destroy();
+    this.buzzAura = undefined;
+    this.buzzFadeWarned = false;
+    this.buzzAwakening = false;
+    this.buzzPowerLive = false;
     this.skateboards = [];
     this.thrown = [];
     this.enemies = [];
@@ -328,7 +396,7 @@ export class BeachScene extends Phaser.Scene {
         x: 1500,
         y: GAME_HEIGHT * 0.68,
         name: "Mean Lad",
-        toughness: 0.72,
+        toughness: 0.80,
         unlockX: 1280,
         role: "scout",
       },
@@ -336,7 +404,7 @@ export class BeachScene extends Phaser.Scene {
         x: 1750,
         y: GAME_HEIGHT * 0.72,
         name: "His Mate",
-        toughness: 0.74,
+        toughness: 0.82,
         unlockX: 1500,
         role: "thug",
       },
@@ -344,7 +412,7 @@ export class BeachScene extends Phaser.Scene {
         x: 2600,
         y: GAME_HEIGHT * 0.68,
         name: "Deck Chair",
-        toughness: 0.82,
+        toughness: 0.90,
         unlockX: 2200,
         needsCall: true,
         role: "sergeant",
@@ -353,7 +421,7 @@ export class BeachScene extends Phaser.Scene {
         x: 3800,
         y: GAME_HEIGHT * 0.7,
         name: "Eastney Boy",
-        toughness: 0.88,
+        toughness: 0.96,
         unlockX: 3300,
         mad: true,
         needsCall: true,
@@ -363,7 +431,7 @@ export class BeachScene extends Phaser.Scene {
         x: 5400,
         y: GAME_HEIGHT * 0.68,
         name: "Arcade Rat",
-        toughness: 0.92,
+        toughness: 1.00,
         unlockX: 5000,
         needsCall: true,
         role: "scout",
@@ -372,7 +440,7 @@ export class BeachScene extends Phaser.Scene {
         x: 7200,
         y: GAME_HEIGHT * 0.7,
         name: "Pier Hardman",
-        toughness: 3.15,
+        toughness: 3.35,
         unlockX: 6800,
         boss: true,
         role: "sergeant",
@@ -401,7 +469,7 @@ export class BeachScene extends Phaser.Scene {
         present: "masc",
         lookId: "look_c09",
       }),
-      new Civilian(this, 2800, GAME_HEIGHT * 0.74, "Kwame + dog", "dog_walker", undefined, {
+      new Civilian(this, 4200, GAME_HEIGHT * 0.74, "Kwame + dog", "dog_walker", undefined, {
         present: "masc",
       }),
       new Civilian(this, 3500, GAME_HEIGHT * 0.66, "Ash", "wheelchair", undefined, {
@@ -482,6 +550,7 @@ export class BeachScene extends Phaser.Scene {
     );
     this.cameras.main.startFollow(this.player, true, 0.08, 0);
     this.cameras.main.setDeadzone(120, 48);
+    this.cameraFollowingPlayer = true;
 
     const START_BANNER =
       "Southsea — morning after. Something's ringing in your ears…";
@@ -573,6 +642,8 @@ export class BeachScene extends Phaser.Scene {
     this.restartKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.continueKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.continueAltKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+    this.pauseKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.P);
+    this.pauseEscKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.chatterAt = this.time.now + 12000 + Math.random() * 4000;
     // No background silhouettes until you've had a proper stroll
     this.nextBgThugAt = this.time.now + 28000 + Math.random() * 8000;
@@ -755,6 +826,226 @@ export class BeachScene extends Phaser.Scene {
         : `J to throw the ${kind}. Q to drop.`;
     this.banner.setText(`Picked up a ${kind} — ${tip}`);
     return true;
+  }
+
+  /** Armed lads / Hardmen nick bats and bottles off the pebbles. */
+  private maybeEnemyWeaponGrabs(): void {
+    if (this.pickups.length === 0) return;
+    for (const e of this.enemies) {
+      if (!e.nicksKit || e.weapon !== "none") continue;
+      if (e.structure.isOut() || e.isBackground || !e.hasSpottedPlayer) continue;
+      let best: WeaponPickup | null = null;
+      let bestD = 48;
+      for (const p of this.pickups) {
+        if (p.taken) continue;
+        const d = Phaser.Math.Distance.Between(e.x, e.y, p.x, p.y);
+        if (d < bestD && Math.abs(e.laneY - p.y) < 36) {
+          bestD = d;
+          best = p;
+        }
+      }
+      if (!best) continue;
+      best.collect();
+      e.equipWeapon(best.kind);
+      this.pickups = this.pickups.filter((x) => x !== best && !x.taken);
+      this.spawnFloat(e.x, e.y - 52, `nicked ${best.kind}`);
+      return;
+    }
+  }
+
+  private nearestBuzzball(): BuzzballPickup | null {
+    let best: BuzzballPickup | null = null;
+    let bestD = 64;
+    for (const b of this.buzzballs) {
+      if (b.taken) continue;
+      const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, b.x, b.y);
+      if (d < bestD && Math.abs(this.player.laneY - b.y) < 44) {
+        bestD = d;
+        best = b;
+      }
+    }
+    return best;
+  }
+
+  private spawnBuzzball(x: number, y: number): void {
+    const ball = new BuzzballPickup(
+      this,
+      Phaser.Math.Clamp(x, LANE.minX, LANE.maxX),
+      Phaser.Math.Clamp(y, LANE.minY, LANE.maxY),
+    );
+    this.buzzballs.push(ball);
+    this.spawnFloat(ball.x, ball.y - 36, "BUZZBALL!");
+  }
+
+  private maybeDropBuzzball(foe: Enemy): void {
+    if (
+      this.endingState === "nuke" ||
+      this.endingState === "complete" ||
+      this.endingState === "epilogue"
+    ) {
+      return;
+    }
+    if (foe.isBackground) return;
+    if (this.buzzballs.some((b) => !b.taken)) return;
+    const chance = foe.isBoss ? 0.14 : 0.07;
+    if (Math.random() > chance) return;
+    this.spawnBuzzball(foe.x + foe.facing * -22, foe.laneY + 6);
+    this.banner.setText("Buzzball! Grab it before it drains.");
+  }
+
+  private tryPickupBuzzball(): boolean {
+    const ball = this.nearestBuzzball();
+    if (!ball || ball.taken) return false;
+    this.drinkBuzzball(ball);
+    return true;
+  }
+
+  private drinkBuzzball(ball: BuzzballPickup): void {
+    if (ball.taken) return;
+    ball.collect();
+    this.buzzballs = this.buzzballs.filter((b) => !b.taken);
+    const now = this.time.now;
+    const already = this.player.isBuzzed(now);
+    this.player.buzzedUntil = now + 10000;
+    this.player.invulnUntil = this.player.buzzedUntil;
+    this.player.setBuzzedMove(true);
+    this.buzzFadeWarned = false;
+    this.spawnFloat(this.player.x, this.player.y - 72, "BUZZBALL!");
+    void chipSfx.pickup();
+    if (already) {
+      this.banner.setText("Another Buzzball — still buzzing.");
+      this.ensureBuzzAura();
+      return;
+    }
+    this.beginBuzzAwakening();
+  }
+
+  private beginBuzzAwakening(): void {
+    this.buzzAwakening = true;
+    this.player.inputLocked = true;
+    this.player.action = "idle";
+    this.player.actionUntil = this.time.now + 1400;
+    this.player.structure.anger = Math.max(this.player.structure.anger, 0.85);
+    this.ensureBuzzAura();
+    this.banner.setText("BUZZBALL — he's going Super.");
+    void chipSfx.buzzCharge();
+    this.cameras.main.shake(240, 0.012);
+    this.spawnBuzzRings(this.player.x, this.player.y);
+
+    this.time.delayedCall(280, () => {
+      if (!this.buzzAwakening) return;
+      this.cameras.main.shake(180, 0.01);
+      this.spawnBuzzRings(this.player.x, this.player.y);
+    });
+    this.time.delayedCall(700, () => {
+      if (!this.buzzAwakening) return;
+      this.cameras.main.shake(220, 0.016);
+      this.spawnBuzzRings(this.player.x, this.player.y);
+      this.bubbles.say(this.player, "AAAGH—", 900);
+    });
+    this.time.delayedCall(1400, () => {
+      if (this.endingState === "nuke") return;
+      this.buzzAwakening = false;
+      this.player.inputLocked = false;
+      this.banner.setText("Buzzball! Ten seconds — wreck them.");
+      this.spawnFloat(this.player.x, this.player.y - 88, "OVERPOWERED");
+    });
+  }
+
+  private spawnBuzzRings(x: number, y: number): void {
+    for (let i = 0; i < 3; i++) {
+      const ring = this.add.circle(x, y - 36, 10 + i * 6, 0x7af0ff, 0).setDepth(190);
+      ring.setStrokeStyle(3, 0x3df0ff, 0.95);
+      this.tweens.add({
+        targets: ring,
+        scale: 4.2 + i * 0.8,
+        alpha: 0,
+        duration: 420 + i * 80,
+        ease: "Cubic.easeOut",
+        onComplete: () => ring.destroy(),
+      });
+    }
+    for (let i = 0; i < 10; i++) {
+      const ang = (Math.PI * 2 * i) / 10 + Math.random() * 0.2;
+      const bolt = this.add.rectangle(x, y - 40, 3, 16 + Math.random() * 18, 0xdffffa, 0.95);
+      bolt.setDepth(191).setRotation(ang);
+      this.tweens.add({
+        targets: bolt,
+        x: x + Math.cos(ang) * (40 + Math.random() * 50),
+        y: y - 40 + Math.sin(ang) * (36 + Math.random() * 40),
+        alpha: 0,
+        duration: 280 + Math.random() * 180,
+        onComplete: () => bolt.destroy(),
+      });
+    }
+  }
+
+  private ensureBuzzAura(): void {
+    if (this.buzzAura) return;
+    this.buzzAura = this.add.graphics().setDepth(8);
+  }
+
+  private updateBuzzballs(now: number): void {
+    for (const b of this.buzzballs) {
+      if (b.taken) continue;
+      if (b.expired) {
+        this.spawnFloat(b.x, b.y - 28, "drained");
+        b.poof();
+      } else {
+        b.refresh(now);
+      }
+    }
+    this.buzzballs = this.buzzballs.filter((b) => b.active && !b.taken);
+
+    const near = this.nearestBuzzball();
+    if (
+      near &&
+      !this.buzzAwakening &&
+      !this.player.inputLocked &&
+      !this.player.structure.isOut() &&
+      this.introPhase === "done" &&
+      Phaser.Math.Distance.Between(this.player.x, this.player.y, near.x, near.y) < 42
+    ) {
+      this.drinkBuzzball(near);
+    }
+
+    this.syncBuzzState(now);
+  }
+
+  private syncBuzzState(now: number): void {
+    const on = this.player.isBuzzed(now) || this.buzzAwakening;
+    if (!on) {
+      if (this.buzzPowerLive) {
+        this.buzzPowerLive = false;
+        this.player.setBuzzedMove(false);
+        this.buzzAura?.destroy();
+        this.buzzAura = undefined;
+        this.buzzFadeWarned = false;
+        void chipSfx.buzzFade();
+        this.banner.setText("Buzzball's gone. Back to being a normal dinlo.");
+        this.spawnFloat(this.player.x, this.player.y - 64, "spent");
+      }
+      return;
+    }
+
+    this.buzzPowerLive = true;
+    if (now >= this.player.buzzedUntil - 2000 && !this.buzzFadeWarned && !this.buzzAwakening) {
+      this.buzzFadeWarned = true;
+      this.banner.setText("Buzzball's wearing off…");
+    }
+
+    this.ensureBuzzAura();
+    const g = this.buzzAura!;
+    const p = this.player;
+    const flicker =
+      this.buzzFadeWarned && Math.sin(now * 0.04) > 0 ? 0.25 : 0.55 + Math.sin(now * 0.02) * 0.2;
+    g.clear();
+    g.fillStyle(0x7af0ff, flicker * 0.35);
+    g.fillEllipse(p.x, p.y - 38, 54 + Math.sin(now * 0.018) * 8, 92);
+    g.fillStyle(0xffffff, flicker * 0.18);
+    g.fillEllipse(p.x, p.y - 48, 22, 48);
+    g.lineStyle(2, 0xdffffa, flicker);
+    g.strokeEllipse(p.x, p.y - 38, 58 + Math.sin(now * 0.03) * 6, 98);
   }
 
   private updateThrows(now: number, dt: number): void {
@@ -966,6 +1257,7 @@ export class BeachScene extends Phaser.Scene {
     void chipSfx.ko();
     this.spawnFloat(x, y - 48, "KABOOM");
     this.banner.setText("Drone went up — anyone in the blast is cooked.");
+    this.unlockAchievement("blackhawkDown");
 
     const radius = 110;
     for (const f of this.fighters) {
@@ -1139,6 +1431,10 @@ export class BeachScene extends Phaser.Scene {
     const nextWave = this.pendingEnemies[0];
     if (!nextWave || reach < nextWave.unlockX) return;
 
+    // Don't pop a Hardman until the camera already covers his patch — locking
+    // then is a freeze, not a jump.
+    if (nextWave.boss && !this.cameraCanLockForBoss(nextWave.x)) return;
+
     // Bosses always arrive once you hit their gate. Soft-downed lads must not
     // block the next wave either — only upright scrap counts.
     if (!nextWave.boss) {
@@ -1235,9 +1531,9 @@ export class BeachScene extends Phaser.Scene {
       return;
     }
 
-    this.nextBgThugAt = now + 22000 + Math.random() * 18000;
-    // Don't always spawn — keep them rare
-    if (Math.random() < 0.72) return;
+    this.nextBgThugAt = now + 16000 + Math.random() * 14000;
+    // Don't always spawn — keep them uncommon
+    if (Math.random() < 0.58) return;
 
     const cam = this.cameras.main;
     const side = Math.random() < 0.5 ? -1 : 1;
@@ -1257,7 +1553,7 @@ export class BeachScene extends Phaser.Scene {
           ? ["Background Sarge", "Common Sarge"]
           : ["Common Lad", "Promenade", "Stroller"];
     const lad = new Enemy(this, x, y, names[Math.floor(Math.random() * names.length)]!, {
-      toughness: 0.78 + Math.random() * 0.12,
+      toughness: 0.86 + Math.random() * 0.12,
       role,
       background: true,
       mad: role === "thug" && Math.random() < 0.25,
@@ -1350,30 +1646,47 @@ export class BeachScene extends Phaser.Scene {
   }
 
   /**
-   * Boss fights lock the camera to one screen — no walking back or ahead until
-   * the Hardman drops.
+   * Boss fights lock the camera to one screen. Hold that frame through Casey
+   * chat / the refuse duel / Clarence's complete card so the view doesn't jump.
    */
   private syncBossArenaLock(): void {
     const boss = this.enemies.find((e) => e.isBoss && !e.structure.isOut());
-    if (!boss) {
-      if (this.bossArena) this.clearBossArenaLock();
+    if (boss) {
+      if (!this.bossArena) this.engageBossArenaLock(boss);
+      else this.applyBossArenaCamera();
       return;
     }
-    if (!this.bossArena) this.engageBossArenaLock(boss);
-    else this.applyBossArenaCamera();
+    if (this.bossArena && this.shouldHoldBossArena()) {
+      this.applyBossArenaCamera();
+      return;
+    }
+    if (this.bossArena) this.clearBossArenaLock();
+  }
+
+  /** Keep the locked screen while the post-boss beat still owns this patch. */
+  private shouldHoldBossArena(): boolean {
+    if (this.postBossPierLock && this.bossArena) return true;
+    if (this.caseyChat) return true;
+    switch (this.endingState) {
+      case "assessment":
+      case "companion":
+      case "duel":
+      case "epilogue":
+      case "complete":
+        return true;
+      default:
+        break;
+    }
+    return this.enemies.some(
+      (e) => e.isBoss && e.structure.isOut() && !this.handledBosses.has(e),
+    );
   }
 
   private engageBossArenaLock(boss: Enemy): void {
     const cam = this.cameras.main;
     const pad = 56;
     const maxScroll = Math.max(0, WORLD_WIDTH - this.viewW);
-    // Prefer the current view so the walk-in doesn't jump; nudge if the boss
-    // is still off the right edge so he lands inside the locked frame.
-    let scrollX = Phaser.Math.Clamp(Math.round(cam.scrollX), 0, maxScroll);
-    const bossWant = boss.x - this.viewW + pad + 40;
-    if (boss.x > scrollX + this.viewW - pad) {
-      scrollX = Phaser.Math.Clamp(Math.round(bossWant), 0, maxScroll);
-    }
+    const scrollX = Phaser.Math.Clamp(cam.scrollX, 0, maxScroll);
     this.bossArena = {
       scrollX,
       minX: scrollX + pad,
@@ -1385,6 +1698,8 @@ export class BeachScene extends Phaser.Scene {
       this.bossArena.maxX,
     );
     boss.x = Phaser.Math.Clamp(boss.x, this.bossArena.minX, this.bossArena.maxX);
+    cam.stopFollow();
+    this.cameraFollowingPlayer = false;
     this.applyBossArenaCamera();
   }
 
@@ -1396,8 +1711,47 @@ export class BeachScene extends Phaser.Scene {
   }
 
   private clearBossArenaLock(): void {
+    if (!this.bossArena) return;
+    const holdScroll = this.bossArena.scrollX;
     this.bossArena = null;
-    this.cameras.main.setBounds(0, 0, WORLD_WIDTH, GAME_HEIGHT);
+    const cam = this.cameras.main;
+    cam.setBounds(0, 0, WORLD_WIDTH, GAME_HEIGHT);
+    cam.stopFollow();
+    cam.setScroll(holdScroll, 0);
+    this.cameraFollowHeld = true;
+  }
+
+  /** Resume smooth follow after a boss lock — same scroll, no snap to player centre. */
+  private syncCameraFollow(): void {
+    if (!this.cameraFollowHeld || this.bossArena || this.postBossPierLock) return;
+    if (this.cameraFollowingPlayer) {
+      this.cameraFollowHeld = false;
+      return;
+    }
+    const cam = this.cameras.main;
+    const holdScroll = cam.scrollX;
+    const playerOff = this.player.x - holdScroll - this.viewW / 2;
+    cam.startFollow(this.player, true, 0.08, 0);
+    cam.setDeadzone(Math.max(120, Math.abs(playerOff) * 2 + 16), 48);
+    this.cameraFollowHeld = false;
+    this.cameraFollowingPlayer = true;
+  }
+
+  /** Level 2 starts on the locked pier screen — unlock when you walk east. */
+  private syncPierScreenRelease(): void {
+    if (!this.postBossPierLock || !this.bossArena || this.stage !== 2) return;
+    if (this.player.x < this.bossArena.maxX - 28) return;
+    this.postBossPierLock = false;
+    this.clearBossArenaLock();
+    this.syncCameraFollow();
+  }
+
+  /** True when locking the current camera would already include this world X. */
+  private cameraCanLockForBoss(standX: number): boolean {
+    const pad = 56;
+    const cam = this.cameras.main;
+    const right = cam.scrollX + this.viewW - pad;
+    return standX <= right;
   }
 
   /**
@@ -1428,14 +1782,12 @@ export class BeachScene extends Phaser.Scene {
     // Ahead of the player — east of the camera (or their patch if already clear)
     let x = next.x;
     if (next.boss) {
-      // Stand on the boss patch (pier / funfair). Only nudge if you're already on it.
-      x = next.x;
-      if (x < this.player.x + 160) x = this.player.x + 260;
-      x = Phaser.Math.Clamp(x, LANE.minX + 80, LANE.maxX - 80);
-      if (x > viewLeft && x < viewRight) {
-        // Walk on from just past the right edge so he reads as arriving
-        x = Phaser.Math.Clamp(viewRight - 24, this.player.x + 180, LANE.maxX - 80);
-      }
+      const pad = 56;
+      const left = cam.scrollX + pad;
+      const right = cam.scrollX + this.viewW - pad;
+      let x = next.x;
+      if (x < this.player.x + 140) x = this.player.x + 220;
+      x = Phaser.Math.Clamp(x, left + 80, right);
       return { x, y };
     }
     if (x > viewLeft && x < viewRight) {
@@ -1463,6 +1815,18 @@ export class BeachScene extends Phaser.Scene {
     }
 
     this.parallax.update(this.cameras.main.scrollX, delta, now);
+    if (this.pendingChoppedMush && this.parallax.hovercraftDeparted) {
+      this.pendingChoppedMush = false;
+      this.unlockAchievement("choppedMush");
+    }
+    if (this.endingState === "nuke") {
+      this.bubbles.update(now);
+      this.updateHud();
+      for (const f of this.fighters) {
+        if (f.active) f.refreshVisuals(now, dt);
+      }
+      return;
+    }
     this.syncBossArenaLock();
     this.updateSkyDrone(now, dt);
     this.gulls.update(now, dt, this.fighters);
@@ -1486,6 +1850,25 @@ export class BeachScene extends Phaser.Scene {
       this.bubbles.update(now);
       this.updateHud();
       this.updateCaseyChat(now);
+      return;
+    }
+
+    if (this.endingState === "complete" && this.player.inputLocked) {
+      for (const f of this.fighters) {
+        if (f.active) f.refreshVisuals(now, dt);
+      }
+      if (
+        Phaser.Input.Keyboard.JustDown(this.restartKey) ||
+        consumeRestartJust()
+      ) {
+        this.scene.restart();
+      } else if (
+        Phaser.Input.Keyboard.JustDown(this.continueKey) ||
+        Phaser.Input.Keyboard.JustDown(this.continueAltKey) ||
+        consumeConfirmJust()
+      ) {
+        this.keepWalkingPromenade(!!this.findRecruitedCasey());
+      }
       return;
     }
 
@@ -1534,6 +1917,8 @@ export class BeachScene extends Phaser.Scene {
       // Only Bill's cuffs keep the R card; any other defeat state gets hauled up
       if (!this.player.structure.cuffed) {
         this.forcePickupAfterDefeat(now);
+      } else if (this.tryCuffBribeInput()) {
+        return;
       } else if (
         Phaser.Input.Keyboard.JustDown(this.restartKey) ||
         consumeRestartJust()
@@ -1568,6 +1953,7 @@ export class BeachScene extends Phaser.Scene {
       if (this.player.action === "hurricanrana") {
         this.techniquesUsed.add("hurricanrana");
       }
+      if (this.player.action === "kickflip") this.unlockAchievement("kickFlip");
       const tossed = this.player.consumeTossLaunch();
       if (tossed) {
         if (this.tryFeedHoverFans(tossed, now, true)) {
@@ -1608,16 +1994,18 @@ export class BeachScene extends Phaser.Scene {
         this.banner.setText("Grabbed at thin air.");
       }
       this.syncPlayerStealth(now, dt);
+      this.syncPierScreenRelease();
     }
+    this.syncCameraFollow();
     this.syncIdleChatter(now);
     this.syncPlayerWondering(now);
     this.syncEngagementCap();
     for (const f of this.fighters) {
       f.applyTossFlight(now, dt, bounds.minX, bounds.maxX);
       // Player already runs updatePhysics in updatePlayer
-      if (f !== this.player && f.airborne) f.updatePhysics(dt, LANE.minY, LANE.maxY);
+      if (f !== this.player && f.airborne && !f.inFanMince) f.updatePhysics(dt, LANE.minY, LANE.maxY);
       // Flying body into the Hovertravel fans
-      if (f !== this.player && (f.isBeingTossed || f.isInThrowArc)) {
+      if (f !== this.player && !f.inFanMince && (f.isBeingTossed || f.isInThrowArc)) {
         this.tryFeedHoverFans(f, now, false);
       }
     }
@@ -1697,14 +2085,21 @@ export class BeachScene extends Phaser.Scene {
     }
     for (const p of this.police) p.updatePolice(now, dt, this.fighters);
 
-    updateCarPlatforms(this.fighters, this.destructibles, now);
-    separateFighters(this.fighters);
+    updateCarPlatforms(
+      this.fighters.filter((f) => !f.inFanMince),
+      this.destructibles,
+      now,
+    );
+    separateFighters(this.fighters.filter((f) => !f.inFanMince));
     // Intro stroll is scripted — don't let a bin shove them back onto the pebbles
     if (this.introPhase === "done") {
-      separateFightersFromObstacles(this.fighters, this.obstacles);
+      separateFightersFromObstacles(
+        this.fighters.filter((f) => !f.inFanMince),
+        this.obstacles,
+      );
     } else {
       separateFightersFromObstacles(
-        this.fighters.filter((f) => f !== this.player),
+        this.fighters.filter((f) => f !== this.player && !f.inFanMince),
         this.obstacles,
       );
     }
@@ -1767,9 +2162,12 @@ export class BeachScene extends Phaser.Scene {
     }
 
     this.updateThrows(now, dt);
+    this.maybeEnemyWeaponGrabs();
+    this.updateBuzzballs(now);
 
     const lootTarget = nearestLootable(this.player, this.fighters);
     const nearWep = this.nearestPickup();
+    const nearBuzz = this.nearestBuzzball();
     const nearBoard = this.nearestSkateboard();
     const nearShop = this.nearestWeaponShop();
     const shopHint = nearShop ? this.weaponShopHint(nearShop) : null;
@@ -1783,6 +2181,8 @@ export class BeachScene extends Phaser.Scene {
       this.showLootHint(`ducked behind the ${this.player.coverHint}`, null);
     } else if (bribeHint) {
       this.showLootHint(bribeHint, "bribe");
+    } else if (nearBuzz) {
+      this.showLootHint(`${this.actKey()} — Buzzball!`, "buzz");
     } else if (shopHint && !lootTarget && !nearWep && !nearBoard) {
       this.showLootHint(shopHint, "shop");
     } else if (stallHint && !lootTarget && !nearWep && !nearBoard) {
@@ -1812,14 +2212,24 @@ export class BeachScene extends Phaser.Scene {
 
     for (const d of this.destructibles) d.update(now);
 
-    resolveCombat(now, this.fighters, (ev) => this.onCombat(ev));
+    resolveCombat(
+      now,
+      this.fighters.filter((f) => !f.inFanMince),
+      (ev) => this.onCombat(ev),
+    );
     this.resolveDogKicks(now);
-    resolvePropHits(this, now, this.fighters, this.destructibles, (ev) => {
-      this.onPropHit(ev.attacker, ev.prop, ev.result.destroyed, ev.result.scrap);
-    });
+    resolvePropHits(
+      this,
+      now,
+      this.fighters.filter((f) => !f.inFanMince),
+      this.destructibles,
+      (ev) => {
+        this.onPropHit(ev.attacker, ev.prop, ev.result.destroyed, ev.result.scrap);
+      },
+    );
     for (const f of this.fighters) f.pinToFloor();
     syncCarOcclusion(
-      this.fighters,
+      this.fighters.filter((f) => !f.inFanMince),
       this.destructibles,
       this.parallax.getPassingCarImages(),
     );
@@ -1831,6 +2241,7 @@ export class BeachScene extends Phaser.Scene {
     }
 
     this.checkFallenBoss();
+    this.tryMentalMushUnlock();
     if (this.endingState !== "playing") {
       this.updateCaptiveEnding();
     } else if (
@@ -1869,16 +2280,21 @@ export class BeachScene extends Phaser.Scene {
       this.lastPlayerDefeat = null;
     }
     this.defeated = false;
-    this.restartPrompt?.destroy();
-    this.restartPrompt = undefined;
+    this.clearRestartPrompt();
 
     this.endingState = "assessment";
+    this.postBossPierLock = true;
     this.pendingEnemies.length = 0;
     this.activeCaller = null;
     this.spawnFloat(boss.x, boss.y - 90, "BOSS DOWN");
     this.banner.setText("The Hardman drops. Someone's tied up by the pier office…");
 
-    const x = Phaser.Math.Clamp(boss.x + 105, LANE.minX, LANE.maxX);
+    const arena = this.bossArena;
+    const minX = arena?.minX ?? LANE.minX;
+    const maxX = arena?.maxX ?? LANE.maxX;
+    let x = boss.x + 90;
+    if (x > maxX - 24) x = boss.x - 90;
+    x = Phaser.Math.Clamp(x, minX, maxX);
     const captive = new Civilian(this, x, GAME_HEIGHT * 0.68, "Casey", "walker", undefined, {
       toughness: 2.2,
       present: "fem",
@@ -1909,6 +2325,7 @@ export class BeachScene extends Phaser.Scene {
         : "I saw what you did out there. You're no better than the thugs that hunt you.";
 
     this.caseyChat = {
+      kind: "l1",
       speaker: captive,
       report,
       index: 0,
@@ -1945,7 +2362,10 @@ export class BeachScene extends Phaser.Scene {
       this.finishCaseyChat();
       return;
     }
-    this.bubbles.saySticky(chat.speaker, line.text);
+    this.bubbles.clearOwner(chat.speaker);
+    this.bubbles.clearOwner(this.player);
+    const who = line.who === "player" ? this.player : chat.speaker;
+    this.bubbles.saySticky(who, line.text);
     if (line.banner) this.banner.setText(line.banner);
     this.continueHint?.destroy();
     this.continueHint = makeContinueButton(this, {
@@ -1980,11 +2400,18 @@ export class BeachScene extends Phaser.Scene {
     const chat = this.caseyChat;
     if (!chat) return;
     this.bubbles.clearOwner(chat.speaker);
+    this.bubbles.clearOwner(this.player);
     this.continueHint?.destroy();
     this.continueHint = undefined;
     this.caseyChat = null;
-    if (chat.report.honour >= 60) this.recruitCaptive(chat.speaker, chat.report);
-    else this.turnCaptiveAgainstPlayer(chat.speaker, chat.report);
+    if (chat.kind === "l2good") {
+      this.finishCaseyGoodEnding();
+      return;
+    }
+    const report = chat.report;
+    if (!report) return;
+    if (report.honour >= 60) this.recruitCaptive(chat.speaker, report);
+    else this.turnCaptiveAgainstPlayer(chat.speaker, report);
   }
 
   private buildLevelOneReport(): {
@@ -2041,12 +2468,14 @@ export class BeachScene extends Phaser.Scene {
     );
     if (teach.length > 0 && living.length < 2) {
       for (let i = living.length; i < 2; i++) {
+        const minX = this.bossArena?.minX ?? LANE.minX;
+        const maxX = this.bossArena?.maxX ?? LANE.maxX;
         const straggler = new Enemy(
           this,
-          Phaser.Math.Clamp(this.player.x + 260 + i * 70, LANE.minX, LANE.maxX),
+          Phaser.Math.Clamp(this.player.x + 160 + i * 70, minX, maxX),
           GAME_HEIGHT * (0.66 + i * 0.05),
           i === 0 ? "Last Lout" : "Pier Straggler",
-          { toughness: 0.72, mad: true, role: "thug" },
+          { toughness: 0.80, mad: true, role: "thug" },
         );
         straggler.onProvoked(this.time.now, this.player);
         this.enemies.push(straggler);
@@ -2082,7 +2511,7 @@ export class BeachScene extends Phaser.Scene {
     captive.destroy(true);
     this.civilians = this.civilians.filter((c) => c !== captive);
     const challenger = new Enemy(this, x, y, "Casey", {
-      toughness: 1.35,
+      toughness: 1.48,
       mad: false,
       role: "thug",
       lookId: captive.spritePrefix,
@@ -2120,16 +2549,17 @@ export class BeachScene extends Phaser.Scene {
     this.stage = 2;
     this.bossAnnounced = false;
     this.droneAssistAnnounced = false;
-    this.bossArena = null;
     this.callArmedUnlock = null;
     this.activeCaller = null;
     this.captiveStragglers = [];
     this.handledBosses.clear();
-    this.restartPrompt?.destroy();
-    this.restartPrompt = undefined;
+    this.clearRestartPrompt();
 
     // Fresh stretch — L1 bodies / chasing stragglers must not gate Clarence Pier
-    for (const e of this.enemies) e.destroy(true);
+    for (const e of this.enemies) {
+      if (this.countsForMassacre(e) && !e.structure.isOut()) this.massacreEscaped = true;
+      e.destroy(true);
+    }
     this.enemies = [];
 
     this.pendingEnemies.splice(
@@ -2139,7 +2569,7 @@ export class BeachScene extends Phaser.Scene {
         x: 7900,
         y: GAME_HEIGHT * 0.7,
         name: "Pier End Boy",
-        toughness: 0.86,
+        toughness: 0.94,
         unlockX: 7550,
         role: "thug",
       },
@@ -2147,7 +2577,7 @@ export class BeachScene extends Phaser.Scene {
         x: 8300,
         y: GAME_HEIGHT * 0.68,
         name: "Shingle Mate",
-        toughness: 0.88,
+        toughness: 0.96,
         unlockX: 8000,
         role: "scout",
       },
@@ -2155,7 +2585,7 @@ export class BeachScene extends Phaser.Scene {
         x: 8900,
         y: GAME_HEIGHT * 0.7,
         name: "Wall Dog",
-        toughness: 0.95,
+        toughness: 1.04,
         unlockX: 8600,
         needsCall: true,
         role: "sergeant",
@@ -2164,7 +2594,7 @@ export class BeachScene extends Phaser.Scene {
         x: 9500,
         y: GAME_HEIGHT * 0.68,
         name: "Rip-Rap",
-        toughness: 0.98,
+        toughness: 1.08,
         unlockX: 9200,
         mad: true,
         needsCall: true,
@@ -2174,7 +2604,7 @@ export class BeachScene extends Phaser.Scene {
         x: 10200,
         y: GAME_HEIGHT * 0.7,
         name: "Hover Pad Boy",
-        toughness: 1.05,
+        toughness: 1.14,
         unlockX: 9900,
         role: "scout",
       },
@@ -2182,7 +2612,7 @@ export class BeachScene extends Phaser.Scene {
         x: 11800,
         y: GAME_HEIGHT * 0.68,
         name: "Fair Mile",
-        toughness: 1.08,
+        toughness: 1.18,
         unlockX: 11450,
         mad: true,
         role: "thug",
@@ -2191,7 +2621,7 @@ export class BeachScene extends Phaser.Scene {
         x: 13000,
         y: GAME_HEIGHT * 0.7,
         name: "Funfair Scout",
-        toughness: 1.1,
+        toughness: 1.2,
         unlockX: 12600,
         role: "scout",
       },
@@ -2200,7 +2630,7 @@ export class BeachScene extends Phaser.Scene {
         x: 14000,
         y: GAME_HEIGHT * 0.7,
         name: "Clarence King",
-        toughness: 3.45,
+        toughness: 3.65,
         unlockX: 13650,
         boss: true,
         role: "sergeant",
@@ -2326,25 +2756,484 @@ export class BeachScene extends Phaser.Scene {
   }
 
   private beginLevelTwoComplete(boss: Enemy): void {
-    this.endingState = "complete";
     this.pendingEnemies.length = 0;
     this.spawnFloat(boss.x, boss.y - 90, "BOSS DOWN");
-    const withCasey =
-      this.captive instanceof Civilian && this.captive.isAlly;
+    this.levelTwoCleared = true;
+    this.registry.set("levelTwoCleared", true);
+    if (this.tryMentalMushUnlock()) return;
+    const casey = this.findRecruitedCasey();
+    if (casey) {
+      this.beginCaseyGoodEnding(casey);
+      return;
+    }
+    this.showLevelTwoCompleteScreen(false);
+  }
+
+  /** Casey joined at the pier and is still on the run — not minced, not a duel. */
+  private findRecruitedCasey(): Civilian | null {
+    const fromList = this.civilians.find(
+      (c) =>
+        c.active &&
+        !c.inFanMince &&
+        c.displayName === "Casey" &&
+        c.isRecruited,
+    );
+    if (fromList) return fromList;
+    if (
+      this.captive instanceof Civilian &&
+      this.captive.active &&
+      !this.captive.inFanMince &&
+      this.captive.isRecruited
+    ) {
+      return this.captive;
+    }
+    return null;
+  }
+
+  /** Honour-path close: Casey stuck with you through Clarence. */
+  private beginCaseyGoodEnding(casey: Civilian): void {
+    const now = this.time.now;
+    if (this.playerDowned) {
+      this.player.reviveFromHelp(now, 0.55);
+      this.playerDowned = null;
+      this.lastPlayerDefeat = null;
+    }
+    this.defeated = false;
+    this.player.inputLocked = true;
+    this.lootHint.setVisible(false);
+    this.hint.setVisible(false);
+    this.clearRestartPrompt();
+
+    if (casey.structure.isOut() || casey.structure.downed) {
+      casey.reviveFromHelp(now, 0.7);
+    }
+    casey.clearPlantLock();
+    casey.airborne = false;
+    casey.jumpVy = 0;
+    casey.action = "idle";
+    const standX = this.player.x + (casey.x >= this.player.x ? 44 : -44);
+    const lane = this.fightLaneBounds();
+    casey.x = Phaser.Math.Clamp(standX, lane.minX, lane.maxX);
+    casey.y = this.player.y;
+    casey.groundY = casey.y;
+    casey.setFacing(this.player.x >= casey.x ? 1 : -1, now);
+    this.player.setFacing(casey.x >= this.player.x ? 1 : -1, now);
+
+    this.endingState = "epilogue";
+    this.registry.set("levelTwoCleared", true);
+    this.registry.set("levelTwoGoodEnding", true);
+    this.captive = casey;
+    this.spawnFloat(casey.x, casey.y - 78, "MATES!");
+    this.showGoodEndingToast();
+    void chipSfx.pickup();
+    void chipSfx.ui();
+
+    const honour = this.currentHonour();
+    const stayLine =
+      honour >= 70
+        ? "You were decent to folk on the way. That's why I stayed."
+        : "You're still a menace mush. But you're my menace.";
+
+    this.caseyChat = {
+      kind: "l2good",
+      speaker: casey,
+      index: 0,
+      lines: [
+        {
+          text: "That's Clarence done. Funfair dinlos didn't last.",
+          banner: "GOOD ENDING — Casey stuck with you.",
+        },
+        {
+          text: stayLine,
+          banner: `Casey stuck with you. Honour ${honour}/100.`,
+        },
+        {
+          text: "Old Portsmouth next — Gunwharf, the Camber, the lot.",
+          banner: "The seafront's ours. Old Portsmouth is waiting.",
+        },
+        {
+          who: "player",
+          text: "Together then.",
+          banner: "Casey isn't going anywhere.",
+        },
+        {
+          text: "Wouldn't miss it. Come on — before Bill's van turns up.",
+          banner: "A good night on the front.",
+        },
+      ],
+    };
+    this.showCaseyChatLine();
+  }
+
+  private showGoodEndingToast(): void {
+    this.nukeHud?.destroy(true);
+    const card = this.add
+      .text(0, 0, "GOOD ENDING\nCasey stuck with you", {
+        fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
+        fontSize: "22px",
+        color: "#1a1410",
+        backgroundColor: "#b8f0a8",
+        padding: { x: 18, y: 12 },
+        align: "center",
+      })
+      .setOrigin(0.5);
+    const root = this.add.container(0, 0, [card]).setDepth(360);
+    this.pinHud(root, this.viewW / 2, GAME_HEIGHT * 0.22);
+    this.nukeHud = root;
+    this.tweens.add({
+      targets: root,
+      y: root.y - 8,
+      duration: 400,
+      yoyo: true,
+      ease: "Sine.easeOut",
+    });
+    this.time.delayedCall(2800, () => {
+      if (this.nukeHud === root) {
+        root.destroy(true);
+        this.nukeHud = undefined;
+      }
+    });
+  }
+
+  private finishCaseyGoodEnding(): void {
+    this.nukeHud?.destroy(true);
+    this.nukeHud = undefined;
+    this.showLevelTwoCompleteScreen(true);
+  }
+
+  /** Clarence is down — card, then stroll or replay. */
+  private showLevelTwoCompleteScreen(withCasey: boolean): void {
+    consumeConfirmJust();
+    this.endingState = "complete";
+    this.player.inputLocked = true;
+    this.defeated = false;
+    this.lootHint.setVisible(false);
+    this.clearRestartPrompt();
+    this.levelTwoCleared = true;
+    this.registry.set("levelTwoCleared", true);
+    this.updateHud();
+    this.hint
+      .setText(
+        isMobilePlay()
+          ? "Keep walking the promenade — or Replay"
+          : "E keep walking · R replay from start",
+      )
+      .setVisible(true);
+    this.banner.setText(
+      withCasey ? "COMPLETE — Casey stuck with you." : "COMPLETE — Clarence Pier is yours.",
+    );
+    showHtmlPrompt({
+      title: "COMPLETE",
+      body: withCasey
+        ? "Clarence Pier is yours.\nCasey stuck with you.\nThe promenade's still open."
+        : "Clarence Pier is yours.\nThe promenade's still open if you fancy a stroll.",
+      buttonLabel: "Keep walking the promenade",
+      onPress: () => this.keepWalkingPromenade(withCasey),
+      altLabel: "Replay from start",
+      onAltPress: () => this.scene.restart(),
+    });
+  }
+
+  private keepWalkingPromenade(withCasey: boolean): void {
+    this.clearRestartPrompt();
+    this.hint.setVisible(false);
+    this.resumeSeafrontHunt(withCasey);
+  }
+
+  /** Clarence is down — keep the front open so you can hunt the rest. */
+  private resumeSeafrontHunt(withCasey: boolean): void {
+    this.endingState = "playing";
+    this.endingResolveAt = 0;
+    this.player.inputLocked = false;
+    this.defeated = false;
+    this.postBossPierLock = false;
+    this.clearBossArenaLock();
+    this.syncCameraFollow();
+    this.clearRestartPrompt();
+    this.levelTwoCleared = true;
+    this.registry.set("levelTwoCleared", true);
+    this.skyDrone.enableHuntPasses(this.time.now);
+    this.updateHud();
     this.banner.setText(
       withCasey
-        ? "LEVEL 2 COMPLETE — Old Portsmouth next, with Casey."
-        : "LEVEL 2 COMPLETE — Old Portsmouth is next.",
+        ? "The front's ours. Hunt the rest — Casey'll tag along."
+        : "Clarence is down. The front's yours — hunt the rest.",
     );
+    this.spawnFloat(this.player.x, this.player.y - 80, "KEEP GOING");
+  }
+
+  private unlockAchievement(id: AchievementId, opts?: { silent?: boolean }): void {
+    if (this.unlockedAchievements.has(id)) return;
+    this.unlockedAchievements.add(id);
+    if (opts?.silent) {
+      this.updateHud();
+      return;
+    }
+    const name = ACHIEVEMENTS.find((a) => a.id === id)?.name ?? id;
+    this.banner.setText(`SECRET UNLOCKED — ${name}`);
+    this.showAchievementToast(name);
+    void chipSfx.pickup();
+    void chipSfx.ui();
+    this.updateHud();
+  }
+
+  private showAchievementToast(name: string): void {
+    this.achievementToast?.destroy(true);
+    const card = this.add
+      .text(0, 0, `SECRET UNLOCKED\n${name}`, {
+        fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
+        fontSize: "22px",
+        color: "#1a1410",
+        backgroundColor: "#ffe08a",
+        padding: { x: 18, y: 12 },
+        align: "center",
+      })
+      .setOrigin(0.5);
+    const root = this.add.container(0, 0, [card]).setDepth(360);
+    this.pinHud(root, this.viewW / 2, GAME_HEIGHT * 0.26);
+    this.achievementToast = root;
+    this.tweens.add({
+      targets: root,
+      y: root.y - 8,
+      duration: 400,
+      yoyo: true,
+      ease: "Sine.easeOut",
+    });
+    this.time.delayedCall(2600, () => {
+      if (this.achievementToast === root) {
+        root.destroy(true);
+        this.achievementToast = undefined;
+      }
+    });
+  }
+
+  private achievementsHudText(): string {
+    if (!this.levelTwoCleared) return "";
+    const n = this.unlockedAchievements.size;
+    const lines = ACHIEVEMENTS.map((a) => {
+      const got = this.unlockedAchievements.has(a.id);
+      return `${got ? "★" : "·"} ${a.name}`;
+    });
+    return `\n\nSECRETS ${n}/5\n${lines.join("\n")}`;
+  }
+
+  /** Named seafront folk + scripted lads. Not Bill, not common loiterers, not Casey-the-mate. */
+  private countsForMassacre(f: Fighter): boolean {
+    if (f === this.player) return false;
+    if (f.team === "police") return false;
+    if (f instanceof Enemy && f.isBackground) return false;
+    if (f instanceof Civilian) {
+      if (f.displayName === "Passer-by") return false;
+      if (f.isAlly || f.isPartyMember) return false;
+    }
+    return true;
+  }
+
+  /** Everyone who showed up on both stretches is out. */
+  private isSeafrontMassacre(): boolean {
+    if (this.massacreEscaped) return false;
+    if (this.stage !== 2) return false;
+    let n = 0;
+    for (const f of this.fighters) {
+      if (!f.active) continue;
+      if (!this.countsForMassacre(f)) continue;
+      n += 1;
+      if (!f.structure.isOut()) return false;
+    }
+    return n >= 20;
+  }
+
+  /** Fire the glory beat once Clarence is down and the whole front is out. */
+  private tryMentalMushUnlock(): boolean {
+    if (this.endingState === "nuke") return false;
+    if (this.endingState === "epilogue") return false;
+    if (this.stage !== 2) return false;
+    const kingDown =
+      this.levelTwoCleared ||
+      this.endingState === "complete" ||
+      this.enemies.some((e) => e.isBoss && e.structure.isOut());
+    if (!kingDown) return false;
+    if (!this.isSeafrontMassacre()) return false;
+    this.clearRestartPrompt();
+    this.beginMentalMushEnding();
+    return true;
+  }
+
+  /** Glory beat, then Portsmouth Council flatten the front. */
+  private beginMentalMushEnding(): void {
+    this.endingState = "nuke";
+    this.endingResolveAt = 0;
+    if (this.playerDowned) {
+      this.player.reviveFromHelp(this.time.now, 0.55);
+      this.playerDowned = null;
+      this.lastPlayerDefeat = null;
+    }
+    this.defeated = false;
+    this.player.inputLocked = true;
+    this.lootHint.setVisible(false);
+    this.hint.setVisible(false);
     this.registry.set("levelTwoCleared", true);
-    this.restartPrompt?.destroy();
-    this.restartPrompt = makeKeyPrompt(this, {
-      message: "CLARENCE PIER CLEARED\n\nLevel 3: Old Portsmouth — coming next",
+    this.levelTwoCleared = true;
+    this.registry.set("achievementMentalMush", true);
+    this.unlockAchievement("bigBang");
+    this.time.delayedCall(2800, () => this.beginCouncilCountdown());
+  }
+
+  private beginCouncilCountdown(): void {
+    if (this.endingState !== "nuke") return;
+    this.nukeHud?.destroy(true);
+    this.achievementToast?.destroy(true);
+    this.achievementToast = undefined;
+    this.banner.setText("Portsmouth City Council — nuclear strike authorised.");
+    void chipSfx.siren();
+    chipRock.setHeat(0);
+
+    const panel = this.add
+      .rectangle(0, 8, 520, 210, 0x1a1410, 0.88)
+      .setOrigin(0.5);
+    const title = this.add
+      .text(0, -52, "PORTSMOUTH CITY COUNCIL", {
+        fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
+        fontSize: "16px",
+        color: "#ffe08a",
+        align: "center",
+      })
+      .setOrigin(0.5);
+    const notice = this.add
+      .text(0, -18, "Unauthorised massacre on the seafront.\nRemain indoors. There are no indoors.", {
+        fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
+        fontSize: "15px",
+        color: "#f2e6d8",
+        align: "center",
+      })
+      .setOrigin(0.5);
+    const count = this.add
+      .text(0, 48, "5", {
+        fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
+        fontSize: "72px",
+        color: "#ff4a2a",
+        align: "center",
+      })
+      .setOrigin(0.5);
+    const root = this.add.container(0, 0, [panel, title, notice, count]).setDepth(370);
+    this.pinHud(root, this.viewW / 2, GAME_HEIGHT * 0.42);
+    this.nukeHud = root;
+
+    let left = 5;
+    const tick = () => {
+      if (this.endingState !== "nuke") return;
+      void chipSfx.nukeTick();
+      void chipSfx.siren();
+      count.setText(String(left));
+      this.cameras.main.shake(80, 0.004 + (6 - left) * 0.002);
+      left -= 1;
+      if (left >= 0) {
+        this.time.delayedCall(1000, tick);
+      } else {
+        count.setText("0");
+        this.time.delayedCall(180, () => this.detonateCouncilNuke());
+      }
+    };
+    tick();
+  }
+
+  private detonateCouncilNuke(): void {
+    if (this.endingState !== "nuke") return;
+    this.nukeHud?.destroy(true);
+    this.nukeHud = undefined;
+    void chipSfx.nukeBlast();
+    void chipSfx.crash();
+    void chipSfx.ko();
+    chipRock.setHeat(0);
+
+    const cam = this.cameras.main;
+    const cx = cam.scrollX + this.viewW * 0.5;
+    const cy = GAME_HEIGHT * 0.5;
+    cam.shake(720, 0.045);
+    cam.flash(220, 255, 244, 200);
+
+    const flash = this.add
+      .rectangle(0, 0, this.viewW + 120, GAME_HEIGHT + 120, 0xfff4c8, 1)
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(420);
+    this.pinHud(flash, this.viewW / 2, GAME_HEIGHT / 2);
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      duration: 900,
+      ease: "Cubic.easeOut",
+      onComplete: () => flash.destroy(),
+    });
+
+    this.spawnDroneExplosion(cx, cy);
+    this.spawnDroneExplosion(cx - 160, cy + 40);
+    this.spawnDroneExplosion(cx + 180, cy - 20);
+    this.spawnNukeAsh(cx, cy);
+
+    this.parallax.scorch();
+    this.skyDrone.destroy();
+    this.gulls.scatter();
+
+    const now = this.time.now;
+    this.bubbles.clearOwner(this.player);
+    for (const f of this.fighters) {
+      if (!f.active) continue;
+      f.charred = true;
+      f.tossVx = 0;
+      f.tossUntil = 0;
+      f.airborne = false;
+      f.jumpVy = 0;
+      f.clearCarMount();
+      f.y = f.laneY;
+      f.groundY = f.laneY;
+      if (!f.structure.isOut()) {
+        f.structure.knockOutCold();
+        f.setAction("out_cold", now, 999999);
+        f.markPlantHere();
+      }
+      f.refreshVisuals(now, 0);
+    }
+
+    this.spawnFloat(this.player.x, this.player.y - 70, "flat!");
+    this.banner.setText("The Council flattened the front — you included.");
+    this.time.delayedCall(2200, () => this.finishMentalMushCard());
+  }
+
+  private spawnNukeAsh(x: number, y: number): void {
+    for (let i = 0; i < 28; i++) {
+      const flake = this.add.rectangle(
+        x + (Math.random() - 0.5) * this.viewW,
+        y + (Math.random() - 0.5) * 80,
+        3 + Math.random() * 5,
+        2 + Math.random() * 4,
+        Math.random() < 0.4 ? 0x2a2620 : 0x6a5a48,
+      );
+      flake.setDepth(188).setAlpha(0.9);
+      this.tweens.add({
+        targets: flake,
+        y: flake.y + 40 + Math.random() * 90,
+        x: flake.x + (Math.random() - 0.5) * 80,
+        alpha: 0,
+        duration: 900 + Math.random() * 700,
+        ease: "Sine.easeIn",
+        onComplete: () => flake.destroy(),
+      });
+    }
+  }
+
+  private finishMentalMushCard(): void {
+    this.endingState = "complete";
+    this.clearRestartPrompt();
+    const allDone = this.unlockedAchievements.size >= 5;
+    showHtmlPrompt({
+      title: "BIG BANG",
+      body: allDone
+        ? "That's the lot.\nPortsmouth Council flattened Southsea.\nYou copped it with the rest of them."
+        : "Portsmouth Council flattened Southsea.\nYou copped it with the rest of them.",
       buttonLabel: "Replay from start",
       onPress: () => this.scene.restart(),
-      depth: 300,
     });
-    this.pinHud(this.restartPrompt.root, this.viewW / 2, GAME_HEIGHT / 2);
   }
 
   private updateHud(): void {
@@ -2354,8 +3243,11 @@ export class BeachScene extends Phaser.Scene {
         ? ` · ${this.player.weapon}(${this.player.weaponDurability})`
         : "";
     const worn = this.conditionLabel();
+    const buzz = this.player.isBuzzed()
+      ? `\nBUZZBALL ${Math.max(0, Math.ceil((this.player.buzzedUntil - this.time.now) / 1000))}s`
+      : "";
     this.hud.setText(
-      `£${this.player.money}${wep}\nHONOUR ${this.currentHonour()}${worn ? `\n${worn}` : ""}${stars ? `\nWANTED ${stars}` : ""}`,
+      `£${this.player.money}${wep}\nHONOUR ${this.currentHonour()}${worn ? `\n${worn}` : ""}${stars ? `\nWANTED ${stars}` : ""}${buzz}${this.achievementsHudText()}`,
     );
     this.updateEnemyPortrait();
   }
@@ -2578,8 +3470,7 @@ export class BeachScene extends Phaser.Scene {
     // Stale defeat card without cuffs — clear it so free play can recover
     if (this.defeated && !this.player.structure.cuffed) {
       this.defeated = false;
-      this.restartPrompt?.destroy();
-      this.restartPrompt = undefined;
+      this.clearRestartPrompt();
     }
     if (this.defeated) return;
     if (this.player.structure.cuffed) {
@@ -2704,7 +3595,10 @@ export class BeachScene extends Phaser.Scene {
       e.refreshVisuals(now, dt);
     }
     if (gone.length) {
-      for (const e of gone) e.destroy(true);
+      for (const e of gone) {
+        if (this.countsForMassacre(e) && !e.structure.isOut()) this.massacreEscaped = true;
+        e.destroy(true);
+      }
       this.enemies = this.enemies.filter((e) => !gone.includes(e));
       this.rebuildFighterList();
     }
@@ -2893,8 +3787,7 @@ export class BeachScene extends Phaser.Scene {
     this.playerDowned = null;
     this.lastPlayerDefeat = null;
     this.defeated = false;
-    this.restartPrompt?.destroy();
-    this.restartPrompt = undefined;
+    this.clearRestartPrompt();
     this.hint.setVisible(false);
     this.banner.setText("A local hauls you up once the coast is clear.");
   }
@@ -2909,22 +3802,77 @@ export class BeachScene extends Phaser.Scene {
     // Free play KO — always get hauled up. Only Bill's cuffs show the R card.
     if (!this.player.structure.cuffed) {
       this.defeated = false;
-      this.restartPrompt?.destroy();
-      this.restartPrompt = undefined;
+      this.clearRestartPrompt();
       this.forceSpawnHelperAndRevive(this.time.now);
       return;
     }
     this.defeated = true;
     this.banner.setText("Cuffed by the Bill. You're going in the van.");
-    this.restartPrompt?.destroy();
-    this.restartPrompt = makeKeyPrompt(this, {
-      message: "CUFFED",
-      buttonLabel: "Restart checkpoint",
-      onPress: () => this.restartFromCheckpoint(),
-      depth: 300,
+    this.clearRestartPrompt();
+    const cost = this.wanted.bribeCost();
+    const canBribe = this.player.money >= cost;
+    showHtmlPrompt({
+      title: "CUFFED",
+      body: canBribe
+        ? `You're going in the van.\nOr bung them £${cost} and they'll look the other way.`
+        : "You're going in the van.",
+      buttonLabel: canBribe ? `Bribe £${cost}` : "Restart checkpoint",
+      onPress: () => {
+        if (canBribe) this.bribeOutOfCuffs();
+        else this.restartFromCheckpoint();
+      },
+      altLabel: canBribe ? "Restart checkpoint" : undefined,
+      onAltPress: canBribe ? () => this.restartFromCheckpoint() : undefined,
     });
-    this.pinHud(this.restartPrompt.root, this.viewW / 2, GAME_HEIGHT / 2);
-    this.hint.setText("Restart — or press R").setVisible(true);
+    this.hint.setText(
+      canBribe ? `Bribe £${cost} (E) — or Restart (R)` : "Restart — or press R",
+    ).setVisible(true);
+  }
+
+  private tryCuffBribeInput(): boolean {
+    if (this.player.money < this.wanted.bribeCost()) return false;
+    if (
+      !Phaser.Input.Keyboard.JustDown(this.continueKey) &&
+      !Phaser.Input.Keyboard.JustDown(this.continueAltKey)
+    ) {
+      return false;
+    }
+    this.bribeOutOfCuffs();
+    return true;
+  }
+
+  /** Pay the Bill off the cuff card — stand up, coppers walk, heat drops. */
+  private bribeOutOfCuffs(): void {
+    const cost = this.wanted.bribeCost();
+    if (this.player.money < cost) return;
+    const now = this.time.now;
+    this.player.money -= cost;
+    this.wanted.acceptBribe(5);
+
+    for (const cop of this.police) {
+      if (!cop.structure.isOut()) cop.takeBribe(now, this.player.x);
+    }
+
+    const p = this.player;
+    p.structure.cuffed = false;
+    p.heldBy = null;
+    p.reviveFromHelp(now, 0.55);
+    p.invulnUntil = now + 1800;
+
+    this.defeated = false;
+    this.playerDowned = null;
+    this.lastPlayerDefeat = null;
+    this.clearRestartPrompt();
+    this.hint.setVisible(false);
+    this.spawnFloat(p.x, p.y - 56, `-£${cost}`);
+    const cop = this.police.find((c) => c.bribed);
+    if (cop) this.bubbles.say(cop, "Go on, sling your hook.", 2600);
+    this.banner.setText("Bunged the Bill — you're back on the front.");
+    void chipSfx.coin();
+  }
+
+  private clearRestartPrompt(): void {
+    hideHtmlPrompt();
   }
 
   /** Bill's van → dump you at the last solid beat (promenade or post-Casey). */
@@ -2935,7 +3883,10 @@ export class BeachScene extends Phaser.Scene {
 
   /** @returns true while the scrap is frozen on the pause menu. */
   private handlePauseInput(): boolean {
-    if (consumePauseJust()) {
+    const keyPause =
+      Phaser.Input.Keyboard.JustDown(this.pauseKey) ||
+      Phaser.Input.Keyboard.JustDown(this.pauseEscKey);
+    if (consumePauseJust() || keyPause) {
       if (this.gamePaused) this.setGamePaused(false);
       else if (this.canOpenPause()) this.setGamePaused(true);
     }
@@ -2944,10 +3895,10 @@ export class BeachScene extends Phaser.Scene {
 
   private canOpenPause(): boolean {
     return (
-      this.introPhase === "done" &&
       !this.caseyChat &&
       !this.defeated &&
-      this.endingState === "playing"
+      this.endingState !== "nuke" &&
+      !(this.endingState === "complete" && this.player.inputLocked)
     );
   }
 
@@ -2962,66 +3913,11 @@ export class BeachScene extends Phaser.Scene {
   }
 
   private showPauseOverlay(): void {
-    this.hidePauseOverlay();
-    const dim = this.add
-      .rectangle(0, 0, this.viewW + 80, GAME_HEIGHT + 80, 0x1a1410, 0.62)
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(400)
-      .setInteractive();
-    this.pinHud(dim, this.viewW / 2, GAME_HEIGHT / 2);
-
-    const title = this.add
-      .text(0, 0, "PAUSED", {
-        fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
-        fontSize: "36px",
-        color: "#ffe08a",
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(401);
-    this.pinHud(title, this.viewW / 2, GAME_HEIGHT * 0.32);
-
-    const resume = this.add
-      .text(0, 0, "Resume", {
-        fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
-        fontSize: "22px",
-        color: "#1a1410",
-        backgroundColor: "#ffe08a",
-        padding: { x: 22, y: 10 },
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(401)
-      .setInteractive({ useHandCursor: true });
-    this.pinHud(resume, this.viewW / 2, GAME_HEIGHT * 0.48);
-
-    const restart = this.add
-      .text(0, 0, "Restart checkpoint", {
-        fontFamily: '"Comic Sans MS", "Chalkboard SE", cursive',
-        fontSize: "18px",
-        color: "#f2e6d8",
-        backgroundColor: "#3a3028",
-        padding: { x: 16, y: 8 },
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(401)
-      .setInteractive({ useHandCursor: true });
-    this.pinHud(restart, this.viewW / 2, GAME_HEIGHT * 0.62);
-
-    resume.on("pointerup", () => this.setGamePaused(false));
-    restart.on("pointerup", () => {
-      this.setGamePaused(false);
-      this.restartFromCheckpoint();
-    });
-
-    this.pauseOverlay = this.add.container(0, 0, [dim, title, resume, restart]).setDepth(400);
+    setPauseMenuOpen(true);
   }
 
   private hidePauseOverlay(): void {
-    this.pauseOverlay?.destroy(true);
-    this.pauseOverlay = undefined;
+    setPauseMenuOpen(false);
   }
 
   private applyResumeCheckpoint(cp: RunCheckpoint): void {
@@ -3091,8 +3987,7 @@ export class BeachScene extends Phaser.Scene {
 
     this.cameras.main.centerOn(p.x, GAME_HEIGHT / 2);
     this.rebuildFighterList();
-    this.restartPrompt?.destroy();
-    this.restartPrompt = undefined;
+    this.clearRestartPrompt();
     this.banner.setText(
       cp.stage === 2
         ? "Bill dumped you past the pier. Back to it."
@@ -3273,7 +4168,16 @@ export class BeachScene extends Phaser.Scene {
           ? `Out cold — press ${this.lootKey()} near them to loot.`
           : `Crawl-away KO — ${this.lootKey()} to loot if you're quick.`,
       );
+      if (ev.target instanceof Enemy) this.maybeDropBuzzball(ev.target);
+      if (ev.target.weapon !== "none") {
+        const dumped = ev.target.dropWeapon();
+        if (dumped) {
+          this.spawnPickup(ev.target.x + (Math.random() < 0.5 ? -18 : 18), ev.target.y, dumped);
+        }
+      }
     }
+
+    if (justFinished) this.tryMentalMushUnlock();
   }
 
   /** Hardmen nick your kit mid-scrap — "I'll have that mush". */
@@ -3406,6 +4310,7 @@ export class BeachScene extends Phaser.Scene {
           this.dogKicks += 1;
           this.wanted.bump(0.2);
           this.banner.setText("Kicked the dog — wanted ticks up.");
+          this.unlockAchievement("dogPound");
         }
       }
     }
@@ -3413,11 +4318,11 @@ export class BeachScene extends Phaser.Scene {
 
   /** When one lad gets stuck into — his mates within earshot pile in. */
   /**
-   * Only one lad piles on at a time — the rest hover and mouth off.
-   * Keeps a pack from cornering you with four sets of fists at the same time.
+   * Two lads can pile on — the rest hover and mouth off.
+   * The Hardman never waits his turn.
    */
   private syncEngagementCap(): void {
-    const maxPressing = 1;
+    const maxPressing = 2;
     const contenders = this.enemies
       .filter((e) => !e.structure.isOut() && !e.isBackground)
       .sort(
@@ -3525,11 +4430,13 @@ export class BeachScene extends Phaser.Scene {
     else if (action === "stall") this.tryBuyFood();
     else if (action === "board") this.tryPickupSkateboard();
     else if (action === "wep") this.tryPickupWeapon();
+    else if (action === "buzz") this.tryPickupBuzzball();
   }
 
   /** E / Punch world use — bribe, loot, buy, hop on, pick up. */
   private tryWorldInteract(): boolean {
     if (this.tryBribePolice()) return true;
+    if (this.tryPickupBuzzball()) return true;
     if (tryLoot(this.player, this.fighters, (ev) => this.onCombat(ev))) return true;
     if (this.tryBuyWeapon()) return true;
     if (this.tryBuyFood()) return true;
@@ -3593,13 +4500,14 @@ export class BeachScene extends Phaser.Scene {
       !this.player.climbing &&
       !!this.nearestSkateboard();
     const canGrabWep = !!this.nearestPickup();
+    const canBuzz = !!this.nearestBuzzball();
     const canLoot = !!nearestLootable(this.player, this.fighters);
 
-    if (!canBribe && !canBuyWep && !canBuyFood && !canBoard && !canGrabWep && !canLoot) {
+    if (!canBribe && !canBuyWep && !canBuyFood && !canBoard && !canGrabWep && !canLoot && !canBuzz) {
       return;
     }
 
-    if (canBribe || canBuyWep || canBuyFood || canBoard || canGrabWep) {
+    if (canBribe || canBuyWep || canBuyFood || canBoard || canGrabWep || canBuzz) {
       const handled = this.tryWorldInteract();
       if (handled) clearPunchJust();
       return;
@@ -3857,10 +4765,12 @@ export class BeachScene extends Phaser.Scene {
    */
   private tryFeedHoverFans(victim: Fighter, now: number, force: boolean): boolean {
     // Cuffs stay out; fresh slam KOs can still get sucked into the ducts
-    if (victim.structure.cuffed) return false;
+    if (victim.structure.cuffed || victim.inFanMince) return false;
     if (!force && victim.structure.isOut()) return false;
     const fans = this.parallax.getHovercraftFans();
     if (fans.length === 0) return false;
+    const sample = fans[0]!;
+    if (!this.parallax.isNearHoverFans(sample.x, sample.y, 1)) return false;
 
     if (force) {
       const px = this.player.x;
@@ -3899,89 +4809,161 @@ export class BeachScene extends Phaser.Scene {
 
   private chopInHoverFans(
     victim: Fighter,
-    fan: { x: number; y: number; rx: number; ry: number },
+    fan: { x: number; y: number; rx: number; ry: number; bladeX: number; bladeY: number },
     now: number,
   ): void {
-    if (victim.structure.cuffed) return;
+    if (victim.structure.cuffed || victim.inFanMince) return;
+    victim.inFanMince = true;
+    this.pendingChoppedMush = true;
     victim.tossVx = 0;
     victim.tossUntil = 0;
     victim.airborne = true;
-    victim.jumpVy = -220;
+    victim.jumpVy = 0;
     victim.clearCarMount();
     victim.clearPlantLock();
-    // Yank into the duct mouth, then plant in the blades
-    const landY = Phaser.Math.Clamp(fan.y, LANE.minY, LANE.maxY);
-    this.tweens.add({
-      targets: victim,
-      x: fan.x,
-      y: landY - 28,
-      duration: 160,
-      ease: "Quad.easeIn",
-      onComplete: () => {
-        if (!victim.active) return;
-        victim.airborne = false;
-        victim.jumpVy = 0;
-        victim.x = fan.x;
-        victim.y = landY;
-        victim.groundY = landY;
-        victim.structure.knockOutCold();
-        victim.setAction("out_cold", now, 999999);
-        victim.markPlantHere();
-        victim.invulnUntil = now + 800;
-      },
-    });
+    victim.heldBy = null;
+    victim.detachFromThrower();
+    if (this.player.heldTarget === victim) this.player.heldTarget = null;
     victim.structure.knockOutCold();
     victim.setAction("out_cold", now, 999999);
-    victim.invulnUntil = now + 900;
+    this.bubbles.clearOwner(victim);
+    if (victim instanceof Civilian) victim.releaseDogIfAny(now);
 
-    this.cameras.main.shake(220, 0.014);
+    const bladeX = fan.bladeX;
+    const bladeY = fan.bladeY;
+    victim.setDepth(16);
+    victim.sprite.setOrigin(0.5, 0.5);
+    victim.sprite.y = 0;
+    victim.weaponSprite.setVisible(false);
+
+    this.cameras.main.shake(180, 0.012);
+    this.spawnFloat(victim.x, victim.y - 70, "sucked in!");
+    this.banner.setText("Straight up into the fans!");
+    this.playThrowImpact(this.player, victim, "launch");
+    void chipSfx.whoosh(true);
+    this.parallax.revHovercraftFans();
+
+    // 1) Yank off the promenade and up into the ducts
     this.tweens.add({
       targets: victim,
-      angle: victim.facing * (540 + Math.random() * 180),
-      duration: 480,
-      ease: "Quad.easeOut",
+      x: bladeX,
+      y: bladeY,
+      angle: victim.facing * 380,
+      duration: 420,
+      ease: "Cubic.easeIn",
       onComplete: () => {
-        if (victim.active) victim.setAngle(0);
+        if (!victim.active) return;
+        void chipSfx.chop();
+        this.cameras.main.shake(280, 0.018);
+        this.spawnFloat(bladeX, bladeY - 36, "CHOPPED!");
+        this.spinInHoverBlades(victim, bladeX, bladeY);
       },
     });
-    // Red spray scribbles
-    for (let i = 0; i < 8; i++) {
-      const blob = this.add
-        .circle(
-          fan.x + (Math.random() - 0.5) * 20,
-          landY - 10 + (Math.random() - 0.5) * 16,
-          3 + Math.random() * 4,
-          0xa01818,
-          0.85,
-        )
-        .setDepth(80);
-      this.tweens.add({
-        targets: blob,
-        x: blob.x + (Math.random() - 0.5) * 70,
-        y: blob.y - 20 - Math.random() * 50,
-        alpha: 0,
-        scale: 0.2,
-        duration: 420 + Math.random() * 200,
-        ease: "Quad.easeOut",
-        onComplete: () => blob.destroy(),
-      });
-    }
-    this.spawnFloat(fan.x, landY - 70, "CHOPPED!");
-    this.banner.setText("Into the fans — give it a second.");
-    this.playThrowImpact(this.player, victim, "pileup");
-    void chipSfx.chop();
-    this.parallax.revHovercraftFans();
-    // Wait out the yank / spin / spray so they're properly minced before it scarpers
-    const leaveIn = 1250;
+
+    const leaveIn = 420 + 920 + 280;
     this.hoverChopLeaveAt = this.time.now + leaveIn;
     this.time.delayedCall(leaveIn, () => {
       if (this.time.now + 40 < this.hoverChopLeaveAt) return;
       if (this.parallax.departHovercraftToIsle()) {
-        this.spawnFloat(fan.x, landY - 100, "off to the Island!");
+        this.spawnFloat(bladeX, bladeY - 80, "off to the Island!");
         this.banner.setText("Hovertravel's scarpering to the Isle of Wight.");
         void chipSfx.whoosh(true);
       }
     });
+  }
+
+  /** Spin them in the ducts, then they're gone. */
+  private spinInHoverBlades(victim: Fighter, bladeX: number, bladeY: number): void {
+    const orbit = { a: 0 };
+    this.tweens.add({
+      targets: orbit,
+      a: Math.PI * 10,
+      duration: 920,
+      ease: "Sine.easeIn",
+      onUpdate: () => {
+        if (!victim.active) return;
+        const r = 14 + Math.sin(orbit.a * 2) * 6;
+        victim.x = bladeX + Math.cos(orbit.a) * r;
+        victim.y = bladeY + Math.sin(orbit.a) * r * 0.72;
+        victim.setAngle((orbit.a * 180) / Math.PI * 1.6);
+        const pulse = 0.72 + Math.sin(orbit.a * 4) * 0.18;
+        victim.setScale(pulse, pulse);
+      },
+      onComplete: () => {
+        if (!victim.active) return;
+        this.tweens.add({
+          targets: victim,
+          scaleX: 0.05,
+          scaleY: 0.05,
+          alpha: 0,
+          angle: victim.angle + 220,
+          duration: 260,
+          ease: "Cubic.easeIn",
+          onComplete: () => this.devourFanVictim(victim),
+        });
+      },
+    });
+
+    const spray = () => {
+      if (!victim.active) return;
+      for (let i = 0; i < 5; i++) {
+        const blob = this.add
+          .circle(
+            bladeX + (Math.random() - 0.5) * 22,
+            bladeY + (Math.random() - 0.5) * 16,
+            2 + Math.random() * 4,
+            0xa01818,
+            0.9,
+          )
+          .setDepth(18);
+        this.tweens.add({
+          targets: blob,
+          x: blob.x + (Math.random() - 0.5) * 70,
+          y: blob.y - 8 - Math.random() * 50,
+          alpha: 0,
+          scale: 0.15,
+          duration: 360 + Math.random() * 220,
+          ease: "Quad.easeOut",
+          onComplete: () => blob.destroy(),
+        });
+      }
+    };
+    spray();
+    this.time.delayedCall(220, spray);
+    this.time.delayedCall(440, spray);
+    this.time.delayedCall(680, spray);
+
+    for (let i = 0; i < 12; i++) {
+      const blob = this.add
+        .circle(
+          bladeX + (Math.random() - 0.5) * 18,
+          bladeY + (Math.random() - 0.5) * 14,
+          3 + Math.random() * 4,
+          0xa01818,
+          0.9,
+        )
+        .setDepth(18);
+      this.tweens.add({
+        targets: blob,
+        x: blob.x + (Math.random() - 0.5) * 80,
+        y: blob.y - 10 - Math.random() * 70,
+        alpha: 0,
+        scale: 0.15,
+        duration: 480 + Math.random() * 280,
+        ease: "Quad.easeOut",
+        onComplete: () => blob.destroy(),
+      });
+    }
+  }
+
+  private devourFanVictim(victim: Fighter): void {
+    this.tweens.killTweensOf(victim);
+    victim.setVisible(false);
+    victim.setAlpha(0);
+    victim.setScale(1);
+    victim.setAngle(0);
+    victim.airborne = false;
+    victim.jumpVy = 0;
   }
 
   /** Body toss launch or mid-air pile-up — shake + flash (no chalk streaks). */

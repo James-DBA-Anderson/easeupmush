@@ -17,19 +17,23 @@ export class Police extends Fighter {
   constructor(scene: Phaser.Scene, x: number, y: number, name = "PC") {
     const look = pickLook("police");
     super(scene, x, y, "police", look.id, name, {
-      toughness: 1.6,
+      toughness: 1.75,
       scaleX: look.scaleX,
       scaleY: look.scaleY,
       loot: { money: 0, weapon: "none" },
     });
-    this.speed = 140;
-    this.runSpeed = 220;
+    this.speed = 148;
+    this.runSpeed = 230;
   }
 
   /** Pocket the cash and scarper. */
   takeBribe(now: number, awayFromX: number): void {
     this.bribed = true;
     this.target = null;
+    if (this.heldTarget) {
+      this.heldTarget.heldBy = null;
+      this.heldTarget = null;
+    }
     this.bribeDir = this.x >= awayFromX ? 1 : -1;
     this.dropBlock(now);
     this.action = "run";
@@ -44,6 +48,7 @@ export class Police extends Fighter {
   }
 
   updatePolice(now: number, dt: number, fighters: Fighter[]): void {
+    if (this.inFanMince) return;
     this.tickKnockdown(now);
 
     try {

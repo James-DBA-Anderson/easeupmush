@@ -83,6 +83,8 @@ export class Player extends Fighter {
    */
   private rushPunchNeedsRelease = false;
   private rushKickNeedsRelease = false;
+  /** One rush special per sprint — mash must not chain headbutts / slides. */
+  private rushAttackSpent = false;
   private pendingPainLine: string | null = null;
   private painMoanUntil = 0;
   private wasBlockDown = false;
@@ -96,13 +98,21 @@ export class Player extends Fighter {
   private peekAmount = 0;
   /** Opening / cutscene — ignore WASD / attacks. */
   inputLocked = false;
+  private calmSpeed = 175;
+  private calmRun = 300;
+
+  /** Super Saiyan seafront — wrecking-ball pace while the Buzzball lasts. */
+  setBuzzedMove(on: boolean): void {
+    this.speed = on ? this.calmSpeed * 1.55 : this.calmSpeed;
+    this.runSpeed = on ? this.calmRun * 1.5 : this.calmRun;
+  }
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     // Always a lad — never roll a fem player look
     const look = pickLookPresent("player", "masc");
     super(scene, x, y, "player", look.id, "You", {
-      toughness: 6.0,
-      recovery: 1.4,
+      toughness: 5.5,
+      recovery: 1.2,
       scaleX: look.scaleX,
       scaleY: look.scaleY,
       build: look.build,
@@ -110,8 +120,10 @@ export class Player extends Fighter {
     });
     this.speed = 175;
     this.runSpeed = 300;
+    this.calmSpeed = 175;
+    this.calmRun = 300;
     // Rising invincibility — the pack can't boot-loop you off the floor
-    this.getUpGraceMs = 850;
+    this.getUpGraceMs = 700;
     this.bindInput();
   }
 
@@ -495,6 +507,10 @@ export class Player extends Fighter {
     // Rolling skate = run-attack rules (headbutt / slide / weapon drive-by)
     this.boardRolling = this.skating && !this.airborne && (moveHeld || this.boardManual);
 
+    if (!wantRun && !(this.skating && this.boardRolling)) {
+      this.rushAttackSpent = false;
+    }
+
     const punchJust =
       Phaser.Input.Keyboard.JustDown(this.keys.punch) || this.pad.punchJust;
     const kickJust =
@@ -672,12 +688,13 @@ export class Player extends Fighter {
       } else {
         this.moanIfLimbFailed(now, "leg");
       }
-    } else if (kickCommit && (wantRun || this.isRushing)) {
-      // Run / skate + K — slide through a line (one per press)
+    } else if (kickCommit && (wantRun || this.isRushing) && !this.rushAttackSpent) {
+      // Run / skate + K — slide through a line (one per sprint)
       if (this.rushKickNeedsRelease) {
         this.kickQueuedAt = 0;
       } else if (this.trySlide(now)) {
         this.rushKickNeedsRelease = true;
+        this.rushAttackSpent = true;
         this.comboStep = 0;
         this.kickQueuedAt = 0;
         this.punchQueuedAt = 0;
@@ -686,12 +703,15 @@ export class Player extends Fighter {
         this.moanIfLimbFailed(now, "leg");
       }
     } else if (punchCommit) {
-      const rushing = wantRun || this.isRushing;
+      const rushing = (wantRun || this.isRushing) && !this.rushAttackSpent;
       if (rushing && this.rushPunchNeedsRelease) {
         // Still holding J after a headbutt / rush swing — don't loop
         this.punchQueuedAt = 0;
       } else if (this.tryComboPunch(now, rushing)) {
-        if (rushing) this.rushPunchNeedsRelease = true;
+        if (rushing) {
+          this.rushPunchNeedsRelease = true;
+          this.rushAttackSpent = true;
+        }
         this.punchQueuedAt = 0;
         this.kickQueuedAt = 0;
         void chipSfx.whoosh(false);

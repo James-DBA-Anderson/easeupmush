@@ -65,6 +65,17 @@ const edged = {
 
 let mounted = false;
 let root: HTMLElement | null = null;
+let pauseBtn: HTMLButtonElement | null = null;
+let pauseOverlay: HTMLElement | null = null;
+let pauseResume: (() => void) | null = null;
+let pauseRestart: (() => void) | null = null;
+let promptOverlay: HTMLElement | null = null;
+let promptTitle: HTMLElement | null = null;
+let promptBody: HTMLElement | null = null;
+let promptBtn: HTMLButtonElement | null = null;
+let promptAltBtn: HTMLButtonElement | null = null;
+let promptOnPress: (() => void) | null = null;
+let promptOnAlt: (() => void) | null = null;
 /** Off on the title screen so the start tap isn't fighting the pad. */
 let padActive = false;
 
@@ -331,9 +342,6 @@ export function mountMobileControls(): void {
         <div class="mp-stick-knob"></div>
       </div>
     </div>
-    <div class="mp-cluster mp-cluster--pause">
-      <button type="button" class="mp-btn mp-pause" data-pause aria-label="Pause">II</button>
-    </div>
     <div class="mp-cluster mp-cluster--fight">
       <button type="button" class="mp-btn mp-act mp-act--punch" data-btn="punch" aria-label="Punch">Punch</button>
       <button type="button" class="mp-btn mp-act mp-act--kick" data-btn="kick" aria-label="Kick">Kick</button>
@@ -368,22 +376,134 @@ export function mountMobileControls(): void {
     );
   });
 
-  const pauseBtn = root.querySelector<HTMLElement>("[data-pause]");
-  if (pauseBtn) {
-    bindHold(
-      pauseBtn,
-      () => {
-        edged.pauseJust = true;
-      },
-      () => {
-        /* tap only */
-      },
-    );
-  }
-
   syncPadVisibility();
   window.addEventListener("orientationchange", syncPadVisibility);
   window.addEventListener("resize", syncPadVisibility);
+}
+
+function bindDebouncedTap(el: HTMLElement, fn: () => void): void {
+  let armedAt = 0;
+  const tap = (ev: Event) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const now = performance.now();
+    if (now - armedAt < 400) return;
+    armedAt = now;
+    fn();
+  };
+  el.addEventListener("pointerup", tap);
+  el.addEventListener("click", tap);
+}
+
+/** Pause control — HTML so it sits above the canvas on mobile and desktop. */
+export function mountPauseButton(): void {
+  if (!pauseBtn) {
+    pauseBtn = document.createElement("button");
+    pauseBtn.type = "button";
+    pauseBtn.id = "game-pause-btn";
+    pauseBtn.className = "mp-btn mp-pause";
+    pauseBtn.setAttribute("aria-label", "Pause");
+    pauseBtn.textContent = "II";
+    bindDebouncedTap(pauseBtn, () => {
+      edged.pauseJust = true;
+    });
+    document.body.appendChild(pauseBtn);
+  }
+  mountPauseOverlay();
+  mountHtmlPrompt();
+}
+
+function mountPauseOverlay(): void {
+  if (pauseOverlay) return;
+  pauseOverlay = document.createElement("div");
+  pauseOverlay.id = "game-pause-overlay";
+  pauseOverlay.innerHTML = `
+    <div class="game-pause-card">
+      <p class="game-pause-title">PAUSED</p>
+      <button type="button" class="game-pause-resume" data-pause-act="resume">Resume</button>
+      <button type="button" class="game-pause-restart" data-pause-act="restart">Restart checkpoint</button>
+    </div>
+  `;
+  const resume = pauseOverlay.querySelector<HTMLElement>('[data-pause-act="resume"]')!;
+  const restart = pauseOverlay.querySelector<HTMLElement>('[data-pause-act="restart"]')!;
+  bindDebouncedTap(resume, () => pauseResume?.());
+  bindDebouncedTap(restart, () => pauseRestart?.());
+  document.body.appendChild(pauseOverlay);
+}
+
+export function bindPauseMenu(handlers: { resume: () => void; restart: () => void }): void {
+  pauseResume = handlers.resume;
+  pauseRestart = handlers.restart;
+}
+
+export function setPauseMenuOpen(on: boolean): void {
+  if (!pauseOverlay) mountPauseOverlay();
+  pauseOverlay?.classList.toggle("is-on", on);
+}
+
+function mountHtmlPrompt(): void {
+  if (promptOverlay) return;
+  promptOverlay = document.createElement("div");
+  promptOverlay.id = "game-prompt-overlay";
+  promptOverlay.innerHTML = `
+    <div class="game-prompt-card">
+      <p class="game-prompt-title"></p>
+      <p class="game-prompt-body"></p>
+      <button type="button" class="game-prompt-btn"></button>
+      <button type="button" class="game-prompt-alt" hidden></button>
+    </div>
+  `;
+  promptTitle = promptOverlay.querySelector(".game-prompt-title");
+  promptBody = promptOverlay.querySelector(".game-prompt-body");
+  promptBtn = promptOverlay.querySelector(".game-prompt-btn");
+  promptAltBtn = promptOverlay.querySelector(".game-prompt-alt");
+  if (promptBtn) {
+    bindDebouncedTap(promptBtn, () => promptOnPress?.());
+  }
+  if (promptAltBtn) {
+    bindDebouncedTap(promptAltBtn, () => promptOnAlt?.());
+  }
+  document.body.appendChild(promptOverlay);
+}
+
+/** Full-screen card above the pad — cuffs, nuke, and other end states. */
+export function showHtmlPrompt(opts: {
+  title: string;
+  body?: string;
+  buttonLabel: string;
+  onPress: () => void;
+  altLabel?: string;
+  onAltPress?: () => void;
+}): void {
+  if (!promptOverlay) mountHtmlPrompt();
+  promptOnPress = opts.onPress;
+  promptOnAlt = opts.onAltPress ?? null;
+  if (promptTitle) promptTitle.textContent = opts.title;
+  if (promptBody) {
+    const body = opts.body?.trim() ?? "";
+    promptBody.textContent = body;
+    promptBody.hidden = !body;
+  }
+  if (promptBtn) promptBtn.textContent = opts.buttonLabel;
+  if (promptAltBtn) {
+    const alt = opts.altLabel?.trim() ?? "";
+    promptAltBtn.textContent = alt;
+    promptAltBtn.hidden = !alt || !opts.onAltPress;
+  }
+  setPauseMenuOpen(false);
+  promptOverlay?.classList.add("is-on");
+}
+
+export function hideHtmlPrompt(): void {
+  promptOnPress = null;
+  promptOnAlt = null;
+  promptOverlay?.classList.remove("is-on");
+}
+
+export function setPauseButtonActive(on: boolean): void {
+  if (!pauseBtn) mountPauseButton();
+  pauseBtn?.classList.toggle("is-on", on);
+  if (!on) setPauseMenuOpen(false);
 }
 
 export function syncPadVisibility(): void {
@@ -399,6 +519,7 @@ export function syncPadVisibility(): void {
 export function setMobilePadActive(on: boolean): void {
   padActive = on;
   syncPadVisibility();
+  setPauseButtonActive(on);
 }
 
 /** Prefer landscape; often needs a user gesture + fullscreen on Android. */

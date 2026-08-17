@@ -3,6 +3,7 @@ import { gameConfig } from "./game/config";
 import {
   isMobilePlay,
   mountMobileControls,
+  mountPauseButton,
   syncPadVisibility,
   tryEnforceLandscape,
 } from "./game/input/mobilePad";
@@ -67,6 +68,8 @@ if (isMobilePlay()) {
   });
   window.addEventListener("resize", syncPadVisibility);
 }
+
+mountPauseButton();
 
 const game = new Phaser.Game({ ...gameConfig, parent });
 

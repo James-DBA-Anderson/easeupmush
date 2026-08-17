@@ -185,6 +185,11 @@ export class FoodStall {
     };
   }
 
+  scorch(): void {
+    this.image.setTint(0x3a342c);
+    this.board.setVisible(false);
+  }
+
   destroy(): void {
     this.image.destroy();
     this.board.destroy();

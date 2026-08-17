@@ -161,8 +161,15 @@ export class ParallaxBeach {
   private readonly seaCraft: SeaCraft[] = [];
   private readonly passingCars: PassingCar[] = [];
   private spitfire: SkySpitfire | null = null;
-  /** World-space fan ducts — throws near here get messy. */
-  private readonly hoverFans: { x: number; y: number; rx: number; ry: number }[] = [];
+  /** World-space fan ducts — fight-lane catch + visual blade centres. */
+  private readonly hoverFans: {
+    x: number;
+    y: number;
+    rx: number;
+    ry: number;
+    bladeX: number;
+    bladeY: number;
+  }[] = [];
   private readonly hoverHull: Obstacle[] = [];
   private hoverCraft: ParallaxImage | null = null;
   private hoverDeparting = false;
@@ -185,6 +192,8 @@ export class ParallaxBeach {
   /** Expanded playfield width (Scale.EXPAND on wide phones). */
   private viewW = GAME_WIDTH;
   private kerb?: Phaser.GameObjects.Rectangle;
+  /** Council strike — freeze traffic and charcoal the front. */
+  private scorched = false;
 
   constructor(private readonly scene: Phaser.Scene) {
     this.viewW = viewportWidth(scene);
@@ -214,7 +223,14 @@ export class ParallaxBeach {
   }
 
   /** Spinning fan ducts on the parked Hovertravel craft. */
-  getHovercraftFans(): readonly { x: number; y: number; rx: number; ry: number }[] {
+  getHovercraftFans(): readonly {
+    x: number;
+    y: number;
+    rx: number;
+    ry: number;
+    bladeX: number;
+    bladeY: number;
+  }[] {
     return this.hoverFans;
   }
 
@@ -661,12 +677,32 @@ export class ParallaxBeach {
       scale: 1.2,
       depth: -7,
     });
-    // Stern intakes facing the scrap — fight-lane hazards (not the sprite fan centres
-    // high on the craft, which sit ~180px above the promenade and never catch a toss).
+    // Stern-on craft: canvas 220×188, fans at (cx±38, 48), origin bottom-centre.
+    const fanCanvasW = 220;
+    const fanCanvasH = 188;
+    const dispW = fanCanvasW * hoverScale;
+    const dispH = fanCanvasH * hoverScale;
+    const spriteLeft = hoverX - dispW * 0.5;
+    const spriteTop = hoverY - dispH;
+    const bladeY = spriteTop + 48 * hoverScale;
     const intakeY = Math.max(LANE.minY + 10, hoverY - 28);
     this.hoverFans.push(
-      { x: hoverX - 42 * hoverScale, y: intakeY, rx: 46, ry: 48 },
-      { x: hoverX + 42 * hoverScale, y: intakeY, rx: 46, ry: 48 },
+      {
+        x: hoverX - 42 * hoverScale,
+        y: intakeY,
+        rx: 52,
+        ry: 56,
+        bladeX: spriteLeft + (110 - 38) * hoverScale,
+        bladeY,
+      },
+      {
+        x: hoverX + 42 * hoverScale,
+        y: intakeY,
+        rx: 52,
+        ry: 56,
+        bladeX: spriteLeft + (110 + 38) * hoverScale,
+        bladeY,
+      },
     );
     this.hoverHull.push({
       x: hoverX,
@@ -1005,8 +1041,47 @@ export class ParallaxBeach {
     });
   }
 
+  /** Char the seafront after the council strike. */
+  scorch(): void {
+    this.scorched = true;
+    const ash = 0x3a342c;
+    for (const layer of this.layers) {
+      layer.sprite.setTint(ash);
+      layer.drift = 0;
+    }
+    for (const item of this.images) {
+      item.image.setTint(ash);
+      item.frames = undefined;
+    }
+    for (const c of this.seaCraft) c.image.destroy();
+    this.seaCraft.length = 0;
+    for (const car of this.passingCars) car.image.destroy();
+    this.passingCars.length = 0;
+    if (this.spitfire) {
+      this.spitfire.image.destroy();
+      this.spitfire = null;
+    }
+    this.kerb?.setFillStyle(0x2a2620, 1);
+    for (const stall of this.foodStalls) stall.scorch();
+    for (const shop of this.weaponShops) shop.scorch();
+    for (const p of this.destructibles) {
+      if (!p.destroyed) p.wreck(this.scene);
+      p.image.setTint(ash);
+    }
+  }
+
   update(cameraScrollX: number, delta: number, now = 0): void {
     this.syncViewportWidth();
+    if (this.scorched) {
+      for (const layer of this.layers) {
+        layer.sprite.tilePositionX = cameraScrollX * layer.factor + (layer.driftX ?? 0);
+      }
+      for (const item of this.images) {
+        item.image.x = item.worldX - cameraScrollX * item.factor;
+        item.image.y = item.screenY;
+      }
+      return;
+    }
     this.waveT += delta;
     const camDelta = this.hasCamScroll ? cameraScrollX - this.lastCamScrollX : 0;
     this.lastCamScrollX = cameraScrollX;

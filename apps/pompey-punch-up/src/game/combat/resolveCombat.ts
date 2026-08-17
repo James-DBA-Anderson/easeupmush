@@ -115,8 +115,10 @@ export function resolveCombat(
         crawling ||
         target.structure.outCold;
       const onFloor = softFloored || crawling || target.structure.isOut();
+      const buzzed = attacker.isBuzzed(now);
       // Soft floors are openings for boots, not free chin-shot finishers
       const critical =
+        buzzed ||
         strike.critical ||
         (!softFloored &&
           open &&
@@ -144,9 +146,9 @@ export function resolveCombat(
       const result = target.receiveStrike({
         kind,
         power:
-          floorAttack && onFloor
+          (floorAttack && onFloor
             ? Math.max(strike.power, 0.75)
-            : strike.power + attacker.structure.anger * 0.1,
+            : strike.power + attacker.structure.anger * 0.1) * (buzzed ? 1.85 : 1),
         critical: (floorAttack && onFloor) || critical,
         dirty: strike.dirty,
         onOpening: open,

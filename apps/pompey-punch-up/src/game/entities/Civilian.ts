@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { Fighter, inReach } from "./Fighter";
+import { Fighter, inReach, KICKFLIP_MS } from "./Fighter";
 import type { StrikeInput, StrikeResult } from "../combat/Structure";
 import { LANE, PROMENADE } from "../constants";
 import { steerAway, type Obstacle } from "../world/obstacles";
@@ -232,6 +232,8 @@ const VARIANT_SPEED: Record<CivilianVariant, { walk: number; run: number }> = {
   dog_walker: { walk: 68, run: 145 },
 };
 
+type SkateTrick = "ollie" | "kickflip" | "manual";
+
 function isPasser(v: CivilianVariant): boolean {
   return v === "bike" || v === "scooter" || v === "skater";
 }
@@ -266,6 +268,10 @@ export class Civilian extends Fighter {
   private lastCrashOutcome: CrashOutcome | null = null;
   /** Skater knocked off — scene spawns a rideable board. */
   private droppedBoard: { x: number; y: number } | null = null;
+  private skateTrick: SkateTrick | null = null;
+  private skateTrickUntil = 0;
+  private skateTrickDur = 1;
+  private nextSkateTrickAt = 0;
   /** Some walkers stop to film a scrap instead of always scarpering. */
   private nosy: boolean;
   private filmPingAt = 0;
@@ -308,6 +314,11 @@ export class Civilian extends Fighter {
   /** Casey (or similar) recruited into the party for the rest of the run. */
   get isPartyMember(): boolean {
     return this.partyMember && !this.structure.isOut();
+  }
+
+  /** Recruited this run — still true if she's on the deck. */
+  get isRecruited(): boolean {
+    return this.partyMember;
   }
 
   /** True while the bloke is steaming over his missus getting hurt. */
@@ -620,6 +631,9 @@ export class Civilian extends Fighter {
     if (variant === "dog_walker") {
       this.dog = new Dog(scene, x - 28, y + 6, this);
     }
+    if (variant === "skater") {
+      this.nextSkateTrickAt = 1600 + Math.random() * 4200;
+    }
 
     // Spawn feet on the promenade, not the tarmac
     if (!this.ally) {
@@ -638,6 +652,12 @@ export class Civilian extends Fighter {
       return { minY: LANE.minY, maxY: LANE.maxY };
     }
     return { minY: PROMENADE.minY, maxY: PROMENADE.maxY };
+  }
+
+  /** Dogs stay off the quiet Eastney stretch. */
+  private strollMinX(): number {
+    if (this.variant === "dog_walker" && !this.ally && !this.isProtecting) return 3600;
+    return LANE.minX;
   }
 
   private clampStrollY(): void {
@@ -693,6 +713,7 @@ export class Civilian extends Fighter {
   crash(now: number, fromX: number, into?: Fighter): CrashOutcome {
     if (!this.mounted) return "flee";
     this.mounted = false;
+    this.skateTrick = null;
     if (this.mount) {
       this.mount.setVisible(false);
       if (this.variant === "skater") {
@@ -746,6 +767,13 @@ export class Civilian extends Fighter {
     return outcome;
   }
 
+  /** Let the mutt scarper before this walker gets minced. */
+  releaseDogIfAny(now: number): void {
+    if (!this.dog || this.dogReleased) return;
+    this.dogReleased = true;
+    this.dog.release(now);
+  }
+
   updateCivilian(
     now: number,
     dt: number,
@@ -753,6 +781,7 @@ export class Civilian extends Fighter {
     obstacles: Obstacle[],
     civilians: Civilian[] = [],
   ): void {
+    if (this.inFanMince) return;
     this.frameObstacles = obstacles;
     this.tickKnockdown(now);
 
@@ -836,6 +865,9 @@ export class Civilian extends Fighter {
     if (this.isCycling) {
       const frame = Math.floor(this.walkPhase * 2) % 2;
       if (this.variant === "skater") {
+        if (this.skateTrick === "kickflip") return "kickflip";
+        if (this.skateTrick === "ollie") return "ollie";
+        if (this.skateTrick === "manual") return "manual";
         if (!this.boardRolling) return "skate0";
         return frame === 0 ? "skate0" : "skate1";
       }
@@ -872,10 +904,36 @@ export class Civilian extends Fighter {
       this.sprite.x = 0;
       this.mount.setVisible(true);
       this.mount.setFlipX(this.facing < 0);
-      // Deck under the soles (same alignment as the player's board)
+      this.mount.setOrigin(0.5, 1);
+      this.mount.setAngle(0);
       this.mount.y = 10;
       this.mount.x = 0;
-      if (this.boardRolling) {
+      const trick = this.skateTrick;
+      if (trick === "kickflip") {
+        const t = Phaser.Math.Clamp(
+          1 - (this.skateTrickUntil - now) / Math.max(1, this.skateTrickDur),
+          0,
+          1,
+        );
+        const hop = Math.sin(t * Math.PI) * 12;
+        this.mount.setAngle((t * 360 * this.facing) % 360);
+        this.mount.y = -4 - hop;
+        this.sprite.y = -12 - hop;
+      } else if (trick === "ollie") {
+        const t = Phaser.Math.Clamp(
+          1 - (this.skateTrickUntil - now) / Math.max(1, this.skateTrickDur),
+          0,
+          1,
+        );
+        const hop = Math.sin(t * Math.PI) * 14;
+        this.sprite.y = -2 - hop;
+        this.mount.y = 10 - hop;
+      } else if (trick === "manual") {
+        this.mount.setOrigin(this.facing > 0 ? 0.3 : 0.7, 1);
+        this.mount.setAngle(this.facing * -28);
+        this.mount.x = this.facing * -10;
+        this.mount.y = 6;
+      } else if (this.boardRolling) {
         const wheelFrame = Math.floor(this.walkPhase * 2) % 2;
         const key = wheelFrame === 0 ? "mount_skate" : "mount_skate_1";
         if (this.scene.textures.exists(key) && this.mount.texture.key !== key) {
@@ -901,6 +959,36 @@ export class Civilian extends Fighter {
     }
   }
 
+  /** Occasional ollie / kickflip / manual while rolling the front. */
+  private tickSkateTrick(now: number): void {
+    if (!this.mounted) {
+      this.skateTrick = null;
+      return;
+    }
+    if (this.skateTrick && now >= this.skateTrickUntil) {
+      this.skateTrick = null;
+      this.nextSkateTrickAt = now + 2400 + Math.random() * 5200;
+    }
+    if (this.skateTrick) return;
+    if (now < this.nextSkateTrickAt) return;
+    if (this.nearCrashMs > 20) {
+      this.nextSkateTrickAt = now + 700;
+      return;
+    }
+    const roll = Math.random();
+    const kind: SkateTrick =
+      roll < 0.4 ? "manual" : roll < 0.74 ? "ollie" : "kickflip";
+    const dur =
+      kind === "manual"
+        ? 800 + Math.random() * 700
+        : kind === "ollie"
+          ? 420
+          : KICKFLIP_MS;
+    this.skateTrick = kind;
+    this.skateTrickDur = dur;
+    this.skateTrickUntil = now + dur;
+  }
+
   private updatePasser(
     now: number,
     dt: number,
@@ -908,6 +996,8 @@ export class Civilian extends Fighter {
     obstacles: Obstacle[],
     civilians: Civilian[],
   ): void {
+    if (this.variant === "skater") this.tickSkateTrick(now);
+
     const look = 210;
     const bodies = [...threats, ...civilians].filter((t) => {
       if (t === this || t.structure.isOut()) return false;
@@ -1218,7 +1308,7 @@ export class Civilian extends Fighter {
   private wrapPastScreen(): void {
     let wrapped = false;
     if (this.x > LANE.maxX + 40) {
-      this.x = LANE.minX - 40;
+      this.x = this.variant === "dog_walker" ? 3600 : LANE.minX - 40;
       wrapped = true;
     } else if (this.x < LANE.minX - 40) {
       this.x = LANE.maxX + 40;
@@ -1462,7 +1552,10 @@ export class Civilian extends Fighter {
     }
     if (this.mount) this.mount.setFlipX(this.facing < 0);
 
-    this.x = Phaser.Math.Clamp(this.x, LANE.minX, LANE.maxX);
+    this.x = Phaser.Math.Clamp(this.x, this.strollMinX(), LANE.maxX);
+    if (this.variant === "dog_walker" && this.x <= this.strollMinX() + 8) {
+      this.wanderDir = 1;
+    }
     this.clampStrollY();
     this.noteStuckProgress(dt, Math.abs(vx) > 0.15 || Math.abs(vy) > 0.15);
     this.maybeRemarkOnBodies(now, threats);
