@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { generateDoodleTextures } from "../assets/doodleTextures";
 import { chipRock } from "../audio/ChipRock";
 import { chipSfx } from "../audio/ChipSfx";
-import { GAME_HEIGHT, GAME_WIDTH } from "../constants";
+import { TITLE_LOGO_H, TITLE_LOGO_W } from "../assets/titleLogo";
 import { isMobilePlay } from "../input/mobilePad";
 import { dismissBootLoader } from "../ui/bootLoader";
 
@@ -591,6 +591,10 @@ export class BootScene extends Phaser.Scene {
 
     this.layoutTitle();
     this.scale.on("resize", this.layoutTitle, this);
+    // iOS often reports the portrait parent size on the first frame, then
+    // the landscape size after rotate / URL-bar settle.
+    this.time.delayedCall(80, this.layoutTitle);
+    this.time.delayedCall(280, this.layoutTitle);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.scale.off("resize", this.layoutTitle, this);
     });
@@ -615,32 +619,49 @@ export class BootScene extends Phaser.Scene {
   }
 
   /**
-   * Place the title UI in a fixed 960×540 band centred in the current view.
-   * EXPAND may be tall (portrait boot) or wide (landscape play) — without this,
-   * rotate leaves the demo + Start stranded below the camera.
+   * Fit the title to the live canvas — EXPAND phones are often shorter than
+   * 540px, so a 960×540 band puts Start / the demo below the camera.
    */
   private layoutTitle = (): void => {
     if (this.started) return;
     const mobile = isMobilePlay();
-    const viewW = this.scale.width;
-    const viewH = this.scale.height;
-    const ox = Math.max(0, (viewW - GAME_WIDTH) / 2);
-    const oy = Math.max(0, (viewH - GAME_HEIGHT) / 2);
+    const viewW = Math.max(1, Math.round(this.scale.gameSize.width || this.scale.width));
+    const viewH = Math.max(1, Math.round(this.scale.gameSize.height || this.scale.height));
+    this.cameras.main.setViewport(0, 0, viewW, viewH);
+    this.cameras.main.setSize(viewW, viewH);
+    this.cameras.main.setScroll(0, 0);
 
     this.bg.clear();
     this.bg.fillGradientStyle(0x241c16, 0x241c16, 0x3a2c22, 0x3a2c22, 1);
     this.bg.fillRect(0, 0, viewW, viewH);
 
-    const cx = ox + GAME_WIDTH / 2;
-    const logoY = oy + (mobile ? 58 : 66);
+    const cx = viewW / 2;
+    const logoScale = Math.min(
+      mobile ? 0.84 : 0.7,
+      (viewW - 36) / TITLE_LOGO_W,
+      (viewH * 0.28) / TITLE_LOGO_H,
+    );
+    const logoH = TITLE_LOGO_H * logoScale;
+    const logoY = 10 + logoH * 0.5;
+    const startY = viewH - (mobile ? 14 : 22);
+    const calloutY = Math.min(viewH * 0.7, startY - (mobile ? 64 : 72));
+    const logoBottom = logoY + logoH * 0.5;
+    const groundY = Phaser.Math.Clamp(
+      (logoBottom + calloutY) * 0.52,
+      logoBottom + 56,
+      calloutY - 28,
+    );
+    const figureScale = mobile
+      ? Phaser.Math.Clamp((calloutY - logoBottom) / 160, 0.95, 1.45)
+      : 1.45;
+
     this.logo.setPosition(cx, logoY);
-    // Kill any stale bob tween target drift after a resize
     this.tweens.killTweensOf(this.logo);
-    this.logo.setScale(mobile ? 0.82 : 0.7);
+    this.logo.setScale(logoScale);
     this.tweens.add({
       targets: this.logo,
-      scaleX: mobile ? 0.86 : 0.72,
-      scaleY: mobile ? 0.86 : 0.72,
+      scaleX: logoScale * 1.04,
+      scaleY: logoScale * 1.04,
       duration: 1800,
       yoyo: true,
       repeat: -1,
@@ -655,8 +676,9 @@ export class BootScene extends Phaser.Scene {
       ease: "Sine.easeInOut",
     });
 
-    const groundY = oy + GAME_HEIGHT * 0.58;
     this.groundMark.setPosition(cx, groundY + 6);
+    this.hero.setScale(figureScale);
+    this.foe.setScale(figureScale);
 
     this.heroHome = { x: cx - 28, y: groundY };
     this.foeHome = { x: cx + 42, y: groundY };
@@ -666,11 +688,10 @@ export class BootScene extends Phaser.Scene {
     this.bin.setPosition(this.binHome.x, this.binHome.y);
     this.foe.setPosition(this.foeHome.x, this.foeHome.y);
     this.hero.setPosition(this.heroHome.x, this.heroHome.y);
-    this.callout.setPosition(cx, groundY + 36);
-    this.startHint.setPosition(cx, oy + GAME_HEIGHT - 22);
-    this.practiceHint?.setPosition(ox + 20, oy + GAME_HEIGHT - 22);
+    this.callout.setPosition(cx, calloutY);
+    this.startHint.setPosition(cx, startY);
+    this.practiceHint?.setPosition(20, startY);
 
-    // Snap the live demo frame onto the new homes
     const clip = DEMOS[this.clipIndex];
     const frame = clip?.frames[this.frameIndex];
     if (clip && frame) this.applyFrame(frame, clip);
