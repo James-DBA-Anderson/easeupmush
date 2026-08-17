@@ -12,7 +12,6 @@ import { resolvePropHits } from "../systems/resolvePropHits";
 import { updateCarPlatforms, syncCarOcclusion, wreckCarUnderThrower } from "../systems/climbCars";
 import { SpeechBubbles } from "../ui/SpeechBubbles";
 import { nextPlayerQuip } from "../ui/playerQuips";
-import { KO_CRIES } from "../entities/Enemy";
 import { DestructibleProp, type DestructibleKey } from "../world/DestructibleProp";
 import { WeaponPickup, type WeaponKind } from "../world/WeaponPickup";
 import { ThrownWeapon, isThrowable } from "../world/ThrownWeapon";
@@ -517,6 +516,8 @@ export class DebugArenaScene extends Phaser.Scene {
 
     this.bubbles.update(now);
     this.player.updatePlayer(now, dt, DEBUG_LANE, this.fighters);
+    const moan = this.player.takePainMoan();
+    if (moan) this.bubbles.say(this.player, moan, 2400);
     const tossed = this.player.consumeTossLaunch();
     if (tossed) {
       const heavy = this.player.isGermanSuplex || this.player.isHurricanrana;
@@ -563,8 +564,12 @@ export class DebugArenaScene extends Phaser.Scene {
     for (const f of this.fighters) f.pinToFloor();
 
     if (this.player.wantsPickup()) {
+      const looted = tryLoot(this.player, this.fighters, (ev) => this.onCombat(ev));
       const bought =
-        this.tryBuyWeapon() || this.tryBuyFood() || this.tryPickupSkateboard();
+        looted ||
+        this.tryBuyWeapon() ||
+        this.tryBuyFood() ||
+        this.tryPickupSkateboard();
       if (!bought && !this.tryPickupWeapon()) {
         this.floatText(this.player.x, this.player.y - 50, "nothing to grab");
       }
@@ -782,7 +787,11 @@ export class DebugArenaScene extends Phaser.Scene {
       cuffed: "CUFFED",
       takedown: "down",
     };
-    this.floatText(ev.target.x, ev.target.y - 58, phrases[ev.result] ?? ev.result);
+    const justFinished =
+      ev.result === "out_cold" || ev.result === "crawl_away" || ev.result === "cuffed";
+    if (!ev.target.structure.isOut() || justFinished) {
+      this.floatText(ev.target.x, ev.target.y - 58, phrases[ev.result] ?? ev.result);
+    }
     if (ev.result === "blocked") this.playBlockImpact(ev.target, ev.attacker);
     if (ev.kind === "toss_hit") {
       this.playThrowImpact(ev.attacker, ev.target, "pileup");
@@ -801,10 +810,7 @@ export class DebugArenaScene extends Phaser.Scene {
       ev.target.team === "enemy" &&
       (ev.result === "out_cold" || ev.result === "crawl_away")
     ) {
-      if (Math.random() < 0.55) {
-        const cry = KO_CRIES[Math.floor(Math.random() * KO_CRIES.length)]!;
-        this.bubbles.say(ev.target, cry, 2800);
-      }
+      this.bubbles.clearOwner(ev.target);
       this.tryPlayerQuip(this.time.now);
     }
   }

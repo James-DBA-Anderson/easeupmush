@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { COMMON, LANE } from "../constants";
 import type { StrikeInput, StrikeResult } from "../combat/Structure";
 import { Fighter, inReach } from "./Fighter";
-import { pickLook } from "../assets/pompeyLooks";
+import { getLook, pickLook } from "../assets/pompeyLooks";
 import { standingFaceAnchor } from "../assets/sorFigure";
 import { steerAway, type Obstacle } from "../world/obstacles";
 
@@ -59,20 +59,6 @@ const SHADE_BREAK_LINES = [
   "Squinny at that — ruined!",
 ];
 
-/** Last gasp when a thug hits the deck. */
-export const KO_CRIES = [
-  "Ease up mush",
-  "Alright mush — enough",
-  "You dinlo…",
-  "Ow mush…",
-  "Leave it mush",
-  "Proper dinlo move that",
-  "Squinny — I'm done",
-  "That hurt mush",
-  "I'm out mush",
-  "Enough dinlo…",
-];
-
 const CALL_DURATION_MS = 3400;
 
 type Mood = "patrol" | "alert" | "fight";
@@ -93,6 +79,8 @@ export interface EnemyOptions {
   background?: boolean;
   /** Debug arena — freeze AI (stand still) instead of fighting. */
   debugStand?: boolean;
+  /** Pin a specific doodle (Casey turning on you, etc.) instead of a random thug. */
+  lookId?: string;
 }
 
 /**
@@ -157,9 +145,10 @@ export class Enemy extends Fighter {
   ) {
     const opts: EnemyOptions =
       typeof toughnessOrOpts === "number" ? { toughness: toughnessOrOpts } : toughnessOrOpts;
-    const look = pickLook("enemy");
+    const look = (opts.lookId ? getLook(opts.lookId) : undefined) ?? pickLook("enemy");
     const boost = opts.scaleBoost ?? (opts.boss ? 1.28 : 1);
     const toughness = opts.toughness ?? (opts.boss ? 3.6 : 0.85);
+    const named = !!opts.lookId;
     super(scene, x, y, "enemy", look.id, name, {
       toughness,
       scaleX: look.scaleX * boost,
@@ -170,15 +159,17 @@ export class Enemy extends Fighter {
         money: opts.boss
           ? 40 + Math.floor(Math.random() * 40)
           : 8 + Math.floor(Math.random() * 25),
-        weapon: opts.boss
-          ? Math.random() < 0.5
-            ? "bat"
-            : "brick"
-          : Math.random() < 0.4
-            ? "bottle"
-            : Math.random() < 0.15
-              ? "brick"
-              : "none",
+        weapon: named
+          ? "none"
+          : opts.boss
+            ? Math.random() < 0.5
+              ? "bat"
+              : "brick"
+            : Math.random() < 0.4
+              ? "bottle"
+              : Math.random() < 0.15
+                ? "brick"
+                : "none",
       },
     });
     this.isBoss = !!opts.boss;
@@ -203,8 +194,8 @@ export class Enemy extends Fighter {
       this.groundY = this.homeY;
       this.applyBackgroundLook(true);
     }
-    // Occasional shades — bosses skip the gag (already steamed)
-    if (!this.isBoss && Math.random() < 0.3) {
+    // Occasional shades — bosses and named faces skip the gag
+    if (!this.isBoss && !named && Math.random() < 0.3) {
       this.wearsShades = true;
       this.shadesGfx = scene.add.graphics();
       this.add(this.shadesGfx);
@@ -483,6 +474,10 @@ export class Enemy extends Fighter {
 
   onProvoked(now: number, by?: Fighter): void {
     if (this.debugStand) return;
+    if (this.structure.downed || this.structure.isOut()) {
+      this.pendingInsult = null;
+      return;
+    }
     if (by && !by.structure.isOut()) this.target = by;
     this.mood = "fight";
     if (this.shadesBrokeAt > 0) return;
@@ -590,7 +585,6 @@ export class Enemy extends Fighter {
   updateEnemy(now: number, dt: number, fighters: Fighter[], obstacles: Obstacle[] = []): void {
     this.frameObstacles = obstacles;
     this.tickKnockdown(now);
-    this.tickCall(now);
 
     try {
       if (this.structure.isOut()) {
@@ -602,13 +596,15 @@ export class Enemy extends Fighter {
         return;
       }
 
+      this.tickCall(now);
+
       // Clinched — stay limp until tossed or released
       if (this.heldBy) {
         if (this.heldBy.heldTarget !== this || this.heldBy.structure.isOut()) {
           this.heldBy = null;
         } else {
           if (this.callActive) this.finishCall(this.callSaidWhere);
-          this.action = "down";
+          this.action = "hitstun";
           return;
         }
       }

@@ -1,8 +1,10 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
+import { appVersionPlugin } from "../../scripts/app-version.mjs";
 
 export default defineConfig({
   base: "/",
+  plugins: [appVersionPlugin()],
   server: {
     port: 5300,
     strictPort: true,

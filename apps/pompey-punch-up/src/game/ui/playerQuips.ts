@@ -231,3 +231,45 @@ export function nextPlayerQuip(): string {
 export function playerQuipCount(): number {
   return QUIPS.length;
 }
+
+const ARM_MOANS = [
+  "Ah — me arm's knackered, I can't use it",
+  "Can't punch, it kills mush",
+  "Ah! Arms have gone, I can't",
+  "That arm's had it — I can't throw a punch",
+  "Wings are out, it hurts too much",
+  "Ah mush, I can't use me arms",
+];
+
+const LEG_MOANS = [
+  "Ah — me legs won't have it",
+  "Can't kick, they're killing me",
+  "Pins have gone, I can't jump",
+  "Ah! Legs are knackered, I can't",
+  "Can't put any weight on it mush",
+  "Ah mush, me legs are out of it",
+];
+
+const GUT_MOANS = [
+  "Ah — I can't, I'm doubled up",
+  "Gut's gone, I can't do nothing",
+  "Ah mush, that low blow's still in me",
+  "Can't — I'm winded, it hurts",
+];
+
+const moanLast: Record<"arm" | "leg" | "gut", string> = {
+  arm: "",
+  leg: "",
+  gut: "",
+};
+
+/** When a knackered limb / gut shot stops a move. */
+export function nextLimbMoan(part: "arm" | "leg" | "gut"): string {
+  const pool = part === "arm" ? ARM_MOANS : part === "leg" ? LEG_MOANS : GUT_MOANS;
+  let line = pool[Math.floor(Math.random() * pool.length)]!;
+  if (pool.length > 1 && line === moanLast[part]) {
+    line = pool[Math.floor(Math.random() * pool.length)]!;
+  }
+  moanLast[part] = line;
+  return line;
+}

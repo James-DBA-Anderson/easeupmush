@@ -183,7 +183,9 @@ export class Structure {
   putOnFloor(now: number, ms: number, force = false): void {
     if (this.isOut()) return;
     const scale = 1 / Math.sqrt(this.toughness);
-    const dur = Math.max(120, ms * scale);
+    // Forced plants (powerbomb) keep the asked-for stun — Hardman toughness
+    // used to shrink 1.7s to ~0.9s, so bosses hopped up mid-slam.
+    const dur = Math.max(120, force ? ms : ms * scale);
     // Already soft-floored — don't refresh the timer under a punch storm
     // (that left lads planted forever while still taking hits).
     if (
@@ -421,7 +423,7 @@ export class Structure {
       this.balance = clamp(this.balance - (0.16 + hit.power * 0.12) / t);
       this.wind = clamp(this.wind - 0.12 / t);
       this.gutPain = clamp(this.gutPain + 0.25);
-      if (open || this.wornFactor() > 0.25 || this.downed) {
+      if (open || this.wornFactor() > 0.36 || this.downed) {
         return this.finish(hit, true);
       }
     }
@@ -521,11 +523,13 @@ export class Structure {
     const worn = this.wornFactor();
     // Stomps always KO. Other cold finishes need allowOutCold + real wear / finishers.
     // (A free-floating random KO used to put fresh powerbomb victims down forever.)
+    // Stomps KO ordinary lads; Hardmen need to be worn first.
+    // Jump kicks / bottles only cold-finish once they've actually been battered.
     const outCold =
-      hit.kind === "boot_head" ||
+      (hit.kind === "boot_head" && (this.toughness < 1.8 || worn >= 0.42)) ||
       (allowOutCold &&
         (hit.kind === "headbutt" ||
-          (hit.critical && hit.kind === "jump_kick") ||
+          (hit.critical && hit.kind === "jump_kick" && worn >= 0.5) ||
           (hit.critical && hit.kind === "thrown" && worn >= 0.5) ||
           worn >= 0.55 ||
           (worn >= 0.45 && Math.random() > 0.45)));

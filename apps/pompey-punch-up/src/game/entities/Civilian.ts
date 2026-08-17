@@ -5,6 +5,7 @@ import { LANE, PROMENADE } from "../constants";
 import { steerAway, type Obstacle } from "../world/obstacles";
 import { Dog } from "./Dog";
 import { getLook, pickLook, pickLookPresent, type Present } from "../assets/pompeyLooks";
+import { isMobilePlay } from "../input/mobilePad";
 
 export type CivilianVariant =
   | "walker"
@@ -36,6 +37,7 @@ const CASEY_MOVE_CALLS: Record<string, string> = {
   back_attack: "Back attack — hit J and K together!",
   headbutt: "Running headbutt — run then J!",
   jump_kick: "Jump kick — Space, then J in the air!",
+  jump_kick_mobile: "Jump kick — just tap Kick!",
   swanton: "Swanton — up on a motor, then Space + K!",
   hurricanrana: "Hurricanrana — off a motor onto a standing mug, K!",
   grab: "Grab 'em — L!",
@@ -345,6 +347,10 @@ export class Civilian extends Fighter {
 
   /** Consume join / ally speech (once). */
   takeSpeech(): string | null {
+    if (this.structure.downed || this.structure.isOut()) {
+      this.pendingLine = null;
+      return null;
+    }
     const line = this.pendingLine;
     this.pendingLine = null;
     return line;
@@ -1817,7 +1823,10 @@ export class Civilian extends Fighter {
   private callTeachMove(now: number, key: string): void {
     if (!this.teachMoves.includes(key)) return;
     if (now < this.teachCallAt) return;
-    const tip = CASEY_MOVE_CALLS[key];
+    const tip =
+      key === "jump_kick" && isMobilePlay()
+        ? CASEY_MOVE_CALLS.jump_kick_mobile
+        : CASEY_MOVE_CALLS[key];
     if (!tip) return;
     this.pendingLine = tip;
     this.teachCallAt = now + 4200 + Math.random() * 1800;

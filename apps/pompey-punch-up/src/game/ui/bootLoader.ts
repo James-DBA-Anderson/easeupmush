@@ -48,12 +48,15 @@ export function paintBootLogo(): void {
       img.id = "boot-logo-img";
       img.className = "boot-logo";
       img.alt = "Pompey Punch-Up";
+      img.hidden = true;
       canvas.insertAdjacentElement("afterend", img);
     }
     applyLogoBox(img, cssW, cssH);
     const showImg = (): void => {
       canvas.hidden = true;
+      canvas.style.display = "none";
       img.hidden = false;
+      img.style.display = "block";
       document.getElementById("boot-wordmark")?.setAttribute("hidden", "");
     };
     img.onload = showImg;

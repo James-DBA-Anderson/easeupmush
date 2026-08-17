@@ -47,6 +47,10 @@ interface SeaCraft {
   frames?: string[];
   animPhase: number;
   animSpeed: number;
+  /** Seconds until a kayak may start sinking. Infinity = never. */
+  sinkWait: number;
+  /** < 0 not sinking; 0–1 tip then slide under. */
+  sinkT: number;
 }
 
 /** Ambient motors rolling the front — visual only, in front of parked cars. */
@@ -67,8 +71,8 @@ type TrafficSpec = {
   weight: number;
   speedMin: number;
   speedMax: number;
-  scaleMin: number;
-  scaleMax: number;
+  /** On-screen height vs a parked saloon at the same depth (1 = same). */
+  size: number;
   pitch: number;
   /** Skip body tint — painted vehicles (taxi yellow, etc.). */
   noTint?: boolean;
@@ -77,16 +81,24 @@ type TrafficSpec = {
   animSpeed?: number;
 };
 
+/**
+ * Parked climbable saloons: native 240×110 at ~1.28, feet at GAME_HEIGHT - 8.
+ * Passing traffic sits closer to camera, so it must never read smaller.
+ */
+const PARKED_SALOON_NATIVE_H = 110;
+const PARKED_SALOON_SCALE = 1.28;
+const PARKED_SALOON_Y = GAME_HEIGHT - 8;
+/** Driving lane is in front of the parkers — extra size even at a similar foot Y. */
+const PASSING_LANE_BOOST = 1.14;
+
 /** Weighted seafront traffic — saloons common, bus rare. */
 const PASSING_TRAFFIC: TrafficSpec[] = [
-  { key: "car", weight: 26, speedMin: 200, speedMax: 320, scaleMin: 1.18, scaleMax: 1.3, pitch: 1 },
   {
     key: "traffic_hatch",
-    weight: 20,
+    weight: 36,
     speedMin: 220,
     speedMax: 340,
-    scaleMin: 1.05,
-    scaleMax: 1.2,
+    size: 0.9,
     pitch: 1.06,
   },
   {
@@ -94,29 +106,15 @@ const PASSING_TRAFFIC: TrafficSpec[] = [
     weight: 12,
     speedMin: 150,
     speedMax: 230,
-    scaleMin: 1.22,
-    scaleMax: 1.38,
+    size: 1.1,
     pitch: 0.82,
-  },
-  {
-    key: "traffic_scooter_0",
-    weight: 14,
-    speedMin: 150,
-    speedMax: 250,
-    scaleMin: 1.35,
-    scaleMax: 1.5,
-    pitch: 1.38,
-    noTint: true,
-    frames: ["traffic_scooter_0", "traffic_scooter_1"],
-    animSpeed: 8,
   },
   {
     key: "traffic_bike",
     weight: 10,
     speedMin: 280,
     speedMax: 430,
-    scaleMin: 0.9,
-    scaleMax: 1.1,
+    size: 0.68,
     pitch: 1.55,
     noTint: true,
   },
@@ -125,8 +123,7 @@ const PASSING_TRAFFIC: TrafficSpec[] = [
     weight: 6,
     speedMin: 100,
     speedMax: 155,
-    scaleMin: 1.48,
-    scaleMax: 1.62,
+    size: 1.36,
     pitch: 0.68,
     noTint: true,
   },
@@ -135,8 +132,7 @@ const PASSING_TRAFFIC: TrafficSpec[] = [
     weight: 5,
     speedMin: 95,
     speedMax: 145,
-    scaleMin: 1.42,
-    scaleMax: 1.56,
+    size: 1.3,
     pitch: 0.62,
     noTint: true,
   },
@@ -172,10 +168,13 @@ export class ParallaxBeach {
   private hoverDeparting = false;
   private hoverGone = false;
   private hoverDepartScale = 1;
+  private hoverRevving = false;
   private waveT = 0;
   private nextCraftAt = 2500;
   private nextSpitfireAt = 8000;
   private nextPassingCarAt = 6000;
+  /** Don't sink a kayak in the opening beat — keep it a rare gag. */
+  private nextKayakSinkAt = 22000;
   private seaLayer: ParallaxLayer | null = null;
   private seaAnimPhase = 0;
   private nextWaveBreakAt = 5000;
@@ -228,15 +227,23 @@ export class ParallaxBeach {
     return false;
   }
 
+  /** Fans go mental while someone is in the blades — craft stays put. */
+  revHovercraftFans(): void {
+    if (this.hoverDeparting || this.hoverGone || !this.hoverCraft) return;
+    this.hoverRevving = true;
+    this.hoverCraft.animSpeed = 22;
+  }
+
   /** After a chop — spin up and slide down the slipway toward the Isle of Wight. */
   departHovercraftToIsle(): boolean {
     if (this.hoverDeparting || this.hoverGone || !this.hoverCraft) return false;
+    this.hoverRevving = false;
     this.hoverDeparting = true;
     this.hoverDepartScale = 1;
     this.hoverFans.length = 0;
     this.hoverHull.length = 0;
     this.hoverCraft.animSpeed = 22;
-    this.hoverCraft.image.setDepth(-30);
+    this.hoverCraft.image.setDepth(-24);
     return true;
   }
 
@@ -259,6 +266,14 @@ export class ParallaxBeach {
     const pan = Phaser.Math.Clamp((screenX / this.viewW) * 2 - 1, -1, 1);
     const dist = Math.abs(screenX - this.viewW * 0.5);
     const near = 1 - Phaser.Math.Clamp(dist / (this.viewW * 0.85), 0, 1);
+    if (this.hoverRevving) {
+      return {
+        active: true,
+        intensity: 0.7 + near * 0.3,
+        pan,
+        spin: 1.85,
+      };
+    }
     if (this.hoverDeparting) {
       const spin = 1.15 + (1 - this.hoverDepartScale) * 0.9;
       return {
@@ -591,12 +606,38 @@ export class ParallaxBeach {
       scale: 1.55,
       depth: -8,
     });
-    this.addLandmark("tower_kids_0", 9200, LANE.minY + 4, 1, {
+    const rimKids = this.addLandmark("tower_kids_0", 9200, LANE.minY + 4, 1, {
       scale: 1.55,
       depth: -7,
-      frames: ["tower_kids_0", "tower_kids_1", "tower_kids_2", "tower_kids_3"],
-      animSpeed: 1.15,
+      frames: [
+        "tower_kids_0",
+        "tower_kids_1",
+        "tower_kids_2",
+        "tower_kids_3",
+        "tower_kids_4",
+        "tower_kids_5",
+        "tower_kids_6",
+        "tower_kids_7",
+      ],
+      animSpeed: 1.85,
     });
+    // Jumper + splash sit behind the drum so they vanish into the Solent
+    const dive = this.addLandmark("tower_dive_0", 9200, LANE.minY + 4, 1, {
+      scale: 1.55,
+      depth: -9,
+      frames: [
+        "tower_dive_0",
+        "tower_dive_1",
+        "tower_dive_2",
+        "tower_dive_3",
+        "tower_dive_4",
+        "tower_dive_5",
+        "tower_dive_6",
+        "tower_dive_7",
+      ],
+      animSpeed: 1.85,
+    });
+    dive.animPhase = rimKids.animPhase;
     this.addLandmark("landmark_sea_defences", 9600, LANE.minY + 14, 1, {
       scale: 1.4,
       depth: -8,
@@ -822,6 +863,22 @@ export class ParallaxBeach {
     this.nextPassingCarAt = 8000 + Math.random() * 10000;
   }
 
+  /**
+   * Phaser scale so a passer matches parked-saloon size, then grows toward
+   * the camera. `size` is height vs that saloon (hatch < 1, bus > 1).
+   */
+  private passingTrafficScale(key: string, y: number, size: number): number {
+    const frame = this.scene.textures.get(key).get();
+    const nativeH = Math.max(8, frame.height);
+    const parkedH = PARKED_SALOON_NATIVE_H * PARKED_SALOON_SCALE;
+    const span = Math.max(1, ROAD.height);
+    const t = Phaser.Math.Clamp((y - ROAD.top) / span, 0, 1);
+    const tParked = Phaser.Math.Clamp((PARKED_SALOON_Y - ROAD.top) / span, 0, 1);
+    const persp = 1 + (t - tParked) * 0.55;
+    const jitter = 0.98 + Math.random() * 0.04;
+    return (parkedH * persp * PASSING_LANE_BOOST * size * jitter) / nativeH;
+  }
+
   private spawnPassingCar(cameraScrollX: number): void {
     if (this.passingCars.length >= 1) return;
 
@@ -845,16 +902,15 @@ export class ParallaxBeach {
     const goingRight = Math.random() < 0.55;
     const speed =
       spec.speedMin + Math.random() * (spec.speedMax - spec.speedMin);
-    const scale =
-      spec.scaleMin + Math.random() * (spec.scaleMax - spec.scaleMin);
     // Big motors need more off-screen lead-in so they don't pop in half-visible
     const lead =
       spec.key === "traffic_bus" || spec.key === "traffic_rubbish" ? 420 : 280;
     const worldX = goingRight
       ? cameraScrollX - lead
       : cameraScrollX + this.viewW + lead;
-    // Closer to camera than the parked motors (those sit ~GAME_HEIGHT - 8)
-    const y = GAME_HEIGHT - 2 - Math.random() * 4;
+    // Tyres sit on the tarmac — art plants wheels at the canvas foot
+    const y = GAME_HEIGHT - 1;
+    const scale = this.passingTrafficScale(spec.key, y, spec.size);
     const image = this.scene.add
       .image(worldX, y, spec.key)
       .setOrigin(0.5, 1)
@@ -918,6 +974,11 @@ export class ParallaxBeach {
     const speed =
       (kind === "jet" ? 55 : kind === "kayak" ? 22 : 32) * (goingRight ? 1 : -1);
     const scale = kind === "jet" ? 0.55 : kind === "kayak" ? 0.78 : 0.62;
+    const now = this.scene.time.now;
+    const maySink =
+      kind === "kayak" &&
+      now >= this.nextKayakSinkAt &&
+      Math.random() < 0.09;
     const image = this.scene.add
       .image(startX, midSeaY, key)
       .setScrollFactor(0)
@@ -939,6 +1000,8 @@ export class ParallaxBeach {
           : undefined,
       animPhase: Math.random() * Math.PI * 2,
       animSpeed: kind === "kayak" ? 5.2 : 0,
+      sinkWait: maySink ? 4 + Math.random() * 7 : Number.POSITIVE_INFINITY,
+      sinkT: -1,
     });
   }
 
@@ -958,28 +1021,22 @@ export class ParallaxBeach {
     }
     if (this.hoverDeparting && this.hoverCraft && !this.hoverGone) {
       const c = this.hoverCraft;
-      // Down the slipway toward the Solent (up-screen), then vanish toward IoW
-      const seaLine = GAME_HEIGHT * 0.34;
-      if (c.screenY > seaLine + 8) {
-        // Still on the apron / slip — crawl toward the water
-        c.screenY -= 52 * dt;
-        c.worldX -= 6 * dt;
-        this.hoverDepartScale = Math.max(0.55, this.hoverDepartScale - 0.08 * dt);
+      // Cushion on the Solent with the kayaks — not up in the sky toward IoW
+      const seaSurface = GAME_HEIGHT * 0.36;
+      if (c.screenY > seaSurface + 4) {
+        c.screenY -= 48 * dt;
+        c.worldX -= 8 * dt;
+        this.hoverDepartScale = Math.max(0.4, this.hoverDepartScale - 0.1 * dt);
       } else {
-        // On the water — shrink away toward the Island and disappear
-        c.screenY -= 18 * dt;
-        c.worldX -= 28 * dt;
-        this.hoverDepartScale = Math.max(0.08, this.hoverDepartScale - 0.28 * dt);
-        c.image.setAlpha(Math.max(0, c.image.alpha - 0.35 * dt));
-        c.image.setDepth(-32);
+        c.screenY = seaSurface + Math.sin(now * 0.004) * 2;
+        c.worldX -= 36 * dt;
+        this.hoverDepartScale = Math.max(0.08, this.hoverDepartScale - 0.3 * dt);
+        c.image.setAlpha(Math.max(0, c.image.alpha - 0.32 * dt));
+        c.image.setDepth(-24);
       }
-      const base = c.baseScale ?? 1.55;
+      const base = c.baseScale ?? 1.05;
       c.image.setScale(base * this.hoverDepartScale);
-      if (
-        c.screenY < GAME_HEIGHT * 0.28 ||
-        c.image.alpha < 0.08 ||
-        this.hoverDepartScale < 0.12
-      ) {
+      if (c.image.alpha < 0.08 || this.hoverDepartScale < 0.12) {
         c.image.setVisible(false);
         this.hoverDeparting = false;
         this.hoverGone = true;
@@ -1035,21 +1092,28 @@ export class ParallaxBeach {
     }
     const still: SeaCraft[] = [];
     for (const c of this.seaCraft) {
-      c.x += c.vx * dt;
-      c.bobPhase += dt * 3.2;
-      c.image.x = c.x;
-      c.image.y = c.y + Math.sin(c.bobPhase) * c.bobAmp;
-      if (c.frames && c.animSpeed > 0) {
-        c.animPhase += dt * c.animSpeed;
-        const frame = c.frames[Math.floor(c.animPhase) % c.frames.length]!;
-        if (c.image.texture.key !== frame && this.scene.textures.exists(frame)) {
-          const flipX = c.image.flipX;
-          c.image.setTexture(frame);
-          c.image.setFlipX(flipX);
+      if (this.updateSeaCraftSink(c, dt, now)) {
+        c.image.destroy();
+        continue;
+      }
+      if (c.sinkT < 0) {
+        c.x += c.vx * dt;
+        c.bobPhase += dt * 3.2;
+        c.image.x = c.x;
+        c.image.y = c.y + Math.sin(c.bobPhase) * c.bobAmp;
+        if (c.frames && c.animSpeed > 0) {
+          c.animPhase += dt * c.animSpeed;
+          const frame = c.frames[Math.floor(c.animPhase) % c.frames.length]!;
+          if (c.image.texture.key !== frame && this.scene.textures.exists(frame)) {
+            const flipX = c.image.flipX;
+            c.image.setTexture(frame);
+            c.image.setFlipX(flipX);
+          }
         }
       }
       const off =
-        (c.vx > 0 && c.x > this.viewW + 80) || (c.vx < 0 && c.x < -80);
+        c.sinkT < 0 &&
+        ((c.vx > 0 && c.x > this.viewW + 80) || (c.vx < 0 && c.x < -80));
       if (off) {
         c.image.destroy();
       } else {
@@ -1108,6 +1172,52 @@ export class ParallaxBeach {
         this.nextSpitfireAt = now + 28000 + Math.random() * 35000;
       }
     }
+  }
+
+  /**
+   * Rare gag — kayak tips until one end sticks straight up, then slides under.
+   * Returns true when the craft should be destroyed.
+   */
+  private updateSeaCraftSink(c: SeaCraft, dt: number, now: number): boolean {
+    if (c.kind !== "kayak") return false;
+    if (c.sinkT < 0) {
+      if (!Number.isFinite(c.sinkWait)) return false;
+      c.sinkWait -= dt;
+      const onScreen = c.x > 80 && c.x < this.viewW - 80;
+      if (c.sinkWait > 0 || !onScreen) return false;
+      c.sinkT = 0;
+      c.animSpeed = 0;
+      this.nextKayakSinkAt = now + 55000 + Math.random() * 40000;
+      return false;
+    }
+
+    const tipDur = 1.65;
+    const slideDur = 1.35;
+    c.sinkT += dt / (tipDur + slideDur);
+    const u = Phaser.Math.Clamp(c.sinkT, 0, 1);
+    const tipEnd = tipDur / (tipDur + slideDur);
+    const spin = c.image.flipX ? -1 : 1;
+
+    let ang = Math.PI * 0.5;
+    let extraY = 26;
+    if (u < tipEnd) {
+      const p = u / tipEnd;
+      const e = 1 - (1 - p) * (1 - p);
+      ang = e * Math.PI * 0.5;
+      extraY = e * 26;
+      c.vx *= Math.max(0, 1 - dt * 2.2);
+      c.x += c.vx * dt;
+    } else {
+      const p = (u - tipEnd) / (1 - tipEnd);
+      extraY = 26 + p * p * 52;
+      c.vx = 0;
+      c.image.setAlpha(0.9 * (1 - p * 0.92));
+    }
+
+    c.image.setRotation(spin * ang);
+    c.image.x = c.x;
+    c.image.y = c.y + extraY;
+    return u >= 1;
   }
 
   /** Rare Solent flyover — small doodle Spitfire across the sky. */

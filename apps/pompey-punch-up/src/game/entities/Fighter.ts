@@ -132,6 +132,7 @@ export type PoseKey =
   | "limp_arm"
   | "limp_leg"
   | "down"
+  | "stunned"
   | "crawl0"
   | "crawl1"
   | "angry"
@@ -295,6 +296,10 @@ export class Fighter extends Phaser.GameObjects.Container {
   private throwReleased = false;
   /** Natural sprite scale before lane-depth perspective. */
   protected baseScaleX = 1;
+  /** Drawn width scale — Hardmen are ~1.28 so grab reach has to match. */
+  get figureScaleX(): number {
+    return this.baseScaleX;
+  }
   protected baseScaleY = 1;
   /** Match pompeyLooks build — face overlays follow the drawn skull. */
   readonly bodyBuild: BodyBuild;
@@ -752,7 +757,6 @@ export class Fighter extends Phaser.GameObjects.Container {
       this.actionUntil = Math.max(this.actionUntil, now + durationMs * 0.5);
       return true;
     }
-    if (this.busy) return false;
     this.setAction("loot", now, durationMs);
     return true;
   }
@@ -921,7 +925,7 @@ export class Fighter extends Phaser.GameObjects.Container {
     victim.headbangChecked = false;
     this.diveAimX = null;
 
-    // Slam: can KO/crawl when they're worn; powerbomb survivors stay stunned on the mat
+    // Slam: can KO/crawl when they're worn; bomb / German survivors stay stunned
     victim.receiveStrike({
       kind: "hook",
       power: bomb ? 0.72 : suplex ? 0.62 : rana ? 0.78 : 0.55,
@@ -950,14 +954,14 @@ export class Fighter extends Phaser.GameObjects.Container {
       // Finished — stay down after the plant
       if (victim.structure.outCold) victim.setAction("out_cold", now, 999999);
       else if (victim.structure.crawling) victim.setAction("crawl", now, 999999);
-    } else if (bomb) {
-      // Powerbomb stun — short bounce then stay planted
-      const stunMs = 1700;
+    } else if (bomb || suplex) {
+      // Powerbomb sits them on the mat; German leaves them stunned a beat
+      const stunMs = bomb ? 1700 : 800;
       victim.structure.putOnFloor(now, stunMs, true);
       victim.action = "down";
-      victim.actionUntil = now + stunMs;
+      victim.actionUntil = victim.structure.groundedUntil;
     } else {
-      // Suplex / rana survivors bounce up on landing
+      // Rana survivors bounce up on landing
       victim.structure.downed = false;
       victim.structure.groundedUntil = 0;
       if (victim.structure.crawling && !victim.structure.outCold) {
@@ -1066,7 +1070,7 @@ export class Fighter extends Phaser.GameObjects.Container {
     this.hitFlashUntil = Math.max(this.hitFlashUntil, now + (heavy ? 260 : 160));
   }
 
-  tryJumpKick(now: number): boolean {
+  tryJumpKick(now: number, keepHeight = false): boolean {
     if (!this.airborne) return false;
     if (this.structure.isOut()) return false;
     if (!this.structure.legsUsable()) return false;
@@ -1079,9 +1083,18 @@ export class Fighter extends Phaser.GameObjects.Container {
       return false;
     }
     this.setAction("jump_kick", now, 380);
-    // Dive a bit forward
-    this.jumpVy = Math.min(this.jumpVy, -80);
+    // Dive only once you've peaked — early boot (or a hop-kick) keeps the height
+    if (!keepHeight && this.jumpVy >= -120) {
+      this.jumpVy = Math.min(this.jumpVy, -80);
+    }
     return true;
+  }
+
+  /** One-tap hop + boot — mobile Kick, so you don't need Jump and Punch together. */
+  tryHopKick(now: number): boolean {
+    if (this.airborne) return this.tryJumpKick(now, true);
+    if (!this.tryJump(now)) return false;
+    return this.tryJumpKick(now, true);
   }
 
   /**
@@ -1334,7 +1347,12 @@ export class Fighter extends Phaser.GameObjects.Container {
       ox = 14;
       oy = -28;
       ang = bat ? -48 : -18;
-    } else if (pose === "crouch" || pose === "down" || pose.startsWith("crawl")) {
+    } else if (
+      pose === "crouch" ||
+      pose === "down" ||
+      pose === "stunned" ||
+      pose.startsWith("crawl")
+    ) {
       ox = 12;
       oy = -14;
       ang = bat ? -35 : -10;
@@ -1399,18 +1417,51 @@ export class Fighter extends Phaser.GameObjects.Container {
     // Cancel recovery so L always answers — silent canAct fails felt like a dead key
     this.setAction("grab", now, this.grabMs);
     this.grabWhiffUntil = 0;
-    // Nobody in reach at the press — announce at the grasp beat
-    const anyone = nearby.some(
-      (f) =>
-        f !== this &&
-        !f.structure.isOut() &&
-        !(f.team === this.team && this.team !== "police") &&
-        inReach(this, f, this.attackReach + 8),
-    );
-    this.grabLookedEmpty = !anyone;
-    this.grabMissFxArmed = !anyone;
     this.pendingGrabWhiffFx = false;
+    const best = this.nearestGrabTarget(nearby);
+    this.grabLookedEmpty = !best;
+    this.grabMissFxArmed = !best;
+    // Latch before enemies take their step — bosses used to walk out of the
+    // delayed grab window. Scoop goes straight into the throw.
+    if (best && this.team === "player") {
+      this.markHit(best);
+      this.connectGrab(best, now);
+    }
     return true;
+  }
+
+  /** Closest living foe in grab reach (bigger lads get a bit more pad). */
+  nearestGrabTarget(fighters: Fighter[]): Fighter | null {
+    let best: Fighter | null = null;
+    let bestD = 9999;
+    for (const target of fighters) {
+      if (target === this) continue;
+      if (target.team === this.team && this.team !== "police") continue;
+      if (target.structure.isOut()) continue;
+      if (!inReach(this, target, this.attackReach + 8)) continue;
+      const d = Math.abs(target.x - this.x);
+      if (d < bestD) {
+        bestD = d;
+        best = target;
+      }
+    }
+    return best;
+  }
+
+  /** Player: scoop into a throw. AI: dump them. */
+  connectGrab(target: Fighter, now: number): void {
+    const fromBehind = (this.x - target.x) * target.facing < -8;
+    target.structure.createOpening(now, 1000);
+    if (this.team === "player") {
+      this.startHoldOn(target, now, fromBehind);
+      target.x = this.x + this.facing * (fromBehind ? 14 : 22);
+      target.y = this.y;
+      target.groundY = target.y;
+      if (fromBehind) target.facing = this.facing;
+      this.tryBodyToss(now);
+    } else {
+      target.takeDown(now);
+    }
   }
 
   /** Latch a grab target so tryBodyToss can fire (no standing clinch). */
@@ -1658,6 +1709,13 @@ export class Fighter extends Phaser.GameObjects.Container {
 
   receiveStrike(hit: StrikeInput): StrikeResult {
     const floored = this.structure.downed || this.structure.isOut();
+    // Super armor through the bomb / rana — Hardmen punching the thrower
+    // used to snap body_toss into hitstun and leave the victim glued.
+    if (this.isThrowFlip && !hit.softFloorOnly) {
+      this.hitFlashUntil = hit.now + 90;
+      this.refreshVisuals(hit.now, 0);
+      return "blocked";
+    }
     // Short i-frames: still let a boot jolt a body on the floor,
     // and always allow toss soft-plants through
     if (hit.now < this.invulnUntil && !hit.softFloorOnly) {
@@ -1926,7 +1984,8 @@ export class Fighter extends Phaser.GameObjects.Container {
     // Drawn facing right; flip for left — feet stay planted (no vertical bob).
     // Soft-down / KO doodles are asymmetric; freeze flipX so a jump past
     // doesn't look like they rolled over. Crawl still faces the drag direction.
-    const pinnedFloorPose = pose === "down" || pose === "cuffed";
+    const pinnedFloorPose =
+      pose === "down" || pose === "stunned" || pose === "cuffed";
     if (pinnedFloorPose) this.lockFloorFacing();
     const face =
       pinnedFloorPose && this.floorFacing !== null ? this.floorFacing : this.facing;
@@ -1972,7 +2031,8 @@ export class Fighter extends Phaser.GameObjects.Container {
       const dir = this.thrower.facing;
       this.sprite.setOrigin(0.5, 0.55);
       this.sprite.x = 0;
-      this.sprite.y = -frame.victimLift;
+      // Bigger lads (Hardmen) need more lift or they look planted on your shoulders
+      this.sprite.y = -frame.victimLift * Math.max(1, this.baseScaleY);
       this.sprite.setRotation(((frame.victimAngle * Math.PI) / 180) * dir);
     } else if (this.action === "body_toss" || this.action === "hurricanrana") {
       const progress = 1 - (this.actionUntil - now) / tossDuration(this.tossStyle);
@@ -2184,7 +2244,7 @@ export class Fighter extends Phaser.GameObjects.Container {
     if (s.cuffed) return "cuffed";
     if (this.isCrawlingAway) return this.crawlPhase < 0.5 ? "crawl0" : "crawl1";
     if (s.outCold || s.crawling) return "down";
-    if (s.downed && now < s.groundedUntil) return "down";
+    if (s.downed && now < s.groundedUntil) return "stunned";
     // Empty-grab recover beats cover crouch so the miss still reads
     if (now < this.grabWhiffUntil) {
       return now < this.grabWhiffUntil - 180 ? "limp_arm" : "hurt";
@@ -2451,7 +2511,8 @@ export class Fighter extends Phaser.GameObjects.Container {
   isGrabActive(now: number): boolean {
     if (this.action !== "grab") return false;
     const progress = 1 - (this.actionUntil - now) / this.grabMs;
-    return progress >= 0.22 && progress <= 0.55;
+    // Early window so a rushing Hardman can still step into the scoop
+    return progress >= 0.04 && progress <= 0.62;
   }
 
   /** Reach → clinch attempt → empty-handed recover if nobody was there. */
@@ -2531,6 +2592,8 @@ export class Fighter extends Phaser.GameObjects.Container {
    * while still marked downed used to leave lads planted forever.
    */
   protected tickKnockdown(now: number): void {
+    // Glued / airborne from a toss — don't stand them out of hitstun mid-flip
+    if (this.isInThrowArc || this.isBeingTossed) return;
     // Absolute ceiling on soft downs — even if something keeps them open
     if (
       this.structure.downed &&
@@ -2650,5 +2713,8 @@ export function inReach(
           : attacker.action === "backflip"
             ? -24
             : -12;
-  return dx > behind && dx < reach + 18 && sameLane(attacker, target, laneTol);
+  // Hardmen are drawn larger; grab reach has to cover the extra sprite
+  const grabPad =
+    attacker.action === "grab" ? Math.max(0, target.figureScaleX - 1) * 48 : 0;
+  return dx > behind && dx < reach + 18 + grabPad && sameLane(attacker, target, laneTol);
 }

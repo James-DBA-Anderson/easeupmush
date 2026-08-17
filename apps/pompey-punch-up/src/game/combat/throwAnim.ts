@@ -45,7 +45,7 @@ const POWERBOMB_RAW: RawFrame[] = [
   { ms: 100, hero: "crouch", heroAngle: 18, victim: "limp_leg", victimNudge: 16, victimLift: 46, victimAngle: -215 },
   { ms: 100, hero: "crouch", heroAngle: 24, victim: "hold_gut", victimNudge: 28, victimLift: 24, victimAngle: -255 },
   { ms: 90, hero: "crouch", heroAngle: 10, victim: "hurt", victimNudge: 38, victimLift: 8, victimAngle: -285 },
-  { ms: 90, hero: "punch2", heroAngle: -4, victim: "down", victimNudge: 42, victimLift: 0, victimAngle: 0 },
+  { ms: 90, hero: "punch2", heroAngle: -4, victim: "stunned", victimNudge: 42, victimLift: 0, victimAngle: 0 },
 ];
 
 /**
@@ -64,7 +64,7 @@ const SUPLEX_RAW: RawFrame[] = [
   { ms: 110, hero: "upper1", heroAngle: 118, victim: "limp_arm", victimNudge: -40, victimLift: 46, victimAngle: 220 },
   { ms: 100, hero: "upper2", heroAngle: 132, victim: "hold_gut", victimNudge: -48, victimLift: 28, victimAngle: 250 },
   { ms: 100, hero: "upper2", heroAngle: 140, victim: "hurt", victimNudge: -54, victimLift: 12, victimAngle: 275 },
-  { ms: 90, hero: "crouch", heroAngle: 28, victim: "down", victimNudge: -58, victimLift: 0, victimAngle: 0 },
+  { ms: 90, hero: "crouch", heroAngle: 28, victim: "stunned", victimNudge: -58, victimLift: 0, victimAngle: 0 },
 ];
 
 /**
@@ -79,7 +79,7 @@ const HURRICAN_RAW: RawFrame[] = [
   { ms: 110, hero: "jump_kick", heroAngle: -88, victim: "limp_leg", victimNudge: -24, victimLift: 52, victimAngle: 200 },
   { ms: 100, hero: "jump2", heroAngle: -118, victim: "hold_gut", victimNudge: -38, victimLift: 34, victimAngle: 250 },
   { ms: 100, hero: "crouch", heroAngle: -40, victim: "hurt", victimNudge: -48, victimLift: 12, victimAngle: 290 },
-  { ms: 90, hero: "crouch", heroAngle: -6, victim: "down", victimNudge: -54, victimLift: 0, victimAngle: 0 },
+  { ms: 90, hero: "crouch", heroAngle: -6, victim: "stunned", victimNudge: -54, victimLift: 0, victimAngle: 0 },
 ];
 
 function buildFrames(raw: RawFrame[]): { frames: ThrowFrame[]; totalMs: number } {

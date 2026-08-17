@@ -64,8 +64,8 @@ const CONTROLS_DESKTOP: { id: string; keys: string; action: string }[] = [
   { id: "jumpkick", keys: "Space + J", action: "jump kick" },
   { id: "stomp", keys: "Down + K", action: "stomp floored" },
   { id: "cover", keys: "C", action: "cover" },
-  { id: "pickup", keys: "E", action: "pick up / buy" },
-  { id: "loot", keys: "Q", action: "loot bodies" },
+  { id: "pickup", keys: "E", action: "pick up / buy / loot" },
+  { id: "loot", keys: "E / Q", action: "loot bodies" },
 ];
 
 /** Pad labels — match the on-screen buttons / floating stick. */
@@ -79,7 +79,7 @@ const CONTROLS_MOBILE: { id: string; keys: string; action: string }[] = [
   { id: "back", keys: "Punch + Kick", action: "back attack" },
   { id: "block", keys: "Block", action: "hold to block" },
   { id: "grab", keys: "Grab", action: "grab / throw" },
-  { id: "jumpkick", keys: "Jump + Punch", action: "jump kick" },
+  { id: "jumpkick", keys: "Kick", action: "hop kick" },
   { id: "stomp", keys: "Stick down + Kick", action: "stomp floored" },
   { id: "cover", keys: "Stick down", action: "cover · hop off board" },
   { id: "pickup", keys: "Punch", action: "near kit, shop or board" },

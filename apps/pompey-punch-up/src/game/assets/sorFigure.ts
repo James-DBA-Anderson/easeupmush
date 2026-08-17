@@ -58,6 +58,8 @@ export type SorPose =
   | "limp_arm"
   | "limp_leg"
   | "down"
+  /** Soft-down — same body as `down`, dazed face instead of KO X's. */
+  | "stunned"
   | "crawl0"
   | "crawl1"
   | "angry"
@@ -1900,6 +1902,8 @@ export function drawSorDown(
     present?: Present;
     hairStyle?: HairStyle;
     kit?: KitStyle;
+    /** ko = X-eyes (finished). dazed = still getting up. */
+    face?: "ko" | "dazed";
   } = {},
 ): void {
   const y = fh - 12;
@@ -1998,14 +2002,32 @@ export function drawSorDown(
   if (police) {
     drawPoliceHelmetSide(ctx, fw * 0.14, y - 4, 0.95);
   }
-  strokeFill(ctx, () => {
-    ctx.beginPath();
-    ctx.moveTo(fw * 0.12, y - 5);
-    ctx.lineTo(fw * 0.16, y - 1);
-    ctx.moveTo(fw * 0.16, y - 5);
-    ctx.lineTo(fw * 0.12, y - 1);
-    ctx.stroke();
-  }, "#1a1410", "#1a1410", 2);
+  const face = opts.face ?? "ko";
+  if (face === "dazed") {
+    // Still conscious — swirl eye + slack gob (KO keeps the X's)
+    strokeFill(ctx, () => {
+      const ex = fw * 0.14;
+      const ey = y - 3;
+      ctx.beginPath();
+      ctx.arc(ex, ey, 1.15, 0.2, Math.PI * 1.8);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(ex + 0.15, ey + 0.2, 2.2, 0.5, Math.PI * 2.15);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.ellipse(fw * 0.175, y + 2.1, 2.8, 1.7, 0.18, 0, Math.PI * 2);
+      ctx.stroke();
+    }, "#1a1410", "#1a1410", 2);
+  } else {
+    strokeFill(ctx, () => {
+      ctx.beginPath();
+      ctx.moveTo(fw * 0.12, y - 5);
+      ctx.lineTo(fw * 0.16, y - 1);
+      ctx.moveTo(fw * 0.16, y - 5);
+      ctx.lineTo(fw * 0.12, y - 1);
+      ctx.stroke();
+    }, "#1a1410", "#1a1410", 2);
+  }
 
   if (bloodied) {
     strokeFill(ctx, () => {

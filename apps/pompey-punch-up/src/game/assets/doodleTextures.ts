@@ -49,10 +49,13 @@ function wobble(n: number, amp = 2): number {
 
 export function generateDoodleTextures(scene: Phaser.Scene): void {
   // Bump this when poses/assets change so hot reload regenerates.
-  const VERSION = "doodle_v126";
+  const VERSION = "doodle_v130";
   if (scene.textures.exists(VERSION)) return;
   if (
     scene.textures.exists("sky") ||
+    scene.textures.exists("doodle_v129") ||
+    scene.textures.exists("doodle_v127") ||
+    scene.textures.exists("doodle_v126") ||
     scene.textures.exists("doodle_v125") ||
     scene.textures.exists("doodle_v124") ||
     scene.textures.exists("doodle_v123") ||
@@ -235,6 +238,18 @@ export function generateDoodleTextures(scene: Phaser.Scene): void {
           "tower_kids_1",
           "tower_kids_2",
           "tower_kids_3",
+          "tower_kids_4",
+          "tower_kids_5",
+          "tower_kids_6",
+          "tower_kids_7",
+          "tower_dive_0",
+          "tower_dive_1",
+          "tower_dive_2",
+          "tower_dive_3",
+          "tower_dive_4",
+          "tower_dive_5",
+          "tower_dive_6",
+          "tower_dive_7",
         ].includes(key)
       ) {
         scene.textures.remove(key);
@@ -1577,200 +1592,329 @@ function makeRoundTower(scene: Phaser.Scene): void {
   tex.refresh();
 }
 
-/** Kids bombing off the Round Tower — leap off the seaward flank into the Solent. */
+/** Kids bombing off the Round Tower — leap seaward, vanish behind the drum, splash in the Solent. */
 function makeTowerKidsJump(scene: Phaser.Scene): void {
-  // Wider than the tower so the dive arc + splash sit beside the drum (left = sea)
+  // Wider than the tower so the dive arc + splash sit in the sea behind the drum
   const w = 220;
   const h = 168;
-  const towerCx = 110; // canvas centre — matches landmark_round_tower when both origin 0.5
-  const parapetY = 38;
-  // Water at tower base, clear of the left (seaward) flank
-  const seaX = 22;
-  const seaY = 148;
-  // Tower drum left edge ~ cx-48 on the 160 tower; on this canvas that's ~62
-  const rimX = towerCx - 42;
+  const towerCx = 110;
+  const parapetY = 36;
+  const rimX = towerCx - 40;
+  // Sea band behind the drum (left = seaward). Not the promenade at the feet.
+  const seaX = 28;
+  const seaY = 98;
+
+  type RimPose = "stand" | "wind" | "run" | "launch" | "watch" | "cheer" | "climb";
+  type AirPose = "leap" | "star" | "dive" | "plunge";
 
   const kid = (
     ctx: CanvasRenderingContext2D,
     x: number,
     y: number,
-    pose: "stand" | "wind" | "run" | "leap" | "dive" | "swim",
+    pose: RimPose | AirPose,
     shirt: string,
   ) => {
     ctx.save();
     ctx.translate(x, y);
-    // Leap/dive rotate so head points seaward (left) and down
-    if (pose === "leap") ctx.rotate(-2.2);
-    if (pose === "dive") ctx.rotate(-2.55);
-    if (pose === "swim") ctx.rotate(0.35);
-    if (pose === "run") ctx.rotate(-0.2);
+    if (pose === "leap") ctx.rotate(-1.15);
+    if (pose === "star") ctx.rotate(-1.85);
+    if (pose === "dive") ctx.rotate(-2.45);
+    if (pose === "plunge") ctx.rotate(-2.85);
+    if (pose === "run") ctx.rotate(-0.22);
+    if (pose === "launch") ctx.rotate(-0.55);
+    if (pose === "climb") ctx.rotate(0.15);
 
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     ctx.strokeStyle = "#1a1410";
-    ctx.lineWidth = 1.8;
+    ctx.lineWidth = 1.9;
 
-    // Legs
-    if (pose === "stand" || pose === "wind") {
-      ctx.beginPath();
-      ctx.moveTo(-3, 3);
-      ctx.lineTo(-5, 12);
-      ctx.moveTo(3, 3);
-      ctx.lineTo(5, 12);
-      ctx.stroke();
-      ctx.fillStyle = "#1a1410";
-      ctx.fillRect(-7, 11, 4, 2);
-      ctx.fillRect(3, 11, 4, 2);
-    } else if (pose === "run") {
-      ctx.beginPath();
-      ctx.moveTo(-4, 2);
-      ctx.lineTo(-10, 9);
-      ctx.moveTo(2, 2);
-      ctx.lineTo(8, 11);
-      ctx.stroke();
-    } else if (pose === "leap" || pose === "dive") {
-      // Tucked — cannonball toward the water
-      ctx.beginPath();
-      ctx.moveTo(-2, 3);
-      ctx.lineTo(-6, 9);
-      ctx.moveTo(3, 3);
-      ctx.lineTo(7, 8);
-      ctx.stroke();
-    } else {
-      ctx.beginPath();
+    const air = pose === "leap" || pose === "star" || pose === "dive" || pose === "plunge";
+
+    ctx.beginPath();
+    if (pose === "stand" || pose === "watch" || pose === "cheer") {
       ctx.moveTo(-3, 4);
-      ctx.lineTo(-8, 6);
+      ctx.lineTo(-5, 14);
       ctx.moveTo(3, 4);
-      ctx.lineTo(8, 7);
-      ctx.stroke();
+      ctx.lineTo(5, 14);
+    } else if (pose === "wind") {
+      ctx.moveTo(-4, 4);
+      ctx.lineTo(-3, 14);
+      ctx.moveTo(3, 4);
+      ctx.lineTo(7, 13);
+    } else if (pose === "run") {
+      ctx.moveTo(-5, 3);
+      ctx.lineTo(-11, 10);
+      ctx.moveTo(2, 3);
+      ctx.lineTo(9, 12);
+    } else if (pose === "launch") {
+      ctx.moveTo(-4, 3);
+      ctx.lineTo(-8, 8);
+      ctx.moveTo(4, 2);
+      ctx.lineTo(8, 12);
+    } else if (pose === "climb") {
+      ctx.moveTo(-4, 5);
+      ctx.lineTo(-6, 13);
+      ctx.moveTo(3, 4);
+      ctx.lineTo(2, 12);
+    } else if (pose === "star") {
+      ctx.moveTo(-6, 2);
+      ctx.lineTo(-11, 6);
+      ctx.moveTo(6, 2);
+      ctx.lineTo(11, 6);
+    } else if (pose === "plunge") {
+      ctx.moveTo(-3, 3);
+      ctx.lineTo(-4, 11);
+      ctx.moveTo(3, 3);
+      ctx.lineTo(4, 11);
+    } else {
+      ctx.moveTo(-3, 3);
+      ctx.lineTo(-7, 10);
+      ctx.moveTo(3, 3);
+      ctx.lineTo(8, 9);
+    }
+    ctx.stroke();
+    if (!air) {
+      ctx.fillStyle = "#1a1410";
+      if (pose === "run") {
+        ctx.fillRect(-13, 9, 5, 2.4);
+        ctx.fillRect(7, 11, 5, 2.4);
+      } else if (pose === "launch") {
+        ctx.fillRect(-10, 7, 5, 2.4);
+        ctx.fillRect(6, 11, 5, 2.4);
+      } else {
+        ctx.fillRect(-7, 13, 5, 2.4);
+        ctx.fillRect(3, 13, 5, 2.4);
+      }
     }
 
-    // Torso
-    ctx.fillStyle = shirt;
+    ctx.fillStyle = pose === "cheer" ? "#2a4a8a" : "#3a3830";
     ctx.beginPath();
-    ctx.moveTo(-5, -7);
-    ctx.lineTo(5, -7);
-    ctx.lineTo(4, 4);
-    ctx.lineTo(-4, 4);
+    ctx.moveTo(-5, 2);
+    ctx.lineTo(5, 2);
+    ctx.lineTo(4, 6);
+    ctx.lineTo(-4, 6);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    // Arms
-    ctx.fillStyle = "#d4a882";
-    ctx.strokeStyle = "#1a1410";
-    if (pose === "wind") {
-      ctx.beginPath();
-      ctx.moveTo(-4, -4);
-      ctx.lineTo(-11, -10);
-      ctx.moveTo(4, -4);
-      ctx.lineTo(10, -12);
-      ctx.stroke();
-    } else if (pose === "run") {
-      ctx.beginPath();
-      ctx.moveTo(-4, -3);
-      ctx.lineTo(-10, 1);
-      ctx.moveTo(4, -4);
-      ctx.lineTo(10, -2);
-      ctx.stroke();
-    } else if (pose === "leap" || pose === "dive") {
-      // Arms forward into the dive
-      ctx.beginPath();
-      ctx.moveTo(-2, -6);
-      ctx.lineTo(-2, -15);
-      ctx.moveTo(2, -6);
-      ctx.lineTo(2, -15);
-      ctx.stroke();
-    } else if (pose === "swim") {
-      ctx.beginPath();
-      ctx.moveTo(-4, -3);
-      ctx.lineTo(-12, -1);
-      ctx.moveTo(4, -3);
-      ctx.lineTo(12, -5);
-      ctx.stroke();
-    } else {
-      ctx.beginPath();
-      ctx.moveTo(-4, -3);
-      ctx.lineTo(-7, 4);
-      ctx.moveTo(4, -3);
-      ctx.lineTo(7, 4);
-      ctx.stroke();
-    }
+    ctx.fillStyle = shirt;
+    ctx.beginPath();
+    ctx.moveTo(-6, -8);
+    ctx.lineTo(6, -8);
+    ctx.lineTo(5, 3);
+    ctx.lineTo(-5, 3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
 
-    // Head
+    ctx.strokeStyle = "#1a1410";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (pose === "wind" || pose === "cheer") {
+      ctx.moveTo(-5, -5);
+      ctx.lineTo(-12, -13);
+      ctx.moveTo(5, -5);
+      ctx.lineTo(12, -14);
+    } else if (pose === "run") {
+      ctx.moveTo(-5, -4);
+      ctx.lineTo(-12, 1);
+      ctx.moveTo(5, -5);
+      ctx.lineTo(12, -3);
+    } else if (pose === "launch") {
+      ctx.moveTo(-4, -6);
+      ctx.lineTo(-6, -16);
+      ctx.moveTo(4, -6);
+      ctx.lineTo(7, -15);
+    } else if (pose === "watch") {
+      ctx.moveTo(-5, -4);
+      ctx.lineTo(-9, 2);
+      ctx.moveTo(5, -4);
+      ctx.lineTo(8, 1);
+    } else if (pose === "climb") {
+      ctx.moveTo(-5, -5);
+      ctx.lineTo(-8, -14);
+      ctx.moveTo(5, -4);
+      ctx.lineTo(9, -13);
+    } else if (air) {
+      ctx.moveTo(-3, -7);
+      ctx.lineTo(-4, -16);
+      ctx.moveTo(3, -7);
+      ctx.lineTo(4, -16);
+    } else {
+      ctx.moveTo(-5, -4);
+      ctx.lineTo(-8, 5);
+      ctx.moveTo(5, -4);
+      ctx.lineTo(8, 5);
+    }
+    ctx.stroke();
+
     ctx.fillStyle = "#e8c8a8";
     ctx.beginPath();
-    ctx.arc(0, -11, 4.5, 0, Math.PI * 2);
+    ctx.arc(0, -13, 5.1, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = "#2a2018";
     ctx.beginPath();
-    ctx.ellipse(-0.5, -13, 4.2, 2.6, 0, Math.PI, Math.PI * 2);
+    ctx.ellipse(-0.4, -16, 5, 2.8, -0.15, Math.PI, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = "#1a1410";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.arc(-1.6, -13.2, 0.7, 0, Math.PI * 2);
+    ctx.stroke();
+    if (air || pose === "launch" || pose === "cheer" || pose === "wind") {
+      ctx.beginPath();
+      ctx.ellipse(0.8, -11.2, 1.8, 1.4, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(-1, -11);
+      ctx.lineTo(2, -11);
+      ctx.stroke();
+    }
 
     ctx.restore();
   };
 
-  const splash = (ctx: CanvasRenderingContext2D, x: number, y: number, big: boolean) => {
-    ctx.strokeStyle = "#7ec8de";
-    ctx.lineWidth = 2.2;
-    const n = big ? 9 : 5;
+  const splash = (
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    big: boolean,
+  ) => {
+    ctx.strokeStyle = "#8ad4e8";
+    ctx.lineWidth = 2.3;
+    const n = big ? 11 : 6;
     for (let i = 0; i < n; i++) {
-      // Spray up and seaward (left)
-      const a = Math.PI * 0.55 + (i / (n - 1)) * Math.PI * 0.95;
-      const len = (big ? 18 : 10) + (i % 2) * 5;
+      const a = -Math.PI * 0.85 + (i / Math.max(1, n - 1)) * Math.PI * 1.15;
+      const len = (big ? 20 : 11) + (i % 3) * 5;
       ctx.beginPath();
       ctx.moveTo(x, y);
-      ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len * 0.85);
+      ctx.lineTo(x + Math.cos(a) * len * 0.7, y + Math.sin(a) * len);
       ctx.stroke();
     }
-    ctx.fillStyle = "rgba(120,190,210,0.6)";
+    ctx.fillStyle = big ? "rgba(140,210,230,0.7)" : "rgba(140,210,230,0.45)";
     ctx.beginPath();
-    ctx.ellipse(x, y + 3, big ? 20 : 12, big ? 7 : 4, -0.15, 0, Math.PI * 2);
+    ctx.ellipse(x, y + 2, big ? 22 : 13, big ? 8 : 4.5, -0.2, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = "#5aa8c0";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.ellipse(x, y + 4, big ? 16 : 9, 3.2, -0.15, 0, Math.PI * 2);
+    ctx.stroke();
   };
 
-  const frames: { key: string; draw: (ctx: CanvasRenderingContext2D) => void }[] = [
+  const YELLOW = "#e8a030";
+  const BLUE = "#3a6db0";
+  const RED = "#c45c4a";
+
+  const rim: { key: string; draw: (ctx: CanvasRenderingContext2D) => void }[] = [
     {
       key: "tower_kids_0",
       draw: (ctx) => {
-        // On the parapet; blue shirt winding up on the seaward rim
-        kid(ctx, towerCx + 10, parapetY + 2, "stand", "#e8a030");
-        kid(ctx, rimX + 6, parapetY, "wind", "#3a6db0");
-        kid(ctx, towerCx + 28, parapetY + 4, "stand", "#c45c4a");
+        kid(ctx, towerCx + 12, parapetY + 3, "stand", YELLOW);
+        kid(ctx, rimX + 4, parapetY, "wind", BLUE);
+        kid(ctx, towerCx + 30, parapetY + 4, "stand", RED);
       },
     },
     {
       key: "tower_kids_1",
       draw: (ctx) => {
-        // Blue shirt steps off the left flank
-        kid(ctx, towerCx + 12, parapetY + 2, "stand", "#e8a030");
-        kid(ctx, rimX - 8, parapetY - 4, "run", "#3a6db0");
-        kid(ctx, towerCx + 28, parapetY + 2, "wind", "#c45c4a");
+        kid(ctx, towerCx + 10, parapetY + 3, "watch", YELLOW);
+        kid(ctx, rimX - 4, parapetY - 2, "run", BLUE);
+        kid(ctx, towerCx + 30, parapetY + 2, "wind", RED);
       },
     },
     {
       key: "tower_kids_2",
       draw: (ctx) => {
-        // Mid-plunge beside the drum, falling toward the Solent
-        kid(ctx, towerCx + 8, parapetY + 2, "wind", "#e8a030");
-        kid(ctx, seaX + 28, 88, "leap", "#3a6db0");
-        kid(ctx, towerCx + 28, parapetY + 4, "stand", "#c45c4a");
+        kid(ctx, towerCx + 8, parapetY + 3, "watch", YELLOW);
+        kid(ctx, rimX - 14, parapetY - 8, "launch", BLUE);
+        kid(ctx, towerCx + 28, parapetY + 4, "cheer", RED);
       },
     },
     {
       key: "tower_kids_3",
       draw: (ctx) => {
-        // Splash at the waterline left of the tower; next lad winding up
-        kid(ctx, rimX + 4, parapetY, "wind", "#e8a030");
-        kid(ctx, seaX + 10, seaY - 4, "dive", "#3a6db0");
-        kid(ctx, towerCx + 28, parapetY + 2, "stand", "#c45c4a");
-        splash(ctx, seaX + 14, seaY + 8, true);
+        kid(ctx, towerCx + 6, parapetY + 2, "watch", YELLOW);
+        kid(ctx, towerCx + 28, parapetY + 3, "watch", RED);
+      },
+    },
+    {
+      key: "tower_kids_4",
+      draw: (ctx) => {
+        kid(ctx, towerCx + 8, parapetY + 3, "cheer", YELLOW);
+        kid(ctx, towerCx + 30, parapetY + 2, "watch", RED);
+      },
+    },
+    {
+      key: "tower_kids_5",
+      draw: (ctx) => {
+        kid(ctx, towerCx + 10, parapetY + 3, "cheer", YELLOW);
+        kid(ctx, towerCx + 28, parapetY + 4, "cheer", RED);
+      },
+    },
+    {
+      key: "tower_kids_6",
+      draw: (ctx) => {
+        kid(ctx, towerCx + 12, parapetY + 3, "wind", YELLOW);
+        kid(ctx, towerCx + 30, parapetY + 2, "stand", RED);
+      },
+    },
+    {
+      key: "tower_kids_7",
+      draw: (ctx) => {
+        kid(ctx, rimX + 6, parapetY - 2, "climb", BLUE);
+        kid(ctx, towerCx + 12, parapetY + 3, "watch", YELLOW);
+        kid(ctx, towerCx + 30, parapetY + 4, "stand", RED);
       },
     },
   ];
 
-  for (const f of frames) {
+  const dive: { key: string; draw: (ctx: CanvasRenderingContext2D) => void }[] = [
+    { key: "tower_dive_0", draw: () => {} },
+    { key: "tower_dive_1", draw: () => {} },
+    {
+      key: "tower_dive_2",
+      draw: (ctx) => {
+        kid(ctx, rimX - 22, parapetY + 6, "leap", BLUE);
+      },
+    },
+    {
+      key: "tower_dive_3",
+      draw: (ctx) => {
+        kid(ctx, seaX + 36, parapetY + 28, "star", BLUE);
+      },
+    },
+    {
+      key: "tower_dive_4",
+      draw: (ctx) => {
+        kid(ctx, seaX + 18, seaY - 22, "dive", BLUE);
+      },
+    },
+    {
+      key: "tower_dive_5",
+      draw: (ctx) => {
+        kid(ctx, seaX + 8, seaY - 6, "plunge", BLUE);
+        splash(ctx, seaX + 10, seaY + 6, false);
+      },
+    },
+    {
+      key: "tower_dive_6",
+      draw: (ctx) => {
+        splash(ctx, seaX + 8, seaY + 8, true);
+      },
+    },
+    {
+      key: "tower_dive_7",
+      draw: (ctx) => {
+        splash(ctx, seaX + 10, seaY + 10, false);
+      },
+    },
+  ];
+
+  for (const f of [...rim, ...dive]) {
     const tex = scene.textures.createCanvas(f.key, w, h)!;
     const ctx = tex.getContext();
     ctx.clearRect(0, 0, w, h);
@@ -3681,13 +3825,27 @@ function makePassingTraffic(scene: Phaser.Scene): void {
   const shadow = (
     ctx: CanvasRenderingContext2D,
     cx: number,
-    cy: number,
+    groundY: number,
     rx: number,
   ) => {
-    ctx.fillStyle = "rgba(0,0,0,0.2)";
+    ctx.fillStyle = "rgba(0,0,0,0.28)";
     ctx.beginPath();
-    ctx.ellipse(cx, cy, rx, 7, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, groundY, rx, 5, 0, 0, Math.PI * 2);
     ctx.fill();
+  };
+
+  /** Drop the body so tyre contact sits on `groundY` (canvas foot). */
+  const plant = (
+    ctx: CanvasRenderingContext2D,
+    h: number,
+    wheelBottom: number,
+    draw: () => void,
+  ) => {
+    const ground = h - 4;
+    ctx.save();
+    ctx.translate(0, ground - wheelBottom);
+    draw();
+    ctx.restore();
   };
 
   // Compact hatch — stubbier roof, short boot
@@ -3698,7 +3856,9 @@ function makePassingTraffic(scene: Phaser.Scene): void {
     const ctx = tex.getContext();
     ctx.clearRect(0, 0, w, h);
     scratchStroke(ctx, () => {
-      shadow(ctx, w / 2, h - 4, 78);
+      const ground = h - 4;
+      shadow(ctx, w / 2, ground, 78);
+      plant(ctx, h, 92, () => {
       ctx.fillStyle = "#4a6a7a";
       ctx.beginPath();
       ctx.moveTo(12, 72);
@@ -3737,6 +3897,7 @@ function makePassingTraffic(scene: Phaser.Scene): void {
       ctx.fillStyle = "#c04040";
       ctx.fillRect(178, 58, 9, 10);
       ctx.strokeRect(178, 58, 9, 10);
+      });
     }, "#1a1410", 2.4);
     tex.refresh();
   }
@@ -3749,7 +3910,9 @@ function makePassingTraffic(scene: Phaser.Scene): void {
     const ctx = tex.getContext();
     ctx.clearRect(0, 0, w, h);
     scratchStroke(ctx, () => {
-      shadow(ctx, w / 2, h - 4, 100);
+      const ground = h - 4;
+      shadow(ctx, w / 2, ground, 100);
+      plant(ctx, h, 112, () => {
       ctx.fillStyle = "#d8dce0";
       ctx.beginPath();
       ctx.moveTo(14, 88);
@@ -3785,6 +3948,7 @@ function makePassingTraffic(scene: Phaser.Scene): void {
       ctx.fillStyle = "#c04040";
       ctx.fillRect(234, 70, 10, 12);
       ctx.strokeRect(234, 70, 10, 12);
+      });
     }, "#1a1410", 2.5);
     tex.refresh();
   }
@@ -3839,7 +4003,9 @@ function makePassingTraffic(scene: Phaser.Scene): void {
     const ctx = tex.getContext();
     ctx.clearRect(0, 0, w, h);
     scratchStroke(ctx, () => {
-      shadow(ctx, w / 2, h - 3, 52);
+      const ground = h - 4;
+      shadow(ctx, w / 2, ground, 52);
+      plant(ctx, h, 77, () => {
       // Rider lean
       ctx.fillStyle = "#2a3040";
       ctx.beginPath();
@@ -3879,6 +4045,7 @@ function makePassingTraffic(scene: Phaser.Scene): void {
       ctx.moveTo(90, 58);
       ctx.lineTo(118, 62);
       ctx.stroke();
+      });
     }, "#1a1410", 2.2);
     tex.refresh();
   }
@@ -3891,7 +4058,9 @@ function makePassingTraffic(scene: Phaser.Scene): void {
     const ctx = tex.getContext();
     ctx.clearRect(0, 0, w, h);
     scratchStroke(ctx, () => {
-      shadow(ctx, w / 2, h - 4, 148);
+      const ground = h - 4;
+      shadow(ctx, w / 2, ground, 148);
+      plant(ctx, h, 144, () => {
       ctx.fillStyle = "#2a6a9a";
       ctx.beginPath();
       ctx.moveTo(14, 118);
@@ -3932,6 +4101,7 @@ function makePassingTraffic(scene: Phaser.Scene): void {
       ctx.fillStyle = "#c04040";
       ctx.fillRect(334, 98, 12, 14);
       ctx.strokeRect(334, 98, 12, 14);
+      });
     }, "#1a1410", 2.6);
     tex.refresh();
   }
@@ -3944,7 +4114,9 @@ function makePassingTraffic(scene: Phaser.Scene): void {
     const ctx = tex.getContext();
     ctx.clearRect(0, 0, w, h);
     scratchStroke(ctx, () => {
-      shadow(ctx, w / 2, h - 4, 138);
+      const ground = h - 4;
+      shadow(ctx, w / 2, ground, 138);
+      plant(ctx, h, 139, () => {
       // Hopper body (olive council green)
       ctx.fillStyle = "#3a6a48";
       ctx.beginPath();
@@ -3998,7 +4170,6 @@ function makePassingTraffic(scene: Phaser.Scene): void {
       ctx.fillRect(304, 52, 16, 64);
       ctx.strokeRect(304, 52, 16, 64);
       wheel(ctx, 52, 122, 17);
-      wheel(ctx, 150, 122, 15);
       wheel(ctx, 250, 122, 17);
       ctx.fillStyle = "#e8d080";
       ctx.fillRect(12, 92, 14, 12);
@@ -4006,6 +4177,7 @@ function makePassingTraffic(scene: Phaser.Scene): void {
       ctx.fillStyle = "#c04040";
       ctx.fillRect(310, 96, 10, 12);
       ctx.strokeRect(310, 96, 10, 12);
+      });
     }, "#1a1410", 2.6);
     tex.refresh();
   }
@@ -4074,6 +4246,7 @@ function aliasLook(scene: Phaser.Scene, oldPrefix: string, lookId: string): void
     "limp_arm",
     "limp_leg",
     "down",
+    "stunned",
     "crawl0",
     "crawl1",
     "angry",
@@ -4161,6 +4334,7 @@ function makeLookSheet(scene: Phaser.Scene, look: PersonLook): void {
     "limp_arm",
     "limp_leg",
     "down",
+    "stunned",
     "crawl0",
     "crawl1",
     "angry",
@@ -4192,7 +4366,7 @@ function makeLookSheet(scene: Phaser.Scene, look: PersonLook): void {
   for (const pose of poses) {
     const key = `${look.id}_${pose}`;
     const crawl = pose === "crawl0" || pose === "crawl1";
-    const wide = pose === "down" || pose === "cuffed" || crawl;
+    const wide = pose === "down" || pose === "stunned" || pose === "cuffed" || crawl;
     // Punch / swing arms reach past a normal frame — give them horizontal room
     const punchy =
       pose.startsWith("punch") ||
@@ -4227,6 +4401,7 @@ function makeLookSheet(scene: Phaser.Scene, look: PersonLook): void {
         present: look.present,
         hairStyle: look.hairStyle,
         kit: look.kit,
+        face: pose === "stunned" ? "dazed" : "ko",
       });
     } else {
       drawSorFighter(ctx, fw / 2, fh - 4, look.skin, look.shirt, pose, {

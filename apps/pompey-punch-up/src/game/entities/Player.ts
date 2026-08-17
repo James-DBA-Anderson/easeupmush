@@ -3,9 +3,11 @@ import { Fighter, inReach } from "./Fighter";
 import { pickLookPresent } from "../assets/pompeyLooks";
 import { ROAD } from "../constants";
 import { chipSfx } from "../audio/ChipSfx";
+import { nextLimbMoan } from "../ui/playerQuips";
 import {
   consumeInteractJust,
   consumeLootJust,
+  isMobilePlay,
   takeMobilePad,
   type MobilePadFrame,
 } from "../input/mobilePad";
@@ -81,6 +83,9 @@ export class Player extends Fighter {
    */
   private rushPunchNeedsRelease = false;
   private rushKickNeedsRelease = false;
+  private pendingPainLine: string | null = null;
+  private painMoanUntil = 0;
+  private wasBlockDown = false;
 
   /** Ducked behind a motor / bin — patrols walk past. */
   hiding = false;
@@ -145,6 +150,28 @@ export class Player extends Fighter {
   wantsPickup(): boolean {
     if (this.structure.isOut()) return false;
     return Phaser.Input.Keyboard.JustDown(this.keys.pickup) || consumeInteractJust();
+  }
+
+  takePainMoan(): string | null {
+    const line = this.pendingPainLine;
+    this.pendingPainLine = null;
+    return line;
+  }
+
+  private moanLimb(now: number, part: "arm" | "leg" | "gut"): void {
+    if (this.structure.downed || this.structure.isOut()) return;
+    if (now < this.painMoanUntil) return;
+    this.painMoanUntil = now + 1600;
+    this.pendingPainLine = nextLimbMoan(part);
+  }
+
+  private moanIfLimbFailed(now: number, want: "arm" | "leg"): void {
+    if (this.structure.isDisabled(now)) {
+      this.moanLimb(now, "gut");
+      return;
+    }
+    if (want === "arm" && !this.structure.armsUsable()) this.moanLimb(now, "arm");
+    if (want === "leg" && !this.structure.legsUsable()) this.moanLimb(now, "leg");
   }
 
   private leftDown(): boolean {
@@ -266,17 +293,14 @@ export class Player extends Fighter {
       this.busy &&
       this.action !== "idle" &&
       this.action !== "move" &&
-      this.action !== "run" &&
-      this.action !== "grab" &&
-      this.action !== "hold" &&
-      this.action !== "body_toss" &&
-      this.action !== "hurricanrana";
+      this.action !== "run";
     const canHide =
       !!cover &&
       ducking &&
       !fighting &&
       this.action !== "grab" &&
       this.action !== "hold" &&
+      !this.isThrowFlip &&
       now >= this.grabWhiffUntil &&
       !this.airborne &&
       this.platformY === null &&
@@ -413,6 +437,22 @@ export class Player extends Fighter {
     this.pad = takeMobilePad();
     this.pollDoubleTap(now);
 
+    // Planted through the bomb / German / rana — walking off them looks broken
+    if (this.isThrowFlip) {
+      this.running = false;
+      this.boardRolling = false;
+      this.boardManual = false;
+      if (this.action === "hurricanrana" && this.diveAimX !== null) {
+        const dx = this.diveAimX - this.x;
+        if (Math.abs(dx) > 2) {
+          this.x += Math.sign(dx) * Math.min(Math.abs(dx), 360 * dt);
+          this.x = Phaser.Math.Clamp(this.x, bounds.minX, bounds.maxX);
+        }
+      }
+      this.refreshVisuals(now, dt);
+      return;
+    }
+
     if (Phaser.Input.Keyboard.JustDown(this.keys.jump) || this.pad.jumpJust) {
       const left = this.leftDown();
       const right = this.rightDown();
@@ -421,8 +461,10 @@ export class Player extends Fighter {
         (this.facing < 0 && right && !left);
       if (holdingBack && !this.skating) {
         if (this.tryBackflip(now)) void chipSfx.whoosh(true);
+        else this.moanIfLimbFailed(now, "leg");
       } else {
         if (this.tryJump(now)) void chipSfx.jump();
+        else this.moanIfLimbFailed(now, "leg");
       }
     }
 
@@ -540,17 +582,6 @@ export class Player extends Fighter {
         this.tryBodyToss(now);
         this.comboStep = 0;
       }
-      // Slow shuffle while clinching
-      if (this.action === "hold") {
-        let hx = 0;
-        if (this.leftDown()) hx -= 1;
-        if (this.rightDown()) hx += 1;
-        if (hx !== 0) {
-          this.x += hx * this.speed * 0.35 * dt;
-          this.x = Phaser.Math.Clamp(this.x, bounds.minX, bounds.maxX);
-          this.setFacing(hx > 0 ? 1 : -1, now);
-        }
-      }
       this.refreshVisuals(now, dt);
       return;
     }
@@ -570,11 +601,15 @@ export class Player extends Fighter {
       grabJust;
 
     // H — hold to block; attacks cancel the guard
-    if (!wantAttack && (this.keys.block.isDown || this.pad.block)) {
-      this.tryBlock(now);
+    const blockDown = this.keys.block.isDown || this.pad.block;
+    if (!wantAttack && blockDown) {
+      if (!this.tryBlock(now) && !this.wasBlockDown) {
+        this.moanIfLimbFailed(now, "arm");
+      }
     } else if (this.action === "block") {
       this.dropBlock(now);
     }
+    this.wasBlockDown = blockDown;
 
     // L first so a buffered jab doesn't swallow the grab
     if (grabJust) {
@@ -588,12 +623,15 @@ export class Player extends Fighter {
       this.comboStep = 0;
       this.punchQueuedAt = 0;
       this.kickQueuedAt = 0;
+      if (this.action !== "grab") this.moanIfLimbFailed(now, "arm");
     } else if (wantBackCombo) {
       const ok = this.tryBackAttack(now) || this.cancelIntoBackAttack(now);
       if (ok) {
         this.comboStep = 0;
         this.punchQueuedAt = 0;
         this.kickQueuedAt = 0;
+      } else {
+        this.moanIfLimbFailed(now, "arm");
       }
     } else if (kickCommit && this.platformY !== null) {
       // On a motor — splash a floored lad, hurricanrana a standing one, else Swanton off
@@ -612,6 +650,8 @@ export class Player extends Fighter {
         this.kickQueuedAt = 0;
         this.punchQueuedAt = 0;
         void chipSfx.whoosh(true);
+      } else {
+        this.moanIfLimbFailed(now, "leg");
       }
     } else if (kickCommit && downHeld && !this.skating) {
       // Down + K — stomp a floored body, else whirlwind crowd clear
@@ -629,6 +669,8 @@ export class Player extends Fighter {
         this.kickQueuedAt = 0;
         this.punchQueuedAt = 0;
         void chipSfx.whoosh(true);
+      } else {
+        this.moanIfLimbFailed(now, "leg");
       }
     } else if (kickCommit && (wantRun || this.isRushing)) {
       // Run / skate + K — slide through a line (one per press)
@@ -640,6 +682,8 @@ export class Player extends Fighter {
         this.kickQueuedAt = 0;
         this.punchQueuedAt = 0;
         void chipSfx.whoosh(true);
+      } else {
+        this.moanIfLimbFailed(now, "leg");
       }
     } else if (punchCommit) {
       const rushing = wantRun || this.isRushing;
@@ -651,8 +695,13 @@ export class Player extends Fighter {
         this.punchQueuedAt = 0;
         this.kickQueuedAt = 0;
         void chipSfx.whoosh(false);
-      } else if (this.canAct(now) && !this.structure.armsUsable()) {
-        // Arms knackered — drop the buffer so it doesn't soft-lock J
+      } else if (
+        this.canAct(now) ||
+        (this.airborne && !this.structure.legsUsable()) ||
+        this.structure.isDisabled(now)
+      ) {
+        if (this.airborne) this.moanIfLimbFailed(now, "leg");
+        else this.moanIfLimbFailed(now, "arm");
         this.punchQueuedAt = 0;
       }
     } else if (kickCommit) {
@@ -661,10 +710,25 @@ export class Player extends Fighter {
         ok = this.tryKickflip(now);
       } else {
         // K near a floored lad → put the boot in
-        const floor = flooredNearby();
+        const floor = this.airborne ? null : flooredNearby();
         if (floor) {
           this.faceToward(floor.x, now);
           ok = this.tryStomp(now);
+        } else if (this.airborne) {
+          ok = this.tryJumpKick(now);
+        } else if (
+          isMobilePlay() &&
+          !this.skating &&
+          !foes.some(
+            (f) =>
+              f !== this &&
+              !f.structure.isOut() &&
+              !f.structure.downed &&
+              inReach(this, f, 64),
+          )
+        ) {
+          // Empty air / drone — hop-kick so you don't need Jump+Punch
+          ok = this.tryHopKick(now);
         } else {
           ok = this.tryKick(now);
         }
@@ -674,11 +738,19 @@ export class Player extends Fighter {
         this.kickQueuedAt = 0;
         this.punchQueuedAt = 0;
         void chipSfx.whoosh(this.skating);
-      } else if (this.canAct(now) && !this.structure.legsUsable()) {
+      } else if (
+        this.canAct(now) ||
+        (this.airborne && !this.structure.legsUsable()) ||
+        this.structure.isDisabled(now)
+      ) {
+        this.moanIfLimbFailed(now, "leg");
         this.kickQueuedAt = 0;
       }
     } else if (lowJust) {
       if (this.tryLowBlow(now)) void chipSfx.whoosh(false);
+      else if (!this.structure.armsUsable() && !this.structure.legsUsable()) {
+        this.moanIfLimbFailed(now, this.structure.painFocus() === "leg" ? "leg" : "arm");
+      }
       this.comboStep = 0;
     }
 
@@ -764,15 +836,6 @@ export class Player extends Fighter {
       }
       if (this.action === "backhand") {
         this.x += this.attackDir * 80 * dt;
-        this.x = Phaser.Math.Clamp(this.x, bounds.minX, bounds.maxX);
-      }
-      if (this.action === "grab") {
-        const progress = 1 - (this.actionUntil - now) / this.grabMs;
-        if (progress < 0.48) {
-          this.x += this.facing * 220 * dt;
-        } else if (!this.heldTarget) {
-          this.x -= this.facing * 110 * dt;
-        }
         this.x = Phaser.Math.Clamp(this.x, bounds.minX, bounds.maxX);
       }
       if (

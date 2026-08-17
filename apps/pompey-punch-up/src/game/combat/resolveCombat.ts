@@ -36,35 +36,9 @@ export function resolveCombat(
 
     if (attacker.isGrabActive(now) && attacker.action === "grab") {
       // Clinch the nearest one only — then you can toss them into the rest
-      let best: Fighter | null = null;
-      let bestD = 9999;
-      for (const target of fighters) {
-        if (target === attacker) continue;
-        if (target.team === attacker.team && attacker.team !== "police") continue;
-        if (target.structure.isOut()) continue;
-        if (!inReach(attacker, target, attacker.attackReach + 8)) continue;
-        const d = Math.abs(target.x - attacker.x);
-        if (d < bestD) {
-          bestD = d;
-          best = target;
-        }
-      }
+      const best = attacker.nearestGrabTarget(fighters);
       if (best && attacker.markHit(best)) {
-        // Behind them if you're on the opposite side of their facing
-        const fromBehind = (attacker.x - best.x) * best.facing < -8;
-        best.structure.createOpening(now, 1000);
-        if (attacker.team === "player") {
-          // Straight into the throw — no standing clinch
-          attacker.startHoldOn(best, now, fromBehind);
-          best.x = attacker.x + attacker.facing * (fromBehind ? 14 : 22);
-          best.y = attacker.y;
-          best.groundY = best.y;
-          if (fromBehind) best.facing = attacker.facing;
-          attacker.tryBodyToss(now);
-        } else {
-          // Enemy/police grabs still dump you
-          best.takeDown(now);
-        }
+        attacker.connectGrab(best, now);
         onEvent?.({
           attacker,
           target: best,
@@ -131,6 +105,7 @@ export function resolveCombat(
       if (target.structure.isOut() && !crawling && !floorAttack) continue;
       if (crawling && !floorAttack) continue;
       if (target === attacker.heldTarget) continue;
+      if (target.isThrowFlip || target.isInThrowArc) continue;
       if (!inReach(attacker, target, attacker.attackReach, attacker.attackDir)) continue;
       if (!attacker.markHit(target)) continue;
 

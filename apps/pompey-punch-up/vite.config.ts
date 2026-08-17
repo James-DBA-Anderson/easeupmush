@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import { debugArenaPlugin } from "./vite.debug-plugin";
+import { appVersionPlugin } from "../../scripts/app-version.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 
@@ -12,7 +13,7 @@ const underSite = base.includes("/games/");
 /** Static standalone site — relative asset paths work on any host/path. */
 export default defineConfig({
   base,
-  plugins: [debugArenaPlugin()],
+  plugins: [appVersionPlugin(), debugArenaPlugin()],
   server: {
     port: 5299,
     strictPort: true,
