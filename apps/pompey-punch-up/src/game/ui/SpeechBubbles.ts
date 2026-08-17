@@ -24,12 +24,7 @@ export class SpeechBubbles {
     const s = owner.structure;
     if (s.isOut() || s.outCold || s.crawling || s.cuffed) return false;
     if (s.downed) return false;
-    if (
-      owner.action === "down" ||
-      owner.action === "out_cold" ||
-      owner.action === "stunned" ||
-      owner.action === "crawl"
-    ) {
+    if (owner.action === "down" || owner.action === "out_cold" || owner.action === "crawl") {
       return false;
     }
     return true;
