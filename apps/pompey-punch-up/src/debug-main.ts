@@ -48,7 +48,9 @@ function syncPlaceButtons(): void {
   const kind = arena()?.getPlaceKind() ?? null;
   document.querySelectorAll<HTMLElement>("[data-spawn]").forEach((btn) => {
     const k = btn.dataset.spawn;
-    if (k === "clear" || k === "reset_player" || k === "cash" || k === "mount_board") {
+    if (k === "clear" || k === "reset_player" || k === "cash" || k === "mount_board" ||
+        k === "buzz_self" || k === "drone_film" || k === "drone_combat" ||
+        k === "drone_flyby" || k === "drone_clear") {
       btn.classList.remove("active");
       return;
     }

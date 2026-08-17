@@ -293,6 +293,7 @@ export class Fighter extends Phaser.GameObjects.Container {
   private visScaleY = 0;
   private visWeaponBehind: boolean | null = null;
   private visWeaponOn = false;
+  private visWeaponFlip = false;
   /** Don't flip facing every frame when bodies shove past each other */
   private facingLockUntil = 0;
   private readonly facingLockMs = 160;
@@ -1272,7 +1273,6 @@ export class Fighter extends Phaser.GameObjects.Container {
     now: number,
     pose: PoseKey,
   ): { x: number; y: number; angle: number; behind: boolean } {
-    const f = this.facing;
     const bat =
       this.weapon === "bat" || this.weapon === "cue" || this.weapon === "chain";
     const brick = this.weapon === "brick" || this.weapon === "knuckle";
@@ -1307,11 +1307,11 @@ export class Fighter extends Phaser.GameObjects.Container {
         ox = Phaser.Math.Linear(38, 20, e);
         oy = Phaser.Math.Linear(-32, -14, e);
       }
-      return { x: f * ox, y: oy, angle: f * angle, behind };
+      return { x: ox, y: oy, angle, behind };
     }
 
     if (this.action === "throw") {
-      return { x: f * 22, y: -44, angle: f * -60, behind: false };
+      return { x: 22, y: -44, angle: -60, behind: false };
     }
 
     // Default ready carry — bat tip up by the lead hip/hand
@@ -1387,7 +1387,36 @@ export class Fighter extends Phaser.GameObjects.Container {
       ang += sway * 4;
     }
 
-    return { x: f * ox, y: oy, angle: f * ang, behind };
+    return { x: ox, y: oy, angle: ang, behind };
+  }
+
+  /** Mirror held-weapon art like the body sprite — flipX + negated x/angle. */
+  private applyHeldWeaponVisual(hold: {
+    x: number;
+    y: number;
+    angle: number;
+    behind: boolean;
+  }): void {
+    const left = this.facing < 0;
+    if (left !== this.visWeaponFlip) {
+      this.visWeaponFlip = left;
+      this.weaponSprite.setFlipX(left);
+    }
+    if (this.weapon === "bat" || this.weapon === "cue" || this.weapon === "chain") {
+      this.weaponSprite.setOrigin(left ? 0.9 : 0.1, 0.5);
+    } else if (this.weapon === "bottle") {
+      this.weaponSprite.setOrigin(left ? 0.55 : 0.45, 0.85);
+    } else {
+      this.weaponSprite.setOrigin(0.5, 0.55);
+    }
+    this.weaponSprite.x = left ? -hold.x : hold.x;
+    this.weaponSprite.y = hold.y;
+    this.weaponSprite.setAngle(left ? -hold.angle : hold.angle);
+    if (hold.behind !== this.visWeaponBehind) {
+      this.visWeaponBehind = hold.behind;
+      if (hold.behind) this.moveTo(this.weaponSprite, 0);
+      else this.bringToTop(this.weaponSprite);
+    }
   }
 
   tryBackAttack(now: number): boolean {
@@ -2057,7 +2086,10 @@ export class Fighter extends Phaser.GameObjects.Container {
       this.sprite.x = 0;
       // Bigger lads (Hardmen) need more lift or they look planted on your shoulders
       this.sprite.y = -frame.victimLift * Math.max(1, this.baseScaleY);
-      this.sprite.setRotation(((frame.victimAngle * Math.PI) / 180) * dir);
+      // Back-over-head throws use positive victimAngle — flip sign vs powerbomb.
+      const rotDir =
+        style === "suplex" || style === "hurricanrana" ? -dir : dir;
+      this.sprite.setRotation(((frame.victimAngle * Math.PI) / 180) * rotDir);
     } else if (this.action === "body_toss" || this.action === "hurricanrana") {
       const progress = 1 - (this.actionUntil - now) / tossDuration(this.tossStyle);
       const frame = sampleToss(this.tossStyle, progress);
@@ -2090,7 +2122,7 @@ export class Fighter extends Phaser.GameObjects.Container {
       : this.isBuzzed(now)
         ? now < this.hitFlashUntil
           ? 0xffffff
-          : 0x7af0ff
+          : 0xffeebb
         : now < this.hitFlashUntil
           ? s.bloodied
             ? 0xffaaaa
@@ -2123,19 +2155,11 @@ export class Fighter extends Phaser.GameObjects.Container {
       if (!this.visWeaponOn) {
         this.visWeaponOn = true;
         this.weaponSprite.setVisible(true);
-        this.weaponSprite.setFlipX(false);
       }
-      const hold = this.layoutHeldWeapon(now, pose);
-      this.weaponSprite.x = hold.x;
-      this.weaponSprite.y = hold.y;
-      this.weaponSprite.setAngle(hold.angle);
-      if (hold.behind !== this.visWeaponBehind) {
-        this.visWeaponBehind = hold.behind;
-        if (hold.behind) this.moveTo(this.weaponSprite, 0);
-        else this.bringToTop(this.weaponSprite);
-      }
+      this.applyHeldWeaponVisual(this.layoutHeldWeapon(now, pose));
     } else if (this.visWeaponOn) {
       this.visWeaponOn = false;
+      this.visWeaponFlip = false;
       this.visWeaponBehind = null;
       this.weaponSprite.setVisible(false);
     }

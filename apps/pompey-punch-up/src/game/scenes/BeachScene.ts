@@ -24,6 +24,7 @@ import { resolvePropHits } from "../systems/resolvePropHits";
 import { updateCarPlatforms, syncCarOcclusion, wreckCarUnderThrower } from "../systems/climbCars";
 import { WeaponPickup, type WeaponKind } from "../world/WeaponPickup";
 import { BuzzballPickup } from "../world/BuzzballPickup";
+import { drawBuzzAura, spawnBuzzRings } from "../systems/buzzballAura";
 import { SkateboardPickup } from "../world/SkateboardPickup";
 import { ThrownWeapon, isThrowable } from "../world/ThrownWeapon";
 import type { DestructibleProp } from "../world/DestructibleProp";
@@ -219,6 +220,8 @@ export class BeachScene extends Phaser.Scene {
   /** Defer camera follow until after a boss lock clears — avoids a one-frame recenter. */
   private cameraFollowHeld = false;
   private cameraFollowingPlayer = false;
+  /** After the pier lock, pan by edge-scroll — startFollow snaps if the lad's on the rim. */
+  private edgeScrollCamera = false;
   /** Unlock X whose call succeeded — wave can spawn. */
   private callArmedUnlock: number | null = null;
   /** Who's currently on the blower. */
@@ -323,6 +326,7 @@ export class BeachScene extends Phaser.Scene {
     this.postBossPierLock = false;
     this.cameraFollowHeld = false;
     this.cameraFollowingPlayer = false;
+    this.edgeScrollCamera = false;
     this.callArmedUnlock = null;
     this.activeCaller = null;
     this.wasHiding = false;
@@ -867,17 +871,19 @@ export class BeachScene extends Phaser.Scene {
     return best;
   }
 
-  private spawnBuzzball(x: number, y: number): void {
+  private spawnBuzzball(x: number, y: number, rollDir: number): void {
     const ball = new BuzzballPickup(
       this,
       Phaser.Math.Clamp(x, LANE.minX, LANE.maxX),
       Phaser.Math.Clamp(y, LANE.minY, LANE.maxY),
+      rollDir,
     );
     this.buzzballs.push(ball);
     this.spawnFloat(ball.x, ball.y - 36, "BUZZBALL!");
   }
 
   private maybeDropBuzzball(foe: Enemy): void {
+    if (this.stage !== 2) return;
     if (
       this.endingState === "nuke" ||
       this.endingState === "complete" ||
@@ -887,10 +893,13 @@ export class BeachScene extends Phaser.Scene {
     }
     if (foe.isBackground) return;
     if (this.buzzballs.some((b) => !b.taken)) return;
-    const chance = foe.isBoss ? 0.14 : 0.07;
+    const chance = foe.isBoss ? 0.12 : 0.06;
     if (Math.random() > chance) return;
-    this.spawnBuzzball(foe.x + foe.facing * -22, foe.laneY + 6);
-    this.banner.setText("Buzzball! Grab it before it drains.");
+    const awayFromPlayer = Math.sign(foe.x - this.player.x);
+    const rollDir =
+      awayFromPlayer !== 0 ? awayFromPlayer : -foe.facing || (Math.random() < 0.5 ? -1 : 1);
+    this.spawnBuzzball(foe.x, foe.laneY + 6, rollDir);
+    this.banner.setText("Buzzball! Chase it down before it drains.");
   }
 
   private tryPickupBuzzball(): boolean {
@@ -930,17 +939,17 @@ export class BeachScene extends Phaser.Scene {
     this.banner.setText("BUZZBALL — he's going Super.");
     void chipSfx.buzzCharge();
     this.cameras.main.shake(240, 0.012);
-    this.spawnBuzzRings(this.player.x, this.player.y);
+    spawnBuzzRings(this, this.player.x, this.player.y);
 
     this.time.delayedCall(280, () => {
       if (!this.buzzAwakening) return;
       this.cameras.main.shake(180, 0.01);
-      this.spawnBuzzRings(this.player.x, this.player.y);
+      spawnBuzzRings(this, this.player.x, this.player.y);
     });
     this.time.delayedCall(700, () => {
       if (!this.buzzAwakening) return;
       this.cameras.main.shake(220, 0.016);
-      this.spawnBuzzRings(this.player.x, this.player.y);
+      spawnBuzzRings(this, this.player.x, this.player.y);
       this.bubbles.say(this.player, "AAAGH—", 900);
     });
     this.time.delayedCall(1400, () => {
@@ -952,47 +961,19 @@ export class BeachScene extends Phaser.Scene {
     });
   }
 
-  private spawnBuzzRings(x: number, y: number): void {
-    for (let i = 0; i < 3; i++) {
-      const ring = this.add.circle(x, y - 36, 10 + i * 6, 0x7af0ff, 0).setDepth(190);
-      ring.setStrokeStyle(3, 0x3df0ff, 0.95);
-      this.tweens.add({
-        targets: ring,
-        scale: 4.2 + i * 0.8,
-        alpha: 0,
-        duration: 420 + i * 80,
-        ease: "Cubic.easeOut",
-        onComplete: () => ring.destroy(),
-      });
-    }
-    for (let i = 0; i < 10; i++) {
-      const ang = (Math.PI * 2 * i) / 10 + Math.random() * 0.2;
-      const bolt = this.add.rectangle(x, y - 40, 3, 16 + Math.random() * 18, 0xdffffa, 0.95);
-      bolt.setDepth(191).setRotation(ang);
-      this.tweens.add({
-        targets: bolt,
-        x: x + Math.cos(ang) * (40 + Math.random() * 50),
-        y: y - 40 + Math.sin(ang) * (36 + Math.random() * 40),
-        alpha: 0,
-        duration: 280 + Math.random() * 180,
-        onComplete: () => bolt.destroy(),
-      });
-    }
-  }
-
   private ensureBuzzAura(): void {
     if (this.buzzAura) return;
     this.buzzAura = this.add.graphics().setDepth(8);
   }
 
-  private updateBuzzballs(now: number): void {
+  private updateBuzzballs(now: number, dt: number): void {
     for (const b of this.buzzballs) {
       if (b.taken) continue;
       if (b.expired) {
         this.spawnFloat(b.x, b.y - 28, "drained");
         b.poof();
       } else {
-        b.refresh(now);
+        b.refresh(now, dt);
       }
     }
     this.buzzballs = this.buzzballs.filter((b) => b.active && !b.taken);
@@ -1035,17 +1016,7 @@ export class BeachScene extends Phaser.Scene {
     }
 
     this.ensureBuzzAura();
-    const g = this.buzzAura!;
-    const p = this.player;
-    const flicker =
-      this.buzzFadeWarned && Math.sin(now * 0.04) > 0 ? 0.25 : 0.55 + Math.sin(now * 0.02) * 0.2;
-    g.clear();
-    g.fillStyle(0x7af0ff, flicker * 0.35);
-    g.fillEllipse(p.x, p.y - 38, 54 + Math.sin(now * 0.018) * 8, 92);
-    g.fillStyle(0xffffff, flicker * 0.18);
-    g.fillEllipse(p.x, p.y - 48, 22, 48);
-    g.lineStyle(2, 0xdffffa, flicker);
-    g.strokeEllipse(p.x, p.y - 38, 58 + Math.sin(now * 0.03) * 6, 98);
+    drawBuzzAura(this.buzzAura!, this.player, now, this.buzzAwakening);
   }
 
   private updateThrows(now: number, dt: number): void {
@@ -1180,6 +1151,10 @@ export class BeachScene extends Phaser.Scene {
   /** Ambient flybys along the front; swoops when Clarence King is live. */
   private updateSkyDrone(now: number, dt: number): void {
     if (this.introPhase !== "done") return;
+    if (this.stage !== 2) {
+      this.skyDrone.standDown();
+      return;
+    }
     // Any live L2 boss gets the dive-bombing kit — don't depend on the exact name string
     const clarence = this.enemies.find(
       (e) => e.isBoss && this.stage === 2 && !e.structure.isOut(),
@@ -1723,6 +1698,7 @@ export class BeachScene extends Phaser.Scene {
 
   /** Resume smooth follow after a boss lock — same scroll, no snap to player centre. */
   private syncCameraFollow(): void {
+    if (this.edgeScrollCamera) return;
     if (!this.cameraFollowHeld || this.bossArena || this.postBossPierLock) return;
     if (this.cameraFollowingPlayer) {
       this.cameraFollowHeld = false;
@@ -1737,13 +1713,40 @@ export class BeachScene extends Phaser.Scene {
     this.cameraFollowingPlayer = true;
   }
 
+  /**
+   * Pan the view only when the player pushes past the screen edge — no follow snap.
+   * Used when leaving the locked pier beat after Casey.
+   */
+  private syncEdgeScrollCamera(): void {
+    if (!this.edgeScrollCamera) return;
+    const cam = this.cameras.main;
+    const maxScroll = Math.max(0, WORLD_WIDTH - this.viewW);
+    const margin = 56;
+
+    if (this.player.x > cam.scrollX + this.viewW - margin) {
+      cam.scrollX = Phaser.Math.Clamp(this.player.x - this.viewW + margin, 0, maxScroll);
+    } else if (this.player.x < cam.scrollX + margin) {
+      cam.scrollX = Phaser.Math.Clamp(this.player.x - margin, 0, maxScroll);
+    }
+
+    const mid = cam.scrollX + this.viewW * 0.5;
+    if (Math.abs(this.player.x - mid) < this.viewW * 0.22) {
+      this.edgeScrollCamera = false;
+      const playerOff = this.player.x - cam.scrollX - this.viewW / 2;
+      cam.startFollow(this.player, true, 0.08, 0);
+      cam.setDeadzone(Math.max(120, Math.abs(playerOff) * 2 + 16), 48);
+      this.cameraFollowingPlayer = true;
+    }
+  }
+
   /** Level 2 starts on the locked pier screen — unlock when you walk east. */
   private syncPierScreenRelease(): void {
     if (!this.postBossPierLock || !this.bossArena || this.stage !== 2) return;
     if (this.player.x < this.bossArena.maxX - 28) return;
     this.postBossPierLock = false;
     this.clearBossArenaLock();
-    this.syncCameraFollow();
+    this.cameraFollowHeld = false;
+    this.edgeScrollCamera = true;
   }
 
   /** True when locking the current camera would already include this world X. */
@@ -1996,6 +1999,7 @@ export class BeachScene extends Phaser.Scene {
       this.syncPlayerStealth(now, dt);
       this.syncPierScreenRelease();
     }
+    this.syncEdgeScrollCamera();
     this.syncCameraFollow();
     this.syncIdleChatter(now);
     this.syncPlayerWondering(now);
@@ -2163,7 +2167,7 @@ export class BeachScene extends Phaser.Scene {
 
     this.updateThrows(now, dt);
     this.maybeEnemyWeaponGrabs();
-    this.updateBuzzballs(now);
+    this.updateBuzzballs(now, dt);
 
     const lootTarget = nearestLootable(this.player, this.fighters);
     const nearWep = this.nearestPickup();
@@ -2549,6 +2553,7 @@ export class BeachScene extends Phaser.Scene {
     this.stage = 2;
     this.bossAnnounced = false;
     this.droneAssistAnnounced = false;
+    this.skyDrone.resetForLevelTwo(this.time.now);
     this.callArmedUnlock = null;
     this.activeCaller = null;
     this.captiveStragglers = [];

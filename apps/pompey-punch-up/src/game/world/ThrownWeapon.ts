@@ -51,6 +51,7 @@ export class ThrownWeapon extends Phaser.GameObjects.Container {
 
     this.sprite = scene.make.image({ x: 0, y: -this.airZ, key: `weapon_${kind}`, add: false });
     this.sprite.setOrigin(0.5, 0.5);
+    this.sprite.setFlipX(facing < 0);
     this.sprite.setScale(kind === "brick" ? 0.95 : 0.85);
     this.add(this.sprite);
     scene.add.existing(this);

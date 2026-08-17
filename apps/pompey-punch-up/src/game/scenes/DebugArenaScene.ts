@@ -16,6 +16,9 @@ import { DestructibleProp, type DestructibleKey } from "../world/DestructiblePro
 import { WeaponPickup, type WeaponKind } from "../world/WeaponPickup";
 import { ThrownWeapon, isThrowable } from "../world/ThrownWeapon";
 import { SkateboardPickup } from "../world/SkateboardPickup";
+import { BuzzballPickup } from "../world/BuzzballPickup";
+import { SkyDrone } from "../world/SkyDrone";
+import { drawBuzzAura, spawnBuzzRings } from "../systems/buzzballAura";
 import { FoodStall } from "../world/FoodStall";
 import { WeaponShop } from "../world/WeaponShop";
 import type { Obstacle } from "../world/obstacles";
@@ -58,6 +61,12 @@ export type DebugSpawnKind =
   | "chain"
   | "cue"
   | "knuckle"
+  | "buzzball"
+  | "buzz_self"
+  | "drone_film"
+  | "drone_combat"
+  | "drone_flyby"
+  | "drone_clear"
   | "cash"
   | "mount_board"
   | "clear"
@@ -76,6 +85,13 @@ export class DebugArenaScene extends Phaser.Scene {
   private destructibles: DestructibleProp[] = [];
   private pickups: WeaponPickup[] = [];
   private skateboards: SkateboardPickup[] = [];
+  private buzzballs: BuzzballPickup[] = [];
+  private skyDrone!: SkyDrone;
+  private buzzAura?: Phaser.GameObjects.Graphics;
+  private buzzAwakening = false;
+  private buzzFadeWarned = false;
+  private buzzPowerLive = false;
+  private droneBossLive = false;
   private foodStalls: FoodStall[] = [];
   private weaponShops: WeaponShop[] = [];
   private thrown: ThrownWeapon[] = [];
@@ -116,6 +132,7 @@ export class DebugArenaScene extends Phaser.Scene {
 
     this.player = new Player(this, GAME_WIDTH * 0.42, DEBUG_LANE.minY + 40);
     this.player.money = 80;
+    this.skyDrone = new SkyDrone(this);
     this.rebuildFighters();
 
     this.cameras.main.setBounds(0, 0, GAME_WIDTH, GAME_HEIGHT);
@@ -238,6 +255,39 @@ export class DebugArenaScene extends Phaser.Scene {
       } else {
         this.setStatus("already on a board");
       }
+      return;
+    }
+    if (kind === "buzz_self") {
+      this.cancelPlace();
+      this.giveBuzzPower();
+      return;
+    }
+    if (kind === "drone_film") {
+      this.cancelPlace();
+      this.skyDrone.debugStartFilm(this.player, this.time.now);
+      this.setStatus("drone filming — jump-kick to boot it");
+      this.floatText(this.player.x, this.player.y - 72, "filming you");
+      return;
+    }
+    if (kind === "drone_combat") {
+      this.cancelPlace();
+      this.droneBossLive = true;
+      this.skyDrone.debugStartCombat(this.player, this.time.now);
+      this.setStatus("combat drone — watch the swoops");
+      this.floatText(this.player.x, this.player.y - 72, "DRONE!");
+      return;
+    }
+    if (kind === "drone_flyby") {
+      this.cancelPlace();
+      this.skyDrone.debugStartFlyby();
+      this.setStatus("drone flyby");
+      return;
+    }
+    if (kind === "drone_clear") {
+      this.cancelPlace();
+      this.droneBossLive = false;
+      this.skyDrone.debugClear();
+      this.setStatus("drone cleared");
       return;
     }
     this.armPlace(kind);
@@ -378,6 +428,11 @@ export class DebugArenaScene extends Phaser.Scene {
       case "knuckle":
         this.spawnPickup(x, y, kind);
         break;
+      case "buzzball": {
+        const rollDir = side;
+        this.spawnBuzzball(x, y, rollDir);
+        break;
+      }
       default:
         break;
     }
@@ -449,6 +504,264 @@ export class DebugArenaScene extends Phaser.Scene {
     this.pickups.push(new WeaponPickup(this, x, y, kind));
   }
 
+  private spawnBuzzball(x: number, y: number, rollDir: number): void {
+    const ball = new BuzzballPickup(
+      this,
+      Phaser.Math.Clamp(x, DEBUG_LANE.minX, DEBUG_LANE.maxX),
+      Phaser.Math.Clamp(y, DEBUG_LANE.minY, DEBUG_LANE.maxY),
+      rollDir,
+    );
+    this.buzzballs.push(ball);
+    this.floatText(ball.x, ball.y - 36, "BUZZBALL!");
+  }
+
+  private nearestBuzzball(): BuzzballPickup | null {
+    let best: BuzzballPickup | null = null;
+    let bestD = 64;
+    for (const b of this.buzzballs) {
+      if (b.taken) continue;
+      const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, b.x, b.y);
+      if (d < bestD && Math.abs(this.player.laneY - b.y) < 44) {
+        bestD = d;
+        best = b;
+      }
+    }
+    return best;
+  }
+
+  private tryPickupBuzzball(): boolean {
+    const ball = this.nearestBuzzball();
+    if (!ball || ball.taken) return false;
+    this.drinkBuzzball(ball);
+    return true;
+  }
+
+  private drinkBuzzball(ball: BuzzballPickup): void {
+    if (ball.taken) return;
+    ball.collect();
+    this.buzzballs = this.buzzballs.filter((b) => !b.taken);
+    const now = this.time.now;
+    const already = this.player.isBuzzed(now);
+    this.player.buzzedUntil = now + 10000;
+    this.player.invulnUntil = this.player.buzzedUntil;
+    this.player.setBuzzedMove(true);
+    this.buzzFadeWarned = false;
+    this.floatText(this.player.x, this.player.y - 72, "BUZZBALL!");
+    void chipSfx.pickup();
+    if (already) {
+      this.setStatus("another Buzzball — still buzzing");
+      this.ensureBuzzAura();
+      return;
+    }
+    this.beginBuzzAwakening();
+  }
+
+  private giveBuzzPower(): void {
+    const now = this.time.now;
+    const already = this.player.isBuzzed(now);
+    this.player.buzzedUntil = now + 10000;
+    this.player.invulnUntil = this.player.buzzedUntil;
+    this.player.setBuzzedMove(true);
+    this.buzzFadeWarned = false;
+    if (already) {
+      this.setStatus("Buzzball refreshed");
+      this.ensureBuzzAura();
+      return;
+    }
+    this.beginBuzzAwakening();
+  }
+
+  private beginBuzzAwakening(): void {
+    this.buzzAwakening = true;
+    this.player.inputLocked = true;
+    this.player.action = "idle";
+    this.player.actionUntil = this.time.now + 1400;
+    this.player.structure.anger = Math.max(this.player.structure.anger, 0.85);
+    this.ensureBuzzAura();
+    this.setStatus("Buzzball — going Super");
+    void chipSfx.buzzCharge();
+    this.cameras.main.shake(240, 0.012);
+    spawnBuzzRings(this, this.player.x, this.player.y);
+
+    this.time.delayedCall(280, () => {
+      if (!this.buzzAwakening) return;
+      this.cameras.main.shake(180, 0.01);
+      spawnBuzzRings(this, this.player.x, this.player.y);
+    });
+    this.time.delayedCall(700, () => {
+      if (!this.buzzAwakening) return;
+      this.cameras.main.shake(220, 0.016);
+      spawnBuzzRings(this, this.player.x, this.player.y);
+      this.bubbles.say(this.player, "AAAGH—", 900);
+    });
+    this.time.delayedCall(1400, () => {
+      this.buzzAwakening = false;
+      this.player.inputLocked = false;
+      this.setStatus("Buzzball active — ten seconds");
+      this.floatText(this.player.x, this.player.y - 88, "OVERPOWERED");
+    });
+  }
+
+  private ensureBuzzAura(): void {
+    if (this.buzzAura) return;
+    this.buzzAura = this.add.graphics().setDepth(8);
+  }
+
+  private updateBuzzballs(now: number, dt: number): void {
+    for (const b of this.buzzballs) {
+      if (b.taken) continue;
+      if (b.expired) {
+        this.floatText(b.x, b.y - 28, "drained");
+        b.poof();
+      } else {
+        b.refresh(now, dt);
+      }
+    }
+    this.buzzballs = this.buzzballs.filter((b) => b.active && !b.taken);
+
+    const near = this.nearestBuzzball();
+    if (
+      near &&
+      !this.buzzAwakening &&
+      !this.player.inputLocked &&
+      !this.player.structure.isOut() &&
+      Phaser.Math.Distance.Between(this.player.x, this.player.y, near.x, near.y) < 42
+    ) {
+      this.drinkBuzzball(near);
+    }
+
+    this.syncBuzzState(now);
+  }
+
+  private syncBuzzState(now: number): void {
+    const on = this.player.isBuzzed(now) || this.buzzAwakening;
+    if (!on) {
+      if (this.buzzPowerLive) {
+        this.buzzPowerLive = false;
+        this.player.setBuzzedMove(false);
+        this.buzzAura?.destroy();
+        this.buzzAura = undefined;
+        this.buzzFadeWarned = false;
+        void chipSfx.buzzFade();
+        this.setStatus("Buzzball spent");
+        this.floatText(this.player.x, this.player.y - 64, "spent");
+      }
+      return;
+    }
+
+    this.buzzPowerLive = true;
+    if (now >= this.player.buzzedUntil - 2000 && !this.buzzFadeWarned && !this.buzzAwakening) {
+      this.buzzFadeWarned = true;
+      this.setStatus("Buzzball wearing off…");
+    }
+
+    this.ensureBuzzAura();
+    drawBuzzAura(this.buzzAura!, this.player, now, this.buzzAwakening);
+  }
+
+  private updateSkyDrone(now: number, dt: number): void {
+    if (
+      this.player.action === "jump_kick" ||
+      this.player.action === "backflip"
+    ) {
+      this.skyDrone.tryJumpKick(this.player);
+    }
+    this.skyDrone.update(
+      now,
+      dt,
+      this.cameras.main.scrollX,
+      this.player,
+      this.droneBossLive,
+      (knockDir) => this.onDroneSwoop(now, knockDir),
+    );
+    const drone = this.skyDrone.getAudio(this.cameras.main.scrollX);
+    chipSfx.setDrone(drone.active, drone.intensity, drone.pan);
+
+    const droneEv = this.skyDrone.takeEvent();
+    if (droneEv === "filming") {
+      this.floatText(this.player.x, this.player.y - 78, "filming you");
+      this.setStatus("drone filming");
+    } else if (droneEv === "kicked") {
+      this.cameras.main.shake(90, 0.006);
+      this.floatText(this.player.x, this.player.y - 72, "booted it");
+      this.setStatus("drone kicked — losing lift");
+      void chipSfx.hit("heavy");
+    } else if (droneEv === "exploded") {
+      const boom = this.skyDrone.getBoomPos();
+      this.onDroneExplode(now, boom.x, boom.y);
+    }
+  }
+
+  private onDroneSwoop(now: number, knockDir: number): void {
+    if (
+      this.player.structure.isOut() ||
+      this.player.structure.cuffed ||
+      this.player.structure.downed
+    ) {
+      return;
+    }
+    this.player.receiveStrike({
+      kind: "jump_kick",
+      power: 0.78,
+      critical: false,
+      dirty: false,
+      onOpening: this.player.structure.isOpen(now),
+      now,
+      bodyPart: "head",
+      knockDir,
+    });
+    this.cameras.main.shake(100, 0.006);
+    this.floatText(this.player.x, this.player.y - 64, "swoop!");
+  }
+
+  private onDroneExplode(now: number, x: number, y: number): void {
+    const flash = this.add.circle(x, y, 10, 0xfff4c8, 0.9).setDepth(184);
+    this.tweens.add({
+      targets: flash,
+      scale: 7,
+      alpha: 0,
+      duration: 280,
+      ease: "Cubic.easeOut",
+      onComplete: () => flash.destroy(),
+    });
+    this.cameras.main.shake(280, 0.018);
+    void chipSfx.crash();
+    void chipSfx.hit("heavy");
+    this.floatText(x, y - 48, "KABOOM");
+    this.setStatus("drone exploded");
+
+    const radius = 110;
+    for (const f of this.fighters) {
+      if (!f.active) continue;
+      if (f.structure.isOut() || f.structure.cuffed) continue;
+      const d = Math.hypot(f.x - x, f.laneY - y);
+      if (d > radius) continue;
+      f.tossVx = 0;
+      f.tossUntil = 0;
+      f.airborne = false;
+      f.jumpVy = 0;
+      f.clearCarMount();
+      f.y = f.laneY;
+      f.groundY = f.laneY;
+      f.structure.knockOutCold();
+      f.setAction("out_cold", now, 999999);
+      f.markPlantHere();
+      f.invulnUntil = now + 600;
+      this.floatText(f.x, f.y - 56, "out");
+    }
+  }
+
+  private maybeDropBuzzball(foe: Enemy): void {
+    if (this.buzzballs.some((b) => !b.taken)) return;
+    const chance = foe.isBoss ? 0.12 : 0.06;
+    if (Math.random() > chance) return;
+    const awayFromPlayer = Math.sign(foe.x - this.player.x);
+    const rollDir =
+      awayFromPlayer !== 0 ? awayFromPlayer : -foe.facing || (Math.random() < 0.5 ? -1 : 1);
+    this.spawnBuzzball(foe.x, foe.laneY + 6, rollDir);
+    this.setStatus("Buzzball dropped — chase it");
+  }
+
   private clearFoes(): void {
     for (const e of this.enemies) e.destroy(true);
     for (const c of this.civilians) {
@@ -459,15 +772,24 @@ export class DebugArenaScene extends Phaser.Scene {
     for (const d of this.destructibles) d.destroy();
     for (const w of this.pickups) w.destroy(true);
     for (const b of this.skateboards) b.destroy(true);
+    for (const b of this.buzzballs) b.destroy(true);
     for (const s of this.foodStalls) s.destroy();
     for (const s of this.weaponShops) s.destroy();
     for (const t of this.thrown) t.destroySelf();
+    this.droneBossLive = false;
+    this.skyDrone.debugClear();
+    this.buzzAura?.destroy();
+    this.buzzAura = undefined;
+    this.buzzAwakening = false;
+    this.buzzFadeWarned = false;
+    this.buzzPowerLive = false;
     this.enemies = [];
     this.civilians = [];
     this.police = [];
     this.destructibles = [];
     this.pickups = [];
     this.skateboards = [];
+    this.buzzballs = [];
     this.foodStalls = [];
     this.weaponShops = [];
     this.thrown = [];
@@ -489,6 +811,13 @@ export class DebugArenaScene extends Phaser.Scene {
     this.player.clearCarMount();
     this.player.climbing = false;
     this.player.money = 80;
+    this.player.buzzedUntil = 0;
+    this.player.setBuzzedMove(false);
+    this.buzzAura?.destroy();
+    this.buzzAura = undefined;
+    this.buzzAwakening = false;
+    this.buzzFadeWarned = false;
+    this.buzzPowerLive = false;
     this.player.refreshVisuals(now, 0);
   }
 
@@ -569,7 +898,8 @@ export class DebugArenaScene extends Phaser.Scene {
         looted ||
         this.tryBuyWeapon() ||
         this.tryBuyFood() ||
-        this.tryPickupSkateboard();
+        this.tryPickupSkateboard() ||
+        this.tryPickupBuzzball();
       if (!bought && !this.tryPickupWeapon()) {
         this.floatText(this.player.x, this.player.y - 50, "nothing to grab");
       }
@@ -610,6 +940,8 @@ export class DebugArenaScene extends Phaser.Scene {
     }
 
     this.updateThrows(now, dt);
+    this.updateBuzzballs(now, dt);
+    this.updateSkyDrone(now, dt);
     for (const d of this.destructibles) d.update(now);
 
     resolveCombat(now, this.fighters, (ev) => this.onCombat(ev));
@@ -812,6 +1144,7 @@ export class DebugArenaScene extends Phaser.Scene {
     ) {
       this.bubbles.clearOwner(ev.target);
       this.tryPlayerQuip(this.time.now);
+      if (ev.target instanceof Enemy) this.maybeDropBuzzball(ev.target);
     }
   }
 

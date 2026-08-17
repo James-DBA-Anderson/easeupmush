@@ -2627,7 +2627,12 @@ export function drawBeachBbq(
   }
 }
 
-export function drawCoffeeVan(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+export function drawCoffeeVan(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  stage: 0 | 1 | 2 | 3 = 0,
+): void {
   // Roadside steel coffee van — brushed metal, rivets, service hatch
   strokeFill(ctx, () => {
     ctx.fillStyle = "rgba(0,0,0,0.22)";
@@ -2635,29 +2640,73 @@ export function drawCoffeeVan(ctx: CanvasRenderingContext2D, w: number, h: numbe
     ctx.ellipse(w / 2, h - 4, w * 0.44, 7, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Steel body panels
+    // Steel body panels — darken as it gets written off
     const steel = ctx.createLinearGradient(0, h * 0.18, 0, h * 0.78);
-    steel.addColorStop(0, "#c8d0d6");
-    steel.addColorStop(0.45, "#9aa6b0");
-    steel.addColorStop(1, "#6e7a84");
+    if (stage >= 3) {
+      steel.addColorStop(0, "#5a6068");
+      steel.addColorStop(0.45, "#3a4048");
+      steel.addColorStop(1, "#2a3036");
+    } else if (stage >= 2) {
+      steel.addColorStop(0, "#a8b0b8");
+      steel.addColorStop(0.45, "#7a8690");
+      steel.addColorStop(1, "#5a646c");
+    } else if (stage >= 1) {
+      steel.addColorStop(0, "#b8c0c6");
+      steel.addColorStop(0.45, "#8a96a0");
+      steel.addColorStop(1, "#6e7a84");
+    } else {
+      steel.addColorStop(0, "#c8d0d6");
+      steel.addColorStop(0.45, "#9aa6b0");
+      steel.addColorStop(1, "#6e7a84");
+    }
     ctx.fillStyle = steel;
-    ctx.fillRect(10, h * 0.2, w - 20, h * 0.54);
-    ctx.strokeRect(10, h * 0.2, w - 20, h * 0.54);
+    const bodyTop = stage >= 3 ? h * 0.34 : h * 0.2;
+    const bodyH = stage >= 3 ? h * 0.38 : h * 0.54;
+    ctx.fillRect(10, bodyTop, w - 20, bodyH);
+    ctx.strokeRect(10, bodyTop, w - 20, bodyH);
 
     // Panel seams
     ctx.strokeStyle = "rgba(40,45,50,0.55)";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(w * 0.35, h * 0.2);
-    ctx.lineTo(w * 0.35, h * 0.74);
-    ctx.moveTo(w * 0.68, h * 0.2);
-    ctx.lineTo(w * 0.68, h * 0.74);
+    ctx.moveTo(w * 0.35, bodyTop);
+    ctx.lineTo(w * 0.35, bodyTop + bodyH);
+    ctx.moveTo(w * 0.68, bodyTop);
+    ctx.lineTo(w * 0.68, bodyTop + bodyH);
     ctx.stroke();
+
+    if (stage >= 1) {
+      ctx.beginPath();
+      ctx.moveTo(24, h * 0.42);
+      ctx.quadraticCurveTo(38, h * 0.56, 52, h * 0.4);
+      ctx.stroke();
+    }
+    if (stage >= 2) {
+      ctx.beginPath();
+      ctx.moveTo(w * 0.42, h * 0.36);
+      ctx.lineTo(w * 0.58, h * 0.52);
+      ctx.moveTo(w * 0.58, h * 0.36);
+      ctx.lineTo(w * 0.42, h * 0.52);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(w * 0.72, h * 0.48);
+      ctx.lineTo(w - 18, h * 0.62);
+      ctx.stroke();
+    }
+    if (stage >= 3) {
+      ctx.fillStyle = "#1a1410";
+      ctx.fillRect(w * 0.22, h * 0.38, w * 0.48, 8);
+      ctx.beginPath();
+      ctx.moveTo(18, h * 0.58);
+      ctx.lineTo(w * 0.42, h * 0.68);
+      ctx.stroke();
+    }
 
     // Rivets
     ctx.fillStyle = "#5a646c";
     for (const rx of [18, w * 0.35, w * 0.68, w - 18]) {
       for (const ry of [h * 0.28, h * 0.48, h * 0.66]) {
+        if (stage >= 3 && ry > h * 0.52) continue;
         ctx.beginPath();
         ctx.arc(rx, ry, 2.2, 0, Math.PI * 2);
         ctx.fill();
@@ -2665,52 +2714,67 @@ export function drawCoffeeVan(ctx: CanvasRenderingContext2D, w: number, h: numbe
     }
 
     // Roof lip / steel canopy
-    ctx.fillStyle = "#7a8690";
-    ctx.fillRect(8, h * 0.1, w - 16, 16);
-    ctx.strokeStyle = "#1a1410";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(8, h * 0.1, w - 16, 16);
+    if (stage < 3) {
+      ctx.fillStyle = stage >= 2 ? "#6a7680" : "#7a8690";
+      ctx.fillRect(8, h * 0.1, w - 16, 16);
+      ctx.strokeStyle = "#1a1410";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(8, h * 0.1, w - 16, 16);
+    }
 
     // Service hatch
-    ctx.fillStyle = "#2a3036";
-    ctx.fillRect(w * 0.2, h * 0.32, w * 0.52, h * 0.28);
-    ctx.fillStyle = "#d8e0e6";
-    ctx.fillRect(w * 0.22, h * 0.34, w * 0.48, h * 0.24);
-    ctx.strokeRect(w * 0.22, h * 0.34, w * 0.48, h * 0.24);
+    if (stage < 3) {
+      ctx.fillStyle = "#2a3036";
+      ctx.fillRect(w * 0.2, h * 0.32, w * 0.52, h * 0.28);
+      ctx.fillStyle = stage >= 2 ? "#6a7884" : "#d8e0e6";
+      ctx.fillRect(w * 0.22, h * 0.34, w * 0.48, h * 0.24);
+      ctx.strokeRect(w * 0.22, h * 0.34, w * 0.48, h * 0.24);
+    }
 
     // Steel sign board
-    ctx.fillStyle = "#3a444c";
-    ctx.fillRect(w * 0.26, h * 0.4, w * 0.4, 18);
-    ctx.strokeRect(w * 0.26, h * 0.4, w * 0.4, 18);
-    ctx.fillStyle = "#e8f0f4";
-    ctx.font = "bold 14px sans-serif";
-    ctx.fillText("COFFEE", w * 0.32, h * 0.525);
+    if (stage < 3) {
+      ctx.fillStyle = "#3a444c";
+      ctx.fillRect(w * 0.26, h * 0.4, w * 0.4, 18);
+      ctx.strokeRect(w * 0.26, h * 0.4, w * 0.4, 18);
+      ctx.fillStyle = stage >= 2 ? "#9aa8b0" : "#e8f0f4";
+      ctx.font = "bold 14px sans-serif";
+      ctx.fillText(stage >= 2 ? "COFF??" : "COFFEE", w * 0.32, h * 0.525);
+    }
 
     // Chrome bumper strip
-    ctx.fillStyle = "#b8c4cc";
+    ctx.fillStyle = stage >= 2 ? "#8a949c" : "#b8c4cc";
     ctx.fillRect(12, h * 0.7, w - 24, 6);
     ctx.strokeRect(12, h * 0.7, w - 24, 6);
 
     // Wheels
     ctx.fillStyle = "#1a1410";
     ctx.beginPath();
-    ctx.arc(36, h * 0.8, 14, 0, Math.PI * 2);
-    ctx.arc(w - 36, h * 0.8, 14, 0, Math.PI * 2);
+    ctx.arc(36, h * 0.8, stage >= 3 ? 11 : 14, 0, Math.PI * 2);
+    ctx.arc(w - 36, stage >= 3 ? h * 0.78 : h * 0.8, stage >= 3 ? 10 : 14, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = "#8a949c";
     ctx.beginPath();
     ctx.arc(36, h * 0.8, 5, 0, Math.PI * 2);
-    ctx.arc(w - 36, h * 0.8, 5, 0, Math.PI * 2);
+    ctx.arc(w - 36, stage >= 3 ? h * 0.78 : h * 0.8, 5, 0, Math.PI * 2);
     ctx.fill();
 
     // Steam from hatch
-    ctx.strokeStyle = "rgba(80,90,100,0.45)";
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(w * 0.72, h * 0.2);
-    ctx.quadraticCurveTo(w * 0.78, h * 0.1, w * 0.72, h * 0.04);
-    ctx.stroke();
+    if (stage < 2) {
+      ctx.strokeStyle = "rgba(80,90,100,0.45)";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(w * 0.72, h * 0.2);
+      ctx.quadraticCurveTo(w * 0.78, h * 0.1, w * 0.72, h * 0.04);
+      ctx.stroke();
+    } else if (stage === 2) {
+      ctx.strokeStyle = "rgba(60,70,80,0.35)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(w * 0.72, h * 0.22);
+      ctx.lineTo(w * 0.76, h * 0.16);
+      ctx.stroke();
+    }
   }, "#9aa6b0", "#1a1410", 2);
 }
 

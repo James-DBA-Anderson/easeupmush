@@ -21,9 +21,9 @@ export type DroneAudio = {
 };
 
 /**
- * Occasional sky drone along the front — sometimes just buzzing past,
- * sometimes hanging off your shoulder filming. During the Clarence Pier
- * boss it sticks around and dive-bombs between scraps.
+ * Occasional sky drone along the front from Level 2 onward — sometimes just
+ * buzzing past, sometimes hanging off your shoulder filming. During the
+ * Clarence Pier boss it sticks around and dive-bombs between scraps.
  */
 export class SkyDrone {
   private image: Phaser.GameObjects.Image | null = null;
@@ -57,10 +57,34 @@ export class SkyDrone {
   /** Clarence's kit stays gone once you've booted it. */
   private assistWrecked = false;
   private inAssist = false;
+  /** Ambient + combat drone only from Level 2 onward. */
+  private levelActive = false;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
     this.nextEventAt = 12000 + Math.random() * 9000;
+  }
+
+  /** No drone on South Parade — call when Level 2 starts. */
+  resetForLevelTwo(now: number): void {
+    this.destroyImage();
+    this.mode = "idle";
+    this.inAssist = false;
+    this.huntPasses = false;
+    this.assistWrecked = false;
+    this.wreckedUntil = 0;
+    this.announcedFilm = false;
+    this.levelActive = true;
+    this.nextEventAt = now + 9000 + Math.random() * 7000;
+  }
+
+  /** Tear down any active pass — Level 1 stays clear. */
+  standDown(): void {
+    this.levelActive = false;
+    if (this.mode === "idle" && !this.image) return;
+    this.destroyImage();
+    this.mode = "idle";
+    this.inAssist = false;
   }
 
   /** One-shot notice for the scene (filming start, etc.). */
@@ -133,6 +157,10 @@ export class SkyDrone {
     bossLive: boolean,
     onSwoopHit: (knockDir: number) => void,
   ): void {
+    if (!this.levelActive) {
+      this.standDown();
+      return;
+    }
     this.anim += dt * 14;
     if (this.image) {
       const frame = Math.floor(this.anim) % 2 === 0 ? "sky_drone_0" : "sky_drone_1";
@@ -330,6 +358,30 @@ export class SkyDrone {
         this.image.setRotation(0);
       }
     }
+  }
+
+  /** Debug arena — skip Level 2 gate and start filming. */
+  debugStartFilm(player: Fighter, now: number): void {
+    this.levelActive = true;
+    this.huntPasses = true;
+    this.spawnFilm(player, now);
+  }
+
+  /** Debug arena — screen-space pass across the top. */
+  debugStartFlyby(): void {
+    this.levelActive = true;
+    this.spawnFlyby();
+  }
+
+  /** Debug arena — Clarence-style combat orbit + swoops. */
+  debugStartCombat(player: Fighter, now: number): void {
+    this.levelActive = true;
+    this.forceAssist(player, now);
+  }
+
+  /** Debug arena — tear down any active pass. */
+  debugClear(): void {
+    this.standDown();
   }
 
   private spawnFlyby(): void {

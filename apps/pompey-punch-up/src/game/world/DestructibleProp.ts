@@ -52,10 +52,10 @@ const STATS: Record<
     scrap: "brick",
   },
   coffee_van: {
-    hits: 18,
-    broken: "coffee_van",
+    hits: 12,
+    broken: "coffee_van_wrecked",
     label: "coffee van",
-    scrapChance: 0.2,
+    scrapChance: 0.55,
     scrap: "bottle",
   },
 };
@@ -127,6 +127,11 @@ export class DestructibleProp {
     return this.key === "car";
   }
 
+  /** Parked motors that dent, wreck, and stay on the road like saloons. */
+  get isMotorWreck(): boolean {
+    return this.key === "car" || this.key === "coffee_van";
+  }
+
   /** Roadside motors / vans that fighters draw behind when north of them. */
   get isOccluder(): boolean {
     return this.key === "car" || this.key === "coffee_van";
@@ -135,7 +140,7 @@ export class DestructibleProp {
   /** Still usable cover (wrecked bins don't hide you). */
   get offersCover(): boolean {
     if (!this.canHide) return false;
-    if (this.key !== "car" && this.destroyed) return false;
+    if (!this.isMotorWreck && this.destroyed) return false;
     return true;
   }
 
@@ -330,6 +335,22 @@ export class DestructibleProp {
     };
   }
 
+  private applyMotorWear(scene: Phaser.Scene, wear: number, dir: number): void {
+    if (!this.isMotorWreck) return;
+    const prefix = this.key === "car" ? "car" : "coffee_van";
+    if (wear >= 0.66 && scene.textures.exists(`${prefix}_dent2`)) {
+      this.image.setTexture(`${prefix}_dent2`);
+    } else if (wear >= 0.33 && scene.textures.exists(`${prefix}_dent1`)) {
+      this.image.setTexture(`${prefix}_dent1`);
+    }
+    scene.tweens.add({
+      targets: this.image,
+      x: this.x + dir * 3,
+      duration: 50,
+      yoyo: true,
+    });
+  }
+
   /** One hit per attacker action id (actionUntil timestamp works as id). */
   canAcceptHit(actionId: number): boolean {
     if (this.destroyed) return false;
@@ -389,19 +410,9 @@ export class DestructibleProp {
     if (this.hitsLeft > 0) {
       const wear = 1 - this.hitsLeft / this.maxHits;
       this.image.setAlpha(1 - wear * 0.12);
-      // SF2-style staged wreck
-      if (this.key === "car") {
-        if (wear >= 0.66 && scene.textures.exists("car_dent2")) {
-          this.image.setTexture("car_dent2");
-        } else if (wear >= 0.33 && scene.textures.exists("car_dent1")) {
-          this.image.setTexture("car_dent1");
-        }
-        scene.tweens.add({
-          targets: this.image,
-          x: this.x + dir * 3,
-          duration: 50,
-          yoyo: true,
-        });
+      // SF2-style staged wreck — saloons and the Eastney coffee van
+      if (this.isMotorWreck) {
+        this.applyMotorWear(scene, wear, dir);
       }
       return { destroyed: false, label: this.label, scrap: null };
     }
@@ -425,8 +436,8 @@ export class DestructibleProp {
     this.image.setAlpha(0.95);
     this.image.setAngle((Math.random() - 0.5) * 20);
 
-    // Cars leave a wreck that still blocks; bins/bollards become debris you can walk through
-    if (this.key === "car") {
+    // Motors leave a wreck that still blocks; bins/bollards become debris you can walk through
+    if (this.isMotorWreck) {
       this.blocks = true;
       this.rx *= 0.9;
       this.drawHideMark(0.4);
@@ -448,7 +459,7 @@ export class DestructibleProp {
   }
 
   update(now: number): void {
-    if (this.destroyed && this.key !== "car") return;
+    if (this.destroyed && !this.isMotorWreck) return;
     if (now >= this.flashUntil) this.image.clearTint();
     // Keep chalk mark under props that get nudged by hits
     if (this.hideMark && this.offersCover && Math.abs(this.image.x - this.x) > 0.5) {

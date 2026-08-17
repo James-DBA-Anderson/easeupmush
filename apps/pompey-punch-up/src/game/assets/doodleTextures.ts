@@ -49,10 +49,11 @@ function wobble(n: number, amp = 2): number {
 
 export function generateDoodleTextures(scene: Phaser.Scene): void {
   // Bump this when poses/assets change so hot reload regenerates.
-  const VERSION = "doodle_v130";
+  const VERSION = "doodle_v131";
   if (scene.textures.exists(VERSION)) return;
   if (
     scene.textures.exists("sky") ||
+    scene.textures.exists("doodle_v130") ||
     scene.textures.exists("doodle_v129") ||
     scene.textures.exists("doodle_v127") ||
     scene.textures.exists("doodle_v126") ||
@@ -215,6 +216,9 @@ export function generateDoodleTextures(scene: Phaser.Scene): void {
           "sea_kayak_3",
           "dog",
           "coffee_van",
+          "coffee_van_dent1",
+          "coffee_van_dent2",
+          "coffee_van_wrecked",
           "coffee_cup_cafe",
           "kids_park",
           "beach_bbq",
@@ -280,6 +284,7 @@ export function generateDoodleTextures(scene: Phaser.Scene): void {
   makeSolentFort(scene);
   makeForeground(scene);
   makeCar(scene);
+  makeCoffeeVan(scene);
   makePassingTraffic(scene);
   makeFoodStalls(scene);
   makeWeapons(scene);
@@ -376,11 +381,6 @@ function makeSceneryExtras(scene: Phaser.Scene): void {
   {
     const tex = scene.textures.createCanvas("beach_bbq", 120, 96)!;
     drawBeachBbq(tex.getContext(), 120, 96, 0);
-    tex.refresh();
-  }
-  {
-    const tex = scene.textures.createCanvas("coffee_van", 200, 130)!;
-    drawCoffeeVan(tex.getContext(), 200, 130);
     tex.refresh();
   }
   {
@@ -3688,6 +3688,21 @@ function makeSeagull(scene: Phaser.Scene): void {
         ctx.stroke();
       }
     }, "#1a1410", 1.8);
+    tex.refresh();
+  }
+}
+
+function makeCoffeeVan(scene: Phaser.Scene): void {
+  const w = 200;
+  const h = 130;
+  for (const [key, stage] of [
+    ["coffee_van", 0],
+    ["coffee_van_dent1", 1],
+    ["coffee_van_dent2", 2],
+    ["coffee_van_wrecked", 3],
+  ] as const) {
+    const tex = scene.textures.createCanvas(key, w, h)!;
+    drawCoffeeVan(tex.getContext(), w, h, stage);
     tex.refresh();
   }
 }
