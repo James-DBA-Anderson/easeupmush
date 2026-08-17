@@ -87,6 +87,12 @@
         touch-action: none;
       }
 
+      /* Don't let max-* shrink Phaser's EXPAND canvas below the size it expects */
+      body.mobile-play #game-root canvas {
+        max-width: none;
+        max-height: none;
+      }
+
       #boot-loader {
         position: fixed;
         inset: 0;
@@ -111,14 +117,34 @@
         pointer-events: none;
       }
 
+      #boot-loader .boot-wordmark {
+        margin: 0;
+        font-family: Impact, "Arial Black", "Helvetica Neue", sans-serif;
+        font-weight: 900;
+        font-style: italic;
+        font-size: clamp(2.4rem, 11vw, 4.6rem);
+        line-height: 0.88;
+        letter-spacing: -0.04em;
+        color: #e8f2ff;
+        text-shadow:
+          3px 4px 0 #061018,
+          -1px -1px 0 #ff2a1a,
+          1px 0 0 #ffcc33;
+      }
+
+      #boot-loader .boot-wordmark span {
+        display: block;
+      }
+
       #boot-loader .boot-logo {
         display: block;
         width: min(520px, 88vw);
-        max-width: 100%;
-        height: auto;
+        /* Explicit height — iOS canvas + height:auto often collapses to 0 */
+        height: calc(min(520px, 88vw) * 178 / 820);
+        max-width: 92vw;
+        max-height: 28vh;
         margin: 0;
-        /* Intrinsic bitmap is 820×178; keep ratio so iOS doesn't collapse height */
-        aspect-ratio: 820 / 178;
+        object-fit: contain;
       }
 
       #boot-loader .boot-line {
@@ -444,12 +470,17 @@
   </head>
   <body>
     <div id="boot-loader" role="status" aria-live="polite">
+      <h1 class="boot-wordmark" id="boot-wordmark">
+        <span>POMPEY</span>
+        <span>PUNCH-UP</span>
+      </h1>
       <canvas
         id="boot-logo"
         class="boot-logo"
         width="820"
         height="178"
-        aria-label="Pompey Punch-Up"
+        hidden
+        aria-hidden="true"
       ></canvas>
       <p class="boot-line">Waking up on Southsea…</p>
       <div class="boot-bar" aria-hidden="true"><i></i></div>

@@ -7,10 +7,14 @@ function paint(): void {
 
 paint();
 
-// Re-paint after fonts settle (Impact / Arial Black metrics can shift on first load).
 if (document.fonts?.ready) {
   void document.fonts.ready.then(() => {
     const loader = document.getElementById("boot-loader");
     if (loader && !loader.classList.contains("is-done")) paint();
   });
 }
+
+window.addEventListener("resize", paint);
+window.addEventListener("orientationchange", () => {
+  window.setTimeout(paint, 80);
+});

@@ -490,6 +490,8 @@ export class BootScene extends Phaser.Scene {
   /** Last demo enemy pose — used to fire hit SFX on connect frames. */
   private lastDemoEnemy: string | undefined;
 
+  private lastViewKey = "";
+
   constructor() {
     super("BootScene");
   }
@@ -499,20 +501,19 @@ export class BootScene extends Phaser.Scene {
     this.controlsList = controlsForDevice();
     const mobile = isMobilePlay();
 
-    this.bg = this.add.graphics().setDepth(0);
+    this.bg = this.add.graphics().setDepth(0).setScrollFactor(0);
 
-    // Title composition is always 960×540. Scale.EXPAND can grow the canvas
-    // (especially while the phone is still portrait under the rotate gate);
-    // pinning to the design size keeps demo + Start on-camera after rotate.
     this.logo = this.add
       .image(0, 0, "title_logo")
       .setOrigin(0.5)
       .setDepth(5)
+      .setScrollFactor(0)
       .setScale(mobile ? 0.82 : 0.7);
 
     this.groundMark = this.add
       .rectangle(0, 0, 300, 10, 0x1a1410, 0.45)
       .setOrigin(0.5)
+      .setScrollFactor(0)
       .setDepth(1);
 
     this.bin = this.add
@@ -520,6 +521,7 @@ export class BootScene extends Phaser.Scene {
       .setOrigin(0.5, 1)
       .setScale(1.15)
       .setVisible(false)
+      .setScrollFactor(0)
       .setDepth(1);
 
     this.foe = this.add
@@ -528,12 +530,14 @@ export class BootScene extends Phaser.Scene {
       .setScale(mobile ? 1.45 : 1.45)
       .setFlipX(true)
       .setVisible(false)
+      .setScrollFactor(0)
       .setDepth(2);
 
     this.hero = this.add
       .image(0, 0, "player_idle")
       .setOrigin(0.5, 1)
       .setScale(mobile ? 1.45 : 1.45)
+      .setScrollFactor(0)
       .setDepth(3);
 
     this.callout = this.add
@@ -546,6 +550,7 @@ export class BootScene extends Phaser.Scene {
         align: "center",
       })
       .setOrigin(0.5, 0)
+      .setScrollFactor(0)
       .setDepth(10);
 
     if (!mobile) {
@@ -558,6 +563,7 @@ export class BootScene extends Phaser.Scene {
           padding: { x: 10, y: 4 },
         })
         .setOrigin(0, 1)
+        .setScrollFactor(0)
         .setDepth(10)
         .setInteractive({ useHandCursor: true });
 
@@ -578,6 +584,7 @@ export class BootScene extends Phaser.Scene {
         align: "center",
       })
       .setOrigin(0.5, 1)
+      .setScrollFactor(0)
       .setDepth(10)
       .setInteractive({ useHandCursor: true });
 
@@ -615,21 +622,21 @@ export class BootScene extends Phaser.Scene {
     this.input.keyboard?.once("keydown", () => this.startBeach());
 
     // Let the first title frame paint, then drop the HTML loading screen
-    this.time.delayedCall(0, () => dismissBootLoader());
+    this.time.delayedCall(120, () => dismissBootLoader());
   }
 
   /**
-   * Fit the title to the live canvas — EXPAND phones are often shorter than
-   * 540px, so a 960×540 band puts Start / the demo below the camera.
+   * Fit the title to whatever the camera is actually showing.
+   * Don't resize the camera — EXPAND already owns that, and setSize/setViewport
+   * in game units puts Start off a short phone screen.
    */
   private layoutTitle = (): void => {
     if (this.started) return;
     const mobile = isMobilePlay();
-    const viewW = Math.max(1, Math.round(this.scale.gameSize.width || this.scale.width));
-    const viewH = Math.max(1, Math.round(this.scale.gameSize.height || this.scale.height));
-    this.cameras.main.setViewport(0, 0, viewW, viewH);
-    this.cameras.main.setSize(viewW, viewH);
-    this.cameras.main.setScroll(0, 0);
+    const cam = this.cameras.main;
+    const viewW = Math.max(1, cam.width || this.scale.width);
+    const viewH = Math.max(1, cam.height || this.scale.height);
+    this.lastViewKey = `0:0:${Math.round(viewW)}:${Math.round(viewH)}`;
 
     this.bg.clear();
     this.bg.fillGradientStyle(0x241c16, 0x241c16, 0x3a2c22, 0x3a2c22, 1);
@@ -699,6 +706,9 @@ export class BootScene extends Phaser.Scene {
 
   update(_time: number, _delta: number): void {
     if (this.started) return;
+    const cam = this.cameras.main;
+    const viewKey = `0:0:${Math.round(cam.width)}:${Math.round(cam.height)}`;
+    if (viewKey !== this.lastViewKey) this.layoutTitle();
     const now = this.time.now;
     this.updateTwitch(now);
     if (now < this.frameUntil) return;
@@ -897,6 +907,7 @@ export class BootScene extends Phaser.Scene {
       const spark = this.add
         .rectangle(x, y, len, 2.5, 0xffe08a, 0.95)
         .setAngle((ang * 180) / Math.PI)
+        .setScrollFactor(0)
         .setDepth(12);
       this.tweens.add({
         targets: spark,
