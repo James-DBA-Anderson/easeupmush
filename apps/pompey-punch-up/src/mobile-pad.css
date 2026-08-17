@@ -1,0 +1,268 @@
+:root {
+  --mp-cream: #f2e6d8;
+  --mp-sand: #c4a882;
+  --mp-amber: #ffe08a;
+  --mp-pad: rgba(26, 20, 16, 0.55);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+}
+
+body.mobile-play {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+body.mobile-play #game-root {
+  padding: 0;
+}
+
+body.mobile-play #game-root canvas {
+  max-width: none;
+  max-height: none;
+  touch-action: none;
+}
+
+#rotate-gate {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  padding-left: calc(1.5rem + var(--safe-l));
+  padding-right: calc(1.5rem + var(--safe-r));
+  background:
+    radial-gradient(ellipse at 50% 30%, #3a2e24 0%, #1a1410 70%),
+    #1a1410;
+  color: var(--mp-cream);
+  text-align: center;
+}
+
+body.mobile-portrait #rotate-gate {
+  display: flex;
+}
+
+body.mobile-portrait #game-root,
+body.mobile-portrait #mobile-pad {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+#rotate-gate .phone {
+  width: 52px;
+  height: 88px;
+  border: 3px solid var(--mp-amber);
+  border-radius: 10px;
+  position: relative;
+  animation: tip-phone 1.6s ease-in-out infinite;
+}
+
+#rotate-gate .phone::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  width: 16px;
+  height: 3px;
+  margin-left: -8px;
+  background: var(--mp-amber);
+  border-radius: 2px;
+}
+
+@keyframes tip-phone {
+  0%,
+  20% {
+    transform: rotate(0deg);
+  }
+  45%,
+  70% {
+    transform: rotate(90deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+#rotate-gate h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: normal;
+  color: var(--mp-amber);
+}
+
+#rotate-gate p {
+  margin: 0;
+  max-width: 16rem;
+  font-size: 0.95rem;
+  line-height: 1.35;
+  color: var(--mp-sand);
+}
+
+#mobile-pad {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  pointer-events: none;
+}
+
+#mobile-pad[hidden] {
+  display: none !important;
+}
+
+.mp-cluster {
+  position: absolute;
+  display: grid;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.mp-stick-zone {
+  position: absolute;
+  left: 0;
+  top: 18%;
+  bottom: 0;
+  width: min(46vw, 320px);
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mp-stick {
+  position: fixed;
+  width: 118px;
+  height: 118px;
+  margin-left: -59px;
+  margin-top: -59px;
+  border-radius: 999px;
+  pointer-events: none;
+  opacity: 0.32;
+  transition: opacity 0.12s ease;
+  left: max(72px, calc(var(--safe-l) + 72px));
+  top: auto;
+  bottom: max(64px, calc(var(--safe-b) + 64px));
+}
+
+.mp-stick.is-active {
+  opacity: 1;
+  bottom: auto;
+}
+
+.mp-stick-base {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  border: 2px solid rgba(242, 230, 216, 0.28);
+  background: radial-gradient(
+    circle at 50% 45%,
+    rgba(60, 48, 40, 0.35),
+    rgba(20, 14, 10, 0.55)
+  );
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.mp-stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 54px;
+  height: 54px;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  border: 2px solid rgba(255, 200, 120, 0.45);
+  background: radial-gradient(
+    circle at 40% 35%,
+    rgba(90, 70, 55, 0.9),
+    rgba(40, 28, 20, 0.92)
+  );
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.4);
+}
+
+.mp-stick-zone.is-active .mp-stick-knob {
+  border-color: rgba(255, 200, 120, 0.7);
+}
+
+.mp-cluster--fight {
+  pointer-events: none;
+  right: max(10px, var(--safe-r));
+  bottom: max(12px, var(--safe-b));
+  grid-template-columns: 68px 68px;
+  grid-template-rows: 56px 56px 56px;
+  grid-template-areas:
+    "punch kick"
+    "grab block"
+    "run jump";
+}
+
+.mp-act--punch {
+  grid-area: punch;
+}
+.mp-act--kick {
+  grid-area: kick;
+}
+.mp-act--grab {
+  grid-area: grab;
+}
+.mp-act--block {
+  grid-area: block;
+}
+.mp-act--run {
+  grid-area: run;
+}
+.mp-act--jump {
+  grid-area: jump;
+}
+
+.mp-btn {
+  pointer-events: auto;
+  touch-action: none;
+  appearance: none;
+  border: 2px solid rgba(242, 230, 216, 0.35);
+  border-radius: 999px;
+  background: var(--mp-pad);
+  color: var(--mp-cream);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  min-width: 52px;
+  min-height: 52px;
+  padding: 0;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mp-act {
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.mp-act--punch,
+.mp-act--kick {
+  min-width: 68px;
+  min-height: 56px;
+  background: rgba(90, 36, 28, 0.72);
+  border-color: rgba(255, 180, 120, 0.4);
+}
+
+.mp-act--jump {
+  background: rgba(40, 70, 90, 0.72);
+}
+
+.mp-act--block {
+  background: rgba(50, 55, 70, 0.72);
+}
+
+.mp-act--run {
+  background: rgba(70, 55, 30, 0.72);
+}
+
+.mp-btn.is-down {
+  background: rgba(255, 224, 138, 0.45);
+  transform: translateY(1px);
+}

@@ -1,9 +1,63 @@
 import Phaser from "phaser";
 import { GAME_HEIGHT, GAME_WIDTH } from "./game/constants";
 import { DebugArenaScene, type DebugSpawnKind } from "./game/scenes/DebugArenaScene";
+import {
+  isMobilePlay,
+  mountMobileControls,
+  setMobilePadActive,
+  syncPadVisibility,
+  tryEnforceLandscape,
+} from "./game/input/mobilePad";
 
 const parent = document.getElementById("game-root");
 if (!parent) throw new Error("Missing #game-root");
+
+const mobile = isMobilePlay();
+
+function disableMobileBrowserZoom(): void {
+  const block = (ev: Event) => {
+    ev.preventDefault();
+  };
+  document.addEventListener("gesturestart", block, { passive: false });
+  document.addEventListener("gesturechange", block, { passive: false });
+  document.addEventListener("gestureend", block, { passive: false });
+
+  let lastTouchEnd = 0;
+  document.addEventListener(
+    "touchend",
+    (ev) => {
+      const now = Date.now();
+      if (now - lastTouchEnd <= 350) ev.preventDefault();
+      lastTouchEnd = now;
+    },
+    { passive: false },
+  );
+
+  document.addEventListener(
+    "touchmove",
+    (ev) => {
+      if (ev.touches.length > 1) ev.preventDefault();
+    },
+    { passive: false },
+  );
+}
+
+if (mobile) {
+  document.body.classList.add("mobile-play");
+  disableMobileBrowserZoom();
+  syncPadVisibility();
+  mountMobileControls();
+
+  const armLandscape = () => {
+    void tryEnforceLandscape();
+  };
+  window.addEventListener("pointerdown", armLandscape, { once: true });
+  window.addEventListener("orientationchange", () => {
+    syncPadVisibility();
+    void tryEnforceLandscape();
+  });
+  window.addEventListener("resize", syncPadVisibility);
+}
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
@@ -17,8 +71,11 @@ const game = new Phaser.Game({
     arcade: { gravity: { x: 0, y: 0 }, debug: false },
   },
   scale: {
-    mode: Phaser.Scale.FIT,
+    mode: mobile ? Phaser.Scale.EXPAND : Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
+  input: {
+    activePointers: mobile ? 3 : 1,
   },
   scene: [DebugArenaScene],
 });
@@ -48,9 +105,17 @@ function syncPlaceButtons(): void {
   const kind = arena()?.getPlaceKind() ?? null;
   document.querySelectorAll<HTMLElement>("[data-spawn]").forEach((btn) => {
     const k = btn.dataset.spawn;
-    if (k === "clear" || k === "reset_player" || k === "cash" || k === "mount_board" ||
-        k === "buzz_self" || k === "drone_film" || k === "drone_combat" ||
-        k === "drone_flyby" || k === "drone_clear") {
+    if (
+      k === "clear" ||
+      k === "reset_player" ||
+      k === "cash" ||
+      k === "mount_board" ||
+      k === "buzz_self" ||
+      k === "drone_film" ||
+      k === "drone_combat" ||
+      k === "drone_flyby" ||
+      k === "drone_clear"
+    ) {
       btn.classList.remove("active");
       return;
     }
@@ -58,10 +123,18 @@ function syncPlaceButtons(): void {
   });
 }
 
+function syncPanelToggle(): void {
+  const panel = document.querySelector(".panel");
+  const toggle = document.getElementById("debug-panel-toggle");
+  if (!panel || !toggle) return;
+  const open = panel.classList.contains("is-open");
+  toggle.textContent = open ? "Hide spawn panel" : "Spawn panel";
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
 function runSpawn(kind: DebugSpawnKind): void {
   const scene = arena();
   if (!scene || !scene.isPanelReady()) {
-    // Texture gen can take a beat — queue until create() finishes
     (window as DebugWindow).__debugPendingSpawn = kind;
     setNote("Arena loading… will place when ready.");
     return;
@@ -82,9 +155,14 @@ function flushPendingSpawn(): void {
 
 function wirePanel(): void {
   const panel = document.querySelector(".panel");
+  const toggle = document.getElementById("debug-panel-toggle");
+  toggle?.addEventListener("click", () => {
+    panel?.classList.toggle("is-open");
+    syncPanelToggle();
+  });
+
   if (!panel) return;
 
-  // Event delegation — one listener, always hits the live arena bridge
   panel.addEventListener("click", (ev) => {
     const t = ev.target;
     if (!(t instanceof Element)) return;
@@ -152,13 +230,29 @@ async function restartServer(): Promise<void> {
   location.reload();
 }
 
+function refreshMobileScale(): void {
+  if (!game.scale) return;
+  game.scale.refresh();
+  syncPadVisibility();
+}
+
 wirePanel();
 window.addEventListener("debug-arena-ready", () => {
   setNote("No auto-reload — hit Refresh after you save.");
   syncBrainButtons();
   syncPlaceButtons();
+  syncPanelToggle();
   flushPendingSpawn();
+  setMobilePadActive(true);
 });
 window.addEventListener("debug-arena-place", () => syncPlaceButtons());
+
+window.addEventListener("resize", refreshMobileScale);
+window.addEventListener("orientationchange", () => {
+  window.setTimeout(refreshMobileScale, 120);
+});
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", refreshMobileScale);
+}
 
 void game;

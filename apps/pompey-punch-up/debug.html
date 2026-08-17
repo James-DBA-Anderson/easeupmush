@@ -2,10 +2,17 @@
 <html lang="en-GB">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="screen-orientation" content="landscape" />
     <meta name="robots" content="noindex" />
     <title>Debug Arena — Pompey Punch-Up</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/mobile-pad.css" />
     <style>
       :root {
         color-scheme: dark;
@@ -192,9 +199,66 @@
           max-height: 42vh;
         }
       }
+
+      /* Mobile landscape — full-screen arena; spawn panel in a drawer */
+      #debug-panel-toggle {
+        display: none;
+        position: fixed;
+        z-index: 30;
+        top: max(10px, env(safe-area-inset-top, 0px));
+        left: max(10px, env(safe-area-inset-left, 0px));
+        font: inherit;
+        font-size: 0.82rem;
+        cursor: pointer;
+        border: 2px solid var(--ink);
+        background: var(--paper);
+        color: var(--ink);
+        padding: 8px 12px;
+        border-radius: 4px;
+        pointer-events: auto;
+      }
+
+      body.mobile-play.mobile-landscape .layout {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr;
+      }
+
+      body.mobile-play.mobile-landscape .panel {
+        display: none;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        top: auto;
+        max-height: min(58vh, 420px);
+        border-left: none;
+        border-top: 3px solid var(--edge);
+        z-index: 30;
+        box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45);
+      }
+
+      body.mobile-play.mobile-landscape .panel.is-open {
+        display: flex;
+      }
+
+      body.mobile-play.mobile-landscape #debug-panel-toggle {
+        display: block;
+      }
+
+      body.mobile-play.mobile-landscape #game-root {
+        min-height: 100%;
+      }
     </style>
   </head>
   <body>
+    <div id="rotate-gate" aria-live="polite">
+      <div class="phone" aria-hidden="true"></div>
+      <h1>Rotate your phone</h1>
+      <p>Debug arena plays in landscape — turn the device sideways.</p>
+    </div>
+    <button type="button" id="debug-panel-toggle" aria-expanded="false">
+      Spawn panel
+    </button>
     <div class="layout">
       <div id="game-root"></div>
       <aside class="panel">

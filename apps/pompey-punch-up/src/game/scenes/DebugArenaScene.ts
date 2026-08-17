@@ -6,7 +6,7 @@ import { Enemy, type EnemyRole } from "../entities/Enemy";
 import { Civilian, type CivilianVariant } from "../entities/Civilian";
 import { Police } from "../entities/Police";
 import type { Fighter } from "../entities/Fighter";
-import { resolveCombat, tryLoot, type CombatEvent } from "../combat/resolveCombat";
+import { resolveCombat, tryLoot, nearestLootable, type CombatEvent } from "../combat/resolveCombat";
 import { separateFighters, separateFightersFromObstacles } from "../systems/separateFighters";
 import { resolvePropHits } from "../systems/resolvePropHits";
 import { updateCarPlatforms, syncCarOcclusion, wreckCarUnderThrower } from "../systems/climbCars";
@@ -23,6 +23,11 @@ import { FoodStall } from "../world/FoodStall";
 import { WeaponShop } from "../world/WeaponShop";
 import type { Obstacle } from "../world/obstacles";
 import { chipSfx } from "../audio/ChipSfx";
+import {
+  clearPunchJust,
+  isMobilePlay,
+  peekPunchJust,
+} from "../input/mobilePad";
 
 /** Tight arena lane — fits one screen, camera zooms in on the scrap. */
 export const DEBUG_LANE = {
@@ -844,6 +849,7 @@ export class DebugArenaScene extends Phaser.Scene {
     const dt = delta / 1000;
 
     this.bubbles.update(now);
+    this.tryMobilePunchContext();
     this.player.updatePlayer(now, dt, DEBUG_LANE, this.fighters);
     const moan = this.player.takePainMoan();
     if (moan) this.bubbles.say(this.player, moan, 2400);
@@ -954,6 +960,59 @@ export class DebugArenaScene extends Phaser.Scene {
     // Soft revive in the arena so you can keep testing
     if (this.player.structure.isOut() && !this.player.structure.cuffed) {
       this.setStatus("you're down — Reset Player or wait…");
+    }
+  }
+
+  /** On mobile, Punch doubles as grab / buy when something's in range. */
+  private tryMobilePunchContext(): void {
+    if (!isMobilePlay() || !peekPunchJust()) return;
+    if (this.player.structure.isOut()) return;
+
+    const shop = this.weaponShops.find((s) => s.inRange(this.player.x, this.player.laneY));
+    const canBuyWep =
+      !!shop && !shop.soldOut && !!shop.offer && this.player.money >= shop.offer.price;
+    const stall = this.foodStalls.find((s) => s.inRange(this.player.x, this.player.laneY));
+    const canBuyFood =
+      !!stall &&
+      !stall.soldOut &&
+      this.player.structure.needsFeed() &&
+      this.player.money >= stall.price;
+    const canBoard =
+      !this.player.skating &&
+      !this.player.airborne &&
+      !this.player.climbing &&
+      !!this.skateboards.find(
+        (b) =>
+          !b.taken &&
+          Math.abs(b.x - this.player.x) < 42 &&
+          Math.abs(b.y - this.player.laneY) < 36,
+      );
+    const canGrabWep = !!this.pickups.find(
+      (p) =>
+        !p.taken &&
+        Math.abs(p.x - this.player.x) < 40 &&
+        Math.abs(p.y - this.player.laneY) < 36,
+    );
+    const canBuzz = !!this.nearestBuzzball();
+    const canLoot = !!nearestLootable(this.player, this.fighters);
+
+    if (!canBuyWep && !canBuyFood && !canBoard && !canGrabWep && !canBuzz && !canLoot) {
+      return;
+    }
+
+    if (canBuyWep || canBuyFood || canBoard || canGrabWep || canBuzz) {
+      const handled =
+        this.tryBuyWeapon() ||
+        this.tryBuyFood() ||
+        this.tryPickupSkateboard() ||
+        this.tryPickupWeapon() ||
+        this.tryPickupBuzzball();
+      if (handled) clearPunchJust();
+      return;
+    }
+
+    if (canLoot && tryLoot(this.player, this.fighters, (ev) => this.onCombat(ev))) {
+      clearPunchJust();
     }
   }
 
