@@ -1392,8 +1392,22 @@ export class Enemy extends Fighter {
     const spd =
       (catching ? this.runSpeed : this.speed) * this.structure.moveSpeedFactor() * rush;
     this.running = catching;
+    const beforeX = this.x;
+    const beforeY = this.y;
     this.stepAround(dx / len, dy / len, spd, dt);
     this.clampPos();
+    // Stage bosses can get pinned on the arena edge / road lip and keep
+    // windmilling in place. If a chase step produced almost no movement,
+    // force a small direct step toward the player to break the stall.
+    if (
+      this.isBoss &&
+      dist > 90 &&
+      Math.hypot(this.x - beforeX, this.y - beforeY) < 0.35
+    ) {
+      this.x += Math.sign(dx) * spd * dt * 0.8;
+      this.y += Math.sign(dy) * spd * dt * 0.28;
+      this.clampPos();
+    }
     this.action = this.running ? "run" : "move";
   }
 
