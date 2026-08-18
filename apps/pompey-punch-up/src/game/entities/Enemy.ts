@@ -12,7 +12,7 @@ import { isThrowable } from "../world/ThrownWeapon";
 const BG_MIN_Y = COMMON.minY;
 const BG_MAX_Y = COMMON.maxY;
 
-const INSULTS = [
+const COMMON_INSULTS = [
   "Come on then mush!",
   "You what mush?",
   "Fancy it, dinlo?",
@@ -32,6 +32,8 @@ const INSULTS = [
   "Alright mush — let's have it",
   "What you squinnying at?",
 ];
+
+const THUG_ONLY_LINES = ["Cushty!"];
 
 const STOMP_LINES = [
   "Stamp him!",
@@ -109,6 +111,8 @@ export interface EnemyOptions {
   debugStand?: boolean;
   /** Pin a specific doodle (Casey turning on you, etc.) instead of a random thug. */
   lookId?: string;
+  /** Draw a big gold chain around the neck (Stage 1 boss). */
+  goldChain?: boolean;
 }
 
 /**
@@ -163,6 +167,8 @@ export class Enemy extends Fighter {
   private wearsShades = false;
   private shadesGfx: Phaser.GameObjects.Graphics | null = null;
   private shadesBrokeAt = 0;
+  /** Big gold chain — Stage 1 boss only. */
+  private chainGfx: Phaser.GameObjects.Graphics | null = null;
   /** Props to walk around this frame (bins, cars, etc.). */
   private frameObstacles: Obstacle[] = [];
 
@@ -249,6 +255,11 @@ export class Enemy extends Fighter {
       this.mad = true;
     }
     if (kit) this.equipWeapon(kit);
+    if (opts.goldChain) {
+      this.chainGfx = scene.add.graphics();
+      this.add(this.chainGfx);
+      this.syncChain();
+    }
   }
 
   override get isBackground(): boolean {
@@ -363,6 +374,7 @@ export class Enemy extends Fighter {
   override refreshVisuals(now: number, dt: number): void {
     super.refreshVisuals(now, dt);
     this.syncShades();
+    this.syncChain();
   }
 
   private breakShades(now: number, knockDir: number): void {
@@ -483,6 +495,64 @@ export class Enemy extends Fighter {
     g.restore();
   }
 
+  /** Big gold rope chain worn by the Stage 1 boss — drawn at chest/neck level. */
+  private syncChain(): void {
+    const g = this.chainGfx;
+    if (!g) return;
+    g.clear();
+    if (
+      this.structure.isOut() ||
+      this.isBeingTossed ||
+      this.isInThrowArc ||
+      this.action === "down" ||
+      this.action === "crawl" ||
+      this.sprite.originY < 0.9
+    ) return;
+
+    const srcH = Math.max(1, this.sprite.frame.height);
+    const scaleY = this.sprite.displayHeight / srcH;
+    const face = this.facing < 0 ? -1 : 1;
+
+    // Sit the chain close to the neck, with only a small drop onto the chest.
+    const chestY = this.sprite.y - srcH * 0.46 * scaleY;
+    const cx = this.sprite.x;
+    const lean = this.sprite.rotation;
+
+    // Keep it necklace-sized rather than a giant chest-wide rope.
+    const halfW = Math.max(5.5, this.sprite.displayWidth * 0.12);
+    const dropY = Math.max(7, this.sprite.displayHeight * 0.05);
+    const linkR = Math.max(1.5, scaleY * 1.45);
+    const GOLD = 0xffd700;
+    const GOLD_DARK = 0xb8860b;
+
+    g.save();
+    g.translateCanvas(cx, chestY);
+    g.rotateCanvas(lean);
+
+    // Draw chain as a row of oval links along a catenary arc
+    const steps = 7;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const lx = face * Phaser.Math.Linear(-halfW, halfW, t);
+      // Catenary: sag is highest at centre
+      const sag = 4 * dropY * t * (1 - t);
+      const ly = sag;
+      // Alternate link orientation for rope-chain look
+      const isVertLink = i % 2 === 0;
+      g.fillStyle(isVertLink ? GOLD : GOLD_DARK, 0.95);
+      g.lineStyle(0.8, GOLD_DARK, 0.7);
+      if (isVertLink) {
+        g.fillEllipse(lx, ly, linkR * 1.1, linkR * 2.0);
+        g.strokeEllipse(lx, ly, linkR * 1.1, linkR * 2.0);
+      } else {
+        g.fillEllipse(lx, ly, linkR * 2.0, linkR * 1.1);
+        g.strokeEllipse(lx, ly, linkR * 2.0, linkR * 1.1);
+      }
+    }
+
+    g.restore();
+  }
+
   /** Cagey lads can phone for backup — not mad / boss. */
   canCallForHelp(): boolean {
     if (this.inBackground) return false;
@@ -574,9 +644,11 @@ export class Enemy extends Fighter {
           "Big mistake dinlo",
           "Come get some!",
           "Have a squinny — you're finished",
-          ...INSULTS,
+          ...COMMON_INSULTS,
         ]
-      : INSULTS;
+      : this.role === "thug"
+        ? [...COMMON_INSULTS, ...THUG_ONLY_LINES]
+        : COMMON_INSULTS;
     this.pendingInsult = lines[Math.floor(Math.random() * lines.length)]!;
   }
 
