@@ -11,6 +11,7 @@
     "dev": "node scripts/dev.mjs",
     "dev:site": "npm run dev -w @easeupmush/site",
     "dev:game": "npm run dev -w @easeupmush/pompey-punch-up",
+    "dev:pompeymon": "npm run dev -w @easeupmush/pompeymon",
     "debug": "npm run debug -w @easeupmush/pompey-punch-up",
     "build": "npm run build -w @easeupmush/site && GAME_BASE=/games/pompey-punch-up/ npm run build -w @easeupmush/pompey-punch-up && node scripts/assemble-dist.mjs",
     "preview": "vite preview --config vite.preview.config.ts",

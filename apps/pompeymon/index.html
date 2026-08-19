@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0b1c24" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>Pompeymon</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #07141a;
+        overflow: hidden;
+        touch-action: none;
+      }
+      #shell {
+        height: 100%;
+        height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        background: #07141a;
+      }
+      #game-screen {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        place-items: center;
+      }
+      #game-screen canvas {
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
+      #touch-pad {
+        display: none;
+        flex: 1;
+        align-items: stretch;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 20px calc(16px + env(safe-area-inset-bottom));
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      html.touch-ui #game-screen {
+        flex: 0 0 auto;
+        width: 100%;
+        aspect-ratio: 240 / 160;
+        max-height: min(54dvh, calc(100dvw * 160 / 240));
+      }
+      html.touch-ui #touch-pad {
+        display: flex;
+      }
+      #rotate-hint {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        place-items: center;
+        background: #07141a;
+        color: #e8f0f4;
+        font-family: "Press Start 2P", monospace;
+        font-size: 12px;
+        text-align: center;
+        line-height: 1.8;
+        padding: 24px;
+      }
+      html.needs-portrait #rotate-hint {
+        display: grid;
+      }
+      .dpad {
+        position: relative;
+        width: 42vw;
+        max-width: 180px;
+        aspect-ratio: 1;
+        margin: auto 0;
+      }
+      .dpad button {
+        position: absolute;
+        width: 34%;
+        height: 34%;
+        border: 2px solid #f0a23a;
+        background: #163040;
+        color: #f0a23a;
+        border-radius: 8px;
+        padding: 0;
+        font-size: 18px;
+        line-height: 1;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .dpad button:active {
+        background: #f0a23a;
+        color: #0b1c24;
+      }
+      .dpad .n {
+        left: 33%;
+        top: 0;
+      }
+      .dpad .s {
+        left: 33%;
+        bottom: 0;
+      }
+      .dpad .w {
+        left: 0;
+        top: 33%;
+      }
+      .dpad .e {
+        right: 0;
+        top: 33%;
+      }
+      .actions {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: flex-end;
+        gap: 16px;
+        margin: auto 0;
+      }
+      .actions button {
+        border: 3px solid #f0a23a;
+        background: #163040;
+        color: #f2e6d0;
+        font-family: "Press Start 2P", monospace;
+        font-size: 10px;
+        border-radius: 999px;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .actions button:active {
+        background: #f0a23a;
+        color: #0b1c24;
+      }
+      .actions [data-pad="action"] {
+        width: 92px;
+        height: 92px;
+      }
+      .actions [data-pad="cancel"] {
+        width: 64px;
+        height: 64px;
+        font-size: 8px;
+        border-color: #8aa3b0;
+        color: #8aa3b0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="shell">
+      <div id="rotate-hint">Turn your phone<br />upright.</div>
+      <div id="game-screen"></div>
+      <div id="touch-pad">
+        <div class="dpad">
+          <button type="button" class="n" data-dir="up" aria-label="Up">▲</button>
+          <button type="button" class="w" data-dir="left" aria-label="Left">◀</button>
+          <button type="button" class="e" data-dir="right" aria-label="Right">▶</button>
+          <button type="button" class="s" data-dir="down" aria-label="Down">▼</button>
+        </div>
+        <div class="actions">
+          <button type="button" data-pad="cancel">BACK</button>
+          <button type="button" data-pad="action">LOOK</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
