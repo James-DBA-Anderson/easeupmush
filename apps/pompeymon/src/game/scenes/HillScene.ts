@@ -1,9 +1,10 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
-import { run } from "../run";
+import { resumePos, run } from "../run";
 import { kidAnim } from "../sprites/kid";
-import { MsgBox } from "../ui/MsgBox";
 import { BagUi } from "../ui/BagUi";
+import { MsgBox, type Line } from "../ui/MsgBox";
+import { isTouchUi } from "../touch";
 import {
   addWalls,
   bindWalkKeys,
@@ -11,51 +12,41 @@ import {
   justCancel,
   near,
   spawnKid,
+  atSouthEdge,
   tickWalk,
-  walkingInto,
   type Facing,
   type WalkKeys,
 } from "../walk";
-import { isTouchUi } from "../touch";
-import { drawLanding, type LandingLayout } from "../world/drawLanding";
+import { drawHill, type HillLayout } from "../world/drawHill";
+import { HILL_NPCS, npcNear, npcTalk, spawnFieldNpcs, tickFieldNpcs, type FieldNpc } from "../world/npcs";
 
-export class LandingScene extends Phaser.Scene {
+export class HillScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WalkKeys;
   private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
-  private layout!: LandingLayout;
+  private layout!: HillLayout;
   private note?: MsgBox;
   private bagUi?: BagUi;
   private facing: Facing = "up";
   private flip = 1;
   private reaching = false;
-  private from = "bedroom";
-  private dressedWarn = false;
+  private npcs: FieldNpc[] = [];
 
   constructor() {
-    super("landing");
-  }
-
-  init(data: { from?: string }): void {
-    this.from = data.from ?? "bedroom";
+    super("hill");
   }
 
   create(): void {
-    if (this.textures.exists("landing")) this.textures.remove("landing");
+    if (this.textures.exists("hill")) this.textures.remove("hill");
     const art = this.add.graphics().setVisible(false);
-    this.layout = drawLanding(art);
-    art.generateTexture("landing", GBA_W, GBA_H);
+    this.layout = drawHill(art);
+    art.generateTexture("hill", GBA_W, GBA_H);
     art.destroy();
-    this.add.image(0, 0, "landing").setOrigin(0);
+    this.add.image(0, 0, "hill").setOrigin(0);
 
-    const spawn =
-      this.from === "bathroom"
-        ? this.layout.spawnFromBathroom
-        : this.from === "hall"
-          ? this.layout.spawnFromHall
-          : this.layout.spawnFromBedroom;
-    this.facing = this.from === "bathroom" ? "down" : "up";
+    const spawn = resumePos("hill", this.layout.spawn);
     this.player = spawnKid(this, spawn.x, spawn.y);
+    this.npcs = spawnFieldNpcs(this, HILL_NPCS);
     addWalls(this, this.player, this.layout.solids);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
@@ -96,56 +87,35 @@ export class LandingScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
+    tickFieldNpcs(this, this.npcs);
+    this.player.setDepth(this.player.y);
 
-    if (walkingInto(this.player, this.layout.bathDoor, "up")) {
-      this.scene.start("bathroom");
+    if (atSouthEdge(this.player)) {
+      this.scene.start("roundabout", { from: "hill" });
       return;
     }
-    if (walkingInto(this.player, this.layout.bedroomDoor, "down")) {
-      this.scene.start("bedroom", { from: "landing" });
-      return;
-    }
-
-    const onStairDown =
-      this.facing === "down" &&
-      this.player.x > this.layout.stairHead.x &&
-      this.player.x < this.layout.stairHead.x + this.layout.stairHead.w &&
-      this.player.y >= this.layout.stairHead.y &&
-      this.player.y <= this.layout.stairs.y + 2;
-
-    if (onStairDown) {
-      if (!run.dressed) {
-        if (!this.dressedWarn) {
-          this.dressedWarn = true;
-          this.reachThen("Not downstairs in Y-fronts.");
-        }
-        return;
-      }
-      this.scene.start("hall", { from: "landing" });
-      return;
-    }
-    this.dressedWarn = false;
 
     if (confirm) this.tryExamine();
   }
 
   private tryExamine(): void {
-    if (near(this.player, this.layout.parentsDoor, 8)) {
-      this.reachThen("Mum and Dad's. Locked.");
+    const person = npcNear(this.player, this.npcs);
+    if (person) {
+      this.reachThen(npcTalk(person));
       return;
     }
-    if (near(this.player, this.layout.stairHead, 8) || near(this.player, this.layout.stairs, 6)) {
-      if (!run.dressed) {
-        this.reachThen("Not downstairs in Y-fronts.");
-        return;
-      }
-      this.scene.start("hall", { from: "landing" });
+    if (near(this.player, this.layout.van, 10)) {
+      this.reachThen("Burger van. Hatch is down.");
       return;
     }
-    this.reachThen("Landing. Loo and stairs.");
+    if (near(this.player, this.layout.view, 14)) {
+      this.reachThen("Portsdown. That's the island.");
+      return;
+    }
+    this.reachThen("The hill. Wind up here.");
   }
 
-  private reachThen(line: string): void {
+  private reachThen(line: Line | Line[]): void {
     this.reaching = true;
     this.player.body.setVelocity(0, 0);
     const reach = this.facing === "down" ? "reach-down" : "reach-side";
@@ -158,7 +128,7 @@ export class LandingScene extends Phaser.Scene {
     });
   }
 
-  private showNote(text: string): void {
+  private showNote(text: Line | Line[]): void {
     this.note?.show(text);
   }
 }

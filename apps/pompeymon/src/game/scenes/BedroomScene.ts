@@ -3,9 +3,10 @@ import { GBA_H, GBA_W } from "../constants";
 import { run } from "../run";
 import { ensureKidSheets, kidAnim, kidSheet, type OutfitId } from "../sprites/kid";
 import { ClothesMenu, type ClothesOption } from "../ui/ClothesMenu";
+import { BagUi } from "../ui/BagUi";
 import { MsgBox } from "../ui/MsgBox";
 import { isTouchUi } from "../touch";
-import { bindWalkKeys, justAction, justCancel, walkAxis, type WalkKeys } from "../walk";
+import { bindWalkKeys, justAction, justCancel, walkAxis, walkingInto, type WalkKeys } from "../walk";
 import { drawBedroom, type BedroomLayout } from "../world/drawBedroom";
 
 type Facing = "down" | "up" | "side";
@@ -22,6 +23,7 @@ export class BedroomScene extends Phaser.Scene {
   private reaching = false;
   private outfit: OutfitId = "pj";
   private clothes!: ClothesMenu;
+  private bagUi?: BagUi;
   private fromLanding = false;
 
   constructor() {
@@ -82,6 +84,7 @@ export class BedroomScene extends Phaser.Scene {
       onWear: (option) => this.wear(option),
       onClose: () => this.showNote("Leave it."),
     });
+    this.bagUi = new BagUi(this, (line) => this.showNote(line));
 
     this.time.delayedCall(400, () => {
       if (!this.fromLanding) this.showNote("…2nd Avenue. Mum's downstairs.");
@@ -96,7 +99,9 @@ export class BedroomScene extends Phaser.Scene {
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
+        if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
+        if (this.bagUi?.menu.active) return;
         if (this.clothes.active || this.busy || this.reaching) return;
         this.tryExamine();
       });
@@ -110,6 +115,11 @@ export class BedroomScene extends Phaser.Scene {
     if (this.clothes.active) {
       this.player.body.setVelocity(0, 0);
       this.clothes.update(this.cursors, { W: this.wasdKeys.W, S: this.wasdKeys.S }, confirm, cancel);
+      return;
+    }
+
+    if (this.bagUi?.update(this.cursors, { W: this.wasdKeys.W, S: this.wasdKeys.S }, confirm, cancel)) {
+      this.player.body.setVelocity(0, 0);
       return;
     }
 
@@ -145,12 +155,7 @@ export class BedroomScene extends Phaser.Scene {
     }
     this.player.setFlipX(this.flip < 0);
 
-    if (
-      !this.busy &&
-      this.player.y < 56 &&
-      this.player.x > 170 &&
-      this.facing === "up"
-    ) {
+    if (!this.busy && walkingInto(this.player, this.layout.door, "up")) {
       this.scene.start("landing", { from: "bedroom" });
       return;
     }
@@ -217,20 +222,20 @@ export class BedroomScene extends Phaser.Scene {
       return;
     }
 
-    if (near(this.layout.door, 10)) {
-      this.scene.start("landing", { from: "bedroom" });
+    if (near(this.layout.pc, 10)) {
+      this.reachThen("Top of the range. Pentium III. Windows ME.");
       return;
     }
-    if (near(this.layout.pc, 10)) {
-      this.reachThen("Beige box humming. Blue screen.");
+    if (p.y < 58 && p.x > 50 && p.x < 100) {
+      this.reachThen("Ease Up Mush poster.");
+      return;
+    }
+    if (near(this.layout.shelf, 14) || (p.y < 58 && p.x > 98 && p.x < 170)) {
+      this.reachThen("Shuttle, tape, footy. The lot.");
       return;
     }
     if (near(this.layout.bed, 8)) {
       this.reachThen("Duvet's a heap.");
-      return;
-    }
-    if (p.y < 56 && p.x > 98 && p.x < 170) {
-      this.reachThen("Shuttle, tape, footy. The lot.");
       return;
     }
     this.reachThen("Your room.");

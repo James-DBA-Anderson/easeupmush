@@ -1,8 +1,8 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
-import { run } from "../run";
+import { run, takeBag } from "../run";
 import { kidAnim } from "../sprites/kid";
-import { MsgBox } from "../ui/MsgBox";
+import { MsgBox, type Line } from "../ui/MsgBox";
 import { BagUi } from "../ui/BagUi";
 import {
   addWalls,
@@ -17,45 +17,37 @@ import {
   type WalkKeys,
 } from "../walk";
 import { isTouchUi } from "../touch";
-import { drawLanding, type LandingLayout } from "../world/drawLanding";
+import { ensureMum } from "../sprites/mum";
+import { drawKitchen, type KitchenLayout } from "../world/drawKitchen";
 
-export class LandingScene extends Phaser.Scene {
+export class KitchenScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WalkKeys;
   private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
-  private layout!: LandingLayout;
+  private layout!: KitchenLayout;
+  private room!: Phaser.GameObjects.Image;
   private note?: MsgBox;
   private bagUi?: BagUi;
   private facing: Facing = "up";
   private flip = 1;
   private reaching = false;
-  private from = "bedroom";
-  private dressedWarn = false;
 
   constructor() {
-    super("landing");
-  }
-
-  init(data: { from?: string }): void {
-    this.from = data.from ?? "bedroom";
+    super("kitchen");
   }
 
   create(): void {
-    if (this.textures.exists("landing")) this.textures.remove("landing");
+    if (this.textures.exists("kitchen")) this.textures.remove("kitchen");
     const art = this.add.graphics().setVisible(false);
-    this.layout = drawLanding(art);
-    art.generateTexture("landing", GBA_W, GBA_H);
+    this.layout = drawKitchen(art);
+    art.generateTexture("kitchen", GBA_W, GBA_H);
     art.destroy();
-    this.add.image(0, 0, "landing").setOrigin(0);
+    this.room = this.add.image(0, 0, "kitchen").setOrigin(0);
 
-    const spawn =
-      this.from === "bathroom"
-        ? this.layout.spawnFromBathroom
-        : this.from === "hall"
-          ? this.layout.spawnFromHall
-          : this.layout.spawnFromBedroom;
-    this.facing = this.from === "bathroom" ? "down" : "up";
-    this.player = spawnKid(this, spawn.x, spawn.y);
+    ensureMum(this);
+    this.add.image(this.layout.mum.x + 8, this.layout.mum.y + 10, "mum").setDepth(9);
+
+    this.player = spawnKid(this, this.layout.spawn.x, this.layout.spawn.y);
     addWalls(this, this.player, this.layout.solids);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
@@ -97,55 +89,52 @@ export class LandingScene extends Phaser.Scene {
     this.facing = walked.facing;
     this.flip = walked.flip;
 
-    if (walkingInto(this.player, this.layout.bathDoor, "up")) {
-      this.scene.start("bathroom");
+    if (walkingInto(this.player, this.layout.door, "down")) {
+      this.scene.start("hall", { from: "kitchen" });
       return;
     }
-    if (walkingInto(this.player, this.layout.bedroomDoor, "down")) {
-      this.scene.start("bedroom", { from: "landing" });
-      return;
-    }
-
-    const onStairDown =
-      this.facing === "down" &&
-      this.player.x > this.layout.stairHead.x &&
-      this.player.x < this.layout.stairHead.x + this.layout.stairHead.w &&
-      this.player.y >= this.layout.stairHead.y &&
-      this.player.y <= this.layout.stairs.y + 2;
-
-    if (onStairDown) {
-      if (!run.dressed) {
-        if (!this.dressedWarn) {
-          this.dressedWarn = true;
-          this.reachThen("Not downstairs in Y-fronts.");
-        }
-        return;
-      }
-      this.scene.start("hall", { from: "landing" });
-      return;
-    }
-    this.dressedWarn = false;
 
     if (confirm) this.tryExamine();
   }
 
   private tryExamine(): void {
-    if (near(this.player, this.layout.parentsDoor, 8)) {
-      this.reachThen("Mum and Dad's. Locked.");
+    if (!run.hasBag && near(this.player, this.layout.bag, 10)) {
+      takeBag();
+      this.bagUi?.sync();
+      if (this.textures.exists("kitchen")) this.textures.remove("kitchen");
+      const art = this.add.graphics().setVisible(false);
+      this.layout = drawKitchen(art);
+      art.generateTexture("kitchen", GBA_W, GBA_H);
+      art.destroy();
+      this.room.destroy();
+      this.room = this.add.image(0, 0, "kitchen").setOrigin(0).setDepth(0);
+      this.reachThen("Bag. Pogs in the front.");
       return;
     }
-    if (near(this.player, this.layout.stairHead, 8) || near(this.player, this.layout.stairs, 6)) {
-      if (!run.dressed) {
-        this.reachThen("Not downstairs in Y-fronts.");
-        return;
-      }
-      this.scene.start("hall", { from: "landing" });
+    if (near(this.player, this.layout.mum, 10)) {
+      this.reachThen({ who: "MUM", text: run.hasBag ? "Go on then." : "Don't forget your bag." });
       return;
     }
-    this.reachThen("Landing. Loo and stairs.");
+    if (near(this.player, this.layout.cooker, 8)) {
+      this.reachThen("Hob's going. Don't touch.");
+      return;
+    }
+    if (near(this.player, this.layout.sink, 8)) {
+      this.reachThen("Washing up from last night.");
+      return;
+    }
+    if (near(this.player, this.layout.table, 8)) {
+      this.reachThen("Toast crusts. Tea's milky.");
+      return;
+    }
+    if (near(this.player, this.layout.fridge, 8)) {
+      this.reachThen("Milk. Leftover mash. Don't.");
+      return;
+    }
+    this.reachThen("Kitchen. Mum's in here.");
   }
 
-  private reachThen(line: string): void {
+  private reachThen(line: Line | Line[]): void {
     this.reaching = true;
     this.player.body.setVelocity(0, 0);
     const reach = this.facing === "down" ? "reach-down" : "reach-side";
@@ -158,7 +147,7 @@ export class LandingScene extends Phaser.Scene {
     });
   }
 
-  private showNote(text: string): void {
+  private showNote(text: Line | Line[]): void {
     this.note?.show(text);
   }
 }

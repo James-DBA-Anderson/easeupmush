@@ -17,45 +17,50 @@ import {
   type WalkKeys,
 } from "../walk";
 import { isTouchUi } from "../touch";
-import { drawLanding, type LandingLayout } from "../world/drawLanding";
+import { drawHall, type HallLayout } from "../world/drawHall";
 
-export class LandingScene extends Phaser.Scene {
+export class HallScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WalkKeys;
   private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
-  private layout!: LandingLayout;
+  private layout!: HallLayout;
   private note?: MsgBox;
   private bagUi?: BagUi;
-  private facing: Facing = "up";
+  private facing: Facing = "down";
   private flip = 1;
   private reaching = false;
-  private from = "bedroom";
+  private from = "landing";
   private dressedWarn = false;
 
   constructor() {
-    super("landing");
+    super("hall");
   }
 
   init(data: { from?: string }): void {
-    this.from = data.from ?? "bedroom";
+    this.from = data.from ?? "landing";
   }
 
   create(): void {
-    if (this.textures.exists("landing")) this.textures.remove("landing");
+    if (this.textures.exists("hall")) this.textures.remove("hall");
     const art = this.add.graphics().setVisible(false);
-    this.layout = drawLanding(art);
-    art.generateTexture("landing", GBA_W, GBA_H);
+    this.layout = drawHall(art);
+    art.generateTexture("hall", GBA_W, GBA_H);
     art.destroy();
-    this.add.image(0, 0, "landing").setOrigin(0);
+    this.add.image(0, 0, "hall").setOrigin(0);
 
     const spawn =
-      this.from === "bathroom"
-        ? this.layout.spawnFromBathroom
-        : this.from === "hall"
-          ? this.layout.spawnFromHall
-          : this.layout.spawnFromBedroom;
-    this.facing = this.from === "bathroom" ? "down" : "up";
+      this.from === "kitchen"
+        ? this.layout.spawnFromKitchen
+        : this.from === "frontroom"
+          ? this.layout.spawnFromFront
+          : this.from === "avenue"
+            ? this.layout.spawnFromAvenue
+            : this.layout.spawnFromLanding;
+    this.facing =
+      this.from === "kitchen" ? "down" : this.from === "frontroom" ? "side" : this.from === "avenue" ? "up" : "up";
+    this.flip = this.from === "frontroom" ? -1 : 1;
     this.player = spawnKid(this, spawn.x, spawn.y);
+    this.player.setFlipX(this.flip < 0);
     addWalls(this, this.player, this.layout.solids);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
@@ -97,31 +102,34 @@ export class LandingScene extends Phaser.Scene {
     this.facing = walked.facing;
     this.flip = walked.flip;
 
-    if (walkingInto(this.player, this.layout.bathDoor, "up")) {
-      this.scene.start("bathroom");
+    if (walkingInto(this.player, this.layout.kitchenDoor, "up")) {
+      this.scene.start("kitchen");
       return;
     }
-    if (walkingInto(this.player, this.layout.bedroomDoor, "down")) {
-      this.scene.start("bedroom", { from: "landing" });
+    if (walkingInto(this.player, this.layout.frontRoomDoor, "right")) {
+      this.scene.start("frontroom");
+      return;
+    }
+    if (
+      this.facing === "up" &&
+      this.player.x > this.layout.stairs.x &&
+      this.player.x < this.layout.stairs.x + this.layout.stairs.w &&
+      this.player.y > 80 &&
+      this.player.y < 96
+    ) {
+      this.scene.start("landing", { from: "hall" });
       return;
     }
 
-    const onStairDown =
-      this.facing === "down" &&
-      this.player.x > this.layout.stairHead.x &&
-      this.player.x < this.layout.stairHead.x + this.layout.stairHead.w &&
-      this.player.y >= this.layout.stairHead.y &&
-      this.player.y <= this.layout.stairs.y + 2;
-
-    if (onStairDown) {
+    if (walkingInto(this.player, this.layout.frontDoor, "down")) {
       if (!run.dressed) {
         if (!this.dressedWarn) {
           this.dressedWarn = true;
-          this.reachThen("Not downstairs in Y-fronts.");
+          this.reachThen("Not going out in Y-fronts.");
         }
         return;
       }
-      this.scene.start("hall", { from: "landing" });
+      this.scene.start("avenue");
       return;
     }
     this.dressedWarn = false;
@@ -130,19 +138,11 @@ export class LandingScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
-    if (near(this.player, this.layout.parentsDoor, 8)) {
-      this.reachThen("Mum and Dad's. Locked.");
+    if (near(this.player, this.layout.stairFoot, 8) || near(this.player, this.layout.stairs, 6)) {
+      this.scene.start("landing", { from: "hall" });
       return;
     }
-    if (near(this.player, this.layout.stairHead, 8) || near(this.player, this.layout.stairs, 6)) {
-      if (!run.dressed) {
-        this.reachThen("Not downstairs in Y-fronts.");
-        return;
-      }
-      this.scene.start("hall", { from: "landing" });
-      return;
-    }
-    this.reachThen("Landing. Loo and stairs.");
+    this.reachThen("Hall. Kitchen, front room, street.");
   }
 
   private reachThen(line: string): void {

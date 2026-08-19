@@ -1,19 +1,20 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
-import { sideDoor, southDoor, stairsDown, wallFrame } from "./drawCommon";
+import { sideDoor, southDoor, stairsUp } from "./drawCommon";
 
 export type Solid = { x: number; y: number; w: number; h: number };
 
-export type LandingLayout = {
+export type HallLayout = {
   solids: Solid[];
-  spawnFromBedroom: { x: number; y: number };
-  spawnFromBathroom: { x: number; y: number };
-  spawnFromHall: { x: number; y: number };
-  bedroomDoor: Solid;
-  bathDoor: Solid;
-  parentsDoor: Solid;
+  spawnFromLanding: { x: number; y: number };
+  spawnFromKitchen: { x: number; y: number };
+  spawnFromFront: { x: number; y: number };
+  spawnFromAvenue: { x: number; y: number };
   stairs: Solid;
-  stairHead: Solid;
+  stairFoot: Solid;
+  kitchenDoor: Solid;
+  frontRoomDoor: Solid;
+  frontDoor: Solid;
 };
 
 function px(
@@ -47,21 +48,22 @@ function furn(
 
 const C = {
   void: 0x000000,
-  paper: 0xe4d8c4,
-  paperStripe: 0xd4c8b4,
+  paper: 0xe8dcc8,
+  paperStripe: 0xd8ccb8,
   wallDark: 0xb8a888,
   skirting: 0x7a6248,
-  floor: 0xb88858,
-  floorDark: 0x9a6840,
-  floorLite: 0xc89868,
+  floor: 0xb07040,
+  floorDark: 0x945830,
+  floorLite: 0xc88850,
   wood: 0xd2a05c,
   woodDark: 0xa07038,
   woodLite: 0xe8c078,
   ink: 0x201c18,
-  rail: 0x8a5a30,
+  glass: 0x68a0c8,
   step: 0x6a4830,
   stepDark: 0x4a3020,
   well: 0x2a1c14,
+  rail: 0x8a5a30,
 };
 
 function floorPlanks(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number): void {
@@ -80,82 +82,73 @@ function paperWall(g: Phaser.GameObjects.Graphics, x: number, y: number, w: numb
   for (let i = 0; i < w; i += 8) px(g, C.paperStripe, x + i, y, 3, h);
 }
 
-/** Tight Cosham terrace landing — L-shaped hall, void around it. */
-export function drawLanding(g: Phaser.GameObjects.Graphics): LandingLayout {
+/** Ground-floor hall — stairs, kitchen, front room, front door. */
+export function drawHall(g: Phaser.GameObjects.Graphics): HallLayout {
   g.clear();
   px(g, C.void, 0, 0, GBA_W, GBA_H);
 
   const hallX = 102;
   const hallW = 44;
   const topY = 46;
-  const topH = 26;
   const stairX = 58;
   const stairW = 44;
-  const stairY = 72;
-  const stairH = 50;
+  const stairY = 46;
+  const stairH = 48;
 
   paperWall(g, stairX - 8, 20, 96, 26);
   px(g, C.wallDark, stairX - 8, 44, 96, 2);
   px(g, C.skirting, stairX - 8, 46, 96, 2);
-
-  paperWall(g, stairX - 8, 20, 8, 110);
+  paperWall(g, stairX - 8, 20, 8, 118);
   paperWall(g, hallX + hallW, 20, 8, 118);
-  px(g, C.wallDark, stairX - 8, 48, 2, 80);
+  px(g, C.wallDark, stairX - 8, 48, 2, 88);
   px(g, C.wallDark, hallX + hallW, 48, 2, 88);
 
-  floorPlanks(g, stairX, topY, stairW + hallW, topH);
-  floorPlanks(g, hallX, topY + topH, hallW, 60);
+  floorPlanks(g, hallX, topY, hallW, 84);
+  floorPlanks(g, stairX, 94, stairW, 22);
 
-  paperWall(g, hallX - 2, 118, hallW + 10, GBA_H - 118);
-  px(g, C.skirting, hallX, 118, hallW, 2);
+  paperWall(g, stairX - 8, 116, hallX + hallW + 16 - (stairX - 8), GBA_H - 116);
+  px(g, C.skirting, stairX, 116, hallX + hallW - stairX, 2);
 
-  const bathDoor: Solid = { x: 108, y: 18, w: 28, h: 28 };
-  furn(g, bathDoor.x, bathDoor.y, bathDoor.w, bathDoor.h, C.wood, C.woodLite, C.woodDark);
+  const kitchenDoor: Solid = { x: 108, y: 18, w: 28, h: 28 };
+  furn(g, kitchenDoor.x, kitchenDoor.y, kitchenDoor.w, kitchenDoor.h, C.wood, C.woodLite, C.woodDark);
   px(g, C.woodLite, 112, 24, 9, 16);
   px(g, C.woodLite, 123, 24, 9, 16);
   px(g, C.woodDark, 121, 24, 2, 16);
   px(g, C.ink, 130, 34, 3, 3);
 
-  wallFrame(g, 62, 24, 18, 16, 0x68a0b8, true);
-  px(g, 0x88c0d0, 66, 26, 10, 6);
-  px(g, 0x5a7a40, 66, 32, 10, 5);
-  wallFrame(g, 84, 22, 14, 18, 0xe8d0b0, false);
-  px(g, 0xc49068, 88, 26, 3, 4);
-  px(g, 0xc49068, 93, 26, 3, 4);
-  px(g, 0x6a3048, 87, 30, 10, 6);
+  const frontRoomDoor = sideDoor(g, hallX + hallW, 72, 8, 40);
 
-  const bedroomDoor = southDoor(g, 108, 118, 32, GBA_H - 118);
-
-  const parentsDoor = sideDoor(g, hallX + hallW, 72, 8, 40);
+  const frontDoor = southDoor(g, 108, 116, 32, GBA_H - 116, true);
 
   const stairs: Solid = { x: stairX, y: stairY, w: stairW, h: stairH };
-  stairsDown(g, stairX, stairY, stairW, stairH);
-  const stairHead: Solid = { x: stairX, y: topY, w: hallX - stairX, h: stairY - topY };
+  stairsUp(g, stairX, stairY, stairW, stairH);
+  const stairFoot: Solid = { x: stairX, y: 94, w: stairW, h: 22 };
 
   const solids: Solid[] = [
     { x: 0, y: 0, w: stairX, h: GBA_H },
     { x: hallX + hallW, y: 0, w: GBA_W - (hallX + hallW), h: GBA_H },
     { x: stairX, y: 0, w: hallX + hallW - stairX, h: topY },
-    { x: stairX, y: stairY, w: hallX - stairX, h: GBA_H - stairY },
-    { x: hallX, y: 118, w: bedroomDoor.x - hallX, h: GBA_H - 118 },
+    { x: stairX, y: stairY, w: hallX - stairX, h: stairH },
+    { x: stairX, y: 116, w: frontDoor.x - stairX, h: GBA_H - 116 },
     {
-      x: bedroomDoor.x + bedroomDoor.w,
-      y: 118,
-      w: hallX + hallW - (bedroomDoor.x + bedroomDoor.w),
-      h: GBA_H - 118,
+      x: frontDoor.x + frontDoor.w,
+      y: 116,
+      w: hallX + hallW - (frontDoor.x + frontDoor.w),
+      h: GBA_H - 116,
     },
     stairs,
   ];
 
   return {
     solids,
-    spawnFromBedroom: { x: 124, y: 104 },
-    spawnFromBathroom: { x: 124, y: 58 },
-    spawnFromHall: { x: 84, y: 52 },
-    bedroomDoor,
-    bathDoor,
-    parentsDoor,
+    spawnFromLanding: { x: 80, y: 98 },
+    spawnFromKitchen: { x: 124, y: 58 },
+    spawnFromFront: { x: 124, y: 92 },
+    spawnFromAvenue: { x: 124, y: 108 },
     stairs,
-    stairHead,
+    stairFoot,
+    kitchenDoor,
+    frontRoomDoor,
+    frontDoor,
   };
 }

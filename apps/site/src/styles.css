@@ -146,13 +146,13 @@ body {
 }
 
 .hero {
-  padding: 0 0 1.25rem;
+  padding: 0 0 1.5rem;
   max-width: 40rem;
   animation: rise-in 0.6s ease-out both;
 }
 
 .hero__mark {
-  margin: 0 0 0.25rem;
+  margin: 0 0 0.35rem;
   font-size: 0.8rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -161,18 +161,17 @@ body {
 
 .hero__brand {
   margin: 0;
-  font-family: var(--font-display);
-  font-size: clamp(2.6rem, 9vw, 4.75rem);
-  font-weight: 400;
-  line-height: 0.92;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--chalk);
-  text-shadow: 0 0 40px rgba(240, 162, 58, 0.15);
+}
+
+.hero__logo {
+  display: block;
+  width: min(100%, 28rem);
+  height: auto;
+  margin-left: -0.35rem;
 }
 
 .hero__line {
-  margin: 0.65rem 0 0;
+  margin: 0.15rem 0 0;
   max-width: 28rem;
   font-size: clamp(1rem, 2.2vw, 1.15rem);
   color: var(--foam);
@@ -313,11 +312,27 @@ body {
 }
 
 .foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
   margin-top: 2rem;
   padding-top: 1.25rem;
   color: var(--muted);
   font-size: 0.9rem;
   border-top: 1px solid rgba(200, 221, 230, 0.08);
+}
+
+.foot__social {
+  display: inline-flex;
+  color: var(--foam);
+  line-height: 0;
+}
+
+.foot__social:hover {
+  color: var(--sodium-hot);
+  text-decoration: none;
 }
 
 .foot p {
@@ -334,6 +349,10 @@ body {
   text-decoration: underline;
 }
 
+.foot a.foot__social:hover {
+  text-decoration: none;
+}
+
 /* --- About --- */
 
 .page--about {
@@ -344,8 +363,8 @@ body {
   padding-bottom: 0.75rem;
 }
 
-.hero--compact .hero__brand {
-  font-size: clamp(2rem, 7vw, 3.25rem);
+.hero--compact .hero__logo {
+  width: min(100%, 20rem);
 }
 
 .about {

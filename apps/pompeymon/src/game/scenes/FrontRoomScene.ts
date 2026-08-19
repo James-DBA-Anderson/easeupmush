@@ -17,45 +17,32 @@ import {
   type WalkKeys,
 } from "../walk";
 import { isTouchUi } from "../touch";
-import { drawLanding, type LandingLayout } from "../world/drawLanding";
+import { drawFrontRoom, type FrontRoomLayout } from "../world/drawFrontRoom";
 
-export class LandingScene extends Phaser.Scene {
+export class FrontRoomScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WalkKeys;
   private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
-  private layout!: LandingLayout;
+  private layout!: FrontRoomLayout;
   private note?: MsgBox;
   private bagUi?: BagUi;
-  private facing: Facing = "up";
+  private facing: Facing = "side";
   private flip = 1;
   private reaching = false;
-  private from = "bedroom";
-  private dressedWarn = false;
 
   constructor() {
-    super("landing");
-  }
-
-  init(data: { from?: string }): void {
-    this.from = data.from ?? "bedroom";
+    super("frontroom");
   }
 
   create(): void {
-    if (this.textures.exists("landing")) this.textures.remove("landing");
+    if (this.textures.exists("frontroom")) this.textures.remove("frontroom");
     const art = this.add.graphics().setVisible(false);
-    this.layout = drawLanding(art);
-    art.generateTexture("landing", GBA_W, GBA_H);
+    this.layout = drawFrontRoom(art);
+    art.generateTexture("frontroom", GBA_W, GBA_H);
     art.destroy();
-    this.add.image(0, 0, "landing").setOrigin(0);
+    this.add.image(0, 0, "frontroom").setOrigin(0);
 
-    const spawn =
-      this.from === "bathroom"
-        ? this.layout.spawnFromBathroom
-        : this.from === "hall"
-          ? this.layout.spawnFromHall
-          : this.layout.spawnFromBedroom;
-    this.facing = this.from === "bathroom" ? "down" : "up";
-    this.player = spawnKid(this, spawn.x, spawn.y);
+    this.player = spawnKid(this, this.layout.spawn.x, this.layout.spawn.y);
     addWalls(this, this.player, this.layout.solids);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
@@ -97,52 +84,32 @@ export class LandingScene extends Phaser.Scene {
     this.facing = walked.facing;
     this.flip = walked.flip;
 
-    if (walkingInto(this.player, this.layout.bathDoor, "up")) {
-      this.scene.start("bathroom");
+    if (walkingInto(this.player, this.layout.door, "left")) {
+      this.scene.start("hall", { from: "frontroom" });
       return;
     }
-    if (walkingInto(this.player, this.layout.bedroomDoor, "down")) {
-      this.scene.start("bedroom", { from: "landing" });
-      return;
-    }
-
-    const onStairDown =
-      this.facing === "down" &&
-      this.player.x > this.layout.stairHead.x &&
-      this.player.x < this.layout.stairHead.x + this.layout.stairHead.w &&
-      this.player.y >= this.layout.stairHead.y &&
-      this.player.y <= this.layout.stairs.y + 2;
-
-    if (onStairDown) {
-      if (!run.dressed) {
-        if (!this.dressedWarn) {
-          this.dressedWarn = true;
-          this.reachThen("Not downstairs in Y-fronts.");
-        }
-        return;
-      }
-      this.scene.start("hall", { from: "landing" });
-      return;
-    }
-    this.dressedWarn = false;
 
     if (confirm) this.tryExamine();
   }
 
   private tryExamine(): void {
-    if (near(this.player, this.layout.parentsDoor, 8)) {
-      this.reachThen("Mum and Dad's. Locked.");
+    if (near(this.player, this.layout.telly, 10)) {
+      this.reachThen("Telly's off. Aerial's bent.");
       return;
     }
-    if (near(this.player, this.layout.stairHead, 8) || near(this.player, this.layout.stairs, 6)) {
-      if (!run.dressed) {
-        this.reachThen("Not downstairs in Y-fronts.");
-        return;
-      }
-      this.scene.start("hall", { from: "landing" });
+    if (near(this.player, this.layout.sofa, 8)) {
+      this.reachThen("Dad's chair. Don't sit there.");
       return;
     }
-    this.reachThen("Landing. Loo and stairs.");
+    if (near(this.player, this.layout.fire, 8)) {
+      this.reachThen("Gas fire. Clicks.");
+      return;
+    }
+    if (this.player.y < 58 && near(this.player, this.layout.window, 16)) {
+      this.reachThen("2nd Avenue. Quiet out.");
+      return;
+    }
+    this.reachThen("Front room. Best suite.");
   }
 
   private reachThen(line: string): void {

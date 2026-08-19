@@ -1,8 +1,20 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "./constants";
+import { AvenueScene } from "./scenes/AvenueScene";
 import { BathroomScene } from "./scenes/BathroomScene";
 import { BedroomScene } from "./scenes/BedroomScene";
+import { BridgeScene } from "./scenes/BridgeScene";
+import { FrontRoomScene } from "./scenes/FrontRoomScene";
+import { HallScene } from "./scenes/HallScene";
+import { HighStreetScene } from "./scenes/HighStreetScene";
+import { HillScene } from "./scenes/HillScene";
+import { EncounterScene } from "./scenes/EncounterScene";
+import { IslandScene } from "./scenes/IslandScene";
+import { KitchenScene } from "./scenes/KitchenScene";
+import { LabScene } from "./scenes/LabScene";
 import { LandingScene } from "./scenes/LandingScene";
+import { RoundaboutScene } from "./scenes/RoundaboutScene";
+import { SchoolScene } from "./scenes/SchoolScene";
 import { TitleScene } from "./scenes/TitleScene";
 
 export const gameConfig: Phaser.Types.Core.GameConfig = {
@@ -20,5 +32,22 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  scene: [TitleScene, BedroomScene, LandingScene, BathroomScene],
+  scene: [
+    TitleScene,
+    BedroomScene,
+    LandingScene,
+    BathroomScene,
+    HallScene,
+    KitchenScene,
+    FrontRoomScene,
+    AvenueScene,
+    RoundaboutScene,
+    HillScene,
+    BridgeScene,
+    HighStreetScene,
+    LabScene,
+    IslandScene,
+    SchoolScene,
+    EncounterScene,
+  ],
 };

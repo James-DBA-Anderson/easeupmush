@@ -3,13 +3,16 @@ import { GBA_H, GBA_W } from "../constants";
 import { run } from "../run";
 import { kidAnim } from "../sprites/kid";
 import { MsgBox } from "../ui/MsgBox";
+import { BagUi } from "../ui/BagUi";
 import {
   addWalls,
   bindWalkKeys,
   justAction,
+  justCancel,
   near,
   spawnKid,
   tickWalk,
+  walkingInto,
   type Facing,
   type WalkKeys,
 } from "../walk";
@@ -22,6 +25,7 @@ export class BathroomScene extends Phaser.Scene {
   private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
   private layout!: BathroomLayout;
   private note?: MsgBox;
+  private bagUi?: BagUi;
   private facing: Facing = "up";
   private flip = 1;
   private reaching = false;
@@ -44,10 +48,13 @@ export class BathroomScene extends Phaser.Scene {
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
     this.note = new MsgBox(this);
+    this.bagUi = new BagUi(this, (line) => this.showNote(line));
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
+        if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
+        if (this.bagUi?.menu.active) return;
         if (!this.reaching) this.tryExamine();
       });
     }
@@ -55,6 +62,12 @@ export class BathroomScene extends Phaser.Scene {
 
   update(): void {
     const confirm = justAction(this.cursors, this.wasd);
+    const cancel = justCancel(this.wasd);
+
+    if (this.bagUi?.update(this.cursors, { W: this.wasd.W, S: this.wasd.S }, confirm, cancel)) {
+      this.player.body.setVelocity(0, 0);
+      return;
+    }
 
     if (this.note?.open) {
       this.player.body.setVelocity(0, 0);
@@ -71,7 +84,7 @@ export class BathroomScene extends Phaser.Scene {
     this.facing = walked.facing;
     this.flip = walked.flip;
 
-    if (this.player.y > 118 && near(this.player, this.layout.door, 14)) {
+    if (walkingInto(this.player, this.layout.door, "down")) {
       this.scene.start("landing", { from: "bathroom" });
       return;
     }
@@ -80,8 +93,8 @@ export class BathroomScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
-    if (near(this.player, this.layout.door, 10)) {
-      this.scene.start("landing", { from: "bathroom" });
+    if (near(this.player, this.layout.window, 10) && this.facing === "up") {
+      this.reachThen("Frosted. Next door's fence.");
       return;
     }
     if (near(this.player, this.layout.bath, 8)) {
@@ -89,11 +102,11 @@ export class BathroomScene extends Phaser.Scene {
       return;
     }
     if (near(this.player, this.layout.loo, 8)) {
-      this.reachThen("The loo. Lid's down.");
+      this.reachThen("Ahhhh.");
       return;
     }
     if (near(this.player, this.layout.sink, 8)) {
-      this.reachThen("Tap drips. Always has.");
+      this.reachThen("Mint. Gums sting.");
       return;
     }
     this.reachThen("Bathroom.");

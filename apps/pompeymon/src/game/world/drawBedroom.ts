@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
+import { drawEaseLogo } from "../ui/pixelLogo";
 
 export type Solid = { x: number; y: number; w: number; h: number };
 
@@ -12,6 +13,8 @@ export type BedroomLayout = {
   wake: { x: number; y: number };
   door: Solid;
   doorSpawn: { x: number; y: number };
+  poster: Solid;
+  shelf: Solid;
 };
 
 const C = {
@@ -105,13 +108,10 @@ export function drawBedroom(g: Phaser.GameObjects.Graphics): BedroomLayout {
   px(g, C.woodDark, 189, 12, 2, 22);
   px(g, C.ink, 198, 24, 3, 3);
 
-  px(g, C.navy, 58, 8, 40, 26);
-  px(g, C.sodium, 60, 10, 36, 22);
-  px(g, C.navy, 64, 13, 8, 13);
-  px(g, C.navy, 74, 12, 6, 15);
-  px(g, C.navy, 83, 13, 8, 13);
-  px(g, 0x3a88c0, 62, 28, 32, 3);
-  px(g, C.cream, 68, 30, 20, 1);
+  px(g, C.navy, 58, 8, 40, 28);
+  px(g, C.sodium, 59, 9, 38, 1);
+  px(g, C.navy, 60, 10, 36, 24);
+  drawEaseLogo(g, 78, 10, 3);
 
   furn(g, 104, 14, 52, 8, C.wood, C.woodLite, C.woodDark);
   px(g, 0x2a3c4c, 108, 8, 10, 6);
@@ -220,5 +220,7 @@ export function drawBedroom(g: Phaser.GameObjects.Graphics): BedroomLayout {
     wake: { x: 78, y: 96 },
     door: { x: 176, y: 6, w: 28, h: 34 },
     doorSpawn: { x: 162, y: 62 },
+    poster: { x: 58, y: 8, w: 40, h: 28 },
+    shelf: { x: 104, y: 8, w: 52, h: 14 },
   };
 }

@@ -1,0 +1,277 @@
+import Phaser from "phaser";
+import { GBA_H, GBA_W } from "../constants";
+import { hasFlyer, run, takeFlyer } from "../run";
+import { kidAnim } from "../sprites/kid";
+import { ensureSteve } from "../sprites/steve";
+import { MsgBox, type Line } from "../ui/MsgBox";
+import { BagUi } from "../ui/BagUi";
+import {
+  addWalls,
+  bindWalkKeys,
+  justAction,
+  justCancel,
+  near,
+  spawnKid,
+  tickWalk,
+  walkingInto,
+  type Facing,
+  type WalkKeys,
+} from "../walk";
+import { isTouchUi } from "../touch";
+import { drawAvenue, type AvenueLayout } from "../world/drawAvenue";
+
+function ensureFlyer(scene: Phaser.Scene): void {
+  if (scene.textures.exists("flyer")) return;
+  const g = scene.add.graphics().setVisible(false);
+  g.fillStyle(0xf0e8b0, 1);
+  g.fillRect(0, 0, 12, 8);
+  g.lineStyle(1, 0xc8b848, 1);
+  g.strokeRect(0, 0, 12, 8);
+  g.fillStyle(0x201c18, 1);
+  g.fillRect(2, 2, 8, 1);
+  g.fillRect(2, 4, 6, 1);
+  g.fillRect(2, 6, 7, 1);
+  g.generateTexture("flyer", 12, 8);
+  g.destroy();
+}
+
+export class AvenueScene extends Phaser.Scene {
+  private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+  private wasd!: WalkKeys;
+  private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
+  private layout!: AvenueLayout;
+  private note?: MsgBox;
+  private bagUi?: BagUi;
+  private facing: Facing = "down";
+  private flip = 1;
+  private reaching = false;
+  private from = "hall";
+  private steve?: Phaser.GameObjects.Image;
+  private shout?: Phaser.GameObjects.Text;
+  private flyerSpr?: Phaser.GameObjects.Image;
+  private pendingRide = false;
+  private riding = false;
+
+  constructor() {
+    super("avenue");
+  }
+
+  init(data: { from?: string }): void {
+    this.from = data.from ?? "hall";
+  }
+
+  create(): void {
+    if (this.textures.exists("avenue")) this.textures.remove("avenue");
+    const art = this.add.graphics().setVisible(false);
+    this.layout = drawAvenue(art);
+    art.generateTexture("avenue", GBA_W, GBA_H);
+    art.destroy();
+    this.add.image(0, 0, "avenue").setOrigin(0);
+
+    ensureSteve(this);
+    ensureFlyer(this);
+    if (!run.steveGone) {
+      this.steve = this.add.image(this.layout.steve.x + 11, this.layout.steve.y + 8, "steve").setDepth(9);
+      this.steve.setFlipX(true);
+    }
+
+    if (run.flyerOnRoad && !hasFlyer()) this.placeFlyer();
+
+    if (this.from === "roundabout") {
+      this.facing = "side";
+      this.flip = -1;
+      this.player = spawnKid(this, this.layout.spawnFromEast.x, this.layout.spawnFromEast.y);
+      this.player.setFlipX(true);
+    } else {
+      this.facing = "down";
+      this.flip = 1;
+      this.player = spawnKid(this, this.layout.spawnFromHall.x, this.layout.spawnFromHall.y);
+    }
+    const walls = this.layout.solids.filter((s) => s !== this.layout.steve);
+    addWalls(this, this.player, walls);
+    const keys = bindWalkKeys(this);
+    this.cursors = keys.cursors;
+    this.wasd = keys.wasd;
+    this.note = new MsgBox(this);
+    this.bagUi = new BagUi(this, (line) => this.showNote(line));
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      if (this.riding && !hasFlyer()) run.flyerOnRoad = true;
+    });
+
+    if (!isTouchUi()) {
+      this.input.on("pointerdown", () => {
+        if (this.bagUi?.atePointer()) return;
+        if (this.note?.advance()) return;
+        if (this.bagUi?.menu.active) return;
+        if (!this.reaching && !this.riding) this.tryExamine();
+      });
+    }
+  }
+
+  update(): void {
+    const confirm = justAction(this.cursors, this.wasd);
+    const cancel = justCancel(this.wasd);
+
+    if (this.bagUi?.update(this.cursors, { W: this.wasd.W, S: this.wasd.S }, confirm, cancel)) {
+      this.player.body.setVelocity(0, 0);
+      return;
+    }
+
+    if (this.note?.open) {
+      this.player.body.setVelocity(0, 0);
+      if (confirm) this.note.advance();
+      return;
+    }
+
+    if (this.reaching) {
+      this.player.body.setVelocity(0, 0);
+      return;
+    }
+
+    if (this.pendingRide) {
+      this.pendingRide = false;
+      this.rideOff();
+    }
+
+    const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
+    this.facing = walked.facing;
+    this.flip = walked.flip;
+
+    if (walkingInto(this.player, this.layout.homeDoor, "left")) {
+      this.scene.start("hall", { from: "avenue" });
+      return;
+    }
+
+    if (this.player.x < 8 && this.player.y > 118) {
+      this.reachThen("Not going up the road yet.");
+      this.player.x = 10;
+      return;
+    }
+    if (this.player.x > GBA_W - 8 && this.player.y > 118) {
+      if (!run.steveGone) {
+        this.player.x = GBA_W - 10;
+        this.reachThen("Go see Steve first.");
+        return;
+      }
+      this.scene.start("roundabout", { from: "avenue" });
+      return;
+    }
+
+    if (confirm) this.tryExamine();
+  }
+
+  private tryExamine(): void {
+    if (run.flyerOnRoad && !hasFlyer() && near(this.player, this.layout.flyer, 12)) {
+      takeFlyer();
+      this.flyerSpr?.destroy();
+      this.flyerSpr = undefined;
+      this.bagUi?.sync();
+      this.reachThen([
+        "Professor Choke's Pompeymon research centre.",
+        "New trainers wanted.",
+        { who: "YOU", text: "Hmm. What is this." },
+      ]);
+      return;
+    }
+    if (!run.steveGone && !this.riding && this.steve && near(this.player, this.layout.steve, 12)) {
+      this.pendingRide = true;
+      this.reachThen([
+        { who: "STEVE", text: "New bike. Yours is still in the shed." },
+        { who: "STEVE", text: "I'm off. Gonna be the Pompeymon master." },
+        { who: "YOU", text: "…Pompeymon? What you on about?" },
+      ]);
+      return;
+    }
+    if (near(this.player, this.layout.houses.ne, 8)) {
+      this.reachThen(run.steveGone ? "Steve's. He's gone." : "Steve's. Bike's louder than their telly.");
+      return;
+    }
+    if (near(this.player, this.layout.houses.sw, 8) || near(this.player, this.layout.houses.se, 8)) {
+      this.reachThen("They're out.");
+      return;
+    }
+    if (near(this.player, this.layout.fence, 8)) {
+      this.reachThen("End of 2nd Avenue.");
+      return;
+    }
+    if (this.player.y > 118) {
+      this.reachThen(run.steveGone ? "Roundabout's east." : "Go see Steve first.");
+      return;
+    }
+    this.reachThen("2nd Avenue.");
+  }
+
+  private rideOff(): void {
+    if (!this.steve || this.riding || run.steveGone) return;
+    this.riding = true;
+    run.steveGone = true;
+    const steve = this.steve;
+    steve.setFlipX(false);
+    this.shout = this.add
+      .text(steve.x, steve.y - 14, "Haha. You're such a loser.", {
+        fontFamily: '"Press Start 2P", monospace',
+        fontSize: "8px",
+        color: "#181828",
+        backgroundColor: "#f8f0c8",
+        padding: { x: 3, y: 2 },
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(20);
+
+    this.tweens.add({
+      targets: steve,
+      x: 120,
+      y: 128,
+      duration: 780,
+      ease: "Linear",
+      onUpdate: () => this.shout?.setPosition(steve.x, steve.y - 14),
+      onComplete: () => {
+        this.tweens.add({
+          targets: steve,
+          x: 268,
+          duration: 1600,
+          ease: "Linear",
+          onUpdate: () => {
+            steve.y = 128 + Math.sin(this.time.now / 55);
+            this.shout?.setPosition(steve.x, steve.y - 14);
+            if (!run.flyerOnRoad && !hasFlyer() && steve.x > this.layout.flyer.x) {
+              run.flyerOnRoad = true;
+              this.placeFlyer();
+            }
+          },
+          onComplete: () => {
+            this.riding = false;
+            steve.destroy();
+            this.steve = undefined;
+            this.shout?.destroy();
+            this.shout = undefined;
+          },
+        });
+      },
+    });
+  }
+
+  private placeFlyer(): void {
+    this.flyerSpr?.destroy();
+    this.flyerSpr = this.add
+      .image(this.layout.flyer.x + 6, this.layout.flyer.y + 4, "flyer")
+      .setDepth(8);
+  }
+
+  private reachThen(line: Line | Line[]): void {
+    this.reaching = true;
+    this.player.body.setVelocity(0, 0);
+    const reach = this.facing === "down" ? "reach-down" : "reach-side";
+    this.player.anims.play(kidAnim(run.outfit, reach));
+    this.showNote(line);
+    this.time.delayedCall(520, () => {
+      this.reaching = false;
+      const idle = this.facing === "up" ? "idle-up" : this.facing === "side" ? "idle-side" : "idle-down";
+      this.player.anims.play(kidAnim(run.outfit, idle));
+    });
+  }
+
+  private showNote(text: Line | Line[]): void {
+    this.note?.show(text);
+  }
+}

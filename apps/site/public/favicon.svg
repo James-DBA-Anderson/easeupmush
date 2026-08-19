@@ -1,4 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Ease Up Mush">
   <rect width="32" height="32" fill="#0b1c24"/>
-  <text x="16" y="22" text-anchor="middle" font-size="14" font-family="Impact, Haettenschweiler, Arial Black, sans-serif" fill="#f0a23a">EM</text>
+  <text
+    x="16"
+    y="22"
+    text-anchor="middle"
+    font-size="13"
+    font-family="Impact, Haettenschweiler, Arial Black, sans-serif"
+    font-style="italic"
+    fill="#f0a23a"
+    stroke="#050508"
+    stroke-width="2.4"
+    paint-order="stroke fill"
+  >EM</text>
 </svg>

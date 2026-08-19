@@ -6,6 +6,16 @@ const BOX_H = 48;
 const BOX_X = 4;
 const BOX_Y = GBA_H - BOX_H - 4;
 
+export type Line = string | { who?: string; text: string };
+
+export function lineText(line: Line): string {
+  return typeof line === "string" ? line : line.text;
+}
+
+export function lineWho(line: Line): string | undefined {
+  return typeof line === "string" ? undefined : line.who;
+}
+
 function paintFrame(g: Phaser.GameObjects.Graphics, w: number, h: number): void {
   g.clear();
   g.fillStyle(0x000000, 1);
@@ -55,14 +65,30 @@ function paintArrow(g: Phaser.GameObjects.Graphics): void {
   g.fillRect(3, 3, 1, 1);
 }
 
-/** FireRed-style message window along the bottom of the GBA screen. */
+function paintName(g: Phaser.GameObjects.Graphics, w: number, h: number): void {
+  g.clear();
+  g.fillStyle(0x183068, 1);
+  g.fillRect(0, 0, w, h);
+  g.fillStyle(0xf8f0c8, 1);
+  g.fillRect(1, 1, w - 2, h - 2);
+  g.fillStyle(0xf0a23a, 1);
+  g.fillRect(1, 1, w - 2, 1);
+  g.fillRect(1, 1, 1, h - 2);
+}
+
+/** FireRed-style message window. Optional speaker name on the top lip. */
 export class MsgBox {
   private readonly root: Phaser.GameObjects.Container;
   private readonly label: Phaser.GameObjects.Text;
   private readonly arrow: Phaser.GameObjects.Graphics;
+  private readonly nameFrame: Phaser.GameObjects.Graphics;
+  private readonly nameLabel: Phaser.GameObjects.Text;
   private hideTimer?: Phaser.Time.TimerEvent;
 
-  constructor(private readonly scene: Phaser.Scene) {
+  private pages: Line[] = [];
+  private page = 0;
+
+  constructor(scene: Phaser.Scene) {
     const frame = scene.add.graphics();
     paintFrame(frame, BOX_W, BOX_H);
 
@@ -78,8 +104,15 @@ export class MsgBox {
     paintArrow(this.arrow);
     this.arrow.setPosition(BOX_W - 16, BOX_H - 12);
 
-    this.root = scene.add.container(BOX_X, BOX_Y, [frame, this.label, this.arrow]);
-    this.root.setDepth(50);
+    this.nameFrame = scene.add.graphics();
+    this.nameLabel = scene.add.text(6, -10, "", {
+      fontFamily: '"Press Start 2P", monospace',
+      fontSize: "8px",
+      color: "#f0a23a",
+    });
+
+    this.root = scene.add.container(BOX_X, BOX_Y, [frame, this.label, this.arrow, this.nameFrame, this.nameLabel]);
+    this.root.setDepth(2000);
     this.root.setScrollFactor(0);
     this.root.setVisible(false);
 
@@ -92,10 +125,12 @@ export class MsgBox {
     });
   }
 
-  show(text: string): void {
+  show(text: Line | Line[]): void {
     this.hideTimer?.remove(false);
     this.hideTimer = undefined;
-    this.label.setText(text);
+    this.pages = Array.isArray(text) ? text : [text];
+    this.page = 0;
+    this.paintPage();
     this.root.setVisible(true);
   }
 
@@ -103,9 +138,14 @@ export class MsgBox {
     return this.root.visible;
   }
 
-  /** Space / Look: close the box. Returns true if the press was used. */
+  /** Space / Look: next page, or close. Returns true if the press was used. */
   advance(): boolean {
     if (!this.open) return false;
+    if (this.page < this.pages.length - 1) {
+      this.page += 1;
+      this.paintPage();
+      return true;
+    }
     this.hide();
     return true;
   }
@@ -114,5 +154,22 @@ export class MsgBox {
     this.hideTimer?.remove(false);
     this.hideTimer = undefined;
     this.root.setVisible(false);
+  }
+
+  private paintPage(): void {
+    const line = this.pages[this.page];
+    this.label.setText(line ? lineText(line) : "");
+    const who = line ? lineWho(line) : undefined;
+    if (!who) {
+      this.nameFrame.clear();
+      this.nameLabel.setVisible(false);
+      return;
+    }
+    this.nameLabel.setVisible(true);
+    this.nameLabel.setText(who);
+    this.nameLabel.setPosition(8, -9);
+    const w = Math.max(36, who.length * 8 + 10);
+    paintName(this.nameFrame, w, 12);
+    this.nameFrame.setPosition(4, -12);
   }
 }

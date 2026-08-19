@@ -8,8 +8,6 @@ export type Facing = "down" | "up" | "side";
 
 export type WalkKeys = Record<"W" | "A" | "S" | "D" | "Z" | "X" | "ESC", Phaser.Input.Keyboard.Key>;
 
-export type Facing = "down" | "up" | "side";
-
 export type Solid = { x: number; y: number; w: number; h: number };
 
 export function near(
@@ -18,6 +16,44 @@ export function near(
   pad = 12,
 ): boolean {
   return p.x > s.x - pad && p.x < s.x + s.w + pad && p.y > s.y - pad && p.y < s.y + s.h + pad;
+}
+
+export type DoorDir = "up" | "down" | "left" | "right";
+
+/** True only when moving into the opening — not walking past it, not Look. */
+export function walkingInto(
+  player: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody,
+  door: Solid,
+  dir: DoorDir,
+): boolean {
+  const { velocity, left, right, top, bottom } = player.body;
+  const go = 20;
+  if (dir === "up") {
+    if (velocity.y > -go) return false;
+    if (player.x < door.x || player.x > door.x + door.w) return false;
+    return top <= door.y + door.h + 4;
+  }
+  if (dir === "down") {
+    if (velocity.y < go) return false;
+    if (player.x < door.x || player.x > door.x + door.w) return false;
+    return bottom >= door.y - 2;
+  }
+  if (dir === "left") {
+    if (velocity.x > -go) return false;
+    if (player.y < door.y || player.y > door.y + door.h) return false;
+    return left <= door.x + door.w + 4;
+  }
+  if (velocity.x < go) return false;
+  if (player.y < door.y || player.y > door.y + door.h) return false;
+  return right >= door.x - 4;
+}
+
+/** Feet body vs map edge — sprite centre never reaches y > 152 with collideWorldBounds. */
+export function atSouthEdge(
+  player: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody,
+  mapH = GBA_H,
+): boolean {
+  return player.body.bottom >= mapH - 1;
 }
 
 export function addWalls(
@@ -36,6 +72,7 @@ export function spawnKid(
   scene: Phaser.Scene,
   x: number,
   y: number,
+  world = { w: GBA_W, h: GBA_H },
 ): Phaser.Types.Physics.Arcade.SpriteWithDynamicBody {
   ensureKidSheets(scene);
   const player = scene.physics.add.sprite(x, y, kidSheet(run.outfit), "idle-down");
@@ -43,8 +80,8 @@ export function spawnKid(
   player.setSize(10, 6).setOffset(11, 24);
   player.setDepth(10);
   player.anims.play(kidAnim(run.outfit, "idle-down"));
-  scene.physics.world.setBounds(0, 0, GBA_W, GBA_H);
-  scene.cameras.main.setBounds(0, 0, GBA_W, GBA_H);
+  scene.physics.world.setBounds(0, 0, world.w, world.h);
+  scene.cameras.main.setBounds(0, 0, world.w, world.h);
   scene.cameras.main.fadeIn(280, 18, 16, 22);
   return player;
 }
