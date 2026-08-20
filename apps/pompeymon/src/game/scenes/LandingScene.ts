@@ -142,7 +142,6 @@ export class LandingScene extends Phaser.Scene {
       this.scene.start("hall", { from: "landing" });
       return;
     }
-    this.reachThen("Landing. Loo and stairs.");
   }
 
   private reachThen(line: string): void {

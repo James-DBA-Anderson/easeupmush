@@ -5,6 +5,14 @@ import { ensureNpcSheets, npcSheet, playNpc, type NpcLook } from "../sprites/npc
 import type { Facing } from "../walk";
 import type { Line } from "../ui/MsgBox";
 
+export type TrainerMate = {
+  name: string;
+  look: NpcLook;
+  mon: SpeciesId;
+  lv: number;
+  win: string;
+};
+
 export type TrainerSpec = {
   title: string;
   mon: SpeciesId;
@@ -12,6 +20,8 @@ export type TrainerSpec = {
   challenge: string;
   win: string;
   after: string;
+  /** Second trainer in a tag fight — their mon comes out after yours beats the first. */
+  mate?: TrainerMate;
 };
 
 export type NpcSpec = {
@@ -25,6 +35,10 @@ export type NpcSpec = {
   los?: number;
   patrol?: { x: number; y: number; w: number; h: number };
   talk: string | string[];
+  /** Mid-chat lines before a trainer fight (Look only — no LOS). */
+  intro?: Line[];
+  /** Interact uses this NPC's trainer / intro / beaten state. */
+  pairLead?: string;
   trainer?: TrainerSpec;
 };
 
@@ -124,7 +138,7 @@ export function npcNear(
 }
 
 export function npcInLos(player: { x: number; y: number }, npc: FieldNpc): boolean {
-  if (!npc.trainer || isBeaten(npc.id)) return false;
+  if (!npc.trainer || npc.intro || isBeaten(npc.id)) return false;
   const range = npc.los ?? 52;
   const x = npc.sprite.x;
   const y = npc.sprite.y;
@@ -143,12 +157,22 @@ export function losTrainer(player: { x: number; y: number }, npcs: FieldNpc[]): 
   return npcs.find((n) => npcInLos(player, n));
 }
 
-export function npcTalk(npc: FieldNpc): Line | Line[] {
+/** Resolve pair mate → lead so both share one fight / beaten flag. */
+export function trainerLead(npc: FieldNpc, npcs: FieldNpc[]): FieldNpc {
+  if (!npc.pairLead) return npc;
+  return npcs.find((n) => n.id === npc.pairLead) ?? npc;
+}
+
+export function npcTalk(npc: FieldNpc, npcs?: FieldNpc[]): Line | Line[] {
+  const lead = npcs ? trainerLead(npc, npcs) : npc;
   const said = (text: string | string[]): Line | Line[] =>
-    Array.isArray(text) ? text.map((line) => ({ who: npc.name, text: line })) : { who: npc.name, text };
-  if (npc.trainer && isBeaten(npc.id)) return said(npc.trainer.after);
-  if (npc.trainer && !run.starter) return said("Get a Pompeymon first.");
-  return said(npc.talk);
+    Array.isArray(text)
+      ? text.map((line) => ({ who: lead.name, text: line }))
+      : { who: lead.name, text };
+  if (lead.trainer && isBeaten(lead.id)) return said(lead.trainer.after);
+  if (lead.trainer && !run.starter) return said("Get a Pompeymon first mush.");
+  if (lead.intro && lead.trainer && !isBeaten(lead.id)) return lead.intro;
+  return said(lead.talk);
 }
 
 export function startTrainerFight(
@@ -156,24 +180,43 @@ export function startTrainerFight(
   npc: FieldNpc,
   returnScene: string,
   pos: { x: number; y: number },
+  npcs?: FieldNpc[],
 ): boolean {
-  if (!npc.trainer) return false;
-  if (isBeaten(npc.id)) return false;
+  const lead = npcs ? trainerLead(npc, npcs) : npc;
+  if (!lead.trainer) return false;
+  if (isBeaten(lead.id)) return false;
   if (!run.starter) return false;
   if ((partnerMon()?.hp ?? 0) <= 0) return false;
   saveOverworld(returnScene, pos);
+  const mate = lead.trainer.mate;
   scene.scene.start("encounter", {
     trainer: {
-      id: npc.id,
-      title: npc.trainer.title,
-      mon: npc.trainer.mon,
-      lv: npc.trainer.lv,
-      challenge: npc.trainer.challenge,
-      win: npc.trainer.win,
-      who: npc.name,
+      id: lead.id,
+      title: lead.trainer.title,
+      mon: lead.trainer.mon,
+      lv: lead.trainer.lv,
+      challenge: lead.trainer.challenge,
+      win: lead.trainer.win,
+      look: lead.look,
+      who: lead.name,
+      mate: mate
+        ? {
+            who: mate.name,
+            look: mate.look,
+            mon: mate.mon,
+            lv: mate.lv,
+            win: mate.win,
+          }
+        : undefined,
     },
   });
   return true;
+}
+
+/** True if Look should show intro chat then start the fight. */
+export function needsTrainerIntro(npc: FieldNpc, npcs: FieldNpc[]): boolean {
+  const lead = trainerLead(npc, npcs);
+  return !!(lead.trainer && lead.intro && !isBeaten(lead.id) && run.starter && (partnerMon()?.hp ?? 0) > 0);
 }
 
 export const HIGH_STREET_NPCS: NpcSpec[] = [
@@ -184,7 +227,7 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     x: 84,
     y: 318,
     facing: "down",
-    talk: "Iceland's always cold.",
+    talk: "Iceland's always cold mush.",
   },
   {
     id: "hs-pub",
@@ -196,13 +239,16 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     flip: -1,
     los: 36,
     patrol: { x: 142, y: 316, w: 16, h: 22 },
-    talk: "You're my best mate. You are.",
+    talk: [
+      "You're my best mate mush. You are.",
+      "I aint never been to portsmuth before.",
+    ],
     trainer: {
       title: "DRUNK DAVE",
       mon: "pidgeon",
       lv: 5,
-      challenge: "One more. Then you.",
-      win: "Mine's a lager.",
+      challenge: "One more. Then you mush.",
+      win: "Ease up mush. Mine's a lager.",
       after: "Pub's shut anyway.",
     },
   },
@@ -214,7 +260,7 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     y: 250,
     facing: "down",
     patrol: { x: 78, y: 230, w: 16, h: 50 },
-    talk: "You seen Steve? New bike.",
+    talk: "You seen Steve mush? New bike.",
   },
   {
     id: "hs-kay",
@@ -225,15 +271,58 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     facing: "side",
     flip: 1,
     los: 44,
-    talk: "Chips first. Then you.",
+    talk: "Chips first. Then you mush.",
     trainer: {
       title: "LASS KAY",
       mon: "chipgull",
       lv: 5,
-      challenge: "I was here first.",
+      challenge: "I was here first. Don't squinny.",
       win: "Fine. Have the chips.",
-      after: "Chippy's still shut.",
+      after: "Chippy's still shut. Typical Pompey.",
     },
+  },
+  {
+    id: "hs-sharon",
+    name: "SHARON",
+    look: "lass",
+    x: 138,
+    y: 124,
+    facing: "side",
+    flip: 1,
+    talk: "We're busy mush.",
+    intro: [
+      {
+        who: "SHARON",
+        text: "And I said but a brush on it and you can do my teeth at the same time!",
+      },
+      { who: "TRACY", text: "Oh didn't see you there..." },
+    ],
+    trainer: {
+      title: "SHARON & TRACY",
+      mon: "chipgull",
+      lv: 5,
+      challenge: "Eavesdropping. We'll batter you.",
+      win: "That's bang out of order.",
+      after: "Mind your own mush.",
+      mate: {
+        name: "TRACY",
+        look: "coat",
+        mon: "moggit",
+        lv: 5,
+        win: "Ease up mush.",
+      },
+    },
+  },
+  {
+    id: "hs-tracy",
+    name: "TRACY",
+    look: "coat",
+    x: 150,
+    y: 124,
+    facing: "side",
+    flip: -1,
+    pairLead: "hs-sharon",
+    talk: "We're busy mush.",
   },
   {
     id: "hs-tom",
@@ -244,13 +333,16 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     facing: "side",
     flip: -1,
     los: 40,
-    talk: "Rat's from the chemist bin.",
+    talk: [
+      "Rat's from the chemist bin mush.",
+      "Who's that mush fink he is?",
+    ],
     trainer: {
       title: "LAD TOM",
       mon: "donerrat",
       lv: 5,
-      challenge: "Don't nick my bin.",
-      win: "Take it then.",
+      challenge: "Don't nick my bin you dinlo.",
+      win: "Take it then. That's bang out of order.",
       after: "Chemist's still shut.",
     },
   },
@@ -265,7 +357,10 @@ export const ROUNDABOUT_NPCS: NpcSpec[] = [
     y: 92,
     facing: "side",
     flip: 1,
-    talk: "Give way. They never do.",
+    talk: [
+      "Give way. They never do.",
+      "That's bang out of order mush.",
+    ],
   },
   {
     id: "rb-lee",
@@ -276,12 +371,12 @@ export const ROUNDABOUT_NPCS: NpcSpec[] = [
     facing: "side",
     flip: 1,
     los: 32,
-    talk: "High Street's that way. Mine first.",
+    talk: "High Street's that way mush. Mine first.",
     trainer: {
       title: "YOUNGSTER LEE",
       mon: "pidgeon",
       lv: 4,
-      challenge: "Roundabout rules.",
+      challenge: "Roundabout rules mush.",
       win: "Gave way. First time.",
       after: "Watch the gulls.",
     },
@@ -296,7 +391,7 @@ export const HILL_NPCS: NpcSpec[] = [
     x: 120,
     y: 88,
     facing: "up",
-    talk: "You can see the island from here.",
+    talk: "You can see the island from here mush.",
   },
 ];
 
@@ -309,12 +404,12 @@ export const BRIDGE_NPCS: NpcSpec[] = [
     y: 72,
     facing: "down",
     los: 40,
-    talk: "Over the island. That's where it counts.",
+    talk: "Over the island. That's Pompey mush.",
     trainer: {
       title: "YOUNGSTER DEAN",
       mon: "pidgeon",
       lv: 6,
-      challenge: "Let's see what Choke gave you.",
+      challenge: "Let's see what Choke gave you mush.",
       win: "Alright. You're going.",
       after: "Go on then. Pompey.",
     },
@@ -332,13 +427,16 @@ export const ISLAND_NPCS: NpcSpec[] = [
     flip: 1,
     los: 36,
     patrol: { x: 132, y: 148, w: 20, h: 22 },
-    talk: "Green Posts. I'm barred. Allegedly.",
+    talk: [
+      "Green Posts. I'm barred. Allegedly.",
+      "I'd bang him out if he said that to me.",
+    ],
     trainer: {
       title: "DRUNK MICK",
       mon: "donerrat",
       lv: 6,
-      challenge: "I could take Pompey.",
-      win: "Last orders. Apparently.",
+      challenge: "I could take Pompey mush.",
+      win: "Ease up mush. Last orders.",
       after: "Posts are shut. For me.",
     },
   },
@@ -349,7 +447,11 @@ export const ISLAND_NPCS: NpcSpec[] = [
     x: 70,
     y: 338,
     facing: "down",
-    talk: "Bus is late. Again.",
+    talk: [
+      "Bus is late. Again.",
+      "I'm not squinnying. It is late mush.",
+      "Nuffin ever comes when it should.",
+    ],
   },
   {
     id: "is-bex",
@@ -360,7 +462,7 @@ export const ISLAND_NPCS: NpcSpec[] = [
     facing: "side",
     flip: 1,
     los: 48,
-    talk: "Don't tread on the Lines.",
+    talk: "Don't tread on the Lines mush.",
     trainer: {
       title: "LASS BEX",
       mon: "spikehedge",
@@ -379,13 +481,13 @@ export const ISLAND_NPCS: NpcSpec[] = [
     facing: "side",
     flip: -1,
     los: 48,
-    talk: "Boys school. Field's in there.",
+    talk: "Boys school. Field's in there mush.",
     trainer: {
       title: "YOUNGSTER GAZ",
       mon: "squirral",
       lv: 6,
-      challenge: "This bit's mine.",
-      win: "The squirrels are worse.",
+      challenge: "This bit's mine. I will batter you.",
+      win: "The squirrels are worse mush.",
       after: "Watch the grass.",
     },
   },
@@ -410,13 +512,13 @@ export const SCHOOL_NPCS: NpcSpec[] = [
     facing: "side",
     flip: 1,
     los: 40,
-    talk: "After school. Don't tell Sir.",
+    talk: "After school mush. Don't tell Sir.",
     trainer: {
       title: "LAD RYAN",
       mon: "squirral",
       lv: 6,
-      challenge: "I train on the field.",
-      win: "Kit's wet anyway.",
+      challenge: "I will batter you mush.",
+      win: "Ease up mush. Kit's wet anyway.",
       after: "Go on. Northern Road.",
     },
   },

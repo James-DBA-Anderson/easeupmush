@@ -2,11 +2,12 @@ import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
 import { takeBag, takeStarter, run } from "../run";
 import { ensureKidSheets, kidAnim, kidSheet } from "../sprites/kid";
-import { ensureMonSheets, MON_IDS, monBattleKey, monOwAnim, monOwSheet } from "../sprites/mon";
+import { ensureMonSheets, MON_IDS, monBattleKey, monFlyAnim, monFlySheet, monOwAnim, monOwSheet } from "../sprites/mon";
 import { consumeAction, isTouchUi } from "../touch";
 import { drawEaseLogo, drawPompeymonLogo } from "../ui/pixelLogo";
+import { drawTitleSkyline } from "../ui/titleArt";
 
-/** GBA title — kid in the jumper, Ease Up Mush mark, no place name. */
+/** GBA title — harbour skyline, kid, a few Pompeymon. No place name. */
 export class TitleScene extends Phaser.Scene {
   private started = false;
 
@@ -16,6 +17,10 @@ export class TitleScene extends Phaser.Scene {
 
   create(): void {
     const q = new URLSearchParams(location.search);
+    if (q.has("debug")) {
+      this.scene.start("debug");
+      return;
+    }
     if (q.has("preview")) {
       const g = this.add.graphics();
       g.fillStyle(0x102030, 1);
@@ -49,53 +54,93 @@ export class TitleScene extends Phaser.Scene {
     }
 
     const g = this.add.graphics();
-    g.fillStyle(0x102030, 1);
-    g.fillRect(0, 0, GBA_W, GBA_H);
-    g.fillStyle(0x183848, 1);
-    g.fillRect(0, 0, GBA_W, 52);
-    g.fillStyle(0x1c4058, 1);
-    g.fillRect(0, 52, GBA_W, 8);
-    g.fillStyle(0x8a6a38, 1);
-    g.fillRect(0, 108, GBA_W, 1);
-    g.fillStyle(0x6a5030, 1);
-    g.fillRect(0, 109, GBA_W, 51);
-    g.fillStyle(0x5a4028, 1);
-    for (let y = 116; y < GBA_H; y += 8) g.fillRect(0, y, GBA_W, 1);
-
-    g.fillStyle(0xf0a23a, 0.18);
-    g.fillEllipse(GBA_W / 2, 92, 70, 28);
-
-    drawPompeymonLogo(g, GBA_W / 2, 8);
-    drawEaseLogo(g, GBA_W / 2, 128);
+    drawTitleSkyline(g);
+    drawPompeymonLogo(g, GBA_W / 2, 4);
+    drawEaseLogo(g, 86, 122);
 
     ensureKidSheets(this);
     ensureMonSheets(this);
 
-    if (new URLSearchParams(location.search).has("preview")) {
-      this.showMonPreview();
-      return;
-    }
-
-    const kid = this.add.sprite(GBA_W / 2, 100, kidSheet("jumper"), "idle-down");
+    const kid = this.add.sprite(120, 126, kidSheet("jumper"), "idle-down");
     kid.setOrigin(0.5, 1);
     kid.setScale(2);
+    kid.setDepth(8);
     kid.play(kidAnim("jumper", "idle-down"));
     this.tweens.add({
       targets: kid,
-      y: 98,
+      y: 124,
       duration: 700,
       yoyo: true,
       repeat: -1,
       ease: "Sine.easeInOut",
     });
 
+    const fox = this.add.image(86, 126, monBattleKey("scabfox")).setOrigin(0.5, 1).setDepth(7);
+    this.tweens.add({
+      targets: fox,
+      y: 124,
+      duration: 820,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+      delay: 80,
+    });
+
+    const gull = this.add.sprite(200, 50, monFlySheet("chipgull"), "fly-up");
+    gull.setOrigin(0.5, 1).setDepth(6);
+    gull.play(monFlyAnim("chipgull"));
+    this.tweens.add({
+      targets: gull,
+      x: 218,
+      y: 42,
+      duration: 1600,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+    });
+
+    const bird = this.add.sprite(52, 44, monFlySheet("pidgeon"), "fly-up");
+    bird.setOrigin(0.5, 1).setDepth(6);
+    bird.play(monFlyAnim("pidgeon"));
+    this.tweens.add({
+      targets: bird,
+      x: 72,
+      y: 38,
+      duration: 1400,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+      delay: 200,
+    });
+
+    const rat = this.add.image(158, 128, monBattleKey("donerrat")).setOrigin(0.5, 1).setDepth(7);
+    this.tweens.add({
+      targets: rat,
+      y: 126,
+      duration: 640,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+      delay: 140,
+    });
+
     const prompt = this.add
-      .text(GBA_W / 2, 112, isTouchUi() ? "PRESS LOOK" : "PRESS SPACE", {
+      .text(168, 138, isTouchUi() ? "PRESS LOOK" : "PRESS SPACE", {
         fontFamily: '"Press Start 2P", monospace',
         fontSize: "8px",
-        color: "#f8f0d8",
+        color: "#fff8e8",
       })
-      .setOrigin(0.5);
+      .setOrigin(0.5)
+      .setDepth(9);
+
+    this.add
+      .text(168, 150, isTouchUi() ? "OPEN ?DEBUG" : "PRESS D DEBUG", {
+        fontFamily: '"Press Start 2P", monospace',
+        fontSize: "8px",
+        color: "#e0d0b0",
+      })
+      .setOrigin(0.5)
+      .setDepth(9);
 
     this.tweens.add({
       targets: prompt,
@@ -106,7 +151,7 @@ export class TitleScene extends Phaser.Scene {
     });
 
     this.input.keyboard?.on("keydown-SPACE", () => this.startGame());
-    this.input.once("pointerdown", () => this.startGame());
+    this.input.keyboard?.on("keydown-D", () => this.scene.start("debug"));
   }
 
   private showMonPreview(): void {

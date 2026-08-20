@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
 import { hasFlyer, run, takeFlyer } from "../run";
 import { kidAnim } from "../sprites/kid";
-import { ensureSteve } from "../sprites/steve";
+import { ensureSteve, steveRideAnim, steveSheet } from "../sprites/steve";
 import { MsgBox, type Line } from "../ui/MsgBox";
 import { BagUi } from "../ui/BagUi";
 import {
@@ -19,6 +19,12 @@ import {
 } from "../walk";
 import { isTouchUi } from "../touch";
 import { drawAvenue, type AvenueLayout } from "../world/drawAvenue";
+
+const STEVE_CHAT: Line[] = [
+  { who: "STEVE", text: "New bike. Yours is still in the shed." },
+  { who: "STEVE", text: "I'm off. Gonna be the Pompeymon master." },
+  { who: "YOU", text: "…Pompeymon? What you on about?" },
+];
 
 function ensureFlyer(scene: Phaser.Scene): void {
   if (scene.textures.exists("flyer")) return;
@@ -46,7 +52,7 @@ export class AvenueScene extends Phaser.Scene {
   private flip = 1;
   private reaching = false;
   private from = "hall";
-  private steve?: Phaser.GameObjects.Image;
+  private steve?: Phaser.GameObjects.Sprite;
   private shout?: Phaser.GameObjects.Text;
   private flyerSpr?: Phaser.GameObjects.Image;
   private pendingRide = false;
@@ -71,7 +77,10 @@ export class AvenueScene extends Phaser.Scene {
     ensureSteve(this);
     ensureFlyer(this);
     if (!run.steveGone) {
-      this.steve = this.add.image(this.layout.steve.x + 11, this.layout.steve.y + 8, "steve").setDepth(9);
+      this.steve = this.add
+        .sprite(this.layout.steve.x + 12, this.layout.steve.y + 20, steveSheet(), "idle")
+        .setOrigin(0.5, 1)
+        .setDepth(9);
       this.steve.setFlipX(true);
     }
 
@@ -98,6 +107,8 @@ export class AvenueScene extends Phaser.Scene {
       if (this.riding && !hasFlyer()) run.flyerOnRoad = true;
     });
 
+    if (this.from === "hall" && !run.steveGone) this.meetSteve();
+
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
         if (this.bagUi?.atePointer()) return;
@@ -112,14 +123,14 @@ export class AvenueScene extends Phaser.Scene {
     const confirm = justAction(this.cursors, this.wasd);
     const cancel = justCancel(this.wasd);
 
-    if (this.bagUi?.update(this.cursors, { W: this.wasd.W, S: this.wasd.S }, confirm, cancel)) {
-      this.player.body.setVelocity(0, 0);
-      return;
-    }
-
     if (this.note?.open) {
       this.player.body.setVelocity(0, 0);
       if (confirm) this.note.advance();
+      return;
+    }
+
+    if (this.bagUi?.update(this.cursors, { W: this.wasd.W, S: this.wasd.S }, confirm, cancel)) {
+      this.player.body.setVelocity(0, 0);
       return;
     }
 
@@ -174,12 +185,7 @@ export class AvenueScene extends Phaser.Scene {
       return;
     }
     if (!run.steveGone && !this.riding && this.steve && near(this.player, this.layout.steve, 12)) {
-      this.pendingRide = true;
-      this.reachThen([
-        { who: "STEVE", text: "New bike. Yours is still in the shed." },
-        { who: "STEVE", text: "I'm off. Gonna be the Pompeymon master." },
-        { who: "YOU", text: "…Pompeymon? What you on about?" },
-      ]);
+      this.meetSteve();
       return;
     }
     if (near(this.player, this.layout.houses.ne, 8)) {
@@ -194,11 +200,15 @@ export class AvenueScene extends Phaser.Scene {
       this.reachThen("End of 2nd Avenue.");
       return;
     }
-    if (this.player.y > 118) {
-      this.reachThen(run.steveGone ? "Roundabout's east." : "Go see Steve first.");
-      return;
-    }
-    this.reachThen("2nd Avenue.");
+  }
+
+  private meetSteve(): void {
+    this.facing = "side";
+    this.flip = 1;
+    this.player.setFlipX(false);
+    this.player.anims.play(kidAnim(run.outfit, "idle-side"), true);
+    this.pendingRide = true;
+    this.showNote(STEVE_CHAT);
   }
 
   private rideOff(): void {
@@ -207,8 +217,9 @@ export class AvenueScene extends Phaser.Scene {
     run.steveGone = true;
     const steve = this.steve;
     steve.setFlipX(false);
+    steve.play(steveRideAnim());
     this.shout = this.add
-      .text(steve.x, steve.y - 14, "Haha. You're such a loser.", {
+      .text(steve.x, steve.y - 22, "Haha. You're such a loser.", {
         fontFamily: '"Press Start 2P", monospace',
         fontSize: "8px",
         color: "#181828",
@@ -221,19 +232,20 @@ export class AvenueScene extends Phaser.Scene {
     this.tweens.add({
       targets: steve,
       x: 120,
-      y: 128,
-      duration: 780,
-      ease: "Linear",
-      onUpdate: () => this.shout?.setPosition(steve.x, steve.y - 14),
+      y: 136,
+      duration: 700,
+      ease: "Sine.easeInOut",
+      onUpdate: () => this.shout?.setPosition(steve.x, steve.y - 22),
       onComplete: () => {
         this.tweens.add({
           targets: steve,
-          x: 268,
-          duration: 1600,
+          x: 280,
+          duration: 1500,
           ease: "Linear",
           onUpdate: () => {
-            steve.y = 128 + Math.sin(this.time.now / 55);
-            this.shout?.setPosition(steve.x, steve.y - 14);
+            // Subtle road hop on top of the pedal anim
+            steve.y = 136 + Math.sin(this.time.now / 70) * 1.5;
+            this.shout?.setPosition(steve.x, steve.y - 22);
             if (!run.flyerOnRoad && !hasFlyer() && steve.x > this.layout.flyer.x) {
               run.flyerOnRoad = true;
               this.placeFlyer();

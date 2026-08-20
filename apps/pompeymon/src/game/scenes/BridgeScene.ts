@@ -135,7 +135,6 @@ export class BridgeScene extends Phaser.Scene {
       this.reachThen("Creek. Then the island.");
       return;
     }
-    this.reachThen("Northern Road.");
   }
 
   private reachThen(line: Line | Line[]): void {

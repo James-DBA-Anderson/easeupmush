@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GBA_W } from "../constants";
-import { partnerMon, resumePos, run, saveOverworld } from "../run";
+import { isBeaten, partnerMon, resumePos, returningTo, run } from "../run";
 import { rollWildLv } from "../battle";
 import { kidAnim } from "../sprites/kid";
 import { SPECIES, type WildId } from "../species";
@@ -23,20 +23,16 @@ import { drawHighStreet, type HighStreetLayout } from "../world/drawHighStreet";
 import {
   HIGH_STREET_NPCS,
   losTrainer,
+  needsTrainerIntro,
   npcNear,
   npcTalk,
   spawnFieldNpcs,
   startTrainerFight,
   tickFieldNpcs,
+  trainerLead,
   type FieldNpc,
 } from "../world/npcs";
-import { spawnWanderers, tickWanderers, wanderNear, type Wanderer } from "../world/wander";
-
-const WANDER = [
-  { id: "pidgeon" as const, x: 116, y: 188, box: { x: 96, y: 164, w: 44, h: 48 } },
-  { id: "donerrat" as const, x: 116, y: 304, box: { x: 96, y: 278, w: 44, h: 52 } },
-  { id: "chipgull" as const, x: 116, y: 428, box: { x: 96, y: 404, w: 44, h: 52 } },
-];
+import { spawnAreaWilds, beginWildFight, leaveField, snapshotField, tickWanderers, wanderNear, type Wanderer } from "../world/wander";
 
 export class HighStreetScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -71,6 +67,7 @@ export class HighStreetScene extends Phaser.Scene {
 
     const rude = this.from === "lab-rude";
     const fallback = this.from === "lab" || rude ? this.layout.spawnFromLab : this.layout.spawnFromWest;
+    const returning = returningTo("highstreet");
     const spawn = resumePos("highstreet", fallback);
     this.facing = "side";
     this.flip = 1;
@@ -79,7 +76,7 @@ export class HighStreetScene extends Phaser.Scene {
       h: this.layout.mapH,
     });
     this.npcs = spawnFieldNpcs(this, HIGH_STREET_NPCS);
-    this.wanderers = spawnWanderers(this, WANDER);
+    this.wanderers = spawnAreaWilds(this, "highstreet", returning);
     addWalls(this, this.player, this.layout.solids);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
@@ -129,27 +126,32 @@ export class HighStreetScene extends Phaser.Scene {
     this.facing = walked.facing;
     this.flip = walked.flip;
     tickFieldNpcs(this, this.npcs);
-    tickWanderers(this, this.wanderers);
+    tickWanderers(this, this.wanderers, this.player);
     this.player.setDepth(this.player.y);
 
     const spotted = losTrainer(this.player, this.npcs);
-    if (spotted && startTrainerFight(this, spotted, "highstreet", this.player)) return;
+    if (spotted) {
+      snapshotField(this.wanderers);
+      if (startTrainerFight(this, spotted, "highstreet", this.player)) return;
+    }
 
     const moving = this.player.body.velocity.x !== 0 || this.player.body.velocity.y !== 0;
     const bumped = wanderNear(this.player, this.wanderers);
     if (moving) {
       if (run.grassCalm > 0) run.grassCalm -= 1;
       else if (bumped && run.starter) {
-        this.startWild(bumped.id);
+        this.startWild(bumped.id, bumped);
         return;
       }
     }
 
     if (this.player.x < 8 && near(this.player, this.layout.join, 16)) {
+      leaveField("highstreet");
       this.scene.start("roundabout", { from: "highstreet" });
       return;
     }
     if (walkingInto(this.player, this.layout.centreDoor, "left")) {
+      leaveField("highstreet");
       this.scene.start("lab");
       return;
     }
@@ -183,7 +185,7 @@ export class HighStreetScene extends Phaser.Scene {
     });
   }
 
-  private startWild(wild: WildId): void {
+  private startWild(wild: WildId, map?: Wanderer): void {
     if (!run.starter) {
       this.reachThen(`A ${SPECIES[wild].name}. Need a partner first.`);
       return;
@@ -193,20 +195,38 @@ export class HighStreetScene extends Phaser.Scene {
       return;
     }
     run.grassCalm = 28;
-    saveOverworld("highstreet", { x: this.player.x, y: this.player.y });
-    this.scene.start("encounter", { wild, lv: rollWildLv(3, 4) });
+    beginWildFight("highstreet", { x: this.player.x, y: this.player.y }, this.wanderers, map);
+    this.scene.start("encounter", { wild, lv: map?.lv ?? rollWildLv(3, 4) });
   }
 
   private tryExamine(): void {
     const person = npcNear(this.player, this.npcs);
     if (person) {
-      if (startTrainerFight(this, person, "highstreet", this.player)) return;
-      this.reachThen(npcTalk(person));
+      snapshotField(this.wanderers);
+      const lead = trainerLead(person, this.npcs);
+      if (lead.trainer && !isBeaten(lead.id)) {
+        if (!run.starter) {
+          this.reachThen(npcTalk(person, this.npcs));
+          return;
+        }
+        if ((partnerMon()?.hp ?? 0) <= 0) {
+          this.reachThen("Your Pompeymon's out.");
+          return;
+        }
+        if (needsTrainerIntro(person, this.npcs)) {
+          this.reachThen(lead.intro!, () => {
+            startTrainerFight(this, lead, "highstreet", this.player, this.npcs);
+          });
+          return;
+        }
+        if (startTrainerFight(this, lead, "highstreet", this.player, this.npcs)) return;
+      }
+      this.reachThen(npcTalk(person, this.npcs));
       return;
     }
     const wild = wanderNear(this.player, this.wanderers);
     if (wild) {
-      this.startWild(wild.id);
+      this.startWild(wild.id, wild);
       return;
     }
     for (const spot of this.layout.spots) {
@@ -215,15 +235,14 @@ export class HighStreetScene extends Phaser.Scene {
         return;
       }
     }
-    this.reachThen("Cosham High Street.");
   }
 
-  private reachThen(line: Line | Line[]): void {
+  private reachThen(line: Line | Line[], onDone?: () => void): void {
     this.reaching = true;
     this.player.body.setVelocity(0, 0);
     const reach = this.facing === "down" ? "reach-down" : "reach-side";
     this.player.anims.play(kidAnim(run.outfit, reach));
-    this.showNote(line);
+    this.showNote(line, onDone);
     this.time.delayedCall(520, () => {
       this.reaching = false;
       const idle = this.facing === "up" ? "idle-up" : this.facing === "side" ? "idle-side" : "idle-down";
@@ -231,7 +250,7 @@ export class HighStreetScene extends Phaser.Scene {
     });
   }
 
-  private showNote(text: Line | Line[]): void {
-    this.note?.show(text);
+  private showNote(text: Line | Line[], onDone?: () => void): void {
+    this.note?.show(text, onDone);
   }
 }

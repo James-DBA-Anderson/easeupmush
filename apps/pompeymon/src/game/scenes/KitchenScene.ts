@@ -20,6 +20,14 @@ import { isTouchUi } from "../touch";
 import { ensureMum } from "../sprites/mum";
 import { drawKitchen, type KitchenLayout } from "../world/drawKitchen";
 
+const mumLine = (text: string): Line => ({ who: "MUM", text: withHic(text) });
+
+/** Irritable drunk Mum — hic at the end of every line. */
+function withHic(text: string): string {
+  const t = text.trim().replace(/\s*hic\.?$/i, "").replace(/[.!?]*$/, "");
+  return `${t}. Hic.`;
+}
+
 export class KitchenScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WalkKeys;
@@ -31,6 +39,8 @@ export class KitchenScene extends Phaser.Scene {
   private facing: Facing = "up";
   private flip = 1;
   private reaching = false;
+  private mumSaid = false;
+  private bye: "off" | "walk" | "wait" | "line" = "off";
 
   constructor() {
     super("kitchen");
@@ -45,7 +55,8 @@ export class KitchenScene extends Phaser.Scene {
     this.room = this.add.image(0, 0, "kitchen").setOrigin(0);
 
     ensureMum(this);
-    this.add.image(this.layout.mum.x + 8, this.layout.mum.y + 10, "mum").setDepth(9);
+    // Lean on the units by the fridge — elbow on the worktop, facing into the room.
+    this.add.image(this.layout.mum.x + 10, this.layout.mum.y + 14, "mum").setOrigin(0.5, 1).setDepth(9);
 
     this.player = spawnKid(this, this.layout.spawn.x, this.layout.spawn.y);
     addWalls(this, this.player, this.layout.solids);
@@ -57,6 +68,7 @@ export class KitchenScene extends Phaser.Scene {
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
+        if (this.bye !== "off") return;
         if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
         if (this.bagUi?.menu.active) return;
@@ -68,6 +80,15 @@ export class KitchenScene extends Phaser.Scene {
   update(): void {
     const confirm = justAction(this.cursors, this.wasd);
     const cancel = justCancel(this.wasd);
+
+    if (this.bye !== "off") {
+      this.player.body.setVelocity(0, 0);
+      if (this.note?.open && confirm) this.note.advance();
+      if (this.bye === "line" && !this.note?.open) {
+        this.scene.start("hall", { from: "kitchen-bye" });
+      }
+      return;
+    }
 
     if (this.bagUi?.update(this.cursors, { W: this.wasd.W, S: this.wasd.S }, confirm, cancel)) {
       this.player.body.setVelocity(0, 0);
@@ -90,6 +111,10 @@ export class KitchenScene extends Phaser.Scene {
     this.flip = walked.flip;
 
     if (walkingInto(this.player, this.layout.door, "down")) {
+      if (!this.mumSaid) {
+        this.playByeLeave();
+        return;
+      }
       this.scene.start("hall", { from: "kitchen" });
       return;
     }
@@ -112,7 +137,12 @@ export class KitchenScene extends Phaser.Scene {
       return;
     }
     if (near(this.player, this.layout.mum, 10)) {
-      this.reachThen({ who: "MUM", text: run.hasBag ? "Go on then." : "Don't forget your bag." });
+      this.mumSaid = true;
+      this.reachThen(
+        run.hasBag
+          ? [mumLine("What now"), mumLine("Go on then. Out")]
+          : [mumLine("Oi"), mumLine("Don't forget your bag")],
+      );
       return;
     }
     if (near(this.player, this.layout.cooker, 8)) {
@@ -131,7 +161,28 @@ export class KitchenScene extends Phaser.Scene {
       this.reachThen("Milk. Leftover mash. Don't.");
       return;
     }
-    this.reachThen("Kitchen. Mum's in here.");
+  }
+
+  private playByeLeave(): void {
+    this.bye = "walk";
+    this.player.body.setVelocity(0, 0);
+    this.player.body.setEnable(false);
+    this.player.setCollideWorldBounds(false);
+    this.facing = "down";
+    this.player.anims.play(kidAnim(run.outfit, "walk-down"), true);
+    this.tweens.add({
+      targets: this.player,
+      y: GBA_H + 16,
+      duration: 760,
+      ease: "Linear",
+      onComplete: () => {
+        this.bye = "wait";
+        this.time.delayedCall(480, () => {
+          this.bye = "line";
+          this.showNote(mumLine("Bye then"));
+        });
+      },
+    });
   }
 
   private reachThen(line: Line | Line[]): void {

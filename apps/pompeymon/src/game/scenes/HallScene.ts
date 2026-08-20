@@ -30,6 +30,7 @@ export class HallScene extends Phaser.Scene {
   private flip = 1;
   private reaching = false;
   private from = "landing";
+  private meeting = false;
   private dressedWarn = false;
 
   constructor() {
@@ -48,8 +49,9 @@ export class HallScene extends Phaser.Scene {
     art.destroy();
     this.add.image(0, 0, "hall").setOrigin(0);
 
+    const fromKitchen = this.from === "kitchen" || this.from === "kitchen-bye";
     const spawn =
-      this.from === "kitchen"
+      fromKitchen
         ? this.layout.spawnFromKitchen
         : this.from === "frontroom"
           ? this.layout.spawnFromFront
@@ -57,7 +59,7 @@ export class HallScene extends Phaser.Scene {
             ? this.layout.spawnFromAvenue
             : this.layout.spawnFromLanding;
     this.facing =
-      this.from === "kitchen" ? "down" : this.from === "frontroom" ? "side" : this.from === "avenue" ? "up" : "up";
+      fromKitchen ? "down" : this.from === "frontroom" ? "side" : this.from === "avenue" ? "up" : "up";
     this.flip = this.from === "frontroom" ? -1 : 1;
     this.player = spawnKid(this, spawn.x, spawn.y);
     this.player.setFlipX(this.flip < 0);
@@ -68,8 +70,11 @@ export class HallScene extends Phaser.Scene {
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
 
+    if (this.from === "kitchen-bye") this.meetFromKitchen();
+
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
+        if (this.meeting) return;
         if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
         if (this.bagUi?.menu.active) return;
@@ -81,6 +86,11 @@ export class HallScene extends Phaser.Scene {
   update(): void {
     const confirm = justAction(this.cursors, this.wasd);
     const cancel = justCancel(this.wasd);
+
+    if (this.meeting) {
+      this.player.body.setVelocity(0, 0);
+      return;
+    }
 
     if (this.bagUi?.update(this.cursors, { W: this.wasd.W, S: this.wasd.S }, confirm, cancel)) {
       this.player.body.setVelocity(0, 0);
@@ -129,6 +139,13 @@ export class HallScene extends Phaser.Scene {
         }
         return;
       }
+      if (!run.hasBag) {
+        if (!this.dressedWarn) {
+          this.dressedWarn = true;
+          this.reachThen("Not going out without my bag.");
+        }
+        return;
+      }
       this.scene.start("avenue");
       return;
     }
@@ -137,12 +154,28 @@ export class HallScene extends Phaser.Scene {
     if (confirm) this.tryExamine();
   }
 
+  private meetFromKitchen(): void {
+    this.meeting = true;
+    this.player.body.setEnable(false);
+    this.player.anims.play(kidAnim(run.outfit, "walk-down"), true);
+    this.tweens.add({
+      targets: this.player,
+      y: this.player.y + 18,
+      duration: 520,
+      ease: "Linear",
+      onComplete: () => {
+        this.player.body.setEnable(true);
+        this.player.anims.play(kidAnim(run.outfit, "idle-down"), true);
+        this.meeting = false;
+      },
+    });
+  }
+
   private tryExamine(): void {
     if (near(this.player, this.layout.stairFoot, 8) || near(this.player, this.layout.stairs, 6)) {
       this.scene.start("landing", { from: "hall" });
       return;
     }
-    this.reachThen("Hall. Kitchen, front room, street.");
   }
 
   private reachThen(line: string): void {

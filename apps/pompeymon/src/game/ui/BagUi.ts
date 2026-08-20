@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
 import { bagEntries, bagLabel, bagLine, battleBagEntries, run, syncBagChrome, type BagEntry } from "../run";
 import { consumeBag, consumeDir, isTouchUi } from "../touch";
+import { mountDebugBack } from "./debugBack";
 
 type BagCallbacks = {
   onPick: (entry: BagEntry) => void;
@@ -49,7 +50,7 @@ export class BagMenu {
       color: "#f2e6d0",
     });
 
-    this.empty = scene.add.text(x + 22, y + LIST_Y, this.battle ? "No items." : "Empty.", {
+    this.empty = scene.add.text(x + 22, y + LIST_Y, this.battle ? "Nothing." : "Empty.", {
       fontFamily: '"Press Start 2P", monospace',
       fontSize: "8px",
       color: "#8aa3b0",
@@ -57,7 +58,7 @@ export class BagMenu {
 
     const hint = scene.add
       .text(GBA_W / 2, y + BAG_H - 10, this.battle
-          ? isTouchUi() ? "LOOK  USE    BACK" : "SPACE  USE    ESC  BACK"
+          ? isTouchUi() ? "LOOK  PICK    BACK" : "SPACE  PICK    ESC  BACK"
           : isTouchUi() ? "LOOK  SEE    BACK" : "SPACE  SEE    ESC  BACK", {
         fontFamily: '"Press Start 2P", monospace',
         fontSize: "6px",
@@ -211,6 +212,7 @@ export class BagUi {
     this.keyI = scene.input.keyboard!.addKey("I");
     syncBagChrome();
     this.sync();
+    mountDebugBack(scene);
   }
 
   private hitIcon(pointer: Phaser.Input.Pointer): boolean {

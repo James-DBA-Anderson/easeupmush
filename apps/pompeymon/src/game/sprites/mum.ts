@@ -20,36 +20,43 @@ const PAL: Record<string, number> = {
   T: 0x1c2034,
   o: 0x6a3820,
   O: 0x4a2414,
+  /** Wine glass / hand prop */
+  g: 0xc8e0e8,
+  G: 0x68a0b0,
 };
 
-const idleDown = [
-  "....kkkkkk....",
-  "...khHHHHHk...",
-  "..khhhhhhhhk..",
-  ".khhhhhhhhhhk.",
-  ".khhsssssshhk.",
-  ".khsswesewssk.",
-  ".khsssssssshk.",
-  "..khsssssshk..",
-  "...kssssssk...",
+/**
+ * Side lean on the kitchen units — elbow on the worktop, wine in hand, tip toward the counter.
+ * Drawn facing right (counter on the right); flip in scene if needed.
+ */
+const leanSide = [
+  "..............",
+  "......kkkk....",
+  ".....khHHHk...",
+  "....khhhhhhk..",
+  "...khhsssshk..",
+  "...khsweshk...",
+  "...khssssshk..",
+  "....ksssssk...",
   "...kcjjjjck...",
-  "..kjlllllljk..",
-  ".kjjjjjjjjjjk.",
-  ".kjjjJjjJjJjk.",
-  ".ksjjjjjjjjsk.",
-  ".kjjjjjjjjjjk.",
-  "..kJjjjjjjJk..",
-  "...kttttttk...",
-  "...ktTttTtk...",
-  "...kttttttk...",
-  "...koookook...",
-  "....kOkkOk....",
+  "..ksjllljJk...",
+  ".kjjjjjjjJk...",
+  "kjSjjjjjjJk...",
+  "kSSjjjjjJjk...",
+  ".kSjjjjjjjk..",
+  "..kjjjjjjtk..",
+  "...kjjjjttk..",
+  "....kjjtttk..",
+  ".....ktttOk..",
+  "......ktOOk..",
+  ".......kOOk..",
+  "........kk...",
 ];
 
 export function ensureMum(scene: Phaser.Scene): void {
-  if (scene.textures.exists("mum")) return;
+  if (scene.textures.exists("mum")) scene.textures.remove("mum");
   const g = scene.add.graphics().setVisible(false);
-  idleDown.forEach((row, y) => {
+  leanSide.forEach((row, y) => {
     for (let x = 0; x < row.length; x++) {
       const color = PAL[row[x]];
       if (color === undefined) continue;
@@ -57,6 +64,13 @@ export function ensureMum(scene: Phaser.Scene): void {
       g.fillRect(8 + x, 6 + y, 1, 1);
     }
   });
+  // Wine glass in the propped hand (near counter)
+  g.fillStyle(PAL.G, 1);
+  g.fillRect(22, 18, 3, 4);
+  g.fillStyle(PAL.g, 1);
+  g.fillRect(22, 17, 3, 2);
+  g.fillStyle(PAL.k, 1);
+  g.fillRect(23, 21, 1, 3);
   g.generateTexture("mum", FW, FH);
   g.destroy();
 }

@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
-import { consumeWhiteout, foundItem, hasChomp, healParty, run, takeChomp, takeStarter, type StarterId } from "../run";
+import { consumeWhiteout, foundItem, hasChomp, healParty, partyNeedsHeal, run, takeChomp, takeStarter, type StarterId } from "../run";
 import { ensureChoke } from "../sprites/choke";
 import { kidAnim } from "../sprites/kid";
 import { ensureMonSheets, monOwAnim, monOwSheet } from "../sprites/mon";
@@ -63,6 +63,12 @@ const HEAL: Line[] = [
   choke("There. They're up."),
   you("Cheers."),
   choke("Don't make a habit of it."),
+];
+
+const PATCH: Line[] = [
+  choke("You look rough. Hold still."),
+  choke("There. They're up."),
+  you("Cheers."),
 ];
 
 export class LabScene extends Phaser.Scene {
@@ -165,7 +171,13 @@ export class LabScene extends Phaser.Scene {
 
     if (walkingInto(this.player, this.layout.door, "down")) {
       if (!run.starter) {
-        this.reachThen(choke(run.refusedStarters ? "Bin's there." : "Pick one first."));
+        this.reachThen(
+          choke(
+            run.refusedStarters
+              ? "Bin's there. Rougher than Fratton Wetherspoons."
+              : "Pick one first.",
+          ),
+        );
         return;
       }
       if (hasChomp() && !run.chompKept) {
@@ -200,7 +212,6 @@ export class LabScene extends Phaser.Scene {
       this.reachThen(hasChomp() ? "Folders. Empty wrapper." : "Folders. Dust.");
       return;
     }
-    this.reachThen("Lab. Smells of chips and bleach.");
   }
 
   private findChomp(): void {
@@ -236,12 +247,18 @@ export class LabScene extends Phaser.Scene {
       return;
     }
     if (run.starter) {
-      healParty();
+      if (partyNeedsHeal()) {
+        healParty();
+        this.reachThen(PATCH);
+        return;
+      }
       this.reachThen(choke("Kebab boxes. Throw 'em. That's catching."));
       return;
     }
     if (run.refusedStarters) {
-      this.reachThen(choke("Bin's there. Suit yourself."));
+      this.reachThen(
+        choke("That one's rooting around in the bin. Rougher than Fratton Wetherspoons."),
+      );
       return;
     }
     this.offerMenu = true;
@@ -267,7 +284,10 @@ export class LabScene extends Phaser.Scene {
     if (id === "none") {
       run.refusedStarters = true;
       this.paint();
-      this.showNote(choke("Suit yourself. Bin's there."));
+      this.showNote([
+        choke("Well there's that one rooting around in the bin,"),
+        choke("but be careful, it's rougher than Fratton Wetherspoons."),
+      ]);
       return;
     }
     takeStarter(id);

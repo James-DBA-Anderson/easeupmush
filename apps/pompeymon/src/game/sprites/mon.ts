@@ -25,6 +25,8 @@ type MonArt = {
   pal: Pal;
   battle: string[];
   ow: Record<OwFrame, string[]>;
+  /** Battle-res side-view wing flap (title / sky). */
+  fly?: { up: string[]; down: string[] };
 };
 
 function padRow(row: string, w: number): string {
@@ -232,6 +234,44 @@ const CHIPGULL: MonArt = {
       ".kwwwwwwk.",
       "kook...ook",
       "kYk.....Yk",
+    ],
+  },
+  fly: {
+    // Same face as battle art; tapered wings so flap reads cleanly
+    up: [
+      "..kk..................kk..",
+      ".kwwk................kwwk.",
+      "kwwwk....kkkkkk......kwwwk",
+      "kwwwwk..kwWWWWwk....kwwwwk",
+      ".kwwwwkwwwwwwwWwk..kwwwwk.",
+      "..kwwwwwyeeeYywwwwwwwwk...",
+      "...kwwwwwwwwwwwwwwwwk.....",
+      "....kkwwgGGGGwwkk.........",
+      "...kwWWgGGGGGgWWwk........",
+      "..kwwWWGGGGGGWWwwk........",
+      "..kwwwWWWWWWWWwwwk........",
+      "...kwwwwwwwwwwwwk.........",
+      "....kwwkkkkkkwwk..........",
+      "....koook..kook...........",
+      ".....kYk....kYk...........",
+      ".....kk......kk...........",
+    ],
+    down: [
+      "..........kkkkkk..........",
+      ".........kwWWWWwk.........",
+      "........kwwwwwwwWk........",
+      ".......kwwyeeeYywwk.......",
+      ".......kwwwwwwwwwwk.......",
+      "..kkk.kkwwgGGGGwwkk.kkk...",
+      ".kwwwwwwwgGGGGGwwwwwwwk...",
+      "kWWWWWWWGGGGGGGWWWWWWWk...",
+      ".kwwwwWWWWWWWWWWWwwwwk....",
+      "..kwwwWWWWWWWWWWwwk.......",
+      "...kwwwwwwwwwwwwk.........",
+      "....kwwkkkkkkwwk..........",
+      "....koook..kook...........",
+      ".....kYk....kYk...........",
+      ".....kk......kk...........",
     ],
   },
 };
@@ -509,6 +549,43 @@ const PIDGEON: MonArt = {
       ".kggggggk.",
       "kook...ook",
       "kOk.....Ok",
+    ],
+  },
+  fly: {
+    up: [
+      "..kk..................kk..",
+      ".kggk................kggk.",
+      "kgggk....kkkkkk......kgggk",
+      "kggggk..kgGGGGgk....kggggk",
+      ".kggggkggwwwwggk..kggggk..",
+      "..kgggggweeeewgggggggk....",
+      "...kgggnnnnnnnpggggk......",
+      "....kkggggggggggkk........",
+      "...kggGGGGGGGGGGggk.......",
+      "..kgggGGGGGGGGGGggk.......",
+      "..kgggggggggggggggk.......",
+      "...kGggggggggggGk.........",
+      "....kggkkkkkkggk..........",
+      "....koook..kook...........",
+      ".....kOk....kOk...........",
+      ".....kk......kk...........",
+    ],
+    down: [
+      "..........kkkkkk..........",
+      ".........kgGGGGgk.........",
+      "........kggwwwwggk........",
+      ".......kggweeeewggk.......",
+      "......kgnnnnnnnpggk.......",
+      "..kkk.kggggggggggkk.kkk...",
+      ".kgggggggGGGGGGGggggggk...",
+      "kGGGGGGGGGGGGGGGGGGGGGk...",
+      ".kggggGGGGGGGGGGGGgggk....",
+      "..kgggGGGGGGGGGGGggk......",
+      "...kgggggggggggggk........",
+      "....kggkkkkkkggk..........",
+      "....koook..kook...........",
+      ".....kOk....kOk...........",
+      ".....kk......kk...........",
     ],
   },
 };
@@ -891,11 +968,22 @@ export function monBattleKey(id: SpeciesId): string {
 }
 
 export function monOwSheet(id: SpeciesId): string {
-  return `mon-ow-${id}`;
+  return `mon-ow-${id}-v2`;
 }
 
-export function monOwAnim(id: SpeciesId, kind: OwFrame | "walk-down-loop" | "walk-side-loop" | "walk-up-loop"): string {
+export function monFlySheet(id: SpeciesId): string {
+  return `mon-fly-${id}-v5`;
+}
+
+export function monOwAnim(
+  id: SpeciesId,
+  kind: OwFrame | "walk-down-loop" | "walk-side-loop" | "walk-up-loop",
+): string {
   return `mon-${id}-${kind}`;
+}
+
+export function monFlyAnim(id: SpeciesId): string {
+  return `mon-${id}-fly-loop`;
 }
 
 function drawBattle(scene: Phaser.Scene, id: SpeciesId): void {
@@ -909,6 +997,39 @@ function drawBattle(scene: Phaser.Scene, id: SpeciesId): void {
   blit(g, ox, oy, rows, art.pal);
   g.generateTexture(key, MON_BATTLE, MON_BATTLE);
   g.destroy();
+}
+
+function drawFly(scene: Phaser.Scene, id: SpeciesId): void {
+  const art = ART[id];
+  if (!art.fly) return;
+  const key = monFlySheet(id);
+  if (scene.textures.exists(key)) return;
+  const frames = [
+    { name: "fly-up", rows: art.fly.up },
+    { name: "fly-down", rows: art.fly.down },
+  ] as const;
+  const g = scene.add.graphics().setVisible(false);
+  frames.forEach(({ rows }, i) => {
+    const w = Math.max(...rows.map((row) => row.length), 1);
+    const h = rows.length;
+    const ox = i * MON_BATTLE + Math.floor((MON_BATTLE - w) / 2);
+    const oy = Math.floor((MON_BATTLE - h) / 2);
+    blit(g, ox, oy, rows, art.pal);
+  });
+  g.generateTexture(key, frames.length * MON_BATTLE, MON_BATTLE);
+  g.destroy();
+  const tex = scene.textures.get(key);
+  frames.forEach(({ name }, i) => {
+    tex.add(name, 0, i * MON_BATTLE, 0, MON_BATTLE, MON_BATTLE);
+  });
+  const anim = monFlyAnim(id);
+  if (scene.anims.exists(anim)) scene.anims.remove(anim);
+  scene.anims.create({
+    key: anim,
+    frames: frames.map(({ name }) => ({ key, frame: name })),
+    frameRate: 8,
+    repeat: -1,
+  });
 }
 
 function drawOw(scene: Phaser.Scene, id: SpeciesId): void {
@@ -930,7 +1051,7 @@ function drawOw(scene: Phaser.Scene, id: SpeciesId): void {
     tex.add(name, 0, i * MON_OW, 0, MON_OW, MON_OW);
   });
   const mk = (anim: string, frames: OwFrame[], rate: number): void => {
-    if (scene.anims.exists(anim)) return;
+    if (scene.anims.exists(anim)) scene.anims.remove(anim);
     scene.anims.create({
       key: anim,
       frames: frames.map((frame) => ({ key, frame })),
@@ -950,5 +1071,6 @@ export function ensureMonSheets(scene: Phaser.Scene): void {
   for (const id of MON_IDS) {
     drawBattle(scene, id);
     drawOw(scene, id);
+    drawFly(scene, id);
   }
 }

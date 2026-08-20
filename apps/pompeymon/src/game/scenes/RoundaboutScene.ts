@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
-import { partnerMon, resumePos, run, saveOverworld } from "../run";
+import { partnerMon, resumePos, returningTo, run } from "../run";
 import { rollWildLv } from "../battle";
 import { kidAnim } from "../sprites/kid";
 import { SPECIES, type WildId } from "../species";
@@ -30,12 +30,7 @@ import {
   tickFieldNpcs,
   type FieldNpc,
 } from "../world/npcs";
-import { spawnWanderers, tickWanderers, wanderNear, type Wanderer } from "../world/wander";
-
-const WANDER = [
-  { id: "pidgeon" as const, x: 120, y: 78, box: { x: 104, y: 64, w: 32, h: 30 } },
-  { id: "starlimur" as const, x: 148, y: 78, box: { x: 136, y: 66, w: 28, h: 26 } },
-];
+import { spawnAreaWilds, beginWildFight, leaveField, snapshotField, tickWanderers, wanderNear, type Wanderer } from "../world/wander";
 
 export class RoundaboutScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -75,6 +70,7 @@ export class RoundaboutScene extends Phaser.Scene {
           : this.from === "highstreet"
             ? this.layout.spawnFromEast
             : this.layout.spawnFromWest;
+    const returning = returningTo("roundabout");
     const spawn = resumePos("roundabout", fallback);
     this.facing =
       this.from === "hill" ? "down" : this.from === "bridge" ? "up" : this.from === "highstreet" ? "side" : "side";
@@ -82,7 +78,7 @@ export class RoundaboutScene extends Phaser.Scene {
     this.player = spawnKid(this, spawn.x, spawn.y);
     this.player.setFlipX(this.flip < 0);
     this.npcs = spawnFieldNpcs(this, ROUNDABOUT_NPCS);
-    this.wanderers = spawnWanderers(this, WANDER);
+    this.wanderers = spawnAreaWilds(this, "roundabout", returning);
     addWalls(this, this.player, this.layout.solids);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
@@ -124,35 +120,42 @@ export class RoundaboutScene extends Phaser.Scene {
     this.facing = walked.facing;
     this.flip = walked.flip;
     tickFieldNpcs(this, this.npcs);
-    tickWanderers(this, this.wanderers);
+    tickWanderers(this, this.wanderers, this.player);
     this.player.setDepth(this.player.y);
 
     const spotted = losTrainer(this.player, this.npcs);
-    if (spotted && startTrainerFight(this, spotted, "roundabout", this.player)) return;
+    if (spotted) {
+      snapshotField(this.wanderers);
+      if (startTrainerFight(this, spotted, "roundabout", this.player)) return;
+    }
 
     const moving = this.player.body.velocity.x !== 0 || this.player.body.velocity.y !== 0;
     const bumped = wanderNear(this.player, this.wanderers);
     if (moving) {
       if (run.grassCalm > 0) run.grassCalm -= 1;
       else if (bumped && run.starter) {
-        this.startWild(bumped.id);
+        this.startWild(bumped.id, bumped);
         return;
       }
     }
 
     if (this.player.x < 8 && this.player.y > 60 && this.player.y < 100) {
+      leaveField("roundabout");
       this.scene.start("avenue", { from: "roundabout" });
       return;
     }
     if (this.player.y < 8 && this.player.x > 100 && this.player.x < 140) {
+      leaveField("roundabout");
       this.scene.start("hill", { from: "roundabout" });
       return;
     }
     if (atSouthEdge(this.player) && this.player.x > 100 && this.player.x < 140) {
+      leaveField("roundabout");
       this.scene.start("bridge", { from: "roundabout" });
       return;
     }
     if (this.player.x > GBA_W - 8 && this.player.y > 60 && this.player.y < 100) {
+      leaveField("roundabout");
       this.scene.start("highstreet", { from: "roundabout" });
       return;
     }
@@ -160,7 +163,7 @@ export class RoundaboutScene extends Phaser.Scene {
     if (confirm) this.tryExamine();
   }
 
-  private startWild(wild: WildId): void {
+  private startWild(wild: WildId, map?: Wanderer): void {
     if (!run.starter) {
       this.reachThen(`A ${SPECIES[wild].name}. Need a partner first.`);
       return;
@@ -170,20 +173,21 @@ export class RoundaboutScene extends Phaser.Scene {
       return;
     }
     run.grassCalm = 28;
-    saveOverworld("roundabout", { x: this.player.x, y: this.player.y });
-    this.scene.start("encounter", { wild, lv: rollWildLv(3, 4) });
+    beginWildFight("roundabout", { x: this.player.x, y: this.player.y }, this.wanderers, map);
+    this.scene.start("encounter", { wild, lv: map?.lv ?? rollWildLv(3, 4) });
   }
 
   private tryExamine(): void {
     const person = npcNear(this.player, this.npcs);
     if (person) {
+      snapshotField(this.wanderers);
       if (startTrainerFight(this, person, "roundabout", this.player)) return;
       this.reachThen(npcTalk(person));
       return;
     }
     const wild = wanderNear(this.player, this.wanderers);
     if (wild) {
-      this.startWild(wild.id);
+      this.startWild(wild.id, wild);
       return;
     }
     if (near(this.player, this.layout.sign, 10)) {
@@ -194,7 +198,6 @@ export class RoundaboutScene extends Phaser.Scene {
       this.reachThen("Roundabout. Give way.");
       return;
     }
-    this.reachThen("Roundabout.");
   }
 
   private reachThen(line: Line | Line[]): void {

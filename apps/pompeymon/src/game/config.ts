@@ -4,6 +4,7 @@ import { AvenueScene } from "./scenes/AvenueScene";
 import { BathroomScene } from "./scenes/BathroomScene";
 import { BedroomScene } from "./scenes/BedroomScene";
 import { BridgeScene } from "./scenes/BridgeScene";
+import { DebugScene } from "./scenes/DebugScene";
 import { FrontRoomScene } from "./scenes/FrontRoomScene";
 import { HallScene } from "./scenes/HallScene";
 import { HighStreetScene } from "./scenes/HighStreetScene";
@@ -34,6 +35,7 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
   },
   scene: [
     TitleScene,
+    DebugScene,
     BedroomScene,
     LandingScene,
     BathroomScene,

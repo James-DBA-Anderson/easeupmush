@@ -109,7 +109,6 @@ export class BathroomScene extends Phaser.Scene {
       this.reachThen("Mint. Gums sting.");
       return;
     }
-    this.reachThen("Bathroom.");
   }
 
   private reachThen(line: string): void {

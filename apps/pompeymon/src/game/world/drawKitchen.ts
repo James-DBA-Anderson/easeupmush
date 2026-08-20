@@ -129,7 +129,7 @@ export function drawKitchen(g: Phaser.GameObjects.Graphics): KitchenLayout {
     px(g, C.ink, 182, 110, 2, 2);
   }
 
-  const mum: Solid = { x: 108, y: 48, w: 16, h: 24 };
+  const mum: Solid = { x: 142, y: 44, w: 18, h: 26 };
 
   const southY = ry + rh - 16;
   const door = southDoor(g, 104, southY, 32, GBA_H - southY);

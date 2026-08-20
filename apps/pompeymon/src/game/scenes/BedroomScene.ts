@@ -238,7 +238,6 @@ export class BedroomScene extends Phaser.Scene {
       this.reachThen("Duvet's a heap.");
       return;
     }
-    this.reachThen("Your room.");
   }
 
   private wear(option: ClothesOption): void {

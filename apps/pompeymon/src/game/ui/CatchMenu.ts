@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
 import { consumeDir, isTouchUi } from "../touch";
 
-export type BattleOpt = "fight" | "bag" | "defend" | "dodge" | "catch" | "run";
+export type BattleOpt = "fight" | "bag" | "defend" | "dodge" | "run";
 
 type BattleMenuCallbacks = {
   onPick: (opt: BattleOpt) => void;
@@ -10,28 +10,26 @@ type BattleMenuCallbacks = {
 
 const COL = 56;
 
-/** FIGHT / BAG / DEFEND / CATCH / RUN. CATCH omitted for trainers. */
+/** FIGHT / BAG / DEFEND / DODGE / RUN. Catch is via kebab boxes in the bag. */
 export class CatchMenu {
   private root: Phaser.GameObjects.Container;
   private cursor: Phaser.GameObjects.Text;
   private index = 0;
   private open = false;
-  private opts: BattleOpt[];
+  /** Skip one update so leftover walk/touch input cannot move the cursor. */
+  private arm = false;
+  private readonly opts: BattleOpt[] = ["fight", "bag", "defend", "dodge", "run"];
   private readonly x: number;
   private readonly y: number;
 
   constructor(
     scene: Phaser.Scene,
     private readonly callbacks: BattleMenuCallbacks,
-    private readonly canCatch: boolean,
   ) {
-    this.opts = canCatch
-      ? ["fight", "bag", "defend", "dodge", "catch", "run"]
-      : ["fight", "bag", "defend", "dodge", "run"];
     const w = 128;
     const h = 64;
     this.x = GBA_W - w - 8;
-    this.y = GBA_H - h - 56;
+    this.y = GBA_H - h - 8;
 
     const plate = scene.add.rectangle(this.x + w / 2, this.y + h / 2, w, h, 0x1a1814, 1);
     plate.setStrokeStyle(2, 0xf0a23a);
@@ -47,7 +45,6 @@ export class CatchMenu {
       bag: "BAG",
       defend: "DEFEND",
       dodge: "DODGE",
-      catch: "CATCH",
       run: "RUN",
     };
     const lines = this.opts.map((opt, i) => {
@@ -79,6 +76,8 @@ export class CatchMenu {
   show(): void {
     this.index = 0;
     this.open = true;
+    this.arm = false;
+    this.drainDirs();
     this.root.setVisible(true);
     this.placeCursor();
   }
@@ -95,6 +94,13 @@ export class CatchMenu {
     cancel = false,
   ): void {
     if (!this.open) return;
+    if (!this.arm) {
+      this.arm = true;
+      this.drainDirs();
+      this.index = 0;
+      this.placeCursor();
+      return;
+    }
     const n = this.opts.length;
     if (
       Phaser.Input.Keyboard.JustDown(cursors.up) ||
@@ -137,6 +143,13 @@ export class CatchMenu {
       this.hide();
       this.callbacks.onPick("run");
     }
+  }
+
+  private drainDirs(): void {
+    consumeDir("up");
+    consumeDir("down");
+    consumeDir("left");
+    consumeDir("right");
   }
 
   private slot(i: number): { x: number; y: number } {

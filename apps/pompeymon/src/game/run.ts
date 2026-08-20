@@ -1,6 +1,15 @@
-import { BATTLE, MAX_LV, STARTER_LV, scaled, xpToNext } from "./battle";
+import { BATTLE, MAX_LV, MAX_MOVES, STARTER_LV, moveLearnedAt, moveIdsForLevel, scaled, xpToNext } from "./battle";
 import type { OutfitId } from "./sprites/kid";
-import { SPECIES, type SpeciesId } from "./species";
+import { SPECIES, type SpeciesId, type WildId } from "./species";
+
+export type FieldMon = {
+  key: string;
+  id: WildId;
+  lv: number;
+  x: number;
+  y: number;
+  box: { x: number; y: number; w: number; h: number };
+};
 
 export type ItemId = "pogs" | "flyer" | "pompdex" | "kebab" | "chomp";
 export type StarterId = "scabfox" | "chipgull" | "moggit" | "donerrat";
@@ -10,6 +19,8 @@ export type PartyMon = {
   lv: number;
   xp: number;
   hp: number;
+  /** Known move ids (max 6). */
+  moves: string[];
 };
 
 export type BagEntry = { kind: "item"; id: ItemId } | { kind: "mon"; mon: PartyMon };
@@ -38,40 +49,67 @@ export const run = {
   seen: [] as SpeciesId[],
   owned: [] as SpeciesId[],
   party: [] as PartyMon[],
+  lead: 0,
   islandPos: null as { x: number; y: number } | null,
   overworld: null as { scene: string; x: number; y: number } | null,
+  field: null as { scene: string; mons: FieldMon[] } | null,
+  wildKey: null as string | null,
+  wildGone: false,
   beaten: [] as string[],
   grassCalm: 0,
   kebabBoxes: 0,
   kebabCatch: false,
   whiteout: false,
   chompKept: false,
+  /** Hill Nan's trainer pep-talk done — she's gone next visit. */
+  hillNanGone: false,
+  /** Launched from the debug menu — battles/areas should be able to return there. */
+  debugSession: false,
 };
 
 export function consumeWhiteout(): boolean {
   if (!run.whiteout) return false;
   run.whiteout = false;
   run.overworld = null;
+  run.field = null;
+  run.wildKey = null;
+  run.wildGone = false;
   healParty();
   return true;
 }
 
 export function makePartyMon(id: SpeciesId, lv: number): PartyMon {
   const n = Math.max(1, Math.min(MAX_LV, lv));
-  return { id, lv: n, xp: 0, hp: scaled(BATTLE[id].hp, n) };
+  return { id, lv: n, xp: 0, hp: scaled(BATTLE[id].hp, n), moves: moveIdsForLevel(id, n) };
 }
 
 export function partnerMon(): PartyMon | undefined {
-  return run.party.find((p) => p.id === run.starter) ?? run.party[0];
+  return run.party[run.lead] ?? run.party[0];
+}
+
+export function partyAlive(): boolean {
+  return run.party.some((p) => p.hp > 0);
+}
+
+export function setLead(mon: PartyMon): boolean {
+  const i = run.party.indexOf(mon);
+  if (i < 0 || mon.hp <= 0) return false;
+  run.lead = i;
+  return true;
 }
 
 export function healParty(): void {
   for (const p of run.party) p.hp = scaled(BATTLE[p.id].hp, p.lv);
 }
 
+export function partyNeedsHeal(): boolean {
+  return run.party.some((p) => p.hp < scaled(BATTLE[p.id].hp, p.lv));
+}
+
 export function applyXp(mon: PartyMon, gained: number): string[] {
   const lines: string[] = [];
   if (mon.lv >= MAX_LV || gained <= 0) return lines;
+  if (!mon.moves?.length) mon.moves = moveIdsForLevel(mon.id, mon.lv);
   mon.xp += gained;
   while (mon.lv < MAX_LV) {
     const need = xpToNext(mon.lv);
@@ -80,6 +118,17 @@ export function applyXp(mon: PartyMon, gained: number): string[] {
     mon.lv += 1;
     mon.hp = scaled(BATTLE[mon.id].hp, mon.lv);
     lines.push(`${SPECIES[mon.id].name} grew to Lv${mon.lv}!`);
+    const learned = moveLearnedAt(mon.id, mon.lv);
+    if (learned) {
+      if (mon.moves.includes(learned.id)) {
+        /* already knows it */
+      } else if (mon.moves.length < MAX_MOVES) {
+        mon.moves.push(learned.id);
+        lines.push(`${SPECIES[mon.id].name} learned ${learned.name}!`);
+      } else {
+        lines.push(`${SPECIES[mon.id].name} wants ${learned.name}. Moves full.`);
+      }
+    }
   }
   if (mon.lv >= MAX_LV) mon.xp = 0;
   return lines;
@@ -88,6 +137,10 @@ export function applyXp(mon: PartyMon, gained: number): string[] {
 export function saveOverworld(scene: string, pos: { x: number; y: number }): void {
   run.overworld = { scene, x: pos.x, y: pos.y };
   if (scene === "island") run.islandPos = { x: pos.x, y: pos.y };
+}
+
+export function returningTo(scene: string): boolean {
+  return run.overworld?.scene === scene;
 }
 
 export function resumePos(scene: string, fallback: { x: number; y: number }): { x: number; y: number } {
@@ -151,7 +204,12 @@ export function useKebabBox(): boolean {
 }
 
 export function battleBagEntries(): BagEntry[] {
-  return run.items.filter((id) => ITEM[id].heal).map((id) => ({ kind: "item" as const, id }));
+  return [
+    ...run.items
+      .filter((id) => ITEM[id].heal || (id === "kebab" && run.kebabBoxes > 0))
+      .map((id) => ({ kind: "item" as const, id })),
+    ...run.party.map((mon) => ({ kind: "mon" as const, mon })),
+  ];
 }
 
 /** Heal amount for a Chomp-style item. Half of max, at least 8. */
@@ -189,6 +247,7 @@ export function catchSpecies(id: SpeciesId, lv = STARTER_LV): boolean {
 export function takeStarter(id: StarterId): void {
   run.starter = id;
   catchSpecies(id, STARTER_LV);
+  run.lead = 0;
   takePompdex();
   takeKebabBoxes(5);
 }
@@ -221,7 +280,8 @@ export function bagLabel(entry: BagEntry): string {
     return ITEM[entry.id].label;
   }
   const star = run.starter === entry.mon.id ? "*" : "";
-  return `${SPECIES[entry.mon.id].name}${star} Lv${entry.mon.lv}`;
+  const out = entry.mon.hp <= 0 ? " --" : "";
+  return `${SPECIES[entry.mon.id].name}${star} Lv${entry.mon.lv}${out}`;
 }
 
 export function syncBagChrome(): void {

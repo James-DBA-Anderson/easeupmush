@@ -109,7 +109,6 @@ export class FrontRoomScene extends Phaser.Scene {
       this.reachThen("2nd Avenue. Quiet out.");
       return;
     }
-    this.reachThen("Front room. Best suite.");
   }
 
   private reachThen(line: string): void {

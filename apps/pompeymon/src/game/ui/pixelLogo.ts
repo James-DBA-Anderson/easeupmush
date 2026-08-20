@@ -39,21 +39,36 @@ function blitWord(
   scale: number,
   italic = false,
   tracking = 1,
+  shadow = false,
 ): void {
   const s = scale;
   let ox = 0;
   for (const ch of text) {
     const glyph = GLYPH[ch] ?? GLYPH[" "];
+    if (shadow) {
+      for (let row = 0; row < 5; row++) {
+        const slant = italic ? Math.floor((4 - row) / 2) * s : 0;
+        for (let col = 0; col < 5; col++) {
+          if (glyph[row][col] !== "1") continue;
+          const pxX = x + ox + col * s + slant;
+          const pxY = y + row * s;
+          px(g, 0x182838, pxX + s, pxY + s, s);
+        }
+      }
+    }
+    // Thick GBA outline (8-neighbour)
     for (let row = 0; row < 5; row++) {
       const slant = italic ? Math.floor((4 - row) / 2) * s : 0;
       for (let col = 0; col < 5; col++) {
         if (glyph[row][col] !== "1") continue;
         const pxX = x + ox + col * s + slant;
         const pxY = y + row * s;
-        px(g, ink, pxX - s, pxY, s);
-        px(g, ink, pxX + s, pxY, s);
-        px(g, ink, pxX, pxY - s, s);
-        px(g, ink, pxX, pxY + s, s);
+        for (let oy = -s; oy <= s; oy += s) {
+          for (let ox2 = -s; ox2 <= s; ox2 += s) {
+            if (ox2 === 0 && oy === 0) continue;
+            px(g, ink, pxX + ox2, pxY + oy, s);
+          }
+        }
       }
     }
     for (let row = 0; row < 5; row++) {
@@ -63,19 +78,24 @@ function blitWord(
         const pxX = x + ox + col * s + slant;
         const pxY = y + row * s;
         const hi = row === 0 || (row === 1 && col > 0 && col < 4);
-        px(g, hi ? 0xf8d060 : fill, pxX, pxY, s);
+        const mid = row === 2;
+        px(g, hi ? 0xffe080 : mid ? fill : 0xd88828, pxX, pxY, s);
       }
     }
     ox += 5 * s + tracking * s;
   }
 }
 
-/** Pompeymon wordmark — outlined GBA title type. */
+/** Pompeymon wordmark — bold outlined GBA title type. */
 export function drawPompeymonLogo(g: Phaser.GameObjects.Graphics, cx: number, y: number): void {
-  const scale = 2;
+  const scale = 3;
   const tracking = 1;
   const w = wordWidth("POMPEYMON", scale, tracking);
-  blitWord(g, "POMPEYMON", Math.floor(cx - w / 2), y, 0xf0a23a, 0x101018, scale, false, tracking);
+  const x = Math.floor(cx - w / 2);
+  // Soft plate so letters read on bright sky
+  g.fillStyle(0x183048, 0.35);
+  g.fillRect(x - 4, y - 2, w + 8, 5 * scale + 4);
+  blitWord(g, "POMPEYMON", x, y, 0xf0a23a, 0x101820, scale, false, tracking, true);
 }
 
 /** Stacked Ease Up Mush mark with a tiny wave, GBA palette. */

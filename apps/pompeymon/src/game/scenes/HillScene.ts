@@ -112,7 +112,6 @@ export class HillScene extends Phaser.Scene {
       this.reachThen("Portsdown. That's the island.");
       return;
     }
-    this.reachThen("The hill. Wind up here.");
   }
 
   private reachThen(line: Line | Line[]): void {

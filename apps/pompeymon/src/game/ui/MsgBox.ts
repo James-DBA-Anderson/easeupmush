@@ -87,8 +87,12 @@ export class MsgBox {
 
   private pages: Line[] = [];
   private page = 0;
+  private onDone?: () => void;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(
+    scene: Phaser.Scene,
+    private readonly onPage?: (line: Line | undefined) => void,
+  ) {
     const frame = scene.add.graphics();
     paintFrame(frame, BOX_W, BOX_H);
 
@@ -125,9 +129,10 @@ export class MsgBox {
     });
   }
 
-  show(text: Line | Line[]): void {
+  show(text: Line | Line[], onDone?: () => void): void {
     this.hideTimer?.remove(false);
     this.hideTimer = undefined;
+    this.onDone = onDone;
     this.pages = Array.isArray(text) ? text : [text];
     this.page = 0;
     this.paintPage();
@@ -154,11 +159,16 @@ export class MsgBox {
     this.hideTimer?.remove(false);
     this.hideTimer = undefined;
     this.root.setVisible(false);
+    this.onPage?.(undefined);
+    const done = this.onDone;
+    this.onDone = undefined;
+    done?.();
   }
 
   private paintPage(): void {
     const line = this.pages[this.page];
     this.label.setText(line ? lineText(line) : "");
+    this.onPage?.(line);
     const who = line ? lineWho(line) : undefined;
     if (!who) {
       this.nameFrame.clear();
