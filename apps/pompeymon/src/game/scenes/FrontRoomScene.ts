@@ -1,8 +1,9 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
 import { run } from "../run";
+import { ensureDad } from "../sprites/dad";
 import { kidAnim } from "../sprites/kid";
-import { MsgBox } from "../ui/MsgBox";
+import { MsgBox, type Line } from "../ui/MsgBox";
 import { BagUi } from "../ui/BagUi";
 import {
   addWalls,
@@ -18,6 +19,12 @@ import {
 } from "../walk";
 import { isTouchUi } from "../touch";
 import { drawFrontRoom, type FrontRoomLayout } from "../world/drawFrontRoom";
+
+const SLEEP_TALK: string[] = [
+  "Hic, no, no, no... hic",
+  "No son of mine is collecting small animals! Hic",
+  "One more, hic, please just one...",
+];
 
 export class FrontRoomScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -41,6 +48,12 @@ export class FrontRoomScene extends Phaser.Scene {
     art.generateTexture("frontroom", GBA_W, GBA_H);
     art.destroy();
     this.add.image(0, 0, "frontroom").setOrigin(0);
+
+    ensureDad(this);
+    this.add
+      .image(this.layout.dad.x + 26, this.layout.dad.y + 18, "dad")
+      .setOrigin(0.5, 1)
+      .setDepth(10);
 
     this.player = spawnKid(this, this.layout.spawn.x, this.layout.spawn.y);
     addWalls(this, this.player, this.layout.solids);
@@ -93,12 +106,12 @@ export class FrontRoomScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
-    if (near(this.player, this.layout.telly, 10)) {
-      this.reachThen("Telly's off. Aerial's bent.");
+    if (near(this.player, this.layout.dad, 12) || near(this.player, this.layout.sofa, 10)) {
+      this.talkDad();
       return;
     }
-    if (near(this.player, this.layout.sofa, 8)) {
-      this.reachThen("Dad's chair. Don't sit there.");
+    if (near(this.player, this.layout.telly, 10)) {
+      this.reachThen("Telly's off. Aerial's bent.");
       return;
     }
     if (near(this.player, this.layout.fire, 8)) {
@@ -111,7 +124,15 @@ export class FrontRoomScene extends Phaser.Scene {
     }
   }
 
-  private reachThen(line: string): void {
+  private talkDad(): void {
+    const mutter = SLEEP_TALK[Math.floor(Math.random() * SLEEP_TALK.length)]!;
+    this.reachThen([
+      "Dad's passed out. Talking in his sleep.",
+      { who: "DAD", text: mutter },
+    ]);
+  }
+
+  private reachThen(line: Line | Line[]): void {
     this.reaching = true;
     this.player.body.setVelocity(0, 0);
     const reach = this.facing === "down" ? "reach-down" : "reach-side";
@@ -124,7 +145,7 @@ export class FrontRoomScene extends Phaser.Scene {
     });
   }
 
-  private showNote(text: string): void {
+  private showNote(text: Line | Line[]): void {
     this.note?.show(text);
   }
 }

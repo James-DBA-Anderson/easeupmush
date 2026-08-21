@@ -15,7 +15,7 @@ function disc(g: Phaser.GameObjects.Graphics, c: number, cx: number, cy: number,
   }
 }
 
-/** Harbour daytime — looking south: Pompey, Solent + IoW, canal + bridge. */
+/** Harbour daytime — looking south from north of Pompey. */
 export function drawTitleSkyline(g: Phaser.GameObjects.Graphics): void {
   const skyTop = 0x4aa0e0;
   const skyMid = 0x78c4f0;
@@ -32,41 +32,135 @@ export function drawTitleSkyline(g: Phaser.GameObjects.Graphics): void {
   disc(g, 0xffe868, 24, 18, 6);
   disc(g, 0xfff8e0, 24, 18, 3);
 
-  // Far Pompey land strip + Spinnaker (viewer looks south from north of town)
-  px(g, 0x6a9888, 0, 52, GBA_W, 12);
-  px(g, 0x5a8878, 0, 52, GBA_W, 2);
-  farRow(g, 54);
-  spinnakerFar(g, 158, 44);
-
-  // Nearer harbour frontage — Pompey
-  terrace(g, 2, 62, 36, 22, 0xd0c0a8, 0x3a3428);
-  terrace(g, 36, 66, 30, 18, 0xb87060, 0x3a2820);
-  shop(g, 64, 60, 0xc8b8a0);
-  terrace(g, 96, 64, 32, 20, 0xc88870, 0x3a2820);
-  warehouse(g, 126, 62);
-  px(g, 0x6a9888, 154, 62, 24, 22);
-  px(g, 0x588878, 154, 62, 24, 2);
-  for (let i = 0; i < 3; i += 1) px(g, 0x4a7068, 158 + i * 6, 68, 3, 4);
-  terrace(g, 176, 64, 28, 20, 0xb88870, 0x3a2820);
-  terrace(g, 208, 64, 30, 20, 0xd0c0a8, 0x3a3428);
-
-  // Solent — sea south of Pompey; Isle of Wight sits on that water
+  // Far south — Solent + Isle of Wight on the horizon
   const water = 0x3890c0;
   const waterL = 0x78c8e0;
-  px(g, water, 0, 84, GBA_W, 24);
-  px(g, 0x2a7088, 0, 84, GBA_W, 1);
-  isleOfWight(g, 72, 86);
-  px(g, waterL, 10, 96, 20, 1);
-  px(g, waterL, 48, 100, 16, 1);
-  px(g, waterL, 160, 98, 18, 1);
-  px(g, waterL, 200, 94, 14, 1);
-  px(g, 0x68b8d0, 30, 102, 12, 1);
-  px(g, 0x68b8d0, 190, 104, 10, 1);
+  px(g, water, 0, 48, GBA_W, 18);
+  px(g, 0x2a7088, 0, 48, GBA_W, 1);
+  isleOfWight(g, 78, 50);
+  px(g, waterL, 12, 58, 18, 1);
+  px(g, waterL, 160, 60, 16, 1);
+  px(g, waterL, 200, 56, 14, 1);
 
-  // Canal (same band the quay/road used: y 108 → bottom)
-  canal(g, 108, GBA_H - 108);
-  // Bridge over the canal toward Pompey
-  canalBridge(g, 72, 108);
+  // Pompey land strip + Spinnaker (south of the canal, mid-distance)
+  px(g, 0x6a9888, 0, 64, GBA_W, 8);
+  px(g, 0x5a8878, 0, 64, GBA_W, 2);
+  farRow(g, 66);
+  spinnakerFar(g, 158, 56);
+
+  // Pompey harbour frontage — road will run into this
+  terrace(g, 2, 70, 36, 22, 0xd0c0a8, 0x3a3428);
+  terrace(g, 36, 74, 28, 18, 0xb87060, 0x3a2820);
+  shop(g, 62, 68, 0xc8b8a0);
+  // Gap for the road mouth into Pompey (~x 100–128)
+  terrace(g, 128, 72, 28, 20, 0xc88870, 0x3a2820);
+  warehouse(g, 154, 70);
+  terrace(g, 180, 72, 28, 20, 0xb88870, 0x3a2820);
+  terrace(g, 206, 72, 32, 20, 0xd0c0a8, 0x3a3428);
+
+  // Quay / street edge under the buildings
+  px(g, 0x5a5448, 0, 90, GBA_W, 6);
+  px(g, 0x6a6458, 0, 90, GBA_W, 1);
+  px(g, 0x4a4838, 0, 94, GBA_W, 2);
+
+  // Canal between Cosham grass and Pompey
+  const canalY = 96;
+  const canalH = 18;
+  canal(g, canalY, canalH);
+
+  // Foreground grass (Cosham side — nearest the viewer)
+  grass(g, 0, canalY + canalH, GBA_W, GBA_H - (canalY + canalH));
+
+  // Road from bottom of screen → over grass → canal bridge → into Pompey
+  southRoad(g, 104, canalY, canalH);
+}
+
+/** Cosham-side grass in the foreground. */
+function grass(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number): void {
+  const mid = 0x4a8850;
+  const dark = 0x2a5838;
+  const lit = 0x68a868;
+  const tip = 0x88c878;
+  px(g, mid, x, y, w, h);
+  px(g, dark, x, y, w, 2);
+  for (let gy = y + 4; gy < y + h; gy += 5) {
+    for (let gx = x + ((gy * 3) % 7); gx < x + w; gx += 9) {
+      px(g, lit, gx, gy, 2, 2);
+      px(g, tip, gx + 1, gy - 1, 1, 2);
+    }
+  }
+  for (let i = 0; i < 18; i += 1) {
+    const bx = x + 4 + ((i * 41) % (w - 10));
+    const by = y + 6 + ((i * 17) % (h - 10));
+    px(g, dark, bx, by, 1, 3);
+    px(g, tip, bx, by, 1, 1);
+  }
+}
+
+/**
+ * N–S road: bottom of screen (near) → grass → bridge over canal → into Pompey.
+ * `x` is the left edge of the carriageway.
+ */
+function southRoad(
+  g: Phaser.GameObjects.Graphics,
+  x: number,
+  canalY: number,
+  canalH: number,
+): void {
+  const ink = 0x2a2820;
+  const asphalt = 0x4a4840;
+  const asphaltL = 0x6a6860;
+  const line = 0xe8d8a0;
+  const kerb = 0x8a8070;
+  const w = 28;
+  const grassTop = canalY + canalH;
+
+  // Road on grass from bottom of screen up to the canal
+  px(g, ink, x - 1, grassTop, w + 2, GBA_H - grassTop);
+  px(g, asphalt, x, grassTop, w, GBA_H - grassTop);
+  px(g, asphaltL, x, grassTop, w, 1);
+  px(g, kerb, x - 2, grassTop, 2, GBA_H - grassTop);
+  px(g, kerb, x + w, grassTop, 2, GBA_H - grassTop);
+  // Centre dashes toward the viewer
+  for (let dy = grassTop + 4; dy < GBA_H - 2; dy += 6) {
+    px(g, line, x + Math.floor(w / 2) - 1, dy, 2, 3);
+  }
+
+  // Bridge over the canal (road continues, with rails + piers)
+  const deckY = canalY + 4;
+  const deckH = canalH - 4;
+  // Piers
+  for (const px0 of [x + 4, x + 12, x + 20]) {
+    px(g, ink, px0, canalY + 2, 5, canalH);
+    px(g, 0x5a5448, px0 + 1, canalY + 2, 3, canalH);
+    px(g, 0x286888, px0 - 3, canalY + 8, 10, 6);
+  }
+  // Deck = road over water
+  px(g, ink, x - 3, deckY, w + 6, deckH + 2);
+  px(g, asphalt, x - 2, deckY + 1, w + 4, deckH);
+  px(g, asphaltL, x - 2, deckY + 1, w + 4, 2);
+  px(g, line, x + Math.floor(w / 2) - 1, deckY + 4, 2, deckH - 6);
+  // Rails
+  px(g, 0x3a3830, x - 4, deckY - 2, w + 8, 2);
+  px(g, 0x3a3830, x - 4, deckY + deckH, w + 8, 2);
+  for (let lx = x - 2; lx < x + w + 2; lx += 6) {
+    px(g, 0x3a3830, lx, deckY - 4, 2, 4);
+    px(g, 0x3a3830, lx, deckY + deckH - 2, 2, 4);
+  }
+
+  // Road into Pompey (above the canal, through the building gap)
+  const pompeyY = 72;
+  px(g, ink, x - 1, pompeyY, w + 2, canalY - pompeyY + 2);
+  px(g, asphalt, x, pompeyY, w, canalY - pompeyY + 2);
+  px(g, asphaltL, x, pompeyY, w, 1);
+  px(g, kerb, x - 2, pompeyY, 2, canalY - pompeyY);
+  px(g, kerb, x + w, pompeyY, 2, canalY - pompeyY);
+  for (let dy = pompeyY + 4; dy < canalY; dy += 5) {
+    px(g, line, x + Math.floor(w / 2) - 1, dy, 2, 2);
+  }
+  // Mouth under the terraces
+  px(g, 0x3a3830, x - 4, 88, w + 8, 4);
+  px(g, asphalt, x - 2, 89, w + 4, 3);
 }
 
 /** Green Isle of Wight — low diamond silhouette on the horizon. */
@@ -94,7 +188,7 @@ function isleOfWight(g: Phaser.GameObjects.Graphics, x: number, y: number): void
   px(g, 0xb8b098, x + 18, y + 9, 10, 1);
 }
 
-/** Canal fill — same footprint as the old quay road. */
+/** Canal fill between Cosham grass and Pompey. */
 function canal(g: Phaser.GameObjects.Graphics, y: number, h: number): void {
   const deep = 0x286888;
   const mid = 0x3a98b0;
@@ -104,77 +198,17 @@ function canal(g: Phaser.GameObjects.Graphics, y: number, h: number): void {
   px(g, deep, 0, y, GBA_W, h);
   px(g, bank, 0, y, GBA_W, 2);
   px(g, bankL, 0, y, GBA_W, 1);
-  px(g, mid, 0, y + 2, GBA_W, 3);
-  // Ripples
-  for (let i = 0; i < 7; i += 1) {
-    const ry = y + 8 + ((i * 7) % (h - 12));
-    const rx = (i * 37 + 12) % (GBA_W - 24);
+  px(g, mid, 0, y + 2, GBA_W, Math.min(3, h - 2));
+  for (let i = 0; i < 5; i += 1) {
+    const ry = y + 6 + ((i * 5) % Math.max(1, h - 8));
+    const rx = (i * 47 + 12) % (GBA_W - 24);
     px(g, lit, rx, ry, 14 + (i % 3) * 4, 1);
   }
-  px(g, 0x58b0c8, 20, y + 18, 18, 1);
-  px(g, 0x58b0c8, 90, y + 28, 22, 1);
-  px(g, 0x58b0c8, 160, y + 22, 16, 1);
-  px(g, 0x58b0c8, 200, y + 36, 20, 1);
-  // Far bank lip under the harbour water
+  // Far bank under Pompey
   px(g, 0x3a4a38, 0, y, GBA_W, 1);
-}
-
-/**
- * Bridge spanning the canal toward Pompey.
- * Deck sits where the kid / mons stand (~y 118–126).
- */
-function canalBridge(g: Phaser.GameObjects.Graphics, x: number, canalY: number): void {
-  const ink = 0x2a2820;
-  const stone = 0x8a8070;
-  const stoneL = 0xa89880;
-  const stoneD = 0x5a5448;
-  const rail = 0x3a3830;
-  const deck = 0x6a5a48;
-  const deckL = 0x8a7860;
-  const w = 96;
-  const deckY = canalY + 10;
-  const deckH = 8;
-
-  // Piers in the canal
-  for (const px0 of [x + 18, x + 48, x + 78]) {
-    px(g, ink, px0 - 1, canalY + 4, 8, GBA_H - (canalY + 4));
-    px(g, stoneD, px0, canalY + 4, 6, GBA_H - (canalY + 4));
-    px(g, stone, px0, canalY + 4, 6, 3);
-    // Arch cut suggestion
-    px(g, 0x286888, px0 - 4, canalY + 16, 14, 10);
-    px(g, 0x3a98b0, px0 - 3, canalY + 17, 12, 8);
-  }
-
-  // Approach ramps toward Pompey (up) and Cosham side (down / foreground)
-  px(g, ink, x - 10, deckY + 2, 14, deckH + 2);
-  px(g, deck, x - 9, deckY + 3, 12, deckH);
-  px(g, deckL, x - 9, deckY + 3, 12, 1);
-  px(g, ink, x + w - 4, deckY - 2, 18, deckH + 4);
-  px(g, deck, x + w - 3, deckY - 1, 16, deckH + 2);
-  px(g, deckL, x + w - 3, deckY - 1, 16, 1);
-  // Ramp up into Pompey frontage
-  px(g, ink, x + w + 10, canalY - 2, 14, 14);
-  px(g, deck, x + w + 11, canalY - 1, 12, 12);
-  px(g, deckL, x + w + 11, canalY - 1, 12, 1);
-  px(g, 0x5a4a3a, x + w + 14, canalY + 4, 6, 8);
-
-  // Main deck
-  px(g, ink, x, deckY, w, deckH + 2);
-  px(g, deck, x + 1, deckY + 1, w - 2, deckH);
-  px(g, deckL, x + 1, deckY + 1, w - 2, 2);
-  px(g, 0x5a4a3a, x + 1, deckY + deckH, w - 2, 1);
-  // Plank lines
-  for (let lx = x + 6; lx < x + w - 4; lx += 8) px(g, 0x5a4a3a, lx, deckY + 2, 1, deckH - 2);
-
-  // Railings
-  px(g, rail, x, deckY - 4, w, 2);
-  px(g, stoneL, x, deckY - 3, w, 1);
-  for (let lx = x + 4; lx < x + w; lx += 8) {
-    px(g, rail, lx, deckY - 6, 2, 4);
-    px(g, stoneL, lx, deckY - 6, 2, 1);
-  }
-  px(g, rail, x, deckY + deckH + 1, w, 2);
-  for (let lx = x + 4; lx < x + w; lx += 8) px(g, rail, lx, deckY + deckH - 1, 2, 4);
+  // Near bank toward grass
+  px(g, bank, 0, y + h - 2, GBA_W, 2);
+  px(g, bankL, 0, y + h - 1, GBA_W, 1);
 }
 
 function mix(a: number, b: number, t: number): number {

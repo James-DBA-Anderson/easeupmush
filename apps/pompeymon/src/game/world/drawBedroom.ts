@@ -9,6 +9,7 @@ export type BedroomLayout = {
   bed: Solid;
   pc: Solid;
   wardrobe: Solid;
+  bin: Solid;
   spawn: { x: number; y: number };
   wake: { x: number; y: number };
   door: Solid;
@@ -199,6 +200,7 @@ export function drawBedroom(g: Phaser.GameObjects.Graphics): BedroomLayout {
   px(g, C.bin, 86, 126, 10, 13);
   px(g, 0x3a3a40, 87, 125, 8, 3);
   px(g, C.floorDark, 88, 130, 6, 5);
+  const bin: Solid = { x: 86, y: 125, w: 10, h: 14 };
 
   const solids: Solid[] = [
     { x: 0, y: 0, w: 20, h: GBA_H },
@@ -207,7 +209,7 @@ export function drawBedroom(g: Phaser.GameObjects.Graphics): BedroomLayout {
     { x: 0, y: 144, w: GBA_W, h: 16 },
     pc,
     wardrobe,
-    { x: 86, y: 125, w: 10, h: 14 },
+    bin,
     { x: 104, y: 8, w: 52, h: 14 },
   ];
 
@@ -216,6 +218,7 @@ export function drawBedroom(g: Phaser.GameObjects.Graphics): BedroomLayout {
     bed,
     pc,
     wardrobe,
+    bin,
     spawn: { x: 46, y: 124 },
     wake: { x: 78, y: 96 },
     door: { x: 176, y: 6, w: 28, h: 34 },

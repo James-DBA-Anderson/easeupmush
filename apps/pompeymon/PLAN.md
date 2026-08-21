@@ -18,13 +18,13 @@ Tight rooms with **black void** outside the floor plan is correct GBA terrace �
 
 | Scene | What’s in it |
 | --- | --- |
-| **Title** | Looking south from north of Pompey: skyline + Spinnaker, then the **Solent** with green **Isle of Wight** on that sea, canal + bridge in the foreground. Bold pixel wordmark, kid + Pompeymon on the bridge, Ease Up Mush logo. Space / Look to start. No place name. |
-| **Bedroom** | Wake in **white Y-fronts**. Bed bottom-left, oval mat, small PC/desk top-left, wardrobe lower-right, **Ease Up Mush poster** + shelf, bin. No TV/window. Clothes: School jumper, Trackies, Y-fronts. Walk up into the north door to the landing. |
+| **Title** | Looking south from north of Pompey: **Solent** + green **Isle of Wight** on the far horizon, then Pompey skyline + Spinnaker, a **canal**, then **grass** in the foreground. A **road** runs south from the bottom of the screen over the grass, over the canal as a **bridge**, and into Pompey. Bold pixel wordmark, kid + Pompeymon on the road, Ease Up Mush logo. Space / Look to start. No place name. |
+| **Bedroom** | Wake in **white Y-fronts**. Bed bottom-left, oval mat, small PC/desk top-left, wardrobe lower-right, **Ease Up Mush poster** (*“I wonder what their next game will be like?”*) + shelf, bin (*“It's full of tissues...”* — player blushes briefly). No TV/window. Clothes: School jumper, Trackies, **Pompey kit** (baby blue tee, white shorts). Walk up into the north door to the landing. |
 | **Landing** | L-shaped hall. Walk up into the bathroom door, down into the bedroom door. Locked parents’ door east (wall-thin), **stairs down west**. Walk **down** at the stair head to go downstairs — no Space. Well is solid. South wall is solid except the bedroom door. |
 | **Bathroom** | Bath, frosted window (`Next door's fence.`), loo (`Ahhhh.`), sink/toothbrush (`Mint. Gums sting.`). Walk south into the door back to landing. |
 | **Hall** (ground) | Stairs up, kitchen north, front room east, front door south onto **2nd Avenue**. South wall at the stair foot is solid — only the front door is a gap. Stairs and street blocked in Y-fronts. Street also blocked without the bag (*“Not going out without my bag.”*). |
-| **Kitchen** | Units, sink, cooker, fridge, table. School bag on the floor, **bottom-right** (pogs inside). **Mum** leans on the worktop (irritable, drunk *Hic.* at the end of lines): *“Oi. Don't forget your bag.”* until you take it, then *“Go on then. Out.”* Leave without talking: camera stays on Mum, you walk out, pause, she says *“Bye then.”*, then the hall. |
-| **Front room** | Street window, gas fire, CRT, coffee table, sofa. Door west to hall. |
+| **Kitchen** | Units, sink, cooker, fridge, table. Empty wine bottles and glasses on the worktop, table, and floor. School bag on the floor, **bottom-right** (pogs inside). **Mum** leans on the worktop (irritable, drunk *Hic.* at the end of lines): *“Oi. Don't forget your bag.”* until you take it, then *“Go on then. Out.”* Leave without talking: camera stays on Mum, you walk out, pause, she says *“Bye then.”*, then the hall. |
+| **Front room** | Street window, **gas fire in the middle**, CRT on the east wall, coffee table, better sofa. **Dad** passed out on the sofa with cans, bottle, takeaway and crisps on the floor. Look: *“Dad's passed out. Talking in his sleep.”* then a random mutter (*Hic, no, no, no…* / *No son of mine is collecting small animals!* / *One more, hic…*). Door west to hall. |
 | **2nd Avenue** | First outside map. Short N–S cul-de-sac: fence at the north end, T-junction south. Four houses; **player’s is top-left** (cream). Stepping out the front door starts **Steve**’s chat (new BMX); he then rides **east** shouting *“Haha. You're such a loser.”* and drops a **flyer** on the main road. Pickup: *“Professor Choke's Pompeymon research centre. New trainers wanted. Hmm. What is this.”* Walk west into the home door to go back in. **West** along the south road is blocked. **East** to the roundabout is blocked until Steve’s gone (*“Go see Steve first.”*). |
 
 ### Cosham roads
@@ -50,7 +50,7 @@ Tight rooms with **black void** outside the floor plan is correct GBA terrace �
 - **Side doors** use `sideDoor()` — same width as the east/west wall strip (thin).
 - **Doors:** walk **into** the opening (`walkingInto()`). Look / Space on a door does not go through. Walking past a door along the wall must not.
 - **Stairs** use `stairsDown()` / `stairsUp()`. Landing: walk down on `stairHead` to go down (Space only if you examine). Hall: walk up at `stairFoot`.
-- Player and NPCs: ~16×24, black outline, face shading. Palettes in `kid.ts` / `mum.ts` / `npc.ts`. After sprite edits, hard-refresh (`ensureKidSheets` skips rebuild if `kid-pj` exists).
+- Player and NPCs: ~16×24, black outline, face shading. Palettes in `kid.ts` / `mum.ts` / `npc.ts`. After sprite edits, hard-refresh (`ensureKidSheets` rebuilds if any outfit sheet is missing).
 - Pompeymon: battle portraits 32×32 (`mon.ts`) and 16×16 overworld walk sheets (down / side / up). Hilsea / school / High Street / roundabout spawn wandering mons in random slots on area load; KO or catch removes that one from the map until you leave. Hilsea and school also have tall-grass encounters.
 - Wallpaper stripes, floorboards / lino / carpet, skirting. Shared helpers live in `apps/pompeymon/src/game/world/drawCommon.ts`.
 

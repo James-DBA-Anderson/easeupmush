@@ -56,29 +56,29 @@ export class TitleScene extends Phaser.Scene {
     const g = this.add.graphics();
     drawTitleSkyline(g);
     drawPompeymonLogo(g, GBA_W / 2, 4);
-    drawEaseLogo(g, 86, 122);
+    drawEaseLogo(g, 48, 128);
 
     ensureKidSheets(this);
     ensureMonSheets(this);
 
-    const kid = this.add.sprite(120, 126, kidSheet("jumper"), "idle-down");
+    const kid = this.add.sprite(118, 148, kidSheet("jumper"), "idle-down");
     kid.setOrigin(0.5, 1);
     kid.setScale(2);
     kid.setDepth(8);
     kid.play(kidAnim("jumper", "idle-down"));
     this.tweens.add({
       targets: kid,
-      y: 124,
+      y: 146,
       duration: 700,
       yoyo: true,
       repeat: -1,
       ease: "Sine.easeInOut",
     });
 
-    const fox = this.add.image(86, 126, monBattleKey("scabfox")).setOrigin(0.5, 1).setDepth(7);
+    const fox = this.add.image(88, 146, monBattleKey("scabfox")).setOrigin(0.5, 1).setDepth(7);
     this.tweens.add({
       targets: fox,
-      y: 124,
+      y: 144,
       duration: 820,
       yoyo: true,
       repeat: -1,
@@ -86,26 +86,26 @@ export class TitleScene extends Phaser.Scene {
       delay: 80,
     });
 
-    const gull = this.add.sprite(200, 50, monFlySheet("chipgull"), "fly-up");
+    const gull = this.add.sprite(200, 42, monFlySheet("chipgull"), "fly-up");
     gull.setOrigin(0.5, 1).setDepth(6);
     gull.play(monFlyAnim("chipgull"));
     this.tweens.add({
       targets: gull,
       x: 218,
-      y: 42,
+      y: 34,
       duration: 1600,
       yoyo: true,
       repeat: -1,
       ease: "Sine.easeInOut",
     });
 
-    const bird = this.add.sprite(52, 44, monFlySheet("pidgeon"), "fly-up");
+    const bird = this.add.sprite(52, 38, monFlySheet("pidgeon"), "fly-up");
     bird.setOrigin(0.5, 1).setDepth(6);
     bird.play(monFlyAnim("pidgeon"));
     this.tweens.add({
       targets: bird,
       x: 72,
-      y: 38,
+      y: 32,
       duration: 1400,
       yoyo: true,
       repeat: -1,
@@ -113,10 +113,10 @@ export class TitleScene extends Phaser.Scene {
       delay: 200,
     });
 
-    const rat = this.add.image(158, 128, monBattleKey("donerrat")).setOrigin(0.5, 1).setDepth(7);
+    const rat = this.add.image(152, 148, monBattleKey("donerrat")).setOrigin(0.5, 1).setDepth(7);
     this.tweens.add({
       targets: rat,
-      y: 126,
+      y: 146,
       duration: 640,
       yoyo: true,
       repeat: -1,
@@ -125,7 +125,7 @@ export class TitleScene extends Phaser.Scene {
     });
 
     const prompt = this.add
-      .text(168, 138, isTouchUi() ? "PRESS LOOK" : "PRESS SPACE", {
+      .text(200, 132, isTouchUi() ? "PRESS LOOK" : "PRESS SPACE", {
         fontFamily: '"Press Start 2P", monospace',
         fontSize: "8px",
         color: "#fff8e8",
@@ -134,7 +134,7 @@ export class TitleScene extends Phaser.Scene {
       .setDepth(9);
 
     this.add
-      .text(168, 150, isTouchUi() ? "OPEN ?DEBUG" : "PRESS D DEBUG", {
+      .text(200, 144, isTouchUi() ? "OPEN ?DEBUG" : "PRESS D DEBUG", {
         fontFamily: '"Press Start 2P", monospace',
         fontSize: "8px",
         color: "#e0d0b0",

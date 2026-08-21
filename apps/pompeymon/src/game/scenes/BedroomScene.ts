@@ -227,17 +227,29 @@ export class BedroomScene extends Phaser.Scene {
       return;
     }
     if (p.y < 58 && p.x > 50 && p.x < 100) {
-      this.reachThen("Ease Up Mush poster.");
+      this.reachThen("I wonder what their next game will be like?");
       return;
     }
     if (near(this.layout.shelf, 14) || (p.y < 58 && p.x > 98 && p.x < 170)) {
       this.reachThen("Shuttle, tape, footy. The lot.");
       return;
     }
+    if (near(this.layout.bin, 8)) {
+      this.lookBin();
+      return;
+    }
     if (near(this.layout.bed, 8)) {
       this.reachThen("Duvet's a heap.");
       return;
     }
+  }
+
+  private lookBin(): void {
+    this.reachThen("It's full of tissues...");
+    this.player.setTint(0xff90a8);
+    this.time.delayedCall(1400, () => {
+      if (this.player?.active) this.player.clearTint();
+    });
   }
 
   private wear(option: ClothesOption): void {

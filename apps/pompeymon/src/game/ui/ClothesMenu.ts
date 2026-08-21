@@ -12,7 +12,7 @@ export type ClothesOption = {
 export const CLOTHES: ClothesOption[] = [
   { id: "jumper", label: "SCHOOL JUMPER", dressed: true },
   { id: "trackies", label: "TRACKIES", dressed: true },
-  { id: "pj", label: "Y-FRONTS", dressed: false },
+  { id: "kit", label: "POMPEY KIT", dressed: true },
 ];
 
 type ClothesMenuCallbacks = {

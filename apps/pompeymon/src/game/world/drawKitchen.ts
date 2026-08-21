@@ -63,7 +63,42 @@ const C = {
   chrome: 0xa8b0b8,
   hob: 0x2a2a30,
   kettle: 0xc0c4c8,
+  glass: 0xc8e0e8,
+  glassD: 0x68a0b0,
+  wine: 0x4a1830,
+  wineL: 0x6a2848,
 };
+
+/** Empty wine bottle — dark glass, no fill, cork gone. */
+function wineBottle(g: Phaser.GameObjects.Graphics, x: number, y: number, tip = false): void {
+  if (tip) {
+    px(g, C.wine, x, y + 2, 10, 4);
+    px(g, C.wineL, x, y + 2, 10, 1);
+    px(g, C.wine, x + 9, y + 1, 3, 3);
+    px(g, C.ink, x + 11, y + 2, 2, 1);
+    return;
+  }
+  px(g, C.wine, x, y + 3, 5, 10);
+  px(g, C.wineL, x, y + 3, 5, 1);
+  px(g, C.wine, x + 1, y, 3, 4);
+  px(g, C.ink, x + 2, y - 1, 1, 2);
+}
+
+/** Empty wine glass — stem + bowl rim. */
+function wineGlass(g: Phaser.GameObjects.Graphics, x: number, y: number, tip = false): void {
+  if (tip) {
+    px(g, C.glassD, x, y + 2, 7, 3);
+    px(g, C.glass, x, y + 2, 7, 1);
+    px(g, C.glassD, x + 6, y + 3, 4, 1);
+    return;
+  }
+  px(g, C.glassD, x, y, 5, 4);
+  px(g, C.glass, x, y, 5, 1);
+  px(g, C.glass, x + 1, y + 1, 3, 2);
+  px(g, C.glassD, x + 2, y + 4, 1, 3);
+  px(g, C.glassD, x + 1, y + 7, 3, 1);
+}
+
 
 /** Back kitchen — small terrace room. */
 export function drawKitchen(g: Phaser.GameObjects.Graphics): KitchenLayout {
@@ -120,6 +155,22 @@ export function drawKitchen(g: Phaser.GameObjects.Graphics): KitchenLayout {
   px(g, C.woodDark, 113, 106, 5, 10);
   px(g, 0xe8e0d0, 84, 84, 14, 8);
   px(g, 0xc45c3a, 102, 86, 10, 7);
+  // Empty glasses + bottle on the table
+  wineGlass(g, 78, 82);
+  wineGlass(g, 112, 84, true);
+  wineBottle(g, 94, 80);
+
+  // Empties by Mum on the worktop / fridge end
+  wineBottle(g, 146, 28);
+  wineBottle(g, 154, 30);
+  wineGlass(g, 142, 36);
+  wineGlass(g, 150, 38);
+
+  // A couple on the lino by the table leg
+  wineBottle(g, 128, 108, true);
+  wineGlass(g, 138, 112, true);
+  wineBottle(g, 58, 100);
+  wineGlass(g, 64, 108, true);
 
   const bag: Solid = { x: 172, y: 106, w: 16, h: 16 };
   if (!run.hasBag) {

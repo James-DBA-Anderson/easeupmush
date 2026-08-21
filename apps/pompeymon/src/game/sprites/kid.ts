@@ -3,9 +3,9 @@ import Phaser from "phaser";
 export const KID_FW = 32;
 export const KID_FH = 32;
 
-export type OutfitId = "pj" | "jumper" | "trackies";
+export type OutfitId = "pj" | "jumper" | "trackies" | "kit";
 
-export const OUTFITS: OutfitId[] = ["pj", "jumper", "trackies"];
+export const OUTFITS: OutfitId[] = ["pj", "jumper", "trackies", "kit"];
 
 /** GBA overworld palettes. */
 const BASE: Record<string, number> = {
@@ -53,6 +53,18 @@ const PALS: Record<OutfitId, Record<string, number>> = {
     c: 0x2a2a38,
     t: 0x6a6a74,
     T: 0x4a4a54,
+    o: 0xd45c28,
+    O: 0x8a3018,
+  },
+  /** Pompey kit — baby blue tee, white shorts. */
+  kit: {
+    ...BASE,
+    j: 0x7ec8e8,
+    J: 0x58a8c8,
+    l: 0xa0d8f0,
+    c: 0x4890b0,
+    t: 0xf8f8f4,
+    T: 0xd0d0c8,
     o: 0xd45c28,
     O: 0x8a3018,
   },
@@ -615,6 +627,6 @@ export function createKidSheets(scene: Phaser.Scene): void {
 }
 
 export function ensureKidSheets(scene: Phaser.Scene): void {
-  if (scene.textures.exists(kidSheet("pj"))) return;
+  if (OUTFITS.every((outfit) => scene.textures.exists(kidSheet(outfit)))) return;
   createKidSheets(scene);
 }
