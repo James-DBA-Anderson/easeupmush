@@ -10,6 +10,7 @@ import { StarterMenu } from "../ui/StarterMenu";
 import { isTouchUi } from "../touch";
 import {
   addWalls,
+  armSouthExit,
   bindWalkKeys,
   justAction,
   justCancel,
@@ -86,12 +87,14 @@ export class LabScene extends Phaser.Scene {
   private offerMenu = false;
   private tableMons: Phaser.GameObjects.Sprite[] = [];
   private rude: "off" | "walk" | "line" = "off";
+  private southExit = { armed: false };
 
   constructor() {
     super("lab");
   }
 
   create(): void {
+    this.southExit = { armed: false };
     this.paint();
     ensureChoke(this);
     this.add.image(this.layout.choke.x + 8, this.layout.choke.y + 10, "choke").setDepth(9);
@@ -118,7 +121,7 @@ export class LabScene extends Phaser.Scene {
         if (this.rude !== "off") return;
         if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
-        if (this.bagUi?.menu.active || this.menu.active) return;
+        if (this.bagUi?.busy || this.menu.active) return;
         if (!this.reaching) this.tryExamine();
       });
     }
@@ -169,7 +172,7 @@ export class LabScene extends Phaser.Scene {
     this.facing = walked.facing;
     this.flip = walked.flip;
 
-    if (walkingInto(this.player, this.layout.door, "down")) {
+    if (armSouthExit(this.player, this.cursors, this.wasd, this.southExit) && walkingInto(this.player, this.layout.door, "down")) {
       if (!run.starter) {
         this.reachThen(
           choke(
@@ -243,7 +246,7 @@ export class LabScene extends Phaser.Scene {
   private talkChoke(): void {
     if (hasChomp() && !run.chompKept) {
       run.chompKept = true;
-      this.reachThen([choke("Oh ok you can keep it."), choke("Pompeymon love them.")]);
+      this.reachThen([choke("Oh OK you can keep it."), choke("Pompeymon love them.")]);
       return;
     }
     if (run.starter) {

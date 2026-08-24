@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
-import { run } from "../run";
+import { returningTo, resumePos, run, saveOverworld } from "../run";
+import { attachAutosave } from "../save";
 import { ensureKidSheets, kidAnim, kidSheet, type OutfitId } from "../sprites/kid";
 import { ClothesMenu, type ClothesOption } from "../ui/ClothesMenu";
 import { BagUi } from "../ui/BagUi";
@@ -46,17 +47,23 @@ export class BedroomScene extends Phaser.Scene {
 
     this.outfit = run.outfit;
 
-    const start = this.fromLanding ? this.layout.doorSpawn : this.layout.spawn;
+    const saved = returningTo("bedroom");
+    const start = saved
+      ? resumePos("bedroom", this.fromLanding ? this.layout.doorSpawn : this.layout.spawn)
+      : this.fromLanding
+        ? this.layout.doorSpawn
+        : this.layout.spawn;
+    const skipWake = saved || this.fromLanding;
     this.player = this.physics.add.sprite(
       start.x,
       start.y,
       kidSheet(this.outfit),
-      this.fromLanding ? "idle-down" : "sleep",
+      skipWake ? "idle-down" : "sleep",
     );
     this.player.setCollideWorldBounds(true);
     this.player.setSize(10, 6).setOffset(11, 24);
     this.player.setDepth(10);
-    if (this.fromLanding) {
+    if (skipWake) {
       this.busy = false;
       this.player.anims.play(kidAnim(this.outfit, "idle-down"));
     } else {
@@ -87,21 +94,24 @@ export class BedroomScene extends Phaser.Scene {
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
 
     this.time.delayedCall(400, () => {
-      if (!this.fromLanding) this.showNote("…2nd Avenue. Mum's downstairs.");
+      if (!skipWake) this.showNote("…2nd Avenue. Mum's downstairs.");
     });
-    if (!this.fromLanding) this.time.delayedCall(1400, () => this.playWakeSequence());
-    if (this.fromLanding) {
+    if (!skipWake) this.time.delayedCall(1400, () => this.playWakeSequence());
+    if (skipWake) {
       const s = this.layout.bed;
       const block = this.add.rectangle(s.x + s.w / 2, s.y + s.h / 2, s.w, s.h, 0x000000, 0);
       this.physics.add.existing(block, true);
       this.physics.add.collider(this.player, block);
     }
 
+    saveOverworld("bedroom", start);
+    attachAutosave(this, this.player);
+
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
         if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
-        if (this.bagUi?.menu.active) return;
+        if (this.bagUi?.busy) return;
         if (this.clothes.active || this.busy || this.reaching) return;
         this.tryExamine();
       });

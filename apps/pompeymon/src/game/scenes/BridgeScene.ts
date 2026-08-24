@@ -17,6 +17,7 @@ import {
   type WalkKeys,
 } from "../walk";
 import { drawBridge, type BridgeLayout } from "../world/drawBridge";
+import { BikeField } from "../world/bike";
 import {
   BRIDGE_NPCS,
   losTrainer,
@@ -40,6 +41,7 @@ export class BridgeScene extends Phaser.Scene {
   private reaching = false;
   private from = "roundabout";
   private npcs: FieldNpc[] = [];
+  private bikes!: BikeField;
 
   constructor() {
     super("bridge");
@@ -67,12 +69,13 @@ export class BridgeScene extends Phaser.Scene {
     this.wasd = keys.wasd;
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
+    this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
         if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
-        if (this.bagUi?.menu.active) return;
+        if (this.bagUi?.busy) return;
         if (!this.reaching) this.tryExamine();
       });
     }
@@ -101,6 +104,7 @@ export class BridgeScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
+    this.bikes.tick();
     tickFieldNpcs(this, this.npcs);
     this.player.setDepth(this.player.y);
 
@@ -121,10 +125,12 @@ export class BridgeScene extends Phaser.Scene {
       return;
     }
 
+    if (cancel && this.bikes.tryBack()) return;
     if (confirm) this.tryExamine();
   }
 
   private tryExamine(): void {
+    if (this.bikes.tryExamine()) return;
     const person = npcNear(this.player, this.npcs);
     if (person) {
       if (startTrainerFight(this, person, "bridge", this.player)) return;

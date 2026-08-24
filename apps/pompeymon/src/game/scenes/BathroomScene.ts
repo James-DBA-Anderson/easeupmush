@@ -54,7 +54,7 @@ export class BathroomScene extends Phaser.Scene {
       this.input.on("pointerdown", () => {
         if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
-        if (this.bagUi?.menu.active) return;
+        if (this.bagUi?.busy) return;
         if (!this.reaching) this.tryExamine();
       });
     }

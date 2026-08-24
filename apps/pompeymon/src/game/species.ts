@@ -1,5 +1,23 @@
 import type { StarterId } from "./run";
 
+export type ElemId = "fire" | "wind" | "poison" | "earth" | "water";
+
+export const ELEM_LABEL: Record<ElemId, string> = {
+  fire: "FIRE",
+  wind: "WIND",
+  poison: "POISON",
+  earth: "EARTH",
+  water: "WATER",
+};
+
+export const ELEM_TINT: Record<ElemId, number> = {
+  fire: 0xff7040,
+  wind: 0xb8e8ff,
+  poison: 0xc070e0,
+  earth: 0xd4a050,
+  water: 0x5090e8,
+};
+
 export type WildId =
   | "pidgeon"
   | "squirral"

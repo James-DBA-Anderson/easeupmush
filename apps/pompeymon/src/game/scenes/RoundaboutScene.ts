@@ -31,6 +31,7 @@ import {
   type FieldNpc,
 } from "../world/npcs";
 import { spawnAreaWilds, beginWildFight, leaveField, snapshotField, tickWanderers, wanderNear, type Wanderer } from "../world/wander";
+import { BikeField } from "../world/bike";
 
 export class RoundaboutScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -45,6 +46,7 @@ export class RoundaboutScene extends Phaser.Scene {
   private from = "avenue";
   private npcs: FieldNpc[] = [];
   private wanderers: Wanderer[] = [];
+  private bikes!: BikeField;
 
   constructor() {
     super("roundabout");
@@ -85,12 +87,13 @@ export class RoundaboutScene extends Phaser.Scene {
     this.wasd = keys.wasd;
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
+    this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
         if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
-        if (this.bagUi?.menu.active) return;
+        if (this.bagUi?.busy) return;
         if (!this.reaching) this.tryExamine();
       });
     }
@@ -119,6 +122,7 @@ export class RoundaboutScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
+    this.bikes.tick();
     tickFieldNpcs(this, this.npcs);
     tickWanderers(this, this.wanderers, this.player);
     this.player.setDepth(this.player.y);
@@ -160,6 +164,7 @@ export class RoundaboutScene extends Phaser.Scene {
       return;
     }
 
+    if (cancel && this.bikes.tryBack()) return;
     if (confirm) this.tryExamine();
   }
 
@@ -174,10 +179,11 @@ export class RoundaboutScene extends Phaser.Scene {
     }
     run.grassCalm = 28;
     beginWildFight("roundabout", { x: this.player.x, y: this.player.y }, this.wanderers, map);
-    this.scene.start("encounter", { wild, lv: map?.lv ?? rollWildLv(3, 4) });
+    this.scene.start("encounter", { wild, lv: map?.lv ?? rollWildLv(2, 3) });
   }
 
   private tryExamine(): void {
+    if (this.bikes.tryExamine()) return;
     const person = npcNear(this.player, this.npcs);
     if (person) {
       snapshotField(this.wanderers);

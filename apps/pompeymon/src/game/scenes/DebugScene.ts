@@ -11,6 +11,7 @@ import {
   HIGH_STREET_NPCS,
   ISLAND_NPCS,
   ROUNDABOUT_NPCS,
+  SCHOOL_IN_NPCS,
   SCHOOL_NPCS,
   type NpcSpec,
 } from "../world/npcs";
@@ -36,8 +37,13 @@ const AREAS: DebugArea[] = [
   { label: "BRIDGE", scene: "bridge", starter: true },
   { label: "HIGH STREET", scene: "highstreet", data: { from: "roundabout" }, starter: true, steveGone: true },
   { label: "LAB", scene: "lab", starter: true, steveGone: true },
+  { label: "BIKE SHOP", scene: "bikeshop", data: { from: "highstreet" }, starter: true, steveGone: true },
+  { label: "CHARITY", scene: "junkshop", data: { kind: "charity", from: "highstreet" }, starter: true, steveGone: true },
+  { label: "PAWN", scene: "junkshop", data: { kind: "pawn", from: "highstreet" }, starter: true, steveGone: true },
+  { label: "CHIPPY", scene: "takeaway", data: { kind: "chippy", from: "highstreet" }, starter: true, steveGone: true },
   { label: "HILSEA", scene: "island", starter: true, steveGone: true },
   { label: "SCHOOL", scene: "school", starter: true, steveGone: true },
+  { label: "SCHOOL IN", scene: "schoolin", starter: true, steveGone: true },
 ];
 
 const DEBUG_TRAINERS: NpcSpec[] = [
@@ -46,6 +52,7 @@ const DEBUG_TRAINERS: NpcSpec[] = [
   ...BRIDGE_NPCS,
   ...ISLAND_NPCS,
   ...SCHOOL_NPCS,
+  ...SCHOOL_IN_NPCS,
 ].filter((n) => n.trainer);
 
 export class DebugScene extends Phaser.Scene {
@@ -306,6 +313,16 @@ export class DebugScene extends Phaser.Scene {
     run.whiteout = false;
     run.chompKept = false;
     run.hillNanGone = false;
+    run.lockChored = false;
+    run.cash = 200;
+    run.mounted = false;
+    run.parked = null;
+    run.plasters = 0;
+    run.stale = 0;
+    run.curry = 0;
+    run.doner = 0;
+    run.chips = 0;
+    run.fish = 0;
     syncBagChrome();
   }
 

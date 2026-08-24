@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GBA_H, GBA_W } from "../constants";
+import { GBA_H } from "../constants";
 
 const BOX_W = 232;
 const BOX_H = 48;

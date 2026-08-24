@@ -20,6 +20,7 @@ import {
   type WalkKeys,
 } from "../walk";
 import { drawSchool, type GrassZone, type SchoolLayout } from "../world/drawSchool";
+import { BikeField, grassOnBike } from "../world/bike";
 import {
   SCHOOL_NPCS,
   losTrainer,
@@ -37,6 +38,7 @@ import {
   spawnAreaWilds,
   tickWanderers,
   wanderNear,
+  wanderInGrass,
   type Wanderer,
 } from "../world/wander";
 
@@ -53,9 +55,15 @@ export class SchoolScene extends Phaser.Scene {
   private steps = 0;
   private wanderers: Wanderer[] = [];
   private npcs: FieldNpc[] = [];
+  private from = "island";
+  private bikes!: BikeField;
 
   constructor() {
     super("school");
+  }
+
+  init(data: { from?: string }): void {
+    this.from = data.from ?? "island";
   }
 
   create(): void {
@@ -67,9 +75,10 @@ export class SchoolScene extends Phaser.Scene {
     this.add.image(0, 0, "school").setOrigin(0);
 
     const returning = returningTo("school");
-    const spawn = resumePos("school", this.layout.spawnFromRoad);
-    this.facing = "side";
-    this.flip = -1;
+    const fallback = this.from === "schoolin" ? this.layout.spawnFromIn : this.layout.spawnFromRoad;
+    const spawn = resumePos("school", fallback);
+    this.facing = this.from === "schoolin" ? "down" : "side";
+    this.flip = this.from === "schoolin" ? 1 : -1;
     this.player = spawnKid(this, spawn.x, spawn.y, { w: GBA_W, h: this.layout.mapH });
     this.player.setFlipX(true);
     this.cameras.main.startFollow(this.player, true, 1, 1);
@@ -81,12 +90,13 @@ export class SchoolScene extends Phaser.Scene {
     this.wasd = keys.wasd;
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
+    this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
         if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
-        if (this.bagUi?.menu.active) return;
+        if (this.bagUi?.busy) return;
         if (!this.reaching) this.tryExamine();
       });
     }
@@ -115,6 +125,7 @@ export class SchoolScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
+    this.bikes.tick();
     tickWanderers(this, this.wanderers, this.player);
     tickFieldNpcs(this, this.npcs);
     this.player.setDepth(this.player.y);
@@ -137,9 +148,20 @@ export class SchoolScene extends Phaser.Scene {
       this.scene.start("island", { from: "school" });
       return;
     }
+    if (walkingInto(this.player, this.layout.door, "up")) {
+      this.bikes.stashIndoor();
+      leaveField("school");
+      this.scene.start("schoolin");
+      return;
+    }
 
     const zone = this.grassZone();
-    if (moving && zone) {
+    if (moving && zone && !grassOnBike()) {
+      const mapMon = wanderInGrass(this.player, this.wanderers, zone.at);
+      if (mapMon) {
+        this.startWild(mapMon.id, mapMon);
+        return;
+      }
       if (run.grassCalm > 0) run.grassCalm -= 1;
       else {
         this.steps += 1;
@@ -150,6 +172,7 @@ export class SchoolScene extends Phaser.Scene {
       }
     }
 
+    if (cancel && this.bikes.tryBack()) return;
     if (confirm) this.tryExamine();
   }
 
@@ -169,6 +192,7 @@ export class SchoolScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
+    if (this.bikes.tryExamine()) return;
     const person = npcNear(this.player, this.npcs);
     if (person) {
       snapshotField(this.wanderers);

@@ -14,7 +14,9 @@ export type SchoolLayout = {
   grass: GrassZone[];
   spots: SchoolSpot[];
   gate: Solid;
+  door: Solid;
   spawnFromRoad: { x: number; y: number };
+  spawnFromIn: { x: number; y: number };
 };
 
 const C = {
@@ -126,7 +128,7 @@ export function drawSchool(g: Phaser.GameObjects.Graphics): SchoolLayout {
   px(g, C.path, 16, 72, 122, 16);
 
   const main = block(g, 8, 8, 148, 60, C.brick, C.brickL, C.brickD, C.roof);
-  southDoor(g, 64, 58, 22, 10);
+  const door = southDoor(g, 64, 58, 22, 10);
   const gym = block(g, 164, 8, 60, 60, C.pebble, C.pebbleL, C.pebbleD, C.roof2);
   px(g, C.cream, 20, 12, 72, 8);
   px(g, C.ink, 28, 14, 56, 4);
@@ -173,8 +175,8 @@ export function drawSchool(g: Phaser.GameObjects.Graphics): SchoolLayout {
   ];
 
   const spots: SchoolSpot[] = [
-    { at: main, line: "City of Portsmouth Boys School." },
-    { at: gym, line: "Gym. Smells of plimsolls." },
+    { at: main, line: "City of Portsmouth Boys' School." },
+    { at: gym, line: "Gym. Atkins. Go in the main doors." },
     { at: hut, line: "Huts. Art and geography." },
     { at: shed, line: "Bike shed. Don't." },
     { at: pitch, line: "The field. Mud." },
@@ -189,7 +191,9 @@ export function drawSchool(g: Phaser.GameObjects.Graphics): SchoolLayout {
     southF,
     eastN,
     eastS,
-    main,
+    { x: main.x, y: main.y, w: main.w, h: 50 },
+    { x: main.x, y: 58, w: 56, h: 10 },
+    { x: 86, y: 58, w: main.x + main.w - 86, h: 10 },
     gym,
     hut,
     shed,
@@ -203,6 +207,8 @@ export function drawSchool(g: Phaser.GameObjects.Graphics): SchoolLayout {
     grass,
     spots,
     gate,
+    door,
     spawnFromRoad: { x: 214, y: 128 },
+    spawnFromIn: { x: 75, y: 78 },
   };
 }

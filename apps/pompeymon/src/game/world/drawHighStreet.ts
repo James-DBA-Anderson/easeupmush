@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GBA_W } from "../constants";
-import { furn, px, type Solid } from "./drawCommon";
+import { cycleShopFront, furn, px, type Solid } from "./drawCommon";
 
 export const HIGH_STREET_H = 480;
 
@@ -11,9 +11,19 @@ export type HighStreetLayout = {
   solids: Solid[];
   spawnFromWest: { x: number; y: number };
   spawnFromLab: { x: number; y: number };
+  spawnFromBike: { x: number; y: number };
+  spawnFromCharity: { x: number; y: number };
+  spawnFromPawn: { x: number; y: number };
+  spawnFromChippy: { x: number; y: number };
+  spawnFromSpice: { x: number; y: number };
   join: Solid;
   centre: Solid;
   centreDoor: Solid;
+  bikeDoor: Solid;
+  charityDoor: Solid;
+  pawnDoor: Solid;
+  chippyDoor: Solid;
+  spiceDoor: Solid;
   spots: HighStreetSpot[];
 };
 
@@ -141,7 +151,7 @@ export function drawHighStreet(g: Phaser.GameObjects.Graphics): HighStreetLayout
   const news = shopWest(g, 8, 160, 72, 48, C.cream, C.creamL, C.creamD, C.roof);
   const iceland = shopWest(g, 8, 280, 72, 52, C.navy, C.navyL, 0x1a2848, C.roof2);
   const chemistW = shopWest(g, 8, 340, 72, 48, C.pebble, C.creamL, C.creamD, C.roof);
-  const lastW = shopWest(g, 8, 396, 72, 48, C.brick, C.brickL, C.brickD, C.roof);
+  const lastW = cycleShopFront(g, 8, 396, 72, 48, true);
 
   const bookies = shopEast(g, 156, 20, 76, 52, C.brick, C.brickL, C.brickD, C.roof);
   const hair = shopEast(g, 156, 80, 76, 48, C.cream, C.creamL, C.creamD, C.roof);
@@ -152,17 +162,17 @@ export function drawHighStreet(g: Phaser.GameObjects.Graphics): HighStreetLayout
 
   const spots: HighStreetSpot[] = [
     { at: centre, line: "Professor Choke's Pompeymon research centre." },
-    { at: chippy, line: "Chippy. Closed." },
+    { at: chippy, line: "Chippy. Open." },
     { at: news, line: "Papers. Not going in." },
     { at: iceland, line: "Iceland. Freezers humming." },
     { at: chemistW, line: "Chemist. Shut." },
-    { at: lastW, line: "Shutters down." },
+    { at: lastW, line: "Cosham Cycles. Bikes in the window." },
     { at: bookies, line: "Bookies. Blokes in there." },
     { at: hair, line: "Hair. Smells of spray." },
-    { at: charity, line: "Bags of old coats." },
+    { at: charity, line: "Charity. Cheap coats." },
     { at: pub, line: "Pub. Not going in." },
-    { at: shut, line: "Shutters down." },
-    { at: lastE, line: "Further shops. Later." },
+    { at: shut, line: "Pawn. Watches in the window." },
+    { at: lastE, line: "Spice. Curry. Kebab." },
   ];
 
   const solids: Solid[] = [
@@ -190,9 +200,19 @@ export function drawHighStreet(g: Phaser.GameObjects.Graphics): HighStreetLayout
     solids,
     spawnFromWest: { x: 40, y: joinY + 22 },
     spawnFromLab: { x: 90, y: 70 },
+    spawnFromBike: { x: 90, y: 420 },
+    spawnFromCharity: { x: 148, y: 178 },
+    spawnFromPawn: { x: 148, y: 366 },
+    spawnFromChippy: { x: 90, y: 132 },
+    spawnFromSpice: { x: 148, y: 422 },
     join,
     centre,
     centreDoor,
+    bikeDoor: { x: lastW.x + lastW.w - 12, y: lastW.y + 18, w: 10, h: lastW.h - 22 },
+    charityDoor: { x: charity.x, y: charity.y + 18, w: 10, h: charity.h - 22 },
+    pawnDoor: { x: shut.x, y: shut.y + 18, w: 10, h: shut.h - 22 },
+    chippyDoor: { x: chippy.x + chippy.w - 12, y: chippy.y + 18, w: 10, h: chippy.h - 22 },
+    spiceDoor: { x: lastE.x, y: lastE.y + 18, w: 10, h: lastE.h - 22 },
     spots,
   };
 }

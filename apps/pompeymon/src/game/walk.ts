@@ -1,8 +1,9 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "./constants";
-import { run } from "./run";
+import { resumePos, run, saveOverworld } from "./run";
+import { attachAutosave } from "./save";
 import { ensureKidSheets, kidAnim, kidSheet } from "./sprites/kid";
-import { consumeAction, consumeCancel, consumeDir, pad } from "./touch";
+import { consumeAction, consumeCancel, pad } from "./touch";
 
 export type Facing = "down" | "up" | "side";
 
@@ -48,6 +49,27 @@ export function walkingInto(
   return right >= door.x - 4;
 }
 
+/**
+ * Street shops share a south door. Walking N–S outside often keeps DOWN held,
+ * which would fire the exit on the first interior frame. Arm once DOWN is released.
+ */
+export function armSouthExit(
+  player: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody,
+  cursors: Phaser.Types.Input.Keyboard.CursorKeys,
+  wasd: WalkKeys,
+  gate: { armed: boolean },
+): boolean {
+  const holdDown = cursors.down.isDown || wasd.S.isDown || pad.down;
+  if (!gate.armed) {
+    if (holdDown) {
+      if (player.body.velocity.y > 0) player.body.setVelocityY(0);
+      return false;
+    }
+    gate.armed = true;
+  }
+  return true;
+}
+
 /** Feet body vs map edge — sprite centre never reaches y > 152 with collideWorldBounds. */
 export function atSouthEdge(
   player: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody,
@@ -75,7 +97,8 @@ export function spawnKid(
   world = { w: GBA_W, h: GBA_H },
 ): Phaser.Types.Physics.Arcade.SpriteWithDynamicBody {
   ensureKidSheets(scene);
-  const player = scene.physics.add.sprite(x, y, kidSheet(run.outfit), "idle-down");
+  const pos = resumePos(scene.scene.key, { x, y });
+  const player = scene.physics.add.sprite(pos.x, pos.y, kidSheet(run.outfit), "idle-down");
   player.setCollideWorldBounds(true);
   player.setSize(10, 6).setOffset(11, 24);
   player.setDepth(10);
@@ -83,6 +106,10 @@ export function spawnKid(
   scene.physics.world.setBounds(0, 0, world.w, world.h);
   scene.cameras.main.setBounds(0, 0, world.w, world.h);
   scene.cameras.main.fadeIn(280, 18, 16, 22);
+  if (scene.scene.key !== "bikeshop" && scene.scene.key !== "junkshop" && scene.scene.key !== "takeaway") {
+    saveOverworld(scene.scene.key, pos);
+  }
+  attachAutosave(scene, player);
   return player;
 }
 
@@ -147,7 +174,7 @@ export function tickWalk(
   facing: Facing,
   flip: number,
 ): { facing: Facing; flip: number } {
-  const speed = 68;
+  const speed = run.mounted ? 118 : 68;
   const { vx, vy } = walkAxis(cursors, wasd);
   player.body.setVelocity(vx * speed, vy * speed);
 

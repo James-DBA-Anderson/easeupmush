@@ -66,7 +66,7 @@ const AREA_WILDS: Record<string, AreaWilds> = {
   },
   highstreet: {
     count: 3,
-    lv: [3, 4],
+    lv: [2, 3],
     pool: ["pidgeon", "donerrat", "chipgull"],
     keepOff: [
       { x: 0, y: 196, w: 100, h: 84 },
@@ -82,7 +82,7 @@ const AREA_WILDS: Record<string, AreaWilds> = {
   },
   roundabout: {
     count: 2,
-    lv: [3, 4],
+    lv: [2, 3],
     pool: ["pidgeon", "starlimur"],
     keepOff: [
       { x: 0, y: 56, w: 52, h: 48 },
@@ -339,9 +339,37 @@ export function wanderNear(
   wanderers: Wanderer[],
   dist = 14,
 ): Wanderer | undefined {
+  if (run.mounted) return undefined;
   const keepOff = wanderers[0]?.keepOff;
   if (keepOff && blocked(player.x, player.y, keepOff)) return undefined;
-  return wanderers.find(
-    (w) => Phaser.Math.Distance.Between(player.x, player.y, w.sprite.x, w.sprite.y) < dist,
-  );
+  let best: Wanderer | undefined;
+  let bestD = dist;
+  for (const w of wanderers) {
+    const d = Phaser.Math.Distance.Between(player.x, player.y, w.sprite.x, w.sprite.y);
+    if (d < bestD) {
+      bestD = d;
+      best = w;
+    }
+  }
+  return best;
+}
+
+/** Visible map mon standing in this grass patch — fight that, not a random roll. */
+export function wanderInGrass(
+  player: { x: number; y: number },
+  wanderers: Wanderer[],
+  grass: WanderBox,
+): Wanderer | undefined {
+  if (run.mounted) return undefined;
+  let best: Wanderer | undefined;
+  let bestD = Infinity;
+  for (const w of wanderers) {
+    if (!inBox(w.sprite.x, w.sprite.y, grass)) continue;
+    const d = Phaser.Math.Distance.Between(player.x, player.y, w.sprite.x, w.sprite.y);
+    if (d < bestD) {
+      bestD = d;
+      best = w;
+    }
+  }
+  return best;
 }

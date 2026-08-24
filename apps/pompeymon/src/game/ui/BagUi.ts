@@ -1,14 +1,15 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
-import { bagEntries, bagLabel, bagLine, battleBagEntries, run, syncBagChrome, type BagEntry } from "../run";
+import { bagEntries, bagLabel, bagLine, battleBagEntries, isFood, run, syncBagChrome, type BagEntry } from "../run";
 import { consumeBag, consumeDir, isTouchUi } from "../touch";
 import { mountDebugBack } from "./debugBack";
+import { FeedMenu } from "./FeedMenu";
 
 type BagCallbacks = {
   onPick: (entry: BagEntry) => void;
 };
 
-const BAG_W = 176;
+const BAG_W = 216;
 const BAG_H = 112;
 const ROW = 12;
 const VISIBLE = 5;
@@ -192,12 +193,26 @@ const ICON_H = 16;
 /** On-screen bag + I / BAG button. Visible after you pick the bag up. */
 export class BagUi {
   readonly menu: BagMenu;
+  private readonly feed: FeedMenu;
   private readonly icon: Phaser.GameObjects.Graphics;
   private readonly keyI: Phaser.Input.Keyboard.Key;
   private pointerUsed = false;
 
   constructor(scene: Phaser.Scene, onItem: (line: string) => void) {
-    this.menu = new BagMenu(scene, { onPick: (entry) => onItem(bagLine(entry)) });
+    this.menu = new BagMenu(scene, {
+      onPick: (entry) => {
+        if (entry.kind === "item" && isFood(entry.id)) {
+          if (!run.party.length) {
+            onItem("Need a Pompeymon.");
+            return;
+          }
+          this.feed.show(entry.id);
+          return;
+        }
+        onItem(bagLine(entry));
+      },
+    });
+    this.feed = new FeedMenu(scene, { onDone: (line) => onItem(line) });
     this.icon = scene.add.graphics();
     paintBagIcon(this.icon);
     this.icon.setPosition(ICON_X, ICON_Y);
@@ -230,8 +245,13 @@ export class BagUi {
     return hit;
   }
 
+  get busy(): boolean {
+    return this.menu.active || this.feed.active;
+  }
+
   sync(): void {
-    this.icon.setVisible(run.hasBag);
+    // Touch UI already has a BAG button on the control deck — hide the HUD icon.
+    this.icon.setVisible(run.hasBag && !isTouchUi());
     syncBagChrome();
   }
 
@@ -247,6 +267,10 @@ export class BagUi {
       run.hasBag && (Phaser.Input.Keyboard.JustDown(this.keyI) || consumeBag());
     if (toggle) {
       this.toggle();
+      return true;
+    }
+    if (this.feed.active) {
+      this.feed.update(cursors, wasd, confirm, cancel);
       return true;
     }
     if (this.menu.active) {

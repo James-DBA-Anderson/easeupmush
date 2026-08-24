@@ -1,4 +1,4 @@
-import type { SpeciesId } from "./species";
+import type { ElemId, SpeciesId } from "./species";
 
 export const MAX_MOVES = 6;
 
@@ -18,6 +18,8 @@ export type MoveDef = {
   drain?: number;
   /** Flat speed added for the rest of the fight (speed). */
   boost?: number;
+  /** Takeaway evolution type. */
+  elem?: ElemId;
 };
 
 export const MOVES: Record<string, MoveDef> = {
@@ -58,6 +60,12 @@ export const MOVES: Record<string, MoveDef> = {
   zip: { id: "zip", name: "ZIP", kind: "speed", pow: 0, boost: 4 },
   wind: { id: "wind", name: "WIND UP", kind: "speed", pow: 0, boost: 5 },
   scamper: { id: "scamper", name: "SCAMPER", kind: "speed", pow: 0, boost: 4 },
+
+  chilli: { id: "chilli", name: "CHILLI", kind: "attack", pow: 20, elem: "fire" },
+  puff: { id: "puff", name: "PUFF", kind: "quick", pow: 16, elem: "wind" },
+  grease: { id: "grease", name: "GREASE", kind: "poison", pow: 16, poison: 35, elem: "poison" },
+  grit: { id: "grit", name: "GRIT", kind: "attack", pow: 18, elem: "earth" },
+  batter: { id: "batter", name: "BATTER", kind: "attack", pow: 18, elem: "water" },
 };
 
 type Learn = { lv: number; move: string };

@@ -19,11 +19,14 @@ import {
 } from "../walk";
 import { isTouchUi } from "../touch";
 import { drawAvenue, type AvenueLayout } from "../world/drawAvenue";
+import { BikeField } from "../world/bike";
 
 const STEVE_CHAT: Line[] = [
-  { who: "STEVE", text: "New bike. Yours is still in the shed." },
+  { who: "STEVE", text: "Alright mush. New bike. Cushty init." },
+  { who: "STEVE", text: "Yours is still in the shed. Beard if you say it aint." },
   { who: "STEVE", text: "I'm off. Gonna be the Pompeymon master." },
   { who: "YOU", text: "…Pompeymon? What you on about?" },
+  { who: "STEVE", text: "The fings. On the paper. You wouldn't get it." },
 ];
 
 function ensureFlyer(scene: Phaser.Scene): void {
@@ -57,6 +60,7 @@ export class AvenueScene extends Phaser.Scene {
   private flyerSpr?: Phaser.GameObjects.Image;
   private pendingRide = false;
   private riding = false;
+  private bikes!: BikeField;
 
   constructor() {
     super("avenue");
@@ -103,6 +107,7 @@ export class AvenueScene extends Phaser.Scene {
     this.wasd = keys.wasd;
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
+    this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       if (this.riding && !hasFlyer()) run.flyerOnRoad = true;
     });
@@ -113,7 +118,7 @@ export class AvenueScene extends Phaser.Scene {
       this.input.on("pointerdown", () => {
         if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
-        if (this.bagUi?.menu.active) return;
+        if (this.bagUi?.busy) return;
         if (!this.reaching && !this.riding) this.tryExamine();
       });
     }
@@ -147,8 +152,10 @@ export class AvenueScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
+    this.bikes.tick();
 
     if (walkingInto(this.player, this.layout.homeDoor, "left")) {
+      this.bikes.stashIndoor();
       this.scene.start("hall", { from: "avenue" });
       return;
     }
@@ -168,10 +175,12 @@ export class AvenueScene extends Phaser.Scene {
       return;
     }
 
+    if (cancel && this.bikes.tryBack()) return;
     if (confirm) this.tryExamine();
   }
 
   private tryExamine(): void {
+    if (this.bikes.tryExamine()) return;
     if (run.flyerOnRoad && !hasFlyer() && near(this.player, this.layout.flyer, 12)) {
       takeFlyer();
       this.flyerSpr?.destroy();
@@ -180,7 +189,7 @@ export class AvenueScene extends Phaser.Scene {
       this.reachThen([
         "Professor Choke's Pompeymon research centre.",
         "New trainers wanted.",
-        { who: "YOU", text: "Hmm. What is this." },
+        { who: "YOU", text: "Hmm. What is this?" },
       ]);
       return;
     }
@@ -219,7 +228,7 @@ export class AvenueScene extends Phaser.Scene {
     steve.setFlipX(false);
     steve.play(steveRideAnim());
     this.shout = this.add
-      .text(steve.x, steve.y - 22, "Haha. You're such a loser.", {
+      .text(steve.x, steve.y - 22, "Haha. Loser mush.", {
         fontFamily: '"Press Start 2P", monospace',
         fontSize: "8px",
         color: "#181828",

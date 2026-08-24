@@ -1,8 +1,8 @@
 import Phaser from "phaser";
-import { applyHit, BATTLE, canRun, doDefend, doDodge, drainSta, firstActor, makeBattler, pickFoeMove, rollCounter, rollDamage, rollDodge, rollHit, spendChase, spendFight, STARTER_LV, tickPoison, tryCatch, tryPoison, xpForKo, type Battler } from "../battle";
+import { applyHit, BATTLE, canRun, doDefend, doDodge, drainSta, firstActor, makeBattler, pickFoeMove, rollCounter, rollDamage, rollDodge, rollHit, spendChase, spendFight, STA_FIGHT, STARTER_LV, tickPoison, tryCatch, tryPoison, xpForKo, type Battler } from "../battle";
 import { isDamaging, type MoveDef } from "../moves";
-import { applyXp, beatTrainer, catchSpecies, ITEM, partnerMon, partyAlive, run, seeSpecies, setLead, useHealItem, useKebabBox, type BagEntry, type PartyMon } from "../run";
-import { SPECIES, type SpeciesId } from "../species";
+import { applyXp, beatTrainer, catchSpecies, ITEM, MAX_PARTY, partnerMon, partyAlive, persistRun, run, seeSpecies, setLead, takeCash, takePrize, useHealItem, useKebabBox, type BagEntry, type ItemId, type PartyMon } from "../run";
+import { ELEM_TINT, SPECIES, type SpeciesId } from "../species";
 import { ensureKidSheets, kidAnim, kidSheet } from "../sprites/kid";
 import { ensureMonSheets, monBattleKey } from "../sprites/mon";
 import { CatchMenu } from "../ui/CatchMenu";
@@ -38,6 +38,7 @@ export type TrainerBattle = {
   win: string;
   who: string;
   look: NpcLook;
+  prize?: ItemId;
   mate?: {
     who: string;
     look: NpcLook;
@@ -97,7 +98,7 @@ export class EncounterScene extends Phaser.Scene {
     this.foeSlot = 0;
     const partner = partnerMon();
     const partnerId = partner?.id ?? run.starter ?? "scabfox";
-    this.me = makeBattler(partnerId, partner?.lv ?? STARTER_LV, partner?.hp, partner?.moves);
+    this.me = makeBattler(partnerId, partner?.lv ?? STARTER_LV, partner?.hp, partner?.moves, partner?.elem);
     this.foe = makeBattler(this.foeId, this.foeLv);
     seeSpecies(this.foeId);
     seeSpecies(partnerId);
@@ -109,6 +110,7 @@ export class EncounterScene extends Phaser.Scene {
     ensureKidSheets(this);
     this.foeSpr = this.add.image(180, 100, monBattleKey(this.foeId)).setScale(2).setOrigin(0.5, 1).setDepth(10);
     this.meSpr = this.add.image(52, 76, monBattleKey(partnerId)).setScale(2).setOrigin(0.5, 1).setDepth(10);
+    if (partner?.elem) this.meSpr.setTint(ELEM_TINT[partner.elem]);
     this.kidSpr = this.add
       .sprite(KID_X, KID_REST_Y, kidSheet(run.outfit), "idle-up")
       .setScale(2)
@@ -243,7 +245,7 @@ export class EncounterScene extends Phaser.Scene {
     if (this.after === "menu") this.settleToMenu();
     else if (this.after === "afterPoison") this.afterPoison();
     else if (this.after === "bag") this.openBag();
-    else if (this.after === "foe") this.foeStrike();
+    else if (this.after === "foe") this.enemyReply();
     else if (this.after === "next") this.nextAct();
     else if (this.after === "counter") this.counterHit();
     else this.finishLeave();
@@ -316,6 +318,11 @@ export class EncounterScene extends Phaser.Scene {
   }
 
   private pickedMove(move: MoveDef): void {
+    if (move.kind === "defend") {
+      this.me.move = move;
+      this.startDefend();
+      return;
+    }
     if (!spendFight(this.me)) {
       this.say("Too tired. Defend.", "menu");
       return;
@@ -354,7 +361,7 @@ export class EncounterScene extends Phaser.Scene {
     const revived = this.mustSwitch && this.me.hp > 0;
     if (revived) this.mustSwitch = false;
     this.say(
-      [`You gave it a ${ITEM[entry.id].label}.`, `${this.me.name} recovered ${got} HP.`],
+      [`You used ${ITEM[entry.id].label}.`, `${this.me.name} recovered ${got} HP.`],
       revived || this.mustSwitch ? "menu" : "foe",
     );
   }
@@ -380,9 +387,10 @@ export class EncounterScene extends Phaser.Scene {
     }
     const forced = this.mustSwitch;
     this.mustSwitch = false;
-    this.me = makeBattler(next.id, next.lv, next.hp, next.moves);
+    this.me = makeBattler(next.id, next.lv, next.hp, next.moves, next.elem);
     this.meSpr?.setTexture(monBattleKey(next.id));
     this.meSpr?.clearTint();
+    if (next.elem) this.meSpr?.setTint(ELEM_TINT[next.elem]);
     this.meSpr?.setAlpha(1);
     this.meSpr?.setPosition(52, 76);
     this.kidSpr?.clearTint();
@@ -415,15 +423,39 @@ export class EncounterScene extends Phaser.Scene {
 
   private planFoe(): "fight" | "defend" {
     const worn = this.foe.sta < this.foe.staMax && Math.random() < 0.22;
-    if (this.foe.sta < 1 || worn) {
+    if (this.foe.sta < STA_FIGHT || worn) {
       doDefend(this.foe);
       this.foeBar?.setSta(this.foe.sta, this.foe.staMax);
       return "defend";
     }
     this.foe.move = pickFoeMove(this.foe);
-    spendFight(this.foe);
+    if (this.foe.move.kind === "defend") {
+      doDefend(this.foe);
+      this.foeBar?.setSta(this.foe.sta, this.foe.staMax);
+      return "defend";
+    }
+    if (!spendFight(this.foe)) {
+      doDefend(this.foe);
+      this.foeBar?.setSta(this.foe.sta, this.foe.staMax);
+      return "defend";
+    }
     this.foeBar?.setSta(this.foe.sta, this.foe.staMax);
     return "fight";
+  }
+
+  /** Extra foe action after bag / flee fail — pick a fresh move and pay stamina. */
+  private enemyReply(): void {
+    this.wantPoisonTick = true;
+    const theirs = this.planFoe();
+    if (theirs === "defend") {
+      this.pauseFoeBob();
+      braceGuard(this, this.foeSpr);
+      this.resumeFoeBob(200);
+      actorReact(this, this.activeTrainerSpr(), "stamp");
+      this.say(`Foe ${this.foe.name} is defending.`, "menu");
+      return;
+    }
+    this.foeStrike();
   }
 
   private queueRound(mine: "fight" | "defend"): void {
@@ -619,7 +651,17 @@ export class EncounterScene extends Phaser.Scene {
     const lines: Line[] = [...lead, `Foe ${fainted} fainted.`];
     if (this.trainer) {
       beatTrainer(this.trainer.id);
-      lines.push("You won.", { who: this.trainer.who, text: this.trainer.win });
+      const dosh = this.trainer.lv * 5;
+      takeCash(dosh);
+      lines.push("You won.", `Got £${dosh} dosh.`, { who: this.trainer.who, text: this.trainer.win });
+      if (this.trainer.prize && takePrize(this.trainer.prize)) {
+        const label = ITEM[this.trainer.prize].label;
+        lines.push(`You got the ${label}!`);
+        if (label.includes("BADGE")) {
+          lines.push({ who: this.trainer.who, text: "Alright mush, what do you want, a chuffdy badge?" });
+          lines.push({ who: "YOU", text: "I'm well chuffed with that." });
+        }
+      }
       if (this.trainer.mate) {
         lines.push({ who: this.trainer.mate.who, text: this.trainer.mate.win });
         actorReact(this, this.mateSpr, "loss");
@@ -711,12 +753,17 @@ export class EncounterScene extends Phaser.Scene {
       this.say("Too lively. Weaken it first.", "menu");
       return;
     }
+    if (run.party.length >= MAX_PARTY) {
+      this.say("Six is enough. No room.", "menu");
+      return;
+    }
     if (!useKebabBox()) {
       this.say("No kebab boxes.", "menu");
       return;
     }
     if (tryCatch(this.foe)) {
-      const again = !catchSpecies(this.foeId, this.foe.lv);
+      const again = run.owned.includes(this.foeId);
+      catchSpecies(this.foeId, this.foe.lv);
       this.done = true;
       this.storeHp();
       const lines: Line[] = [
@@ -820,9 +867,11 @@ export class EncounterScene extends Phaser.Scene {
     if (run.whiteout) {
       run.overworld = null;
       clearField();
+      persistRun();
       this.scene.start("lab");
       return;
     }
+    persistRun();
     this.scene.start(run.overworld?.scene ?? "island");
   }
 }

@@ -1,6 +1,8 @@
 import { defineConfig } from "vite";
+import { appVersionPlugin } from "../../scripts/app-version.mjs";
 
 export default defineConfig({
+  plugins: [appVersionPlugin()],
   base: "./",
   server: {
     host: true,

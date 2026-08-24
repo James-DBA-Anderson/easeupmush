@@ -1,10 +1,10 @@
 import Phaser from "phaser";
-import { GBA_H, GBA_W } from "../constants";
-import { run } from "../run";
-import { ensureDad } from "../sprites/dad";
+import { GBA_W } from "../constants";
+import { resumePos, returningTo, run } from "../run";
 import { kidAnim } from "../sprites/kid";
-import { MsgBox, type Line } from "../ui/MsgBox";
 import { BagUi } from "../ui/BagUi";
+import { MsgBox, type Line } from "../ui/MsgBox";
+import { isTouchUi } from "../touch";
 import {
   addWalls,
   bindWalkKeys,
@@ -17,45 +17,49 @@ import {
   type Facing,
   type WalkKeys,
 } from "../walk";
-import { isTouchUi } from "../touch";
-import { drawFrontRoom, type FrontRoomLayout } from "../world/drawFrontRoom";
+import { drawSchoolIn, type SchoolInLayout } from "../world/drawSchoolIn";
+import {
+  SCHOOL_IN_NPCS,
+  losTrainer,
+  npcNear,
+  npcTalk,
+  spawnFieldNpcs,
+  startTrainerFight,
+  tickFieldNpcs,
+  type FieldNpc,
+} from "../world/npcs";
 
-const SLEEP_TALK: string[] = [
-  "Hic, no, no, no... hic.",
-  "No son of mine is collecting small animals! Hic.",
-  "One more, hic, please just one...",
-];
-
-export class FrontRoomScene extends Phaser.Scene {
+export class SchoolInScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WalkKeys;
   private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
-  private layout!: FrontRoomLayout;
+  private layout!: SchoolInLayout;
   private note?: MsgBox;
   private bagUi?: BagUi;
-  private facing: Facing = "side";
+  private facing: Facing = "up";
   private flip = 1;
   private reaching = false;
+  private npcs: FieldNpc[] = [];
 
   constructor() {
-    super("frontroom");
+    super("schoolin");
   }
 
   create(): void {
-    if (this.textures.exists("frontroom")) this.textures.remove("frontroom");
+    if (this.textures.exists("schoolin")) this.textures.remove("schoolin");
     const art = this.add.graphics().setVisible(false);
-    this.layout = drawFrontRoom(art);
-    art.generateTexture("frontroom", GBA_W, GBA_H);
+    this.layout = drawSchoolIn(art);
+    art.generateTexture("schoolin", GBA_W, this.layout.mapH);
     art.destroy();
-    this.add.image(0, 0, "frontroom").setOrigin(0);
+    this.add.image(0, 0, "schoolin").setOrigin(0);
 
-    ensureDad(this);
-    this.add
-      .image(this.layout.dad.x + 32, this.layout.dad.y + 22, "dad")
-      .setOrigin(0.5, 1)
-      .setDepth(10);
-
-    this.player = spawnKid(this, this.layout.spawn.x, this.layout.spawn.y);
+    returningTo("schoolin");
+    const spawn = resumePos("schoolin", this.layout.spawnFromField);
+    this.facing = "up";
+    this.flip = 1;
+    this.player = spawnKid(this, spawn.x, spawn.y, { w: GBA_W, h: this.layout.mapH });
+    this.cameras.main.startFollow(this.player, true, 1, 1);
+    this.npcs = spawnFieldNpcs(this, SCHOOL_IN_NPCS);
     addWalls(this, this.player, this.layout.solids);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
@@ -96,9 +100,16 @@ export class FrontRoomScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
+    tickFieldNpcs(this, this.npcs);
+    this.player.setDepth(this.player.y);
 
-    if (walkingInto(this.player, this.layout.door, "left")) {
-      this.scene.start("hall", { from: "frontroom" });
+    const spotted = losTrainer(this.player, this.npcs);
+    if (spotted) {
+      if (startTrainerFight(this, spotted, "schoolin", this.player, this.npcs)) return;
+    }
+
+    if (walkingInto(this.player, this.layout.door, "down")) {
+      this.scene.start("school", { from: "schoolin" });
       return;
     }
 
@@ -106,30 +117,22 @@ export class FrontRoomScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
-    if (near(this.player, this.layout.dad, 12) || near(this.player, this.layout.sofa, 10)) {
-      this.talkDad();
+    const person = npcNear(this.player, this.npcs);
+    if (person) {
+      if (startTrainerFight(this, person, "schoolin", this.player, this.npcs)) return;
+      this.reachThen(npcTalk(person, this.npcs));
       return;
     }
-    if (near(this.player, this.layout.telly, 10)) {
-      this.reachThen("Telly's off. Aerial's bent.");
-      return;
+    for (const spot of this.layout.spots) {
+      if (near(this.player, spot.at, 8)) {
+        if (spot.at === this.layout.trophy && run.items.includes("hilsea")) {
+          this.reachThen("Hilsea Badge case. Yours is in the bag.");
+          return;
+        }
+        this.reachThen(spot.line);
+        return;
+      }
     }
-    if (near(this.player, this.layout.table, 8)) {
-      this.reachThen("Coffee table. Sticky.");
-      return;
-    }
-    if (this.player.y < 58 && near(this.player, this.layout.window, 16)) {
-      this.reachThen("2nd Avenue. Quiet out.");
-      return;
-    }
-  }
-
-  private talkDad(): void {
-    const mutter = SLEEP_TALK[Math.floor(Math.random() * SLEEP_TALK.length)]!;
-    this.reachThen([
-      "Dad's passed out. Talking in his sleep.",
-      { who: "DAD", text: mutter },
-    ]);
   }
 
   private reachThen(line: Line | Line[]): void {

@@ -77,7 +77,7 @@ export class HallScene extends Phaser.Scene {
         if (this.meeting) return;
         if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
-        if (this.bagUi?.menu.active) return;
+        if (this.bagUi?.busy) return;
         if (!this.reaching) this.tryExamine();
       });
     }

@@ -31,6 +31,7 @@ import {
   tickFieldNpcs,
   type FieldNpc,
 } from "../world/npcs";
+import { BikeField, grassOnBike } from "../world/bike";
 import {
   beginWildFight,
   leaveField,
@@ -38,6 +39,7 @@ import {
   spawnAreaWilds,
   tickWanderers,
   wanderNear,
+  wanderInGrass,
   type Wanderer,
 } from "../world/wander";
 
@@ -55,6 +57,7 @@ export class IslandScene extends Phaser.Scene {
   private wanderers: Wanderer[] = [];
   private npcs: FieldNpc[] = [];
   private from = "bridge";
+  private bikes!: BikeField;
 
   constructor() {
     super("island");
@@ -73,7 +76,19 @@ export class IslandScene extends Phaser.Scene {
     this.add.image(0, 0, "island").setOrigin(0);
 
     const fallback =
-      this.from === "school" ? this.layout.spawnFromSchool : (run.islandPos ?? this.layout.spawnFromNorth);
+      this.from === "school"
+        ? this.layout.spawnFromSchool
+        : this.from === "bikeshop"
+          ? this.layout.spawnFromBike
+          : this.from === "charity"
+            ? this.layout.spawnFromCharity
+            : this.from === "pawn"
+              ? this.layout.spawnFromPawn
+              : this.from === "chippy"
+                ? this.layout.spawnFromChippy
+                : this.from === "spice"
+                  ? this.layout.spawnFromSpice
+                  : (run.islandPos ?? this.layout.spawnFromNorth);
     const returning = returningTo("island");
     const spawn = resumePos("island", fallback);
     this.player = spawnKid(this, spawn.x, spawn.y, { w: GBA_W, h: this.layout.mapH });
@@ -92,12 +107,13 @@ export class IslandScene extends Phaser.Scene {
     this.wasd = keys.wasd;
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
+    this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
         if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
-        if (this.bagUi?.menu.active) return;
+        if (this.bagUi?.busy) return;
         if (!this.reaching) this.tryExamine();
       });
     }
@@ -126,6 +142,7 @@ export class IslandScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
+    this.bikes.tick();
     tickWanderers(this, this.wanderers, this.player);
     tickFieldNpcs(this, this.npcs);
     this.player.setDepth(this.player.y);
@@ -149,8 +166,39 @@ export class IslandScene extends Phaser.Scene {
       return;
     }
     if (walkingInto(this.player, this.layout.schoolGate, "left")) {
+      this.bikes.stashIndoor();
       leaveField("island");
       this.scene.start("school");
+      return;
+    }
+    if (walkingInto(this.player, this.layout.bikeDoor, "left")) {
+      this.bikes.stashIndoor();
+      leaveField("island");
+      this.scene.start("bikeshop", { from: "island" });
+      return;
+    }
+    if (walkingInto(this.player, this.layout.charityDoor, "right")) {
+      this.bikes.stashIndoor();
+      leaveField("island");
+      this.scene.start("junkshop", { kind: "charity", from: "island" });
+      return;
+    }
+    if (walkingInto(this.player, this.layout.pawnDoor, "right")) {
+      this.bikes.stashIndoor();
+      leaveField("island");
+      this.scene.start("junkshop", { kind: "pawn", from: "island" });
+      return;
+    }
+    if (walkingInto(this.player, this.layout.chippyDoor, "right")) {
+      this.bikes.stashIndoor();
+      leaveField("island");
+      this.scene.start("takeaway", { kind: "chippy", from: "island" });
+      return;
+    }
+    if (walkingInto(this.player, this.layout.spiceDoor, "right")) {
+      this.bikes.stashIndoor();
+      leaveField("island");
+      this.scene.start("takeaway", { kind: "spice", from: "island" });
       return;
     }
     if (atSouthEdge(this.player, this.layout.mapH)) {
@@ -160,7 +208,12 @@ export class IslandScene extends Phaser.Scene {
     }
 
     const zone = this.grassZone();
-    if (moving && zone) {
+    if (moving && zone && !grassOnBike()) {
+      const mapMon = wanderInGrass(this.player, this.wanderers, zone.at);
+      if (mapMon) {
+        this.startWild(mapMon.id, mapMon);
+        return;
+      }
       if (run.grassCalm > 0) run.grassCalm -= 1;
       else {
         this.steps += 1;
@@ -171,6 +224,7 @@ export class IslandScene extends Phaser.Scene {
       }
     }
 
+    if (cancel && this.bikes.tryBack()) return;
     if (confirm) this.tryExamine();
   }
 
@@ -190,6 +244,7 @@ export class IslandScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
+    if (this.bikes.tryExamine()) return;
     const person = npcNear(this.player, this.npcs);
     if (person) {
       snapshotField(this.wanderers);

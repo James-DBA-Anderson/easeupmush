@@ -24,8 +24,9 @@ const mumLine = (text: string): Line => ({ who: "MUM", text: withHic(text) });
 
 /** Irritable drunk Mum — hic at the end of every line. */
 function withHic(text: string): string {
-  const t = text.trim().replace(/\s*hic\.?$/i, "").replace(/[.!?]*$/, "");
-  return `${t}. Hic.`;
+  const t = text.trim().replace(/\s*hic\.?$/i, "");
+  const end = /[.!?]$/.test(t) ? "" : ".";
+  return `${t}${end} Hic.`;
 }
 
 export class KitchenScene extends Phaser.Scene {
@@ -71,7 +72,7 @@ export class KitchenScene extends Phaser.Scene {
         if (this.bye !== "off") return;
         if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
-        if (this.bagUi?.menu.active) return;
+        if (this.bagUi?.busy) return;
         if (!this.reaching) this.tryExamine();
       });
     }
@@ -140,7 +141,7 @@ export class KitchenScene extends Phaser.Scene {
       this.mumSaid = true;
       this.reachThen(
         run.hasBag
-          ? [mumLine("What now"), mumLine("Go on then. Out")]
+          ? [mumLine("What now?"), mumLine("Go on then. Out")]
           : [mumLine("Oi"), mumLine("Don't forget your bag")],
       );
       return;

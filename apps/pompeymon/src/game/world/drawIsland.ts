@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { GBA_W } from "../constants";
 import type { WildId } from "../species";
-import { furn, px, sideDoor, type Solid } from "./drawCommon";
+import { cycleShopFront, furn, px, sideDoor, type Solid } from "./drawCommon";
 
 export const ISLAND_H = 640;
 
@@ -16,7 +16,17 @@ export type IslandLayout = {
   spots: IslandSpot[];
   spawnFromNorth: { x: number; y: number };
   spawnFromSchool: { x: number; y: number };
+  spawnFromBike: { x: number; y: number };
+  spawnFromCharity: { x: number; y: number };
+  spawnFromPawn: { x: number; y: number };
+  spawnFromChippy: { x: number; y: number };
+  spawnFromSpice: { x: number; y: number };
   schoolGate: Solid;
+  bikeDoor: Solid;
+  charityDoor: Solid;
+  pawnDoor: Solid;
+  chippyDoor: Solid;
+  spiceDoor: Solid;
 };
 
 const C = {
@@ -271,13 +281,13 @@ export function drawIsland(g: Phaser.GameObjects.Graphics): IslandLayout {
   garden(g, 84, 140, 12, 124);
   garden(g, 144, 162, 12, 106);
 
-  const news = shop(g, 8, 140, 76, 48, C.cream, C.creamL, C.creamD, true);
-  const t3e = terrace(g, 156, 162, 76, 48, true, false);
+  const news = cycleShopFront(g, 8, 140, 76, 48, true);
+  const spice = shop(g, 156, 162, 76, 48, C.cream, C.creamL, C.creamD, false);
   const hNews = hedge(g, 8, 186, 76);
 
   const school = boysSchool(g, 8, 196);
   garden(g, 84, 196, 12, 108);
-  const t4e = terrace(g, 156, 218, 76, 50, false, false);
+  const chippyE = shop(g, 156, 218, 76, 50, C.brick, C.brickL, C.brickD, false);
   const binE = binCan(g, 148, 230);
 
   const shut = shop(g, 156, 276, 76, 48, C.brick, C.brickL, C.brickD, false);
@@ -292,7 +302,7 @@ export function drawIsland(g: Phaser.GameObjects.Graphics): IslandLayout {
   const bin: Solid = { x: 62, y: 336, w: 12, h: 14 };
   const gStop = tallGrass(g, 8, 352, 76, 40);
 
-  const t6e = terrace(g, 156, 332, 76, 48, true, false);
+  const charity = shop(g, 156, 332, 76, 48, C.pebble, C.pebbleL, C.pebbleD, false);
 
   const lineW = rampart(g, 8, 400, 76, 36);
   const lineE = rampart(g, 156, 400, 76, 36);
@@ -335,15 +345,15 @@ export function drawIsland(g: Phaser.GameObjects.Graphics): IslandLayout {
     { at: t1e, line: "Net curtains." },
     { at: t2w, line: "They're in." },
     { at: posts.pub, line: "The Green Posts. Not going in." },
-    { at: news, line: "Papers. Racing on the board." },
-    { at: school.face, line: "City of Portsmouth Boys School." },
-    { at: school.gate, line: "School gate. Field's in there." },
-    { at: t3e, line: "Satellite dish. Bent." },
-    { at: t4e, line: "Maisonettes. Smells of chips." },
-    { at: shut, line: "Shutters down." },
+    { at: news, line: "Hilsea Cycles. Bikes in the window. Get a lock." },
+    { at: school.face, line: "City of Portsmouth Boys' School." },
+    { at: school.gate, line: "School gate. Atkins. Hilsea Badge." },
+    { at: spice, line: "Spice. Curry. Kebab." },
+    { at: chippyE, line: "Chippy. Vinegar." },
+    { at: shut, line: "Pawn. Len's in there." },
     { at: stop, line: "Bus stop. Something lives here." },
     { at: bin, line: "Bin. Don't look." },
-    { at: t6e, line: "They're out." },
+    { at: charity, line: "Charity. Smells of coats." },
     { at: lineW, line: "Hilsea Lines. Old fort." },
     { at: lineE, line: "Rampart. South is North End." },
     { at: ditchW, line: "Ditch. Gulls eye it." },
@@ -368,14 +378,14 @@ export function drawIsland(g: Phaser.GameObjects.Graphics): IslandLayout {
     ...posts.posts,
     news,
     hNews,
-    t3e,
+    spice,
     ...school.walls,
-    t4e,
+    chippyE,
     binE,
     shut,
     stop,
     bin,
-    t6e,
+    charity,
     lineW,
     lineE,
     ditchW,
@@ -396,6 +406,16 @@ export function drawIsland(g: Phaser.GameObjects.Graphics): IslandLayout {
     spots,
     spawnFromNorth: { x: 120, y: 28 },
     spawnFromSchool: { x: 90, y: 250 },
+    spawnFromBike: { x: 90, y: 168 },
+    spawnFromCharity: { x: 148, y: 356 },
+    spawnFromPawn: { x: 148, y: 300 },
+    spawnFromChippy: { x: 148, y: 244 },
+    spawnFromSpice: { x: 148, y: 186 },
     schoolGate: school.gate,
+    bikeDoor: { x: news.x + news.w - 12, y: news.y + 18, w: 10, h: news.h - 22 },
+    charityDoor: { x: charity.x, y: charity.y + 18, w: 10, h: charity.h - 22 },
+    pawnDoor: { x: shut.x, y: shut.y + 18, w: 10, h: shut.h - 22 },
+    chippyDoor: { x: chippyE.x, y: chippyE.y + 18, w: 10, h: chippyE.h - 22 },
+    spiceDoor: { x: spice.x, y: spice.y + 18, w: 10, h: spice.h - 22 },
   };
 }

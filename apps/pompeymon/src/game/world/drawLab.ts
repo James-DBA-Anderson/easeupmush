@@ -111,7 +111,7 @@ export function drawLab(g: Phaser.GameObjects.Graphics): LabLayout {
 
   return {
     solids,
-    spawn: { x: 120, y: 118 },
+    spawn: { x: 120, y: 100 },
     door,
     choke,
     table,

@@ -1,15 +1,19 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
-import { takeBag, takeStarter, run } from "../run";
+import { clearSave, continueScene, hasSave, loadRun, resetNewGame, run, takeBag, takeStarter } from "../run";
 import { ensureKidSheets, kidAnim, kidSheet } from "../sprites/kid";
 import { ensureMonSheets, MON_IDS, monBattleKey, monFlyAnim, monFlySheet, monOwAnim, monOwSheet } from "../sprites/mon";
-import { consumeAction, isTouchUi } from "../touch";
+import { consumeAction, consumeDir, isTouchUi } from "../touch";
 import { drawEaseLogo, drawPompeymonLogo } from "../ui/pixelLogo";
 import { drawTitleSkyline } from "../ui/titleArt";
 
 /** GBA title — harbour skyline, kid, a few Pompeymon. No place name. */
 export class TitleScene extends Phaser.Scene {
   private started = false;
+  private saved = false;
+  private pick = 0;
+  private wiping = false;
+  private menu: Phaser.GameObjects.Text[] = [];
 
   constructor() {
     super("title");
@@ -124,14 +128,29 @@ export class TitleScene extends Phaser.Scene {
       delay: 140,
     });
 
+    this.saved = hasSave();
     const prompt = this.add
-      .text(200, 132, isTouchUi() ? "PRESS LOOK" : "PRESS SPACE", {
+      .text(200, 128, this.saved ? (isTouchUi() ? "LOOK  PICK" : "SPACE  PICK") : isTouchUi() ? "PRESS LOOK" : "PRESS SPACE", {
         fontFamily: '"Press Start 2P", monospace',
         fontSize: "8px",
         color: "#fff8e8",
       })
       .setOrigin(0.5)
       .setDepth(9);
+
+    if (this.saved) {
+      this.menu = ["CONTINUE", "NEW GAME"].map((label, i) =>
+        this.add
+          .text(200, 108 + i * 10, label, {
+            fontFamily: '"Press Start 2P", monospace',
+            fontSize: "8px",
+            color: "#fff8e8",
+          })
+          .setOrigin(0.5)
+          .setDepth(9),
+      );
+      this.paintMenu();
+    }
 
     this.add
       .text(200, 144, isTouchUi() ? "OPEN ?DEBUG" : "PRESS D DEBUG", {
@@ -140,6 +159,15 @@ export class TitleScene extends Phaser.Scene {
         color: "#e0d0b0",
       })
       .setOrigin(0.5)
+      .setDepth(9);
+
+    this.add
+      .text(4, GBA_H - 3, `v${__APP_VERSION__}`, {
+        fontFamily: '"Press Start 2P", monospace',
+        fontSize: "6px",
+        color: "#8aa3b0",
+      })
+      .setOrigin(0, 1)
       .setDepth(9);
 
     this.tweens.add({
@@ -151,6 +179,11 @@ export class TitleScene extends Phaser.Scene {
     });
 
     this.input.keyboard?.on("keydown-SPACE", () => this.startGame());
+    this.input.keyboard?.on("keydown-UP", () => this.movePick(-1));
+    this.input.keyboard?.on("keydown-DOWN", () => this.movePick(1));
+    this.input.keyboard?.on("keydown-W", () => this.movePick(-1));
+    this.input.keyboard?.on("keydown-S", () => this.movePick(1));
+    this.input.keyboard?.on("keydown-ESC", () => this.cancelWipe());
     this.input.keyboard?.on("keydown-D", () => this.scene.start("debug"));
   }
 
@@ -175,12 +208,64 @@ export class TitleScene extends Phaser.Scene {
   }
 
   update(): void {
+    if (consumeDir("up")) this.movePick(-1);
+    if (consumeDir("down")) this.movePick(1);
     if (consumeAction()) this.startGame();
+  }
+
+  private movePick(dir: number): void {
+    if (this.started || !this.saved) return;
+    this.pick = (this.pick + dir + 2) % 2;
+    this.paintMenu();
+  }
+
+  private paintMenu(): void {
+    const labels = this.wiping ? ["YES  WIPE", "NO  KEEP"] : ["CONTINUE", "NEW GAME"];
+    this.menu.forEach((text, i) => {
+      const on = i === this.pick;
+      text.setText(`${on ? ">" : " "} ${labels[i]}`);
+      text.setColor(on ? "#f0a23a" : "#e0d0b0");
+    });
+  }
+
+  private cancelWipe(): void {
+    if (!this.wiping || this.started) return;
+    this.wiping = false;
+    this.pick = 1;
+    this.paintMenu();
   }
 
   private startGame(): void {
     if (this.started) return;
+    if (!this.saved) {
+      this.started = true;
+      this.scene.start("bedroom");
+      return;
+    }
+    if (this.wiping) {
+      if (this.pick === 1) {
+        this.cancelWipe();
+        return;
+      }
+      this.started = true;
+      clearSave();
+      resetNewGame();
+      this.scene.start("bedroom");
+      return;
+    }
+    if (this.pick === 1) {
+      this.wiping = true;
+      this.pick = 1;
+      this.paintMenu();
+      return;
+    }
+    if (!loadRun()) {
+      this.started = true;
+      resetNewGame();
+      this.scene.start("bedroom");
+      return;
+    }
     this.started = true;
-    this.scene.start("bedroom");
+    this.scene.start(continueScene());
   }
 }

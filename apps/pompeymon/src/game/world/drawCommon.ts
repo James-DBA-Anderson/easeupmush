@@ -152,3 +152,59 @@ export function stairsUp(
   px(g, WOOD_HI, x + w - 5, y, 4, 2);
   for (let yy = y + 8; yy < y + h - 4; yy += 10) px(g, WOOD_LO, x + w - 4, yy, 2, 5);
 }
+
+/** Tiny side-on BMX for shop windows and racks. */
+export function miniBike(g: Phaser.GameObjects.Graphics, x: number, y: number): void {
+  px(g, 0xf0c030, x + 3, y, 4, 2);
+  px(g, 0x3a90d0, x + 4, y + 2, 7, 2);
+  px(g, 0x3a90d0, x + 10, y, 4, 2);
+  px(g, 0x201c18, x + 11, y + 1, 3, 1);
+  px(g, 0x2a2a32, x, y + 3, 5, 5);
+  px(g, 0xe8ecf0, x + 1, y + 4, 3, 3);
+  px(g, 0x2a2a32, x + 10, y + 3, 5, 5);
+  px(g, 0xe8ecf0, x + 11, y + 4, 3, 3);
+}
+
+/** High-street cycle shop: yellow fascia, bikes in the window. Door on the street side. */
+export function cycleShopFront(
+  g: Phaser.GameObjects.Graphics,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  doorEast: boolean,
+): Solid {
+  const yellow = 0xe8c030;
+  const yellowL = 0xf8e070;
+  const yellowD = 0xb89018;
+  const navy = 0x2a3a68;
+  const cream = 0xd8ccb4;
+  const creamL = 0xe8e0d0;
+  const creamD = 0xb8a890;
+  const glass = 0x68a0c8;
+  const glassL = 0x88c0d8;
+  const roof = 0x6a3028;
+  px(g, roof, x - 2, y, w + 4, 8);
+  px(g, 0x8a4840, x - 2, y, w + 4, 2);
+  furn(g, x, y + 6, w, h - 6, cream, creamL, creamD);
+  px(g, yellowD, x + 4, y + 8, w - 8, 10);
+  px(g, yellow, x + 5, y + 9, w - 10, 8);
+  px(g, yellowL, x + 5, y + 9, w - 10, 2);
+  px(g, navy, x + 10, y + 11, 8, 4);
+  px(g, navy, x + 20, y + 11, 8, 4);
+  px(g, navy, x + 30, y + 11, 8, 4);
+  px(g, navy, x + 40, y + 11, 6, 4);
+  const gx = doorEast ? x + 6 : x + w - 42;
+  px(g, INK, gx - 1, y + 18, 34, 18);
+  px(g, glass, gx, y + 19, 32, 16);
+  px(g, glassL, gx + 1, y + 20, 8, 5);
+  px(g, 0x5a5040, gx + 2, y + 28, 28, 6);
+  miniBike(g, gx + 2, y + 22);
+  miniBike(g, gx + 16, y + 22);
+  const dx = doorEast ? x + w - 10 : x;
+  px(g, WOOD_LO, dx, y + 18, 8, h - 24);
+  px(g, WOOD, dx, y + 19, 7, h - 26);
+  px(g, WOOD_HI, dx, y + 18, 8, 1);
+  px(g, INK, dx + (doorEast ? 5 : 2), y + 30, 2, 2);
+  return { x, y, w, h };
+}

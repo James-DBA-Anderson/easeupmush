@@ -15,8 +15,12 @@ import { KitchenScene } from "./scenes/KitchenScene";
 import { LabScene } from "./scenes/LabScene";
 import { LandingScene } from "./scenes/LandingScene";
 import { RoundaboutScene } from "./scenes/RoundaboutScene";
+import { SchoolInScene } from "./scenes/SchoolInScene";
 import { SchoolScene } from "./scenes/SchoolScene";
 import { TitleScene } from "./scenes/TitleScene";
+import { BikeShopScene } from "./scenes/BikeShopScene";
+import { JunkShopScene } from "./scenes/JunkShopScene";
+import { TakeawayScene } from "./scenes/TakeawayScene";
 
 export const gameConfig: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -48,8 +52,12 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
     BridgeScene,
     HighStreetScene,
     LabScene,
+    BikeShopScene,
+    JunkShopScene,
+    TakeawayScene,
     IslandScene,
     SchoolScene,
+    SchoolInScene,
     EncounterScene,
   ],
 };

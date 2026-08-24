@@ -32,6 +32,7 @@ import {
   trainerLead,
   type FieldNpc,
 } from "../world/npcs";
+import { BikeField } from "../world/bike";
 import { spawnAreaWilds, beginWildFight, leaveField, snapshotField, tickWanderers, wanderNear, type Wanderer } from "../world/wander";
 
 export class HighStreetScene extends Phaser.Scene {
@@ -48,6 +49,7 @@ export class HighStreetScene extends Phaser.Scene {
   private npcs: FieldNpc[] = [];
   private wanderers: Wanderer[] = [];
   private meeting = false;
+  private bikes!: BikeField;
 
   constructor() {
     super("highstreet");
@@ -66,7 +68,20 @@ export class HighStreetScene extends Phaser.Scene {
     this.add.image(0, 0, "highstreet").setOrigin(0);
 
     const rude = this.from === "lab-rude";
-    const fallback = this.from === "lab" || rude ? this.layout.spawnFromLab : this.layout.spawnFromWest;
+    const fallback =
+      this.from === "charity"
+        ? this.layout.spawnFromCharity
+        : this.from === "pawn"
+          ? this.layout.spawnFromPawn
+          : this.from === "chippy"
+            ? this.layout.spawnFromChippy
+            : this.from === "spice"
+              ? this.layout.spawnFromSpice
+              : this.from === "bikeshop"
+                ? this.layout.spawnFromBike
+                : this.from === "lab" || rude
+                  ? this.layout.spawnFromLab
+                  : this.layout.spawnFromWest;
     const returning = returningTo("highstreet");
     const spawn = resumePos("highstreet", fallback);
     this.facing = "side";
@@ -83,6 +98,7 @@ export class HighStreetScene extends Phaser.Scene {
     this.wasd = keys.wasd;
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
+    this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
 
     if (rude) this.meetOutside();
     else this.cameras.main.startFollow(this.player, true, 1, 1);
@@ -91,7 +107,7 @@ export class HighStreetScene extends Phaser.Scene {
       this.input.on("pointerdown", () => {
         if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
-        if (this.bagUi?.menu.active) return;
+        if (this.bagUi?.busy) return;
         if (!this.reaching) this.tryExamine();
       });
     }
@@ -125,6 +141,7 @@ export class HighStreetScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
+    this.bikes.tick();
     tickFieldNpcs(this, this.npcs);
     tickWanderers(this, this.wanderers, this.player);
     this.player.setDepth(this.player.y);
@@ -151,11 +168,43 @@ export class HighStreetScene extends Phaser.Scene {
       return;
     }
     if (walkingInto(this.player, this.layout.centreDoor, "left")) {
+      this.bikes.stashIndoor();
       leaveField("highstreet");
       this.scene.start("lab");
       return;
     }
+    if (walkingInto(this.player, this.layout.bikeDoor, "left")) {
+      this.bikes.stashIndoor();
+      leaveField("highstreet");
+      this.scene.start("bikeshop", { from: "highstreet" });
+      return;
+    }
+    if (walkingInto(this.player, this.layout.charityDoor, "right")) {
+      this.bikes.stashIndoor();
+      leaveField("highstreet");
+      this.scene.start("junkshop", { kind: "charity", from: "highstreet" });
+      return;
+    }
+    if (walkingInto(this.player, this.layout.pawnDoor, "right")) {
+      this.bikes.stashIndoor();
+      leaveField("highstreet");
+      this.scene.start("junkshop", { kind: "pawn", from: "highstreet" });
+      return;
+    }
+    if (walkingInto(this.player, this.layout.chippyDoor, "left")) {
+      this.bikes.stashIndoor();
+      leaveField("highstreet");
+      this.scene.start("takeaway", { kind: "chippy", from: "highstreet" });
+      return;
+    }
+    if (walkingInto(this.player, this.layout.spiceDoor, "right")) {
+      this.bikes.stashIndoor();
+      leaveField("highstreet");
+      this.scene.start("takeaway", { kind: "spice", from: "highstreet" });
+      return;
+    }
 
+    if (cancel && this.bikes.tryBack()) return;
     if (confirm) this.tryExamine();
   }
 
@@ -196,10 +245,11 @@ export class HighStreetScene extends Phaser.Scene {
     }
     run.grassCalm = 28;
     beginWildFight("highstreet", { x: this.player.x, y: this.player.y }, this.wanderers, map);
-    this.scene.start("encounter", { wild, lv: map?.lv ?? rollWildLv(3, 4) });
+    this.scene.start("encounter", { wild, lv: map?.lv ?? rollWildLv(2, 3) });
   }
 
   private tryExamine(): void {
+    if (this.bikes.tryExamine()) return;
     const person = npcNear(this.player, this.npcs);
     if (person) {
       snapshotField(this.wanderers);

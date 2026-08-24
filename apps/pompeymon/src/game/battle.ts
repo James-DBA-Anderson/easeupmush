@@ -1,5 +1,4 @@
-import type { SpeciesId } from "./species";
-import { SPECIES } from "./species";
+import { SPECIES, type ElemId, type SpeciesId } from "./species";
 import {
   isDamaging,
   movePriority,
@@ -47,6 +46,7 @@ export type Battler = {
   guard: boolean;
   dodging: boolean;
   poisoned: boolean;
+  elem?: ElemId;
 };
 
 export const MAX_LV = 50;
@@ -92,7 +92,7 @@ export function effectiveSpd(b: Battler): number {
   return b.spd + b.spdBoost;
 }
 
-export function makeBattler(id: SpeciesId, lv: number, hp?: number, moveIds?: string[]): Battler {
+export function makeBattler(id: SpeciesId, lv: number, hp?: number, moveIds?: string[], elem?: ElemId): Battler {
   const spec = BATTLE[id];
   const max = scaled(spec.hp, lv);
   const now = hp == null ? max : Math.max(0, Math.min(hp, max));
@@ -119,6 +119,7 @@ export function makeBattler(id: SpeciesId, lv: number, hp?: number, moveIds?: st
     guard: false,
     dodging: false,
     poisoned: false,
+    elem,
   };
 }
 
@@ -184,6 +185,7 @@ export function rollDamage(atk: Battler, def: Battler, move = atk.move): number 
   if (!isDamaging(move)) return 0;
   const raw = Math.floor((atk.atk * move.pow) / Math.max(def.def, 1) / 5) + 3;
   let dmg = Math.max(1, raw + Math.floor(Math.random() * 3));
+  if (atk.elem && move.elem === atk.elem) dmg = Math.max(1, Math.floor(dmg * 1.25));
   if (def.guard) dmg = Math.max(1, Math.floor(dmg / 2));
   return dmg;
 }

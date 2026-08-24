@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { isBeaten, partnerMon, run, saveOverworld } from "../run";
+import { isBeaten, partnerMon, run, saveOverworld, type ItemId } from "../run";
 import type { SpeciesId } from "../species";
 import { ensureNpcSheets, npcSheet, playNpc, type NpcLook } from "../sprites/npc";
 import type { Facing } from "../walk";
@@ -20,6 +20,10 @@ export type TrainerSpec = {
   challenge: string;
   win: string;
   after: string;
+  /** Must beat this trainer id before this fight starts. */
+  need?: string;
+  /** Item given on win (gym badge). */
+  prize?: ItemId;
   /** Second trainer in a tag fight — their mon comes out after yours beats the first. */
   mate?: TrainerMate;
 };
@@ -139,6 +143,7 @@ export function npcNear(
 
 export function npcInLos(player: { x: number; y: number }, npc: FieldNpc): boolean {
   if (!npc.trainer || npc.intro || isBeaten(npc.id)) return false;
+  if (npc.trainer.need && !isBeaten(npc.trainer.need)) return false;
   const range = npc.los ?? 52;
   const x = npc.sprite.x;
   const y = npc.sprite.y;
@@ -171,6 +176,7 @@ export function npcTalk(npc: FieldNpc, npcs?: FieldNpc[]): Line | Line[] {
       : { who: lead.name, text };
   if (lead.trainer && isBeaten(lead.id)) return said(lead.trainer.after);
   if (lead.trainer && !run.starter) return said("Get a Pompeymon first mush.");
+  if (lead.trainer?.need && !isBeaten(lead.trainer.need)) return said(lead.talk);
   if (lead.intro && lead.trainer && !isBeaten(lead.id)) return lead.intro;
   return said(lead.talk);
 }
@@ -185,6 +191,7 @@ export function startTrainerFight(
   const lead = npcs ? trainerLead(npc, npcs) : npc;
   if (!lead.trainer) return false;
   if (isBeaten(lead.id)) return false;
+  if (lead.trainer.need && !isBeaten(lead.trainer.need)) return false;
   if (!run.starter) return false;
   if ((partnerMon()?.hp ?? 0) <= 0) return false;
   saveOverworld(returnScene, pos);
@@ -199,6 +206,7 @@ export function startTrainerFight(
       win: lead.trainer.win,
       look: lead.look,
       who: lead.name,
+      prize: lead.trainer.prize,
       mate: mate
         ? {
             who: mate.name,
@@ -227,7 +235,7 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     x: 84,
     y: 318,
     facing: "down",
-    talk: "Iceland's always cold mush.",
+    talk: "Charity's up the street. Pawn's by the pub.",
   },
   {
     id: "hs-pub",
@@ -246,7 +254,7 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     trainer: {
       title: "DRUNK DAVE",
       mon: "pidgeon",
-      lv: 5,
+      lv: 3,
       challenge: "One more. Then you mush.",
       win: "Ease up mush. Mine's a lager.",
       after: "Pub's shut anyway.",
@@ -260,7 +268,7 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     y: 250,
     facing: "down",
     patrol: { x: 78, y: 230, w: 16, h: 50 },
-    talk: "You seen Steve mush? New bike.",
+    talk: "You seen Steve mush? New bike. Cycles is down the street.",
   },
   {
     id: "hs-kay",
@@ -271,20 +279,20 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     facing: "side",
     flip: 1,
     los: 44,
-    talk: "Chips first. Then you mush.",
+    talk: "Chips first. Then you mush. Chippy's open. Feed 'em.",
     trainer: {
       title: "LASS KAY",
       mon: "chipgull",
-      lv: 5,
+      lv: 3,
       challenge: "I was here first. Don't squinny.",
       win: "Fine. Have the chips.",
-      after: "Chippy's still shut. Typical Pompey.",
+      after: "Chippy's open. Feed your Pompeymon.",
     },
   },
   {
     id: "hs-sharon",
     name: "SHARON",
-    look: "lass",
+    look: "blond",
     x: 138,
     y: 124,
     facing: "side",
@@ -293,14 +301,14 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     intro: [
       {
         who: "SHARON",
-        text: "And I said but a brush on it and you can do my teeth at the same time!",
+        text: "And I said put a brush on it and you can do my teeth at the same time!",
       },
-      { who: "TRACY", text: "Oh didn't see you there..." },
+      { who: "TRACY", text: "Oh, didn't see you there..." },
     ],
     trainer: {
       title: "SHARON & TRACY",
       mon: "chipgull",
-      lv: 5,
+      lv: 3,
       challenge: "Eavesdropping. We'll batter you.",
       win: "That's bang out of order.",
       after: "Mind your own mush.",
@@ -308,7 +316,7 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
         name: "TRACY",
         look: "coat",
         mon: "moggit",
-        lv: 5,
+        lv: 3,
         win: "Ease up mush.",
       },
     },
@@ -340,7 +348,7 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     trainer: {
       title: "LAD TOM",
       mon: "donerrat",
-      lv: 5,
+      lv: 3,
       challenge: "Don't nick my bin you dinlo.",
       win: "Take it then. That's bang out of order.",
       after: "Chemist's still shut.",
@@ -375,7 +383,7 @@ export const ROUNDABOUT_NPCS: NpcSpec[] = [
     trainer: {
       title: "YOUNGSTER LEE",
       mon: "pidgeon",
-      lv: 4,
+      lv: 3,
       challenge: "Roundabout rules mush.",
       win: "Gave way. First time.",
       after: "Watch the gulls.",
@@ -410,8 +418,8 @@ export const BRIDGE_NPCS: NpcSpec[] = [
       mon: "pidgeon",
       lv: 6,
       challenge: "Let's see what Choke gave you mush.",
-      win: "Alright. You're going.",
-      after: "Go on then. Pompey.",
+      win: "Couldn't face the island anyway.",
+      after: "Go on. Pompey. I aint going over.",
     },
   },
 ];
@@ -430,6 +438,8 @@ export const ISLAND_NPCS: NpcSpec[] = [
     talk: [
       "Green Posts. I'm barred. Allegedly.",
       "I'd bang him out if he said that to me.",
+      "School gym's cushty. Atkins. Hilsea Badge.",
+      "Pawn's down the road. Charity's further.",
     ],
     trainer: {
       title: "DRUNK MICK",
@@ -451,6 +461,8 @@ export const ISLAND_NPCS: NpcSpec[] = [
       "Bus is late. Again.",
       "I'm not squinnying. It is late mush.",
       "Nuffin ever comes when it should.",
+      "School gym. Atkins. Hilsea Badge.",
+      "Hilsea Cycles. Get a lock mush.",
     ],
   },
   {
@@ -469,7 +481,7 @@ export const ISLAND_NPCS: NpcSpec[] = [
       lv: 7,
       challenge: "Mine rolls. Yours won't.",
       win: "It unrolled. Typical.",
-      after: "South is North End. Not yet.",
+      after: "South is North End. Not yet. Gym's the school.",
     },
   },
   {
@@ -481,14 +493,17 @@ export const ISLAND_NPCS: NpcSpec[] = [
     facing: "side",
     flip: -1,
     los: 48,
-    talk: "Boys school. Field's in there mush.",
+    talk: [
+      "Boys' school. Atkins does the gym mush.",
+      "Hilsea Badge. That's the one.",
+    ],
     trainer: {
       title: "YOUNGSTER GAZ",
       mon: "squirral",
       lv: 6,
       challenge: "This bit's mine. I will batter you.",
       win: "The squirrels are worse mush.",
-      after: "Watch the grass.",
+      after: "Gym's in the school. Stevie J then Atkins.",
     },
   },
 ];
@@ -501,7 +516,7 @@ export const SCHOOL_NPCS: NpcSpec[] = [
     x: 88,
     y: 80,
     facing: "down",
-    talk: "Cross country. Field's that way.",
+    talk: "Gym's inside. Mr Atkins. Hilsea Badge.",
   },
   {
     id: "sch-ryan",
@@ -519,7 +534,139 @@ export const SCHOOL_NPCS: NpcSpec[] = [
       lv: 6,
       challenge: "I will batter you mush.",
       win: "Ease up mush. Kit's wet anyway.",
-      after: "Go on. Northern Road.",
+      after: "Go on. Main doors. Stevie J's in there.",
+    },
+  },
+];
+
+export const SCHOOL_IN_NPCS: NpcSpec[] = [
+  {
+    id: "si-janitor",
+    name: "JANITOR",
+    look: "coat",
+    x: 48,
+    y: 196,
+    facing: "side",
+    flip: 1,
+    talk: "Wet floor. Don't you dare mush.",
+  },
+  {
+    id: "si-miss",
+    name: "MISS",
+    look: "lass",
+    x: 176,
+    y: 200,
+    facing: "side",
+    flip: -1,
+    talk: "No running. Gym is north.",
+  },
+  {
+    id: "si-dot",
+    name: "DOT",
+    look: "coat",
+    x: 48,
+    y: 276,
+    facing: "down",
+    talk: "Fish today. Don't squinny.",
+  },
+  {
+    id: "si-val",
+    name: "VAL",
+    look: "lass",
+    x: 70,
+    y: 276,
+    facing: "side",
+    flip: -1,
+    los: 32,
+    talk: "Dinner first. Then Atkins.",
+    trainer: {
+      title: "DINNER VAL",
+      mon: "chipgull",
+      lv: 7,
+      challenge: "Chips are mine geez.",
+      win: "Fine. Have the fish.",
+      after: "Gym's north. Stevie J's in the way.",
+    },
+  },
+  {
+    id: "si-dan",
+    name: "DAN",
+    look: "hoodie",
+    x: 100,
+    y: 248,
+    facing: "down",
+    los: 40,
+    talk: "Corridor's mine mush.",
+    trainer: {
+      title: "LAD DAN",
+      mon: "pidgeon",
+      lv: 7,
+      challenge: "You're not getting past.",
+      win: "Alright. Go on then.",
+      after: "Stevie J next. He's the one.",
+    },
+  },
+  {
+    id: "si-kev",
+    name: "KEV",
+    look: "cap",
+    x: 140,
+    y: 200,
+    facing: "down",
+    los: 40,
+    talk: "Stevie J's up there geez.",
+    trainer: {
+      title: "LAD KEV",
+      mon: "squirral",
+      lv: 8,
+      challenge: "I will batter you mush.",
+      win: "Ease up mush.",
+      after: "Stevie J's the strongest pupil init.",
+    },
+  },
+  {
+    id: "si-stevie",
+    name: "STEVIE J",
+    look: "hoodie",
+    x: 120,
+    y: 136,
+    facing: "down",
+    los: 48,
+    talk: "I'm the strongest pupil geez.",
+    trainer: {
+      title: "LAD STEVIE J",
+      mon: "spikehedge",
+      lv: 9,
+      challenge: "Atkins is after me. Get through me first.",
+      win: "Cushty. Go on then.",
+      after: "Atkins is in the gym. Don't skip PE.",
+    },
+  },
+  {
+    id: "si-atkins",
+    name: "ATKINS",
+    look: "polo",
+    x: 120,
+    y: 52,
+    facing: "down",
+    los: 44,
+    talk: "Stevie J first. Then PE.",
+    trainer: {
+      title: "LEADER ATKINS",
+      mon: "squirral",
+      lv: 10,
+      need: "si-stevie",
+      prize: "hilsea",
+      challenge: "Kit on. Hilsea Badge if you last.",
+      win: "Don't skip PE.",
+      after: "Badge is yours. Cross country next week.",
+      mate: {
+        name: "ATKINS",
+        look: "polo",
+        mon: "busstopper",
+        lv: 10,
+        win: "That's both of 'em.",
+      },
     },
   },
 ];

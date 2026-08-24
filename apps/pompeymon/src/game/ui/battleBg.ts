@@ -62,6 +62,8 @@ const TONES: Record<string, Tone> = {
 };
 
 function toneFor(area: string): Tone {
+  if (area === "schoolin") return TONES.school;
+  if (area === "bikeshop" || area === "junkshop" || area === "takeaway") return TONES.highstreet;
   if (area in TONES) return TONES[area];
   return TONES.field;
 }
@@ -97,7 +99,7 @@ export function paintBattleBg(scene: Phaser.Scene, area: string): void {
   back.fillRect(0, 88, GBA_W, GBA_H - 88);
 
   const world = scene.add.graphics().setDepth(1).setAlpha(0.38);
-  if (area === "school") paintSchool(world, t);
+  if (area === "school" || area === "schoolin") paintSchool(world, t);
   else if (area === "island") paintIsland(world, t);
   else if (area === "highstreet") paintHighStreet(world, t);
   else if (area === "roundabout") paintRoundabout(world, t);
