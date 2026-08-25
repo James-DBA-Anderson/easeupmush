@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GBA_H, GBA_W } from "../constants";
+import { GBA_H, GBA_W, UI_DEPTH } from "../constants";
 import { consumeDir, isTouchUi } from "../touch";
 import type { StarterId } from "../run";
 import { ensureMonSheets, monOwSheet } from "../sprites/mon";
@@ -77,7 +77,7 @@ export class StarterMenu {
       .setOrigin(0.5, 1);
 
     this.root = scene.add.container(0, 0, [dim, plate, title, this.cursor, ...lines, ...icons, hint]);
-    this.root.setDepth(40);
+    this.root.setDepth(UI_DEPTH);
     this.root.setScrollFactor(0);
     this.root.setVisible(false);
   }

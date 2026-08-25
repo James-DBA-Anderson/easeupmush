@@ -22,6 +22,7 @@ import {
 } from "../walk";
 import { dismountHint } from "../world/bike";
 import { drawBikeShop, type BikeShopLayout } from "../world/drawBikeShop";
+import { PalField } from "../world/pal";
 
 const COSHAM: ShopStock[] = [{ id: "bmx", label: ITEM.bmx.label, price: 80, line: "Second-hand BMX. Faster. Wilds bounce off." }];
 const HILSEA: ShopStock[] = [
@@ -36,6 +37,7 @@ export class BikeShopScene extends Phaser.Scene {
   private layout!: BikeShopLayout;
   private note?: MsgBox;
   private bagUi?: BagUi;
+  private pal!: PalField;
   private shop?: ShopMenu;
   private facing: Facing = "up";
   private flip = 1;
@@ -70,9 +72,10 @@ export class BikeShopScene extends Phaser.Scene {
     this.wasd = keys.wasd;
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
+    this.pal = new PalField(this, this.player, (line) => this.showNote(line));
     this.shop = new ShopMenu(this, this.from === "island" ? HILSEA : COSHAM, {
       cash: () => run.cash,
-      onPick: (item) => this.buy(item),
+      onPick: (item, qty) => this.buy(item, qty),
     }, "CYCLES");
 
     if (!isTouchUi()) {
@@ -91,7 +94,7 @@ export class BikeShopScene extends Phaser.Scene {
 
     if (this.shop?.active) {
       this.player.body.setVelocity(0, 0);
-      this.shop.update(this.cursors, { W: this.wasd.W, S: this.wasd.S }, confirm, cancel);
+      this.shop.update(this.cursors, { W: this.wasd.W, A: this.wasd.A, S: this.wasd.S, D: this.wasd.D }, confirm, cancel);
       return;
     }
 
@@ -114,6 +117,7 @@ export class BikeShopScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
+    this.pal.tick(this.facing, this.flip);
 
     if (armSouthExit(this.player, this.cursors, this.wasd, this.southExit) && walkingInto(this.player, this.layout.door, "down")) {
       this.scene.start(this.from, { from: "bikeshop" });
@@ -123,7 +127,7 @@ export class BikeShopScene extends Phaser.Scene {
     if (confirm) this.tryExamine();
   }
 
-  private buy(item: ShopStock): void {
+  private buy(item: ShopStock, _qty: number): void {
     if (run.items.includes(item.id as "bmx" | "lock")) {
       this.showNote({ who: "RAY", text: "You already got one mush." });
       return;
@@ -151,6 +155,7 @@ export class BikeShopScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
+    if (this.pal.tryTalk()) return;
     if (near(this.player, this.layout.counter, 14)) {
       if (run.lockChored && run.items.includes("lock") && !run.items.includes("bmx")) {
         run.lockChored = false;

@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GBA_H, GBA_W } from "../constants";
+import { GBA_H, GBA_W, UI_DEPTH } from "../constants";
 import type { MoveDef } from "../moves";
 import { consumeDir, isTouchUi } from "../touch";
 
@@ -56,7 +56,7 @@ export class MoveMenu {
     hint.setOrigin(0, 1);
 
     this.root = scene.add.container(0, 0, [plate, this.cursor, ...this.labels, hint]);
-    this.root.setDepth(41);
+    this.root.setDepth(UI_DEPTH + 1);
     this.root.setScrollFactor(0);
     this.root.setVisible(false);
   }

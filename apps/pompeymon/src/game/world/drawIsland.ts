@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { GBA_W } from "../constants";
 import type { WildId } from "../species";
-import { cycleShopFront, furn, px, sideDoor, type Solid } from "./drawCommon";
+import { chippyFront, cycleShopFront, furn, px, sideDoor, spiceFront, type Solid } from "./drawCommon";
 
 export const ISLAND_H = 640;
 
@@ -282,12 +282,12 @@ export function drawIsland(g: Phaser.GameObjects.Graphics): IslandLayout {
   garden(g, 144, 162, 12, 106);
 
   const news = cycleShopFront(g, 8, 140, 76, 48, true);
-  const spice = shop(g, 156, 162, 76, 48, C.cream, C.creamL, C.creamD, false);
+  const spice = spiceFront(g, 156, 162, 76, 48, false);
   const hNews = hedge(g, 8, 186, 76);
 
   const school = boysSchool(g, 8, 196);
   garden(g, 84, 196, 12, 108);
-  const chippyE = shop(g, 156, 218, 76, 50, C.brick, C.brickL, C.brickD, false);
+  const chippyE = chippyFront(g, 156, 218, 76, 50, false);
   const binE = binCan(g, 148, 230);
 
   const shut = shop(g, 156, 276, 76, 48, C.brick, C.brickL, C.brickD, false);

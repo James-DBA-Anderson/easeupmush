@@ -67,6 +67,11 @@ export const BATTLE: Record<SpeciesId, SpeciesBattle> = {
   spikehedge: { hp: 22, atk: 12, def: 16, spd: 8, sta: 2, catch: 140, exp: 58 },
   starlimur: { hp: 19, atk: 12, def: 9, spd: 16, sta: 4, catch: 170, exp: 50 },
   busstopper: { hp: 28, atk: 15, def: 12, spd: 9, sta: 3, catch: 70, exp: 80 },
+  kerbite: { hp: 20, atk: 16, def: 11, spd: 16, sta: 4, catch: 35, exp: 90 },
+  honkace: { hp: 26, atk: 15, def: 12, spd: 12, sta: 3, catch: 30, exp: 95 },
+  chalklur: { hp: 24, atk: 14, def: 16, spd: 10, sta: 3, catch: 32, exp: 92 },
+  linelurker: { hp: 26, atk: 15, def: 18, spd: 8, sta: 2, catch: 28, exp: 100 },
+  kitthief: { hp: 22, atk: 17, def: 11, spd: 17, sta: 4, catch: 33, exp: 96 },
 };
 
 /** Base stats are Lv5. */
@@ -92,7 +97,7 @@ export function effectiveSpd(b: Battler): number {
   return b.spd + b.spdBoost;
 }
 
-export function makeBattler(id: SpeciesId, lv: number, hp?: number, moveIds?: string[], elem?: ElemId): Battler {
+export function makeBattler(id: SpeciesId, lv: number, hp?: number, moveIds?: string[], elem?: ElemId, nick?: string): Battler {
   const spec = BATTLE[id];
   const max = scaled(spec.hp, lv);
   const now = hp == null ? max : Math.max(0, Math.min(hp, max));
@@ -103,7 +108,7 @@ export function makeBattler(id: SpeciesId, lv: number, hp?: number, moveIds?: st
   const move = known[0] ?? fallback[0];
   return {
     id,
-    name: SPECIES[id].name,
+    name: nick?.trim() || SPECIES[id].name,
     lv: Math.max(1, Math.min(MAX_LV, lv)),
     hp: now,
     max,

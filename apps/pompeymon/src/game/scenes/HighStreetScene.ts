@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GBA_W } from "../constants";
-import { isBeaten, partnerMon, resumePos, returningTo, run } from "../run";
+import { ensureLeadAlive, isBeaten, resumePos, returningTo, run } from "../run";
 import { rollWildLv } from "../battle";
 import { kidAnim } from "../sprites/kid";
 import { SPECIES, type WildId } from "../species";
@@ -33,6 +33,8 @@ import {
   type FieldNpc,
 } from "../world/npcs";
 import { BikeField } from "../world/bike";
+import { PalField } from "../world/pal";
+import { spawnSteveWait, startSteveFight, steveFightPending, STEVE_AMBUSH } from "../world/steve";
 import { spawnAreaWilds, beginWildFight, leaveField, snapshotField, tickWanderers, wanderNear, type Wanderer } from "../world/wander";
 
 export class HighStreetScene extends Phaser.Scene {
@@ -50,6 +52,8 @@ export class HighStreetScene extends Phaser.Scene {
   private wanderers: Wanderer[] = [];
   private meeting = false;
   private bikes!: BikeField;
+  private pal!: PalField;
+  private steveSpr?: Phaser.GameObjects.Sprite;
 
   constructor() {
     super("highstreet");
@@ -83,7 +87,15 @@ export class HighStreetScene extends Phaser.Scene {
                   ? this.layout.spawnFromLab
                   : this.layout.spawnFromWest;
     const returning = returningTo("highstreet");
-    const spawn = resumePos("highstreet", fallback);
+    const atDoor =
+      this.from === "charity" ||
+      this.from === "pawn" ||
+      this.from === "chippy" ||
+      this.from === "spice" ||
+      this.from === "bikeshop" ||
+      this.from === "lab" ||
+      rude;
+    const spawn = resumePos("highstreet", fallback, atDoor);
     this.facing = "side";
     this.flip = 1;
     this.player = spawnKid(this, spawn.x, spawn.y, {
@@ -99,9 +111,14 @@ export class HighStreetScene extends Phaser.Scene {
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
+    this.pal = new PalField(this, this.player, (line) => this.showNote(line));
 
-    if (rude) this.meetOutside();
-    else this.cameras.main.startFollow(this.player, true, 1, 1);
+    const wantSteve = (this.from === "lab" || rude) && steveFightPending();
+    if (rude) this.meetOutside(wantSteve ? () => this.ambushSteve() : undefined);
+    else {
+      this.cameras.main.startFollow(this.player, true, 1, 1);
+      if (wantSteve) this.ambushSteve();
+    }
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
@@ -142,6 +159,7 @@ export class HighStreetScene extends Phaser.Scene {
     this.facing = walked.facing;
     this.flip = walked.flip;
     this.bikes.tick();
+    this.pal.tick(this.facing, this.flip);
     tickFieldNpcs(this, this.npcs);
     tickWanderers(this, this.wanderers, this.player);
     this.player.setDepth(this.player.y);
@@ -208,7 +226,7 @@ export class HighStreetScene extends Phaser.Scene {
     if (confirm) this.tryExamine();
   }
 
-  private meetOutside(): void {
+  private meetOutside(onDone?: () => void): void {
     this.meeting = true;
     this.player.body.setEnable(false);
     const cam = this.cameras.main;
@@ -231,6 +249,20 @@ export class HighStreetScene extends Phaser.Scene {
       cam.startFollow(this.player, true, 1, 1);
       this.meeting = false;
       this.player.anims.play(kidAnim(run.outfit, "idle-side"), true);
+      onDone?.();
+    });
+  }
+
+  private ambushSteve(): void {
+    if (!steveFightPending()) return;
+    this.meeting = true;
+    this.player.body.setVelocity(0, 0);
+    const door = this.layout.spawnFromLab;
+    this.steveSpr = spawnSteveWait(this, door.x + 28, door.y + 8);
+    this.showNote(STEVE_AMBUSH, () => {
+      this.steveSpr?.destroy();
+      this.steveSpr = undefined;
+      startSteveFight(this, "highstreet", { x: this.player.x, y: this.player.y });
     });
   }
 
@@ -239,7 +271,7 @@ export class HighStreetScene extends Phaser.Scene {
       this.reachThen(`A ${SPECIES[wild].name}. Need a partner first.`);
       return;
     }
-    if ((partnerMon()?.hp ?? 0) <= 0) {
+    if ((ensureLeadAlive()?.hp ?? 0) <= 0) {
       this.reachThen("Your Pompeymon's out.");
       return;
     }
@@ -250,6 +282,7 @@ export class HighStreetScene extends Phaser.Scene {
 
   private tryExamine(): void {
     if (this.bikes.tryExamine()) return;
+    if (this.pal.tryTalk()) return;
     const person = npcNear(this.player, this.npcs);
     if (person) {
       snapshotField(this.wanderers);
@@ -259,7 +292,7 @@ export class HighStreetScene extends Phaser.Scene {
           this.reachThen(npcTalk(person, this.npcs));
           return;
         }
-        if ((partnerMon()?.hp ?? 0) <= 0) {
+        if ((ensureLeadAlive()?.hp ?? 0) <= 0) {
           this.reachThen("Your Pompeymon's out.");
           return;
         }

@@ -149,6 +149,82 @@ export function faintDrop(scene: Phaser.Scene, spr: Phaser.GameObjects.Image | u
   });
 }
 
+/** Trainer chucks the next mon in — hop, ball, pop. */
+export function trainerDeploy(
+  scene: Phaser.Scene,
+  trainer: Phaser.GameObjects.Sprite | undefined,
+  mon: Phaser.GameObjects.Image | undefined,
+  rest: { x: number; y: number },
+  texture: string,
+  onLand?: () => void,
+): void {
+  const land = (): void => {
+    if (!mon) {
+      onLand?.();
+      return;
+    }
+    scene.tweens.killTweensOf(mon);
+    mon.setTexture(texture);
+    mon.setAlpha(1);
+    mon.setScale(0.2);
+    mon.setPosition(rest.x, rest.y);
+    puff(scene, rest.x, rest.y - 18, 0xf0a23a);
+    scene.tweens.add({
+      targets: mon,
+      scaleX: 2,
+      scaleY: 2,
+      duration: 200,
+      ease: "Back.easeOut",
+      onComplete: () => onLand?.(),
+    });
+  };
+
+  if (!trainer) {
+    land();
+    return;
+  }
+
+  scene.tweens.killTweensOf(trainer);
+  trainer.clearTint();
+  trainer.setAlpha(1);
+  const ox = trainer.x;
+  const oy = trainer.y;
+  trainer.setPosition(ox, oy);
+
+  scene.tweens.add({
+    targets: trainer,
+    x: ox - 10,
+    y: oy - 4,
+    scaleY: trainer.scaleY * 0.92,
+    duration: 90,
+    yoyo: true,
+    ease: "Quad.easeOut",
+    onComplete: () => {
+      const ball = scene.add.rectangle(ox - 6, oy - 20, 6, 6, 0xf0a23a, 1).setDepth(14);
+      ball.setStrokeStyle(1, 0x1a1814);
+      scene.tweens.add({
+        targets: ball,
+        x: rest.x,
+        y: rest.y - 40,
+        duration: 160,
+        ease: "Quad.easeOut",
+        onComplete: () => {
+          scene.tweens.add({
+            targets: ball,
+            y: rest.y - 22,
+            duration: 90,
+            ease: "Quad.easeIn",
+            onComplete: () => {
+              ball.destroy();
+              land();
+            },
+          });
+        },
+      });
+    },
+  });
+}
+
 /** Trainer / kid body language. */
 export function actorReact(
   scene: Phaser.Scene,

@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GBA_W } from "../constants";
-import { partnerMon, resumePos, returningTo, run } from "../run";
+import { ensureLeadAlive, findStolenMon, resumePos, returningTo, run } from "../run";
 import { rollWildLv } from "../battle";
 import { kidAnim } from "../sprites/kid";
 import type { WildId } from "../species";
@@ -32,6 +32,7 @@ import {
   type FieldNpc,
 } from "../world/npcs";
 import { BikeField, grassOnBike } from "../world/bike";
+import { PalField, PAL_AMBUSH, palJoinChat, runPalAmbush, startPalFight } from "../world/pal";
 import {
   beginWildFight,
   leaveField,
@@ -58,6 +59,9 @@ export class IslandScene extends Phaser.Scene {
   private npcs: FieldNpc[] = [];
   private from = "bridge";
   private bikes!: BikeField;
+  private pal!: PalField;
+  private palAfter?: "fight" | "greet";
+  private palSpr?: Phaser.GameObjects.Sprite;
 
   constructor() {
     super("island");
@@ -90,7 +94,14 @@ export class IslandScene extends Phaser.Scene {
                   ? this.layout.spawnFromSpice
                   : (run.islandPos ?? this.layout.spawnFromNorth);
     const returning = returningTo("island");
-    const spawn = resumePos("island", fallback);
+    const atDoor =
+      this.from === "school" ||
+      this.from === "bikeshop" ||
+      this.from === "charity" ||
+      this.from === "pawn" ||
+      this.from === "chippy" ||
+      this.from === "spice";
+    const spawn = resumePos("island", fallback, atDoor);
     this.player = spawnKid(this, spawn.x, spawn.y, { w: GBA_W, h: this.layout.mapH });
     if (this.from === "school") {
       this.facing = "side";
@@ -108,6 +119,26 @@ export class IslandScene extends Phaser.Scene {
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
+    this.pal = new PalField(this, this.player, (line) => this.showNote(line));
+
+    if (run.palJoined && !run.palGreeted) {
+      this.reaching = true;
+      this.time.delayedCall(240, () => {
+        this.palAfter = "greet";
+        this.showNote(palJoinChat());
+      });
+    } else if (
+      this.from === "bridge" &&
+      run.starter &&
+      !run.palJoined &&
+      findStolenMon()?.cheeky
+    ) {
+      this.reaching = true;
+      this.palSpr = runPalAmbush(this, this.player, () => {
+        this.palAfter = "fight";
+        this.showNote(PAL_AMBUSH);
+      });
+    }
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
@@ -134,6 +165,19 @@ export class IslandScene extends Phaser.Scene {
       return;
     }
 
+    if (this.palAfter === "greet") {
+      this.palAfter = undefined;
+      run.palGreeted = true;
+      this.reaching = false;
+    }
+
+    if (this.palAfter === "fight") {
+      this.palAfter = undefined;
+      this.palSpr?.destroy();
+      startPalFight(this, "island", { x: this.player.x, y: this.player.y });
+      return;
+    }
+
     if (this.reaching) {
       this.player.body.setVelocity(0, 0);
       return;
@@ -143,6 +187,7 @@ export class IslandScene extends Phaser.Scene {
     this.facing = walked.facing;
     this.flip = walked.flip;
     this.bikes.tick();
+    this.pal.tick(this.facing, this.flip);
     tickWanderers(this, this.wanderers, this.player);
     tickFieldNpcs(this, this.npcs);
     this.player.setDepth(this.player.y);
@@ -233,7 +278,7 @@ export class IslandScene extends Phaser.Scene {
   }
 
   private startWild(wild: WildId, map?: Wanderer): void {
-    if ((partnerMon()?.hp ?? 0) <= 0) {
+    if ((ensureLeadAlive()?.hp ?? 0) <= 0) {
       this.reachThen("Your Pompeymon's out.");
       return;
     }
@@ -245,6 +290,7 @@ export class IslandScene extends Phaser.Scene {
 
   private tryExamine(): void {
     if (this.bikes.tryExamine()) return;
+    if (this.pal.tryTalk()) return;
     const person = npcNear(this.player, this.npcs);
     if (person) {
       snapshotField(this.wanderers);

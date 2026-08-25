@@ -1,9 +1,8 @@
 import Phaser from "phaser";
 
-const PLATE_W = 120;
+export const HP_PLATE_W = 128;
 const PLATE_H = 24;
 const BAR_W = 76;
-const LV_X = 94;
 
 /** FireRed-style name + Lv + HP strip. Stamina pips on the HP row. */
 export class HpPlate {
@@ -14,6 +13,8 @@ export class HpPlate {
   private max = 1;
   private sta = 3;
   private staMax = 3;
+  private teamN = 0;
+  private teamLeft = 0;
 
   constructor(
     scene: Phaser.Scene,
@@ -25,7 +26,7 @@ export class HpPlate {
   ) {
     this.max = max;
     this.hp = max;
-    const plate = scene.add.rectangle(x + PLATE_W / 2, y + PLATE_H / 2, PLATE_W, PLATE_H, 0x1a1814, 1);
+    const plate = scene.add.rectangle(x + HP_PLATE_W / 2, y + PLATE_H / 2, HP_PLATE_W, PLATE_H, 0x1a1814, 1);
     plate.setStrokeStyle(2, 0xf0a23a);
     plate.setScrollFactor(0);
     plate.setDepth(20);
@@ -38,11 +39,12 @@ export class HpPlate {
       .setDepth(21)
       .setScrollFactor(0);
     this.lvText = scene.add
-      .text(x + LV_X, y + 3, `Lv${lv}`, {
+      .text(x + HP_PLATE_W - 5, y + 3, `Lv${lv}`, {
         fontFamily: '"Press Start 2P", monospace',
         fontSize: "8px",
         color: "#c8e0a8",
       })
+      .setOrigin(1, 0)
       .setDepth(21)
       .setScrollFactor(0);
     this.bar = scene.add.graphics().setDepth(21).setScrollFactor(0);
@@ -60,10 +62,17 @@ export class HpPlate {
     this.paint();
   }
 
+  setTeam(total: number, left: number): void {
+    this.teamN = Math.max(0, total);
+    this.teamLeft = Math.max(0, Math.min(this.teamN, left));
+    this.paint();
+  }
+
   setMon(name: string, max: number, lv: number, hp: number, sta: number, staMax: number): void {
     this.max = max;
     this.nameText.setText(name);
     this.lvText.setText(`Lv${lv}`);
+    this.lvText.setPosition(this.x + HP_PLATE_W - 5, this.y + 3);
     this.setHp(hp);
     this.setSta(sta, staMax);
   }
@@ -85,6 +94,24 @@ export class HpPlate {
       this.bar.fillRect(x, pipY, 6, 4);
       this.bar.fillStyle(i < this.sta ? 0x48a0d8 : 0x3a3830, 1);
       this.bar.fillRect(x, pipY, 6, 4);
+    }
+    this.paintTeam();
+  }
+
+  private paintTeam(): void {
+    if (this.teamN <= 0) return;
+    const y = this.y + PLATE_H + 2;
+    for (let i = 0; i < this.teamN; i += 1) {
+      const x = this.x + 6 + i * 10;
+      const live = i < this.teamLeft;
+      this.bar.fillStyle(0x1a1814, 1);
+      this.bar.fillRect(x, y, 8, 8);
+      this.bar.fillStyle(live ? 0xf0a23a : 0x3a3830, 1);
+      this.bar.fillRect(x + 1, y + 1, 6, 6);
+      this.bar.fillStyle(0x1a1814, 1);
+      this.bar.fillRect(x + 1, y + 3, 6, 1);
+      this.bar.fillStyle(live ? 0xf8f0e0 : 0x5a5850, 1);
+      this.bar.fillRect(x + 2, y + 2, 2, 1);
     }
   }
 }

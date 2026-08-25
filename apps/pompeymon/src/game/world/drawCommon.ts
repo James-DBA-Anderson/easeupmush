@@ -208,3 +208,102 @@ export function cycleShopFront(
   px(g, INK, dx + (doorEast ? 5 : 2), y + 30, 2, 2);
   return { x, y, w, h };
 }
+
+function shopDoor(
+  g: Phaser.GameObjects.Graphics,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  doorEast: boolean,
+): void {
+  const dx = doorEast ? x + w - 10 : x;
+  px(g, WOOD_LO, dx, y + 18, 8, h - 24);
+  px(g, WOOD, dx, y + 19, 7, h - 26);
+  px(g, WOOD_HI, dx, y + 18, 8, 1);
+  px(g, INK, dx + (doorEast ? 5 : 2), y + 30, 2, 2);
+}
+
+/** Fish-and-chip shop: red fascia, paper parcels in the window. */
+export function chippyFront(
+  g: Phaser.GameObjects.Graphics,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  doorEast: boolean,
+): Solid {
+  const cream = 0xe8e0d0;
+  const creamL = 0xf4eee4;
+  const creamD = 0xc8c0b0;
+  const red = 0xb03028;
+  const redL = 0xd04838;
+  const redD = 0x781818;
+  const glass = 0x68a0c8;
+  const glassL = 0x88c0d8;
+  const paper = 0xf4e8c0;
+  const fish = 0xf0d060;
+  px(g, 0x6a3028, x - 2, y, w + 4, 8);
+  px(g, 0x8a4840, x - 2, y, w + 4, 2);
+  furn(g, x, y + 6, w, h - 6, cream, creamL, creamD);
+  px(g, redD, x + 4, y + 8, w - 8, 10);
+  px(g, red, x + 5, y + 9, w - 10, 8);
+  px(g, redL, x + 5, y + 9, w - 10, 2);
+  px(g, 0xf8f0e0, x + 10, y + 11, 6, 4);
+  px(g, 0xf8f0e0, x + 18, y + 11, 6, 4);
+  px(g, 0xf8f0e0, x + 26, y + 11, 6, 4);
+  px(g, 0xf8f0e0, x + 34, y + 11, 6, 4);
+  px(g, 0xf8f0e0, x + 42, y + 11, 4, 4);
+  const gx = doorEast ? x + 6 : x + w - 42;
+  px(g, INK, gx - 1, y + 18, 34, 18);
+  px(g, glass, gx, y + 19, 32, 16);
+  px(g, glassL, gx + 1, y + 20, 8, 5);
+  px(g, paper, gx + 4, y + 26, 10, 7);
+  px(g, fish, gx + 6, y + 28, 6, 3);
+  px(g, paper, gx + 16, y + 26, 10, 7);
+  px(g, 0xe8c030, gx + 18, y + 28, 6, 3);
+  shopDoor(g, x, y, w, h, doorEast);
+  return { x, y, w, h };
+}
+
+/** Kebab / curry shop: gold fascia, spit glow in the window. */
+export function spiceFront(
+  g: Phaser.GameObjects.Graphics,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  doorEast: boolean,
+): Solid {
+  const body = 0x6a3028;
+  const bodyL = 0x8a4840;
+  const bodyD = 0x4a2018;
+  const gold = 0xd4a040;
+  const goldL = 0xf0c060;
+  const goldD = 0xa07020;
+  const glass = 0x68a0c8;
+  const glassL = 0x88c0d8;
+  const meat = 0x8a4030;
+  const glow = 0xf07030;
+  px(g, 0x3a2018, x - 2, y, w + 4, 8);
+  px(g, goldD, x - 2, y, w + 4, 2);
+  furn(g, x, y + 6, w, h - 6, body, bodyL, bodyD);
+  px(g, goldD, x + 4, y + 8, w - 8, 10);
+  px(g, gold, x + 5, y + 9, w - 10, 8);
+  px(g, goldL, x + 5, y + 9, w - 10, 2);
+  px(g, 0x4a2018, x + 12, y + 11, 8, 4);
+  px(g, 0x4a2018, x + 22, y + 11, 8, 4);
+  px(g, 0x4a2018, x + 32, y + 11, 8, 4);
+  px(g, 0x4a2018, x + 42, y + 11, 6, 4);
+  const gx = doorEast ? x + 6 : x + w - 42;
+  px(g, INK, gx - 1, y + 18, 34, 18);
+  px(g, glass, gx, y + 19, 32, 16);
+  px(g, glassL, gx + 1, y + 20, 8, 5);
+  px(g, glow, gx + 14, y + 21, 3, 12);
+  px(g, meat, gx + 17, y + 22, 8, 11);
+  px(g, 0xa05038, gx + 18, y + 24, 6, 7);
+  px(g, 0xc04028, gx + 6, y + 24, 3, 8);
+  px(g, 0xc04028, gx + 10, y + 26, 3, 6);
+  shopDoor(g, x, y, w, h, doorEast);
+  return { x, y, w, h };
+}

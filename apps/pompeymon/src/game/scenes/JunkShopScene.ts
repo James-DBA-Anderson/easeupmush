@@ -21,6 +21,7 @@ import {
   type WalkKeys,
 } from "../walk";
 import { drawJunkShop, type JunkKind, type JunkShopLayout } from "../world/drawJunkShop";
+import { PalField } from "../world/pal";
 
 const CHARITY: ShopStock[] = [
   { id: "plaster", label: ITEM.plaster.label, price: 3, stack: true, line: "Old plaster. Barely sticks." },
@@ -44,6 +45,7 @@ export class JunkShopScene extends Phaser.Scene {
   private layout!: JunkShopLayout;
   private note?: MsgBox;
   private bagUi?: BagUi;
+  private pal!: PalField;
   private shop?: ShopMenu;
   private facing: Facing = "up";
   private flip = 1;
@@ -81,10 +83,11 @@ export class JunkShopScene extends Phaser.Scene {
     this.wasd = keys.wasd;
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
+    this.pal = new PalField(this, this.player, (line) => this.showNote(line));
     this.shop = new ShopMenu(
       this,
       this.kind === "charity" ? CHARITY : PAWN,
-      { cash: () => run.cash, onPick: (item) => this.buy(item) },
+      { cash: () => run.cash, onPick: (item, qty) => this.buy(item, qty) },
       this.kind === "charity" ? "CHARITY" : "PAWN",
     );
 
@@ -104,7 +107,7 @@ export class JunkShopScene extends Phaser.Scene {
 
     if (this.shop?.active) {
       this.player.body.setVelocity(0, 0);
-      this.shop.update(this.cursors, { W: this.wasd.W, S: this.wasd.S }, confirm, cancel);
+      this.shop.update(this.cursors, { W: this.wasd.W, A: this.wasd.A, S: this.wasd.S, D: this.wasd.D }, confirm, cancel);
       return;
     }
 
@@ -127,6 +130,7 @@ export class JunkShopScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
+    this.pal.tick(this.facing, this.flip);
 
     if (armSouthExit(this.player, this.cursors, this.wasd, this.southExit) && walkingInto(this.player, this.layout.door, "down")) {
       this.scene.start(this.from, { from: this.kind });
@@ -140,23 +144,27 @@ export class JunkShopScene extends Phaser.Scene {
     return this.kind === "charity" ? "NAN" : "LEN";
   }
 
-  private buy(item: ShopStock): void {
+  private buy(item: ShopStock, qty: number): void {
     const id = item.id as ItemId;
     if (!item.stack && run.items.includes(id)) {
       this.showNote({ who: this.clerk(), text: "You already got one mush." });
       return;
     }
-    if (run.cash < item.price) {
+    const n = item.stack ? Math.max(1, qty) : 1;
+    const cost = item.price * n;
+    if (run.cash < cost) {
       this.showNote({ who: this.clerk(), text: "Aint got the dosh." });
       return;
     }
-    run.cash -= item.price;
-    if (item.stack) takeStack(id === "stale" ? "stale" : "plaster");
+    run.cash -= cost;
+    if (item.stack) takeStack(id === "stale" ? "stale" : "plaster", n);
     else takePrize(id);
-    this.showNote([{ who: this.clerk(), text: this.kind === "pawn" ? "No returns." : "It's seen better days." }, `Bought ${item.label}.`]);
+    const got = n > 1 ? `Bought ${item.label} x${n}.` : `Bought ${item.label}.`;
+    this.showNote([{ who: this.clerk(), text: this.kind === "pawn" ? "No returns." : "It's seen better days." }, got]);
   }
 
   private tryExamine(): void {
+    if (this.pal.tryTalk()) return;
     if (near(this.player, this.layout.counter, 14)) {
       const line =
         this.kind === "charity"

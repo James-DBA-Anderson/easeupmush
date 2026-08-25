@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GBA_H, GBA_W } from "../constants";
+import { GBA_H, GBA_W, UI_DEPTH } from "../constants";
 import type { OutfitId } from "../sprites/kid";
 import { consumeDir, isTouchUi } from "../touch";
 
@@ -71,7 +71,7 @@ export class ClothesMenu {
       .setOrigin(0.5, 1);
 
     this.root = scene.add.container(0, 0, [dim, plate, title, this.cursor, ...lines, hint]);
-    this.root.setDepth(40);
+    this.root.setDepth(UI_DEPTH);
     this.root.setVisible(false);
   }
 

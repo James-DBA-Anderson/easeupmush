@@ -20,10 +20,11 @@ import {
 import { isTouchUi } from "../touch";
 import { drawAvenue, type AvenueLayout } from "../world/drawAvenue";
 import { BikeField } from "../world/bike";
+import { PalField } from "../world/pal";
 
 const STEVE_CHAT: Line[] = [
   { who: "STEVE", text: "Alright mush. New bike. Cushty init." },
-  { who: "STEVE", text: "Yours is still in the shed. Beard if you say it aint." },
+  { who: "STEVE", text: "Your mum aint got the dosh for one. Beard." },
   { who: "STEVE", text: "I'm off. Gonna be the Pompeymon master." },
   { who: "YOU", text: "…Pompeymon? What you on about?" },
   { who: "STEVE", text: "The fings. On the paper. You wouldn't get it." },
@@ -61,6 +62,7 @@ export class AvenueScene extends Phaser.Scene {
   private pendingRide = false;
   private riding = false;
   private bikes!: BikeField;
+  private pal!: PalField;
 
   constructor() {
     super("avenue");
@@ -108,6 +110,7 @@ export class AvenueScene extends Phaser.Scene {
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
+    this.pal = new PalField(this, this.player, (line) => this.showNote(line));
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       if (this.riding && !hasFlyer()) run.flyerOnRoad = true;
     });
@@ -153,6 +156,7 @@ export class AvenueScene extends Phaser.Scene {
     this.facing = walked.facing;
     this.flip = walked.flip;
     this.bikes.tick();
+    this.pal.tick(this.facing, this.flip);
 
     if (walkingInto(this.player, this.layout.homeDoor, "left")) {
       this.bikes.stashIndoor();
@@ -181,6 +185,7 @@ export class AvenueScene extends Phaser.Scene {
 
   private tryExamine(): void {
     if (this.bikes.tryExamine()) return;
+    if (this.pal.tryTalk()) return;
     if (run.flyerOnRoad && !hasFlyer() && near(this.player, this.layout.flyer, 12)) {
       takeFlyer();
       this.flyerSpr?.destroy();

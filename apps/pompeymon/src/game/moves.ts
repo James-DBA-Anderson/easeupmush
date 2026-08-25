@@ -148,6 +148,46 @@ export const LEARNSETS: Record<SpeciesId, Learn[]> = {
     { lv: 18, move: "nick" },
     { lv: 24, move: "brace" },
   ],
+  kerbite: [
+    { lv: 1, move: "nibble" },
+    { lv: 1, move: "gutter" },
+    { lv: 8, move: "dart_in" },
+    { lv: 12, move: "reek" },
+    { lv: 16, move: "zip" },
+    { lv: 22, move: "mug" },
+  ],
+  honkace: [
+    { lv: 1, move: "wing" },
+    { lv: 1, move: "bark" },
+    { lv: 8, move: "lunge" },
+    { lv: 12, move: "hunker" },
+    { lv: 16, move: "wind" },
+    { lv: 22, move: "mug" },
+  ],
+  chalklur: [
+    { lv: 1, move: "roll" },
+    { lv: 1, move: "curl" },
+    { lv: 8, move: "scratch" },
+    { lv: 12, move: "hunker" },
+    { lv: 16, move: "brace" },
+    { lv: 22, move: "lunge" },
+  ],
+  linelurker: [
+    { lv: 1, move: "roll" },
+    { lv: 1, move: "hunker" },
+    { lv: 9, move: "scratch" },
+    { lv: 13, move: "brace" },
+    { lv: 17, move: "mug" },
+    { lv: 23, move: "lunge" },
+  ],
+  kitthief: [
+    { lv: 1, move: "scratch" },
+    { lv: 1, move: "snatch" },
+    { lv: 8, move: "dash" },
+    { lv: 12, move: "nick" },
+    { lv: 16, move: "scamper" },
+    { lv: 22, move: "mug" },
+  ],
 };
 
 export function moveById(id: string): MoveDef | undefined {

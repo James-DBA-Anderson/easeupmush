@@ -1,7 +1,7 @@
 import { BATTLE, MAX_LV, MAX_MOVES, STARTER_LV, moveLearnedAt, moveIdsForLevel, scaled, xpToNext } from "./battle";
 import type { OutfitId } from "./sprites/kid";
 import { OUTFITS } from "./sprites/kid";
-import { SPECIES, ELEM_LABEL, type ElemId, type SpeciesId, type WildId } from "./species";
+import { SPECIES, ELEM_LABEL, COMMON_WILDS, HIDDEN_IDS, type ElemId, type SpeciesId, type WildId } from "./species";
 
 export type FieldMon = {
   key: string;
@@ -42,6 +42,12 @@ export type PartyMon = {
   moves: string[];
   /** Takeaway food evolution. */
   elem?: ElemId;
+  /** Nickname (e.g. PRICKLES). */
+  nick?: string;
+  /** Stolen — ignores Fight/Dodge and only braces. */
+  stubborn?: boolean;
+  /** Soft bond — listens sometimes; may jump in to defend mates. */
+  cheeky?: boolean;
 };
 
 export type BagEntry = { kind: "item"; id: ItemId } | { kind: "mon"; mon: PartyMon };
@@ -97,6 +103,12 @@ export type RunState = {
   hillNanGone: boolean;
   debugSession: boolean;
   cash: number;
+  /** Paid Mum rent once (£50 when you came home flush). */
+  mumRentPaid: boolean;
+  /** Jess joined after the bridge fight. */
+  palJoined: boolean;
+  palWon: boolean;
+  palGreeted: boolean;
   mounted: boolean;
   parked: null | { scene: string; x: number; y: number; locked: boolean; wheel: boolean };
   /** Locked bike was chored — Ray gets an earful. */
@@ -137,6 +149,10 @@ function freshRun(): RunState {
     hillNanGone: false,
     debugSession: false,
     cash: 0,
+    mumRentPaid: false,
+    palJoined: false,
+    palWon: false,
+    palGreeted: false,
     mounted: false,
     parked: null,
     lockChored: false,
@@ -269,6 +285,10 @@ export function loadRun(): boolean {
     next.chompKept = !!src.chompKept;
     next.hillNanGone = !!src.hillNanGone;
     next.lockChored = !!src.lockChored;
+    next.mumRentPaid = !!src.mumRentPaid;
+    next.palJoined = !!src.palJoined;
+    next.palWon = !!src.palWon;
+    next.palGreeted = !!src.palGreeted;
     next.whiteout = !!src.whiteout;
     next.mounted = !!src.mounted;
     if (src.starter && STARTERS.has(src.starter)) next.starter = src.starter;
@@ -286,6 +306,9 @@ export function loadRun(): boolean {
           hp: Math.max(0, Number(p.hp) || 0),
           moves: Array.isArray(p.moves) ? p.moves.filter((m) => typeof m === "string").slice(0, MAX_MOVES) : [],
           elem: p.elem && ELEMS.has(p.elem) ? p.elem : undefined,
+          nick: typeof p.nick === "string" && p.nick ? p.nick : undefined,
+          stubborn: !!p.stubborn || undefined,
+          cheeky: !!p.cheeky || undefined,
         }));
     }
     next.lead = next.party.length ? Math.max(0, Math.min(next.party.length - 1, Number(src.lead) || 0)) : 0;
@@ -345,6 +368,18 @@ export function partnerMon(): PartyMon | undefined {
   return run.party[run.lead] ?? run.party[0];
 }
 
+/** If the lead fainted, move to the next healthy party member. */
+export function ensureLeadAlive(): PartyMon | undefined {
+  const cur = run.party[run.lead];
+  if (cur && cur.hp > 0) return cur;
+  const i = run.party.findIndex((p) => p.hp > 0);
+  if (i >= 0) {
+    run.lead = i;
+    return run.party[i];
+  }
+  return cur ?? run.party[0];
+}
+
 export function partyAlive(): boolean {
   return run.party.some((p) => p.hp > 0);
 }
@@ -376,6 +411,12 @@ export function applyXp(mon: PartyMon, gained: number): string[] {
     mon.lv += 1;
     mon.hp = scaled(BATTLE[mon.id].hp, mon.lv);
     lines.push(`${SPECIES[mon.id].name} grew to Lv${mon.lv}!`);
+    if (mon.stubborn) {
+      mon.stubborn = false;
+      mon.cheeky = true;
+      const who = mon.nick ?? SPECIES[mon.id].name;
+      lines.push(`${who} might listen… sometimes.`);
+    }
     const learned = moveLearnedAt(mon.id, mon.lv);
     if (learned) {
       if (mon.moves.includes(learned.id)) {
@@ -403,7 +444,15 @@ export function returningTo(scene: string): boolean {
   return run.overworld?.scene === scene;
 }
 
-export function resumePos(scene: string, fallback: { x: number; y: number }): { x: number; y: number } {
+export function resumePos(scene: string, fallback: { x: number; y: number }, atDoor = false): { x: number; y: number } {
+  if (atDoor) {
+    if (run.overworld?.scene === scene) {
+      run.overworld = null;
+      persistRun();
+    }
+    markPlace(scene, fallback);
+    return fallback;
+  }
   if (run.overworld?.scene === scene) {
     const pos = { x: run.overworld.x, y: run.overworld.y };
     markPlace(scene, pos);
@@ -485,13 +534,14 @@ export function battleBagEntries(): BagEntry[] {
   ];
 }
 
-export function takeStack(id: "plaster" | "stale" | "curry" | "doner" | "chips" | "fish"): void {
-  if (id === "plaster") run.plasters += 1;
-  else if (id === "stale") run.stale += 1;
-  else if (id === "curry") run.curry += 1;
-  else if (id === "doner") run.doner += 1;
-  else if (id === "chips") run.chips += 1;
-  else run.fish += 1;
+export function takeStack(id: "plaster" | "stale" | "curry" | "doner" | "chips" | "fish", n = 1): void {
+  const add = Math.max(1, n);
+  if (id === "plaster") run.plasters += add;
+  else if (id === "stale") run.stale += add;
+  else if (id === "curry") run.curry += add;
+  else if (id === "doner") run.doner += add;
+  else if (id === "chips") run.chips += add;
+  else run.fish += add;
   if (!run.items.includes(id)) run.items.push(id);
 }
 
@@ -587,13 +637,77 @@ export function seeSpecies(id: SpeciesId): void {
   if (!run.seen.includes(id)) run.seen.push(id);
 }
 
+function isAvoided(id: SpeciesId, avoid?: SpeciesId | readonly SpeciesId[]): boolean {
+  if (avoid == null) return false;
+  return Array.isArray(avoid) ? avoid.includes(id) : id === avoid;
+}
+
+function pickOne<T>(list: T[]): T | undefined {
+  if (!list.length) return undefined;
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+function openMons(avoid?: SpeciesId | readonly SpeciesId[]): SpeciesId[] {
+  return (Object.keys(SPECIES) as SpeciesId[]).filter(
+    (id) => !HIDDEN_IDS.has(id as WildId) && !isAvoided(id, avoid),
+  );
+}
+
+/** Gym leaders fill the Pompdex: listed mon if unseen, else another unseen species. */
+export function gymFoeMon(prefer: SpeciesId, avoid?: SpeciesId | readonly SpeciesId[]): SpeciesId {
+  if (!run.seen.includes(prefer) && !isAvoided(prefer, avoid)) return prefer;
+  const unseen = openMons(avoid).filter((id) => !run.seen.includes(id));
+  return pickOne(unseen) ?? pickOne(openMons(avoid)) ?? prefer;
+}
+
+/** Street trainers keep their listed / common mon. Sometimes an unseen common. */
+export function trainerFoeMon(prefer: SpeciesId, avoid?: SpeciesId | readonly SpeciesId[]): SpeciesId {
+  const listed = !isAvoided(prefer, avoid) ? prefer : undefined;
+  const unseenCommon = COMMON_WILDS.filter((id) => !run.seen.includes(id) && !isAvoided(id, avoid));
+  if (listed && !run.seen.includes(listed)) return listed;
+  if (unseenCommon.length && Math.random() < 0.22) return pickOne(unseenCommon)!;
+  if (listed) return listed;
+  return pickOne(COMMON_WILDS.filter((id) => !isAvoided(id, avoid))) ?? prefer;
+}
+
 export const MAX_PARTY = 6;
 
-export function catchSpecies(id: SpeciesId, lv = STARTER_LV): boolean {
+export const STOLEN_NICK = "PRICKLES";
+
+export function monLabel(mon: PartyMon): string {
+  return mon.nick ?? SPECIES[mon.id].name;
+}
+
+/** Steve's abandoned Spikehedge, if still in the party. */
+export function findStolenMon(): PartyMon | undefined {
+  return run.party.find(
+    (p) => p.nick === STOLEN_NICK || (p.id === "spikehedge" && (p.stubborn || p.cheeky)),
+  );
+}
+
+/** After Dean flees — soft bond. */
+export function bondStolenMon(): void {
+  const mon = findStolenMon();
+  if (!mon) return;
+  mon.stubborn = false;
+  mon.cheeky = true;
+  if (!mon.nick) mon.nick = STOLEN_NICK;
+  persistRun();
+}
+
+export function catchSpecies(
+  id: SpeciesId,
+  lv = STARTER_LV,
+  opts?: { stubborn?: boolean; nick?: string; cheeky?: boolean },
+): boolean {
   seeSpecies(id);
   if (run.party.length >= MAX_PARTY) return false;
   if (!run.owned.includes(id)) run.owned.push(id);
-  run.party.push(makePartyMon(id, lv));
+  const mon = makePartyMon(id, lv);
+  if (opts?.stubborn) mon.stubborn = true;
+  if (opts?.nick) mon.nick = opts.nick;
+  if (opts?.cheeky) mon.cheeky = true;
+  run.party.push(mon);
   return true;
 }
 
@@ -627,11 +741,13 @@ export function bagEntries(): BagEntry[] {
 export function bagLine(entry: BagEntry): string {
   if (entry.kind === "item") return itemLine(entry.id);
   const spec = SPECIES[entry.mon.id];
+  const who = monLabel(entry.mon);
   const need = xpToNext(entry.mon.lv);
   const xp = entry.mon.lv >= MAX_LV ? "MAX." : `${entry.mon.xp}/${need} XP.`;
-  const partner = run.starter === entry.mon.id ? " Your partner." : "";
+  const lead = run.party[run.lead] === entry.mon ? " Goes out first." : "";
   const elem = entry.mon.elem ? ` ${ELEM_LABEL[entry.mon.elem]}.` : "";
-  return `${spec.name}. ${spec.kind} Lv${entry.mon.lv}. ${xp}${elem}${partner}`;
+  const mood = entry.mon.stubborn ? " Won't listen." : entry.mon.cheeky ? " Moody." : "";
+  return `${who}. ${spec.kind} Lv${entry.mon.lv}. ${xp}${elem}${mood}${lead}`;
 }
 
 export function bagLabel(entry: BagEntry): string {
@@ -646,10 +762,10 @@ export function bagLabel(entry: BagEntry): string {
     if (entry.id === "fish") return `${name} x${run.fish}`;
     return name;
   }
-  const star = run.starter === entry.mon.id ? "*" : "";
+  const star = run.party[run.lead] === entry.mon ? "*" : "";
   const out = entry.mon.hp <= 0 ? " --" : "";
   const el = entry.mon.elem ? ` ${ELEM_LABEL[entry.mon.elem][0]}` : "";
-  return `${SPECIES[entry.mon.id].name}${star} Lv${entry.mon.lv}${el}${out}`;
+  return `${monLabel(entry.mon)}${star} Lv${entry.mon.lv}${el}${out}`;
 }
 
 export function syncBagChrome(): void {

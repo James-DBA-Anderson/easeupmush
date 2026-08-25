@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { UI_DEPTH } from "../constants";
 import { clearField } from "../world/wander";
 import { run } from "../run";
 
@@ -53,7 +54,7 @@ export function mountDebugBack(scene: Phaser.Scene): void {
   if (!inDebugSession()) return;
   leaving = false;
 
-  const bg = scene.add.rectangle(HIT_X, HIT_Y, HIT_W, HIT_H, 0x1a1814, 1).setOrigin(0).setDepth(100).setScrollFactor(0);
+  const bg = scene.add.rectangle(HIT_X, HIT_Y, HIT_W, HIT_H, 0x1a1814, 1).setOrigin(0).setDepth(UI_DEPTH).setScrollFactor(0);
   bg.setStrokeStyle(1, 0xf0a23a);
 
   scene.add
@@ -62,7 +63,7 @@ export function mountDebugBack(scene: Phaser.Scene): void {
       fontSize: "8px",
       color: "#f0a23a",
     })
-    .setDepth(101)
+    .setDepth(UI_DEPTH + 1)
     .setScrollFactor(0);
 
   scene.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {

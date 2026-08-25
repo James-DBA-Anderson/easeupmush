@@ -1,8 +1,8 @@
 import Phaser from "phaser";
 import { rollWildLv } from "../battle";
-import { partnerMon, run, saveOverworld, type FieldMon } from "../run";
+import { ensureLeadAlive, run, saveOverworld, type FieldMon } from "../run";
 import { ensureMonSheets, monOwAnim, monOwSheet } from "../sprites/mon";
-import type { WildId } from "../species";
+import { HIDDEN_IDS, type WildId } from "../species";
 import type { Facing } from "../walk";
 
 export type WanderBox = { x: number; y: number; w: number; h: number };
@@ -26,6 +26,8 @@ type AreaWilds = {
   lv: [number, number];
   /** Doors, gates, and map mouths — wilds may not spawn or wander here. */
   keepOff: WanderBox[];
+  /** One rare hunt — always on the map, not in the common pool. */
+  hidden?: { id: WildId; lv: [number, number]; slot: WanderBox };
 };
 
 const FLEE_RANGE = 42;
@@ -50,6 +52,7 @@ const AREA_WILDS: Record<string, AreaWilds> = {
       { x: 100, y: 348, w: 40, h: 36 },
       { x: 100, y: 510, w: 40, h: 40 },
     ],
+    hidden: { id: "linelurker", lv: [6, 8], slot: { x: 8, y: 440, w: 48, h: 32 } },
   },
   school: {
     count: 3,
@@ -63,6 +66,7 @@ const AREA_WILDS: Record<string, AreaWilds> = {
       { x: 40, y: 108, w: 48, h: 56 },
       { x: 116, y: 108, w: 48, h: 56 },
     ],
+    hidden: { id: "kitthief", lv: [7, 9], slot: { x: 28, y: 198, w: 40, h: 28 } },
   },
   highstreet: {
     count: 3,
@@ -79,6 +83,7 @@ const AREA_WILDS: Record<string, AreaWilds> = {
       { x: 96, y: 348, w: 44, h: 40 },
       { x: 96, y: 408, w: 44, h: 40 },
     ],
+    hidden: { id: "kerbite", lv: [4, 5], slot: { x: 148, y: 360, w: 24, h: 28 } },
   },
   roundabout: {
     count: 2,
@@ -96,6 +101,15 @@ const AREA_WILDS: Record<string, AreaWilds> = {
       { x: 70, y: 68, w: 22, h: 22 },
       { x: 108, y: 90, w: 24, h: 20 },
     ],
+    hidden: { id: "honkace", lv: [4, 5], slot: { x: 66, y: 88, w: 22, h: 18 } },
+  },
+  hill: {
+    count: 0,
+    lv: [4, 5],
+    pool: ["spikehedge"],
+    keepOff: [{ x: 100, y: 148, w: 40, h: 16 }],
+    slots: [],
+    hidden: { id: "chalklur", lv: [6, 8], slot: { x: 108, y: 64, w: 22, h: 24 } },
   },
 };
 
@@ -120,19 +134,39 @@ function shufflePick<T>(list: T[], n: number): T[] {
   return idx.slice(0, Math.min(n, list.length)).map((i) => list[i]);
 }
 
+function placeIn(box: WanderBox): { x: number; y: number } {
+  return { x: box.x + box.w / 2, y: box.y + Math.floor(box.h * 0.7) };
+}
+
 function rollField(scene: string, cfg: AreaWilds): FieldMon[] {
-  const slots = cfg.slots.filter((box) => !cfg.keepOff.some((z) => overlaps(box, z)));
-  return shufflePick(slots, cfg.count).map((box, i) => {
+  const hide = cfg.hidden;
+  const slots = cfg.slots.filter(
+    (box) => !cfg.keepOff.some((z) => overlaps(box, z)) && !(hide && overlaps(box, hide.slot)),
+  );
+  const mons = shufflePick(slots, cfg.count).map((box, i) => {
     const id = cfg.pool[Math.floor(Math.random() * cfg.pool.length)];
+    const pos = placeIn(box);
     return {
       key: `${scene}-${i}`,
       id,
       lv: rollWildLv(cfg.lv[0], cfg.lv[1]),
-      x: box.x + box.w / 2,
-      y: box.y + Math.floor(box.h * 0.7),
+      x: pos.x,
+      y: pos.y,
       box,
     };
   });
+  if (hide && !cfg.keepOff.some((z) => overlaps(hide.slot, z))) {
+    const pos = placeIn(hide.slot);
+    mons.push({
+      key: `${scene}-hidden`,
+      id: hide.id,
+      lv: rollWildLv(hide.lv[0], hide.lv[1]),
+      x: pos.x,
+      y: pos.y,
+      box: hide.slot,
+    });
+  }
+  return mons;
 }
 
 function fieldMons(scene: string, returning: boolean): FieldMon[] {
@@ -225,7 +259,8 @@ export function spawnWanderers(scene: Phaser.Scene, specs: WanderSpec[], keepOff
 }
 
 function shyOf(w: Wanderer): boolean {
-  const lead = partnerMon();
+  if (HIDDEN_IDS.has(w.id)) return false;
+  const lead = ensureLeadAlive();
   if (!lead || lead.hp <= 0) return false;
   return lead.lv > (w.lv ?? 3);
 }

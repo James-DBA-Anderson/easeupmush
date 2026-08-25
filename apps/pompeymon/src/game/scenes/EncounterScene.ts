@@ -1,7 +1,8 @@
 import Phaser from "phaser";
 import { applyHit, BATTLE, canRun, doDefend, doDodge, drainSta, firstActor, makeBattler, pickFoeMove, rollCounter, rollDamage, rollDodge, rollHit, spendChase, spendFight, STA_FIGHT, STARTER_LV, tickPoison, tryCatch, tryPoison, xpForKo, type Battler } from "../battle";
+import { GBA_W } from "../constants";
 import { isDamaging, type MoveDef } from "../moves";
-import { applyXp, beatTrainer, catchSpecies, ITEM, MAX_PARTY, partnerMon, partyAlive, persistRun, run, seeSpecies, setLead, takeCash, takePrize, useHealItem, useKebabBox, type BagEntry, type ItemId, type PartyMon } from "../run";
+import { applyXp, beatTrainer, catchSpecies, ensureLeadAlive, healParty, ITEM, MAX_PARTY, partyAlive, persistRun, run, seeSpecies, setLead, takeCash, takePrize, useHealItem, useKebabBox, bondStolenMon, findStolenMon, monLabel, STOLEN_NICK, type BagEntry, type ItemId, type PartyMon } from "../run";
 import { ELEM_TINT, SPECIES, type SpeciesId } from "../species";
 import { ensureKidSheets, kidAnim, kidSheet } from "../sprites/kid";
 import { ensureMonSheets, monBattleKey } from "../sprites/mon";
@@ -16,13 +17,21 @@ import {
   dodgeLean,
   faintDrop,
   hitImpact,
+  trainerDeploy,
 } from "../ui/battleFx";
 import { leaveDebugSession, mountDebugBack, inDebugSession } from "../ui/debugBack";
-import { HpPlate } from "../ui/HpPlate";
+import { HpPlate, HP_PLATE_W } from "../ui/HpPlate";
 import { MoveMenu } from "../ui/MoveMenu";
 import { MsgBox, lineWho, type Line } from "../ui/MsgBox";
 import { justAction, justCancel, bindWalkKeys, type WalkKeys } from "../walk";
 import { clearField, markWildBeat } from "../world/wander";
+import { joinPal, PAL_ID } from "../world/pal";
+import {
+  finishSteveCatch,
+  spawnBikeThief,
+  STEVE_ID,
+  STEVE_NAME,
+} from "../world/steve";
 import { ensureNpcSheets, npcAnim, npcSheet, type NpcLook } from "../sprites/npc";
 
 const KID_X = 30;
@@ -39,6 +48,9 @@ export type TrainerBattle = {
   who: string;
   look: NpcLook;
   prize?: ItemId;
+  taunt?: string[];
+  wipe?: string;
+  party?: { mon: SpeciesId; lv: number }[];
   mate?: {
     who: string;
     look: NpcLook;
@@ -48,7 +60,7 @@ export type TrainerBattle = {
   };
 };
 
-type AfterText = "menu" | "foe" | "next" | "done" | "counter" | "bag" | "afterPoison";
+type AfterText = "menu" | "foe" | "next" | "done" | "counter" | "bag" | "afterPoison" | "steveTheft" | "steveCatch" | "stubborn" | "deanFlee" | "deanBlowKo";
 
 export class EncounterScene extends Phaser.Scene {
   private foeId!: SpeciesId;
@@ -78,8 +90,21 @@ export class EncounterScene extends Phaser.Scene {
   private wantPoisonTick = false;
   private foeBob?: Phaser.Tweens.Tween;
   private foeRestY = 100;
-  /** 0 = lead trainer's mon; 1 = mate's mon. */
-  private foeSlot = 0;
+  /** Next extra mon in this trainer's party. */
+  private partyI = 0;
+  private mateOut = false;
+  private foeTeam = 0;
+  private foeLeft = 0;
+  private lastTaunt = -1;
+  /** Steve fight: bike theft already played. */
+  private steveStolen = false;
+  /** Steve ran off — mon is catchable. */
+  private steveAbandoned = false;
+  private steveBusy = false;
+  /** Youngster Dean self-destruct / PRICKLES event. */
+  private deanEvent = false;
+  /** Party index currently in battle — not species id (duplicates share an id). */
+  private meSlot = 0;
 
   constructor() {
     super("encounter");
@@ -95,14 +120,20 @@ export class EncounterScene extends Phaser.Scene {
     this.done = false;
     this.after = "menu";
     this.mustSwitch = false;
-    this.foeSlot = 0;
-    const partner = partnerMon();
+    this.partyI = 0;
+    this.mateOut = false;
+    this.lastTaunt = -1;
+    this.steveStolen = false;
+    this.steveAbandoned = false;
+    this.steveBusy = false;
+    this.deanEvent = false;
+    const partner = ensureLeadAlive();
+    this.meSlot = run.lead;
     const partnerId = partner?.id ?? run.starter ?? "scabfox";
-    this.me = makeBattler(partnerId, partner?.lv ?? STARTER_LV, partner?.hp, partner?.moves, partner?.elem);
+    this.me = makeBattler(partnerId, partner?.lv ?? STARTER_LV, partner?.hp, partner?.moves, partner?.elem, partner?.nick);
     this.foe = makeBattler(this.foeId, this.foeLv);
     seeSpecies(this.foeId);
     seeSpecies(partnerId);
-    if (this.trainer?.mate) seeSpecies(this.trainer.mate.mon);
 
     paintBattleBg(this, run.overworld?.scene ?? "field");
 
@@ -148,8 +179,13 @@ export class EncounterScene extends Phaser.Scene {
     });
     this.foeRestY = 100;
 
-    this.foeBar = new HpPlate(this, 116, 8, this.foe.name, this.foe.max, this.foe.lv);
+    this.foeBar = new HpPlate(this, GBA_W - HP_PLATE_W - 4, 8, this.foe.name, this.foe.max, this.foe.lv);
     this.foeBar.setSta(this.foe.sta, this.foe.staMax);
+    if (this.trainer) {
+      this.foeTeam = 1 + (this.trainer.party?.length ?? 0) + (this.trainer.mate ? 1 : 0);
+      this.foeLeft = this.foeTeam;
+      this.foeBar.setTeam(this.foeTeam, this.foeLeft);
+    }
     this.meBar = new HpPlate(this, 8, 80, this.me.name, this.me.max, this.me.lv);
     this.meBar.setSta(this.me.sta, this.me.staMax);
 
@@ -200,6 +236,7 @@ export class EncounterScene extends Phaser.Scene {
       }
       return;
     }
+    if (this.steveBusy) return;
     if (this.bag?.active) {
       this.bag.update(this.cursors, { W: this.wasd.W, S: this.wasd.S }, confirm, cancel);
       if (!this.bag.active && !this.note?.open) {
@@ -248,6 +285,11 @@ export class EncounterScene extends Phaser.Scene {
     else if (this.after === "foe") this.enemyReply();
     else if (this.after === "next") this.nextAct();
     else if (this.after === "counter") this.counterHit();
+    else if (this.after === "steveTheft") this.playSteveTheft();
+    else if (this.after === "steveCatch") this.autoSteveCatch();
+    else if (this.after === "stubborn") this.startDefend();
+    else if (this.after === "deanFlee") this.finishDeanFlee();
+    else if (this.after === "deanBlowKo") this.finishFoeKo([]);
     else this.finishLeave();
   }
 
@@ -305,6 +347,12 @@ export class EncounterScene extends Phaser.Scene {
   }
 
   private picked(opt: "fight" | "bag" | "defend" | "dodge" | "run"): void {
+    if (opt === "fight" || opt === "dodge") {
+      if (this.ignoresOrder()) {
+        this.refuseOrder(this.leadCheeky() && !this.leadStubborn());
+        return;
+      }
+    }
     if (opt === "fight") this.openMoves();
     else if (opt === "defend") this.startDefend();
     else if (opt === "dodge") this.startDodge();
@@ -323,6 +371,11 @@ export class EncounterScene extends Phaser.Scene {
       this.startDefend();
       return;
     }
+    if (this.ignoresOrder()) {
+      this.moves?.hide();
+      this.refuseOrder(this.leadCheeky() && !this.leadStubborn());
+      return;
+    }
     if (!spendFight(this.me)) {
       this.say("Too tired. Defend.", "menu");
       return;
@@ -330,6 +383,31 @@ export class EncounterScene extends Phaser.Scene {
     this.me.move = move;
     this.meBar?.setSta(this.me.sta, this.me.staMax);
     this.queueRound("fight");
+  }
+
+  private leadStubborn(): boolean {
+    return !!run.party[this.meSlot]?.stubborn;
+  }
+
+  /** Soft bond — sometimes ignores Fight/Dodge. */
+  private leadCheeky(): boolean {
+    const mon = run.party[this.meSlot];
+    return !!mon?.cheeky && !mon.stubborn;
+  }
+
+  private refuseOrder(soft = false): void {
+    const who = this.me.name;
+    const lines = soft
+      ? [`${who} doesn't feel like it.`, `${who} just braces.`]
+      : [`${who} won't listen!`, `${who} just braces.`];
+    this.say(lines, "stubborn");
+  }
+
+  /** True if this order is ignored (always if stubborn, sometimes if cheeky). */
+  private ignoresOrder(): boolean {
+    if (this.leadStubborn()) return true;
+    if (this.leadCheeky() && Math.random() < 0.4) return true;
+    return false;
   }
 
   private openBag(): void {
@@ -367,11 +445,16 @@ export class EncounterScene extends Phaser.Scene {
   }
 
   private switchTo(mon: PartyMon): void {
+    const slot = run.party.indexOf(mon);
+    if (slot < 0) {
+      this.say("Can't.", this.mustSwitch ? "bag" : "menu");
+      return;
+    }
     if (mon.hp <= 0) {
       this.say("It's out.", this.mustSwitch ? "bag" : "menu");
       return;
     }
-    if (mon.id === this.me.id && partnerMon() === mon) {
+    if (slot === this.meSlot && this.me.hp > 0) {
       this.say("Already out.", this.mustSwitch ? "bag" : "menu");
       return;
     }
@@ -380,14 +463,15 @@ export class EncounterScene extends Phaser.Scene {
       this.say("Can't.", this.mustSwitch ? "bag" : "menu");
       return;
     }
-    const next = partnerMon();
+    this.meSlot = run.lead;
+    const next = run.party[this.meSlot];
     if (!next) {
       this.say("Can't.", "menu");
       return;
     }
     const forced = this.mustSwitch;
     this.mustSwitch = false;
-    this.me = makeBattler(next.id, next.lv, next.hp, next.moves, next.elem);
+    this.me = makeBattler(next.id, next.lv, next.hp, next.moves, next.elem, next.nick);
     this.meSpr?.setTexture(monBattleKey(next.id));
     this.meSpr?.clearTint();
     if (next.elem) this.meSpr?.setTint(ELEM_TINT[next.elem]);
@@ -612,41 +696,56 @@ export class EncounterScene extends Phaser.Scene {
   }
 
   private activeTrainerSpr(): Phaser.GameObjects.Sprite | undefined {
-    return this.foeSlot === 1 && this.mateSpr ? this.mateSpr : this.trainerSpr;
+    return this.mateOut && this.mateSpr ? this.mateSpr : this.trainerSpr;
+  }
+
+  private sendNextFoe(id: SpeciesId, lv: number): void {
+    this.foeId = id;
+    this.foeLv = lv;
+    this.foe = makeBattler(id, lv);
+    seeSpecies(id);
+    const deployer = this.activeTrainerSpr();
+    this.time.delayedCall(280, () => {
+      trainerDeploy(this, deployer, this.foeSpr, { x: 180, y: this.foeRestY }, monBattleKey(id), () => {
+        this.foeBar?.setMon(this.foe.name, this.foe.max, this.foe.lv, this.foe.hp, this.foe.sta, this.foe.staMax);
+        this.resumeFoeBob(0);
+      });
+    });
   }
 
   private finishFoeKo(lead: Line[]): void {
     this.storeHp();
     this.pauseFoeBob();
     faintDrop(this, this.foeSpr);
-    actorReact(this, this.activeTrainerSpr(), "loss");
     const fainted = this.foe.name;
     const xpLines = this.grantXp();
-    const mate = this.trainer?.mate;
-    if (this.trainer && mate && this.foeSlot === 0) {
-      this.foeSlot = 1;
-      this.foeId = mate.mon;
-      this.foeLv = mate.lv;
-      this.foe = makeBattler(mate.mon, mate.lv);
-      seeSpecies(mate.mon);
-      const lines: Line[] = [
-        ...lead,
-        `Foe ${fainted} fainted.`,
-        ...xpLines,
-        { who: mate.who, text: `Go ${this.foe.name}!` },
-      ];
-      this.time.delayedCall(300, () => {
-        if (!this.foeSpr) return;
-        this.tweens.killTweensOf(this.foeSpr);
-        this.foeSpr.setTexture(monBattleKey(mate.mon));
-        this.foeSpr.setAlpha(1);
-        this.foeSpr.setPosition(180, this.foeRestY);
-        this.foeBar?.setMon(this.foe.name, this.foe.max, this.foe.lv, this.foe.hp, this.foe.sta, this.foe.staMax);
-        this.resumeFoeBob(0);
-      });
-      this.say(lines, "menu");
+    if (this.trainer) {
+      this.foeLeft = Math.max(0, this.foeLeft - 1);
+      this.foeBar?.setTeam(this.foeTeam, this.foeLeft);
+    }
+    const party = this.trainer?.party ?? [];
+    const nextOwn = this.trainer && this.partyI < party.length ? party[this.partyI] : undefined;
+    if (nextOwn) {
+      this.partyI += 1;
+      this.sendNextFoe(nextOwn.mon, nextOwn.lv);
+      this.say(
+        [...lead, `Foe ${fainted} fainted.`, ...xpLines, { who: this.trainer!.who, text: `Go ${this.foe.name}!` }],
+        "menu",
+      );
       return;
     }
+    const mate = this.trainer?.mate;
+    if (this.trainer && mate && !this.mateOut) {
+      actorReact(this, this.trainerSpr, "loss");
+      this.mateOut = true;
+      this.sendNextFoe(mate.mon, mate.lv);
+      this.say(
+        [...lead, `Foe ${fainted} fainted.`, ...xpLines, { who: mate.who, text: `Go ${this.foe.name}!` }],
+        "menu",
+      );
+      return;
+    }
+    actorReact(this, this.activeTrainerSpr(), "loss");
     this.done = true;
     const lines: Line[] = [...lead, `Foe ${fainted} fainted.`];
     if (this.trainer) {
@@ -666,6 +765,7 @@ export class EncounterScene extends Phaser.Scene {
         lines.push({ who: this.trainer.mate.who, text: this.trainer.mate.win });
         actorReact(this, this.mateSpr, "loss");
       }
+      if (this.trainer.id === PAL_ID) joinPal(true);
     } else {
       markWildBeat();
     }
@@ -675,10 +775,12 @@ export class EncounterScene extends Phaser.Scene {
 
   private hitMe(): void {
     const { lines, ko } = this.resolveMove(this.me, this.foe, true);
+    if (this.handleSteveBeat(lines, ko, "foe")) return;
     if (ko) {
       this.finishFoeKo(lines);
       return;
     }
+    if (this.tryDeanBlow(lines)) return;
     this.say(lines, this.acts.length ? "next" : "menu");
   }
 
@@ -720,6 +822,7 @@ export class EncounterScene extends Phaser.Scene {
       }
       const { lines, ko } = this.resolveMove(this.foe, this.me, false);
       lines.splice(1, 0, `${this.me.name} couldn't dodge.`);
+      if (this.handleSteveBeat(lines, ko, "me")) return;
       if (ko) {
         this.faint();
         return;
@@ -728,6 +831,7 @@ export class EncounterScene extends Phaser.Scene {
       return;
     }
     const { lines, ko } = this.resolveMove(this.foe, this.me, false);
+    if (this.handleSteveBeat(lines, ko, "me")) return;
     if (ko) {
       this.faint();
       return;
@@ -737,15 +841,17 @@ export class EncounterScene extends Phaser.Scene {
 
   private counterHit(): void {
     const { lines, ko } = this.resolveMove(this.me, this.foe, true);
+    if (this.handleSteveBeat(lines, ko, "foe")) return;
     if (ko) {
       this.finishFoeKo(lines);
       return;
     }
+    if (this.tryDeanBlow(lines)) return;
     this.say(lines, this.acts.length ? "next" : "menu");
   }
 
   private tryBall(): void {
-    if (this.trainer) {
+    if (this.trainer && !this.steveAbandoned) {
       this.say("That's someone else's.", "menu");
       return;
     }
@@ -761,9 +867,11 @@ export class EncounterScene extends Phaser.Scene {
       this.say("No kebab boxes.", "menu");
       return;
     }
-    if (tryCatch(this.foe)) {
+    const caught = this.steveAbandoned || tryCatch(this.foe);
+    if (caught) {
       const again = run.owned.includes(this.foeId);
-      catchSpecies(this.foeId, this.foe.lv);
+      catchSpecies(this.foeId, this.foe.lv, this.steveAbandoned ? { stubborn: true, nick: STOLEN_NICK } : undefined);
+      if (this.steveAbandoned) finishSteveCatch();
       this.done = true;
       this.storeHp();
       const lines: Line[] = [
@@ -775,8 +883,14 @@ export class EncounterScene extends Phaser.Scene {
         run.kebabCatch = true;
         lines.push({ who: "YOU", text: "Wow it actually worked." });
       }
-      lines.push(again ? `Gotcha. ${this.foe.name} again.` : `Gotcha. ${this.foe.name}.`);
-      markWildBeat();
+      lines.push(
+        this.steveAbandoned
+          ? `Gotcha. ${STOLEN_NICK}!`
+          : again
+            ? `Gotcha. ${this.foe.name} again.`
+            : `Gotcha. ${this.foe.name}.`,
+      );
+      if (!this.steveAbandoned) markWildBeat();
       this.say(lines, "done");
       return;
     }
@@ -799,23 +913,253 @@ export class EncounterScene extends Phaser.Scene {
     this.say("Can't run!", "foe");
   }
 
+
+  private tryDeanBlow(lead: Line[]): boolean {
+    if (this.deanEvent || this.trainer?.id !== "br-dean") return false;
+    if (this.foe.hp <= 0 || this.foe.hp / this.foe.max > 0.55) return false;
+    this.deanEvent = true;
+    this.acts = [];
+    const dean = this.trainer.who;
+    const stolen = findStolenMon();
+    if (!stolen) {
+      this.foe.hp = 0;
+      this.foeBar?.setHp(0);
+      this.say(
+        [
+          ...lead,
+          { who: dean, text: "Blow yourself up. Don't care about you." },
+          `Foe ${this.foe.name} blew itself up!`,
+        ],
+        "deanBlowKo",
+      );
+      return true;
+    }
+    const who = monLabel(stolen);
+    this.say(
+      [
+        ...lead,
+        { who: dean, text: "Blow yourself up. Don't care about you." },
+        `Foe ${this.foe.name} starts shaking…`,
+        `${who} burst out of the bag!`,
+        `${who} slammed into ${dean}!`,
+        { who: dean, text: "Ow! Mad hedgehog—!" },
+        { who: dean, text: "Forget it. Keep your weird mons." },
+        `${dean} ran off.`,
+        `${who} is watching you.`,
+        `${who} might listen… if it feels like it.`,
+      ],
+      "deanFlee",
+    );
+    return true;
+  }
+
+  private finishDeanFlee(): void {
+    bondStolenMon();
+    if (this.trainer) beatTrainer(this.trainer.id);
+    const dosh = (this.trainer?.lv ?? 6) * 5;
+    takeCash(dosh);
+    this.done = true;
+    this.storeHp();
+    actorReact(this, this.trainerSpr, "loss");
+    if (this.trainerSpr) {
+      this.tweens.add({
+        targets: this.trainerSpr,
+        x: this.trainerSpr.x + 80,
+        alpha: 0,
+        duration: 500,
+        onComplete: () => {
+          this.trainerSpr?.destroy();
+          this.trainerSpr = undefined;
+        },
+      });
+    }
+    this.say([`Got £${dosh} dosh.`, "You won."], "done");
+  }
+
+  /** PRICKLES may jump in when a mate faints. */
+  private tryPricklesGuard(lead: Line[]): boolean {
+    const stolen = findStolenMon();
+    if (!stolen || !stolen.cheeky || stolen.stubborn) return false;
+    if (stolen.hp <= 0) return false;
+    const slot = run.party.indexOf(stolen);
+    if (slot < 0 || slot === this.meSlot) return false;
+    if (Math.random() > 0.55) return false;
+    const who = monLabel(stolen);
+    const fallen = this.me.name;
+    this.storeHp();
+    if (!setLead(stolen)) return false;
+    this.meSlot = run.lead;
+    this.mustSwitch = false;
+    this.me = makeBattler(stolen.id, stolen.lv, stolen.hp, stolen.moves, stolen.elem, stolen.nick);
+    const scrape = Math.max(1, Math.floor(this.me.max * 0.12));
+    this.me.hp = Math.max(1, this.me.hp - scrape);
+    stolen.hp = this.me.hp;
+    this.meSpr?.setTexture(monBattleKey(stolen.id));
+    this.meSpr?.clearTint();
+    if (stolen.elem) this.meSpr?.setTint(ELEM_TINT[stolen.elem]);
+    this.meSpr?.setAlpha(1);
+    this.meBar?.setMon(this.me.name, this.me.max, this.me.lv, this.me.hp, this.me.sta, this.me.staMax);
+    actorReact(this, this.kidSpr, "cheer");
+    this.say(
+      [
+        ...lead,
+        `${who} burst out of the bag!`,
+        `${who} shoved ${fallen} aside and braced!`,
+      ],
+      "menu",
+    );
+    return true;
+  }
+
+  private gymTaunt(wiped: boolean): string | undefined {
+    if (!this.trainer) return undefined;
+    if (wiped && this.trainer.wipe) return this.trainer.wipe;
+    // Gym wipe/taunt on faint still needs a prize; mid-fight uses pickTaunt.
+    if (wiped && !this.trainer.prize) return undefined;
+    if (!wiped && !this.trainer.prize && this.trainer.id !== STEVE_ID) return undefined;
+    return this.pickTaunt();
+  }
+
+  private pickTaunt(): string | undefined {
+    const pool = this.trainer?.taunt ?? [];
+    if (!pool.length) return undefined;
+    let i = Math.floor(Math.random() * pool.length);
+    if (pool.length > 1 && i === this.lastTaunt) i = (i + 1) % pool.length;
+    this.lastTaunt = i;
+    return pool[i];
+  }
+
+  /** Near-defeat window for Steve's bike theft — close, but not a KO. */
+  private nearDefeat(b: { hp: number; max: number }): boolean {
+    const r = b.hp / b.max;
+    return r > 0.18 && r <= 0.48;
+  }
+
+  private handleSteveBeat(lines: Line[], ko: boolean, victim: "me" | "foe"): boolean {
+    if (!this.trainer || this.trainer.id !== STEVE_ID || this.steveStolen) return false;
+    const jab = this.pickTaunt();
+    if (jab) lines.push({ who: this.trainer.who, text: jab });
+    const target = victim === "me" ? this.me : this.foe;
+    if (ko) {
+      target.hp = Math.max(1, Math.floor(target.max * 0.32));
+      if (victim === "me") this.meBar?.setHp(this.me.hp);
+      else this.foeBar?.setHp(this.foe.hp);
+    }
+    if (!(ko || this.nearDefeat(this.me) || this.nearDefeat(this.foe))) return false;
+    this.beginSteveTheft(lines);
+    return true;
+  }
+
+  private beginSteveTheft(lead: Line[]): void {
+    this.steveStolen = true;
+    this.acts = [];
+    const lines: Line[] = [
+      ...lead,
+      "Someone's nicking Steve's new bike!",
+      { who: STEVE_NAME, text: "OI! My bike! Come back you!" },
+      { who: STEVE_NAME, text: "Leave it — that's my new…" },
+    ];
+    this.say(lines, "steveTheft");
+  }
+
+  private playSteveTheft(): void {
+    this.steveBusy = true;
+    const thief = spawnBikeThief(this, -20, 96);
+    const trainer = this.trainerSpr;
+    this.tweens.add({
+      targets: thief,
+      x: GBA_W + 40,
+      duration: 1100,
+      ease: "Linear",
+      onComplete: () => thief.destroy(),
+    });
+    this.time.delayedCall(420, () => {
+      if (trainer) {
+        trainer.play(npcAnim(this.trainer?.look ?? "cap", "walk-side"));
+        this.tweens.add({
+          targets: trainer,
+          x: GBA_W + 50,
+          duration: 700,
+          ease: "Sine.easeIn",
+          onComplete: () => {
+            trainer.destroy();
+            this.trainerSpr = undefined;
+          },
+        });
+      }
+    });
+    this.time.delayedCall(1200, () => {
+      this.trainer = undefined;
+      this.steveAbandoned = true;
+      this.steveBusy = false;
+      this.say(
+        [
+          "Steve ran after the thief.",
+          "He left his Pompeymon behind.",
+          "You put down a kebab box.",
+        ],
+        "steveCatch",
+      );
+    });
+  }
+
+  private autoSteveCatch(): void {
+    if (run.party.length >= MAX_PARTY) {
+      this.done = true;
+      finishSteveCatch();
+      this.storeHp();
+      this.say(["No room in the party.", "The mon wandered off."], "done");
+      return;
+    }
+    if (run.kebabBoxes > 0) useKebabBox();
+    catchSpecies(this.foeId, this.foe.lv, { stubborn: true, nick: STOLEN_NICK });
+    finishSteveCatch();
+    this.done = true;
+    this.storeHp();
+    const lines: Line[] = [
+      "The smell got it. It crawled in.",
+      "You snapped the box shut.",
+    ];
+    if (!run.kebabCatch) {
+      run.kebabCatch = true;
+      lines.push({ who: "YOU", text: "Wow it actually worked." });
+    }
+    lines.push(`Gotcha. ${STOLEN_NICK}!`);
+    this.say(lines, "done");
+  }
+
   private faint(): void {
     this.storeHp();
     faintDrop(this, this.meSpr);
     actorReact(this, this.kidSpr, "loss");
     actorReact(this, this.activeTrainerSpr(), "cheer");
-    if (partyAlive()) {
+    const still = partyAlive();
+    const lines: Line[] = [`${this.me.name} fainted.`];
+    const jab = this.gymTaunt(!still);
+    if (jab && this.trainer) lines.push({ who: this.trainer.who, text: jab });
+    if (still) {
+      if (this.tryPricklesGuard(lines)) return;
       this.mustSwitch = true;
-      this.say([`${this.me.name} fainted.`, "Send out another."], "bag");
+      lines.push("Send out another.");
+      this.say(lines, "bag");
+      return;
+    }
+    if (this.trainer?.id === PAL_ID) {
+      this.done = true;
+      joinPal(false);
+      healParty();
+      lines.push("You lost.");
+      this.say(lines, "done");
       return;
     }
     this.done = true;
     run.whiteout = true;
-    this.say([`${this.me.name} fainted.`, "You blacked out."], "done");
+    lines.push("You blacked out.");
+    this.say(lines, "done");
   }
 
   private grantXp(): string[] {
-    const mine = partnerMon();
+    const mine = run.party[this.meSlot];
     if (!mine) return [];
     const gained = xpForKo(this.foe.lv, BATTLE[this.foe.id].exp, !!this.trainer);
     const grew = applyXp(mine, gained);
@@ -823,7 +1167,7 @@ export class EncounterScene extends Phaser.Scene {
   }
 
   private storeHp(): void {
-    const mine = partnerMon();
+    const mine = run.party[this.meSlot];
     if (mine) mine.hp = this.me.hp;
   }
 

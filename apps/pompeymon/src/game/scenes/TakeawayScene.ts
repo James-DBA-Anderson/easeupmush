@@ -21,6 +21,7 @@ import {
   type WalkKeys,
 } from "../walk";
 import { drawTakeaway, type TakeawayKind, type TakeawayLayout } from "../world/drawTakeaway";
+import { PalField } from "../world/pal";
 
 const CHIPPY: ShopStock[] = [
   { id: "chips", label: ITEM.chips.label, price: 4, stack: true, line: "Chip cone. EARTH if they eat it." },
@@ -41,6 +42,7 @@ export class TakeawayScene extends Phaser.Scene {
   private layout!: TakeawayLayout;
   private note?: MsgBox;
   private bagUi?: BagUi;
+  private pal!: PalField;
   private shop?: ShopMenu;
   private facing: Facing = "up";
   private flip = 1;
@@ -78,10 +80,11 @@ export class TakeawayScene extends Phaser.Scene {
     this.wasd = keys.wasd;
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
+    this.pal = new PalField(this, this.player, (line) => this.showNote(line));
     this.shop = new ShopMenu(
       this,
       this.kind === "chippy" ? CHIPPY : SPICE,
-      { cash: () => run.cash, onPick: (item) => this.buy(item) },
+      { cash: () => run.cash, onPick: (item, qty) => this.buy(item, qty) },
       this.kind === "chippy" ? "CHIPPY" : "SPICE",
     );
 
@@ -101,7 +104,7 @@ export class TakeawayScene extends Phaser.Scene {
 
     if (this.shop?.active) {
       this.player.body.setVelocity(0, 0);
-      this.shop.update(this.cursors, { W: this.wasd.W, S: this.wasd.S }, confirm, cancel);
+      this.shop.update(this.cursors, { W: this.wasd.W, A: this.wasd.A, S: this.wasd.S, D: this.wasd.D }, confirm, cancel);
       return;
     }
 
@@ -124,6 +127,7 @@ export class TakeawayScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
+    this.pal.tick(this.facing, this.flip);
 
     if (armSouthExit(this.player, this.cursors, this.wasd, this.southExit) && walkingInto(this.player, this.layout.door, "down")) {
       this.scene.start(this.from, { from: this.kind });
@@ -137,17 +141,21 @@ export class TakeawayScene extends Phaser.Scene {
     return this.kind === "chippy" ? "TERRY" : "RAJ";
   }
 
-  private buy(item: ShopStock): void {
-    if (run.cash < item.price) {
+  private buy(item: ShopStock, qty: number): void {
+    const n = Math.max(1, qty);
+    const cost = item.price * n;
+    if (run.cash < cost) {
       this.showNote({ who: this.clerk(), text: "Aint got the dosh." });
       return;
     }
-    run.cash -= item.price;
-    takeStack(item.id as "curry" | "doner" | "chips" | "fish");
-    this.showNote([{ who: this.clerk(), text: "There y'are." }, `Bought ${item.label}.`]);
+    run.cash -= cost;
+    takeStack(item.id as "curry" | "doner" | "chips" | "fish", n);
+    const got = n > 1 ? `Bought ${item.label} x${n}.` : `Bought ${item.label}.`;
+    this.showNote([{ who: this.clerk(), text: "There y'are." }, got]);
   }
 
   private tryExamine(): void {
+    if (this.pal.tryTalk()) return;
     if (near(this.player, this.layout.counter, 14)) {
       const line =
         this.kind === "chippy"

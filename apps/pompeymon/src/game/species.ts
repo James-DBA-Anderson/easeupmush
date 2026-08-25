@@ -25,7 +25,34 @@ export type WildId =
   | "starlimur"
   | "busstopper"
   | "chipgull"
-  | "donerrat";
+  | "donerrat"
+  | "kerbite"
+  | "honkace"
+  | "chalklur"
+  | "linelurker"
+  | "kitthief";
+
+/** One hidden hunt per wild region — not in the common street pool. */
+export const HIDDEN_MON: Record<string, WildId> = {
+  highstreet: "kerbite",
+  roundabout: "honkace",
+  hill: "chalklur",
+  island: "linelurker",
+  school: "kitthief",
+};
+
+export const HIDDEN_IDS = new Set<WildId>(Object.values(HIDDEN_MON));
+
+/** Street / early-route wilds. Regular trainers mostly use these. */
+export const COMMON_WILDS: WildId[] = [
+  "pidgeon",
+  "squirral",
+  "spikehedge",
+  "starlimur",
+  "busstopper",
+  "chipgull",
+  "donerrat",
+];
 
 export type SpeciesId = StarterId | WildId;
 
@@ -39,4 +66,9 @@ export const SPECIES: Record<SpeciesId, { name: string; kind: string }> = {
   spikehedge: { name: "SPIKEHEDGE", kind: "Rolls into a ball." },
   starlimur: { name: "STARLIMUR", kind: "Estate starling." },
   busstopper: { name: "BUSSTOPPER", kind: "Lives at the shelter." },
+  kerbite: { name: "KERBITE", kind: "Gutter bite." },
+  honkace: { name: "HONKACE", kind: "Wrong bird." },
+  chalklur: { name: "CHALKLUR", kind: "Pale as the hill." },
+  linelurker: { name: "LINELURKER", kind: "Keeps to the ditch." },
+  kitthief: { name: "KITTHIEF", kind: "Nicks kit." },
 };

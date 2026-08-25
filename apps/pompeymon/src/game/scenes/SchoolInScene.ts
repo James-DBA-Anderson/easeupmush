@@ -28,6 +28,7 @@ import {
   tickFieldNpcs,
   type FieldNpc,
 } from "../world/npcs";
+import { PalField } from "../world/pal";
 
 export class SchoolInScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -40,6 +41,7 @@ export class SchoolInScene extends Phaser.Scene {
   private flip = 1;
   private reaching = false;
   private npcs: FieldNpc[] = [];
+  private pal!: PalField;
 
   constructor() {
     super("schoolin");
@@ -66,6 +68,7 @@ export class SchoolInScene extends Phaser.Scene {
     this.wasd = keys.wasd;
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
+    this.pal = new PalField(this, this.player, (line) => this.showNote(line));
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
@@ -100,6 +103,7 @@ export class SchoolInScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
+    this.pal.tick(this.facing, this.flip);
     tickFieldNpcs(this, this.npcs);
     this.player.setDepth(this.player.y);
 
@@ -117,6 +121,7 @@ export class SchoolInScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
+    if (this.pal.tryTalk()) return;
     const person = npcNear(this.player, this.npcs);
     if (person) {
       if (startTrainerFight(this, person, "schoolin", this.player, this.npcs)) return;

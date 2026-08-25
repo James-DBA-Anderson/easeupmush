@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
-import { partnerMon, resumePos, returningTo, run } from "../run";
+import { ensureLeadAlive, resumePos, returningTo, run } from "../run";
 import { rollWildLv } from "../battle";
 import { kidAnim } from "../sprites/kid";
 import { SPECIES, type WildId } from "../species";
@@ -32,6 +32,7 @@ import {
 } from "../world/npcs";
 import { spawnAreaWilds, beginWildFight, leaveField, snapshotField, tickWanderers, wanderNear, type Wanderer } from "../world/wander";
 import { BikeField } from "../world/bike";
+import { PalField } from "../world/pal";
 
 export class RoundaboutScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -47,6 +48,7 @@ export class RoundaboutScene extends Phaser.Scene {
   private npcs: FieldNpc[] = [];
   private wanderers: Wanderer[] = [];
   private bikes!: BikeField;
+  private pal!: PalField;
 
   constructor() {
     super("roundabout");
@@ -88,6 +90,7 @@ export class RoundaboutScene extends Phaser.Scene {
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
+    this.pal = new PalField(this, this.player, (line) => this.showNote(line));
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
@@ -123,6 +126,7 @@ export class RoundaboutScene extends Phaser.Scene {
     this.facing = walked.facing;
     this.flip = walked.flip;
     this.bikes.tick();
+    this.pal.tick(this.facing, this.flip);
     tickFieldNpcs(this, this.npcs);
     tickWanderers(this, this.wanderers, this.player);
     this.player.setDepth(this.player.y);
@@ -173,7 +177,7 @@ export class RoundaboutScene extends Phaser.Scene {
       this.reachThen(`A ${SPECIES[wild].name}. Need a partner first.`);
       return;
     }
-    if ((partnerMon()?.hp ?? 0) <= 0) {
+    if ((ensureLeadAlive()?.hp ?? 0) <= 0) {
       this.reachThen("Your Pompeymon's out.");
       return;
     }
@@ -184,6 +188,7 @@ export class RoundaboutScene extends Phaser.Scene {
 
   private tryExamine(): void {
     if (this.bikes.tryExamine()) return;
+    if (this.pal.tryTalk()) return;
     const person = npcNear(this.player, this.npcs);
     if (person) {
       snapshotField(this.wanderers);

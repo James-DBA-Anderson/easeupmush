@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GBA_H, GBA_W } from "../constants";
+import { GBA_H, GBA_W, UI_DEPTH } from "../constants";
 import { consumeDir, isTouchUi } from "../touch";
 
 export type BattleOpt = "fight" | "bag" | "defend" | "dodge" | "run";
@@ -64,7 +64,7 @@ export class CatchMenu {
     hint.setOrigin(0, 1);
 
     this.root = scene.add.container(0, 0, [plate, this.cursor, ...lines, hint]);
-    this.root.setDepth(40);
+    this.root.setDepth(UI_DEPTH);
     this.root.setScrollFactor(0);
     this.root.setVisible(false);
   }

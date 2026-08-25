@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GBA_W } from "../constants";
-import { partnerMon, resumePos, returningTo, run } from "../run";
+import { ensureLeadAlive, resumePos, returningTo, run } from "../run";
 import { rollWildLv } from "../battle";
 import { kidAnim } from "../sprites/kid";
 import type { WildId } from "../species";
@@ -21,6 +21,7 @@ import {
 } from "../walk";
 import { drawSchool, type GrassZone, type SchoolLayout } from "../world/drawSchool";
 import { BikeField, grassOnBike } from "../world/bike";
+import { PalField } from "../world/pal";
 import {
   SCHOOL_NPCS,
   losTrainer,
@@ -57,6 +58,7 @@ export class SchoolScene extends Phaser.Scene {
   private npcs: FieldNpc[] = [];
   private from = "island";
   private bikes!: BikeField;
+  private pal!: PalField;
 
   constructor() {
     super("school");
@@ -76,7 +78,7 @@ export class SchoolScene extends Phaser.Scene {
 
     const returning = returningTo("school");
     const fallback = this.from === "schoolin" ? this.layout.spawnFromIn : this.layout.spawnFromRoad;
-    const spawn = resumePos("school", fallback);
+    const spawn = resumePos("school", fallback, this.from === "schoolin");
     this.facing = this.from === "schoolin" ? "down" : "side";
     this.flip = this.from === "schoolin" ? 1 : -1;
     this.player = spawnKid(this, spawn.x, spawn.y, { w: GBA_W, h: this.layout.mapH });
@@ -91,6 +93,7 @@ export class SchoolScene extends Phaser.Scene {
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
+    this.pal = new PalField(this, this.player, (line) => this.showNote(line));
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
@@ -126,6 +129,7 @@ export class SchoolScene extends Phaser.Scene {
     this.facing = walked.facing;
     this.flip = walked.flip;
     this.bikes.tick();
+    this.pal.tick(this.facing, this.flip);
     tickWanderers(this, this.wanderers, this.player);
     tickFieldNpcs(this, this.npcs);
     this.player.setDepth(this.player.y);
@@ -181,7 +185,7 @@ export class SchoolScene extends Phaser.Scene {
   }
 
   private startWild(wild: WildId, map?: Wanderer): void {
-    if ((partnerMon()?.hp ?? 0) <= 0) {
+    if ((ensureLeadAlive()?.hp ?? 0) <= 0) {
       this.reachThen("Your Pompeymon's out.");
       return;
     }
@@ -193,6 +197,7 @@ export class SchoolScene extends Phaser.Scene {
 
   private tryExamine(): void {
     if (this.bikes.tryExamine()) return;
+    if (this.pal.tryTalk()) return;
     const person = npcNear(this.player, this.npcs);
     if (person) {
       snapshotField(this.wanderers);

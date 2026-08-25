@@ -1,9 +1,10 @@
 import Phaser from "phaser";
-import { isBeaten, partnerMon, run, saveOverworld, type ItemId } from "../run";
+import { ensureLeadAlive, gymFoeMon, isBeaten, run, saveOverworld, trainerFoeMon, type ItemId } from "../run";
 import type { SpeciesId } from "../species";
 import { ensureNpcSheets, npcSheet, playNpc, type NpcLook } from "../sprites/npc";
 import type { Facing } from "../walk";
 import type { Line } from "../ui/MsgBox";
+import { palAside } from "./pal";
 
 export type TrainerMate = {
   name: string;
@@ -24,6 +25,12 @@ export type TrainerSpec = {
   need?: string;
   /** Item given on win (gym badge). */
   prize?: ItemId;
+  /** Gym leader lines when they KO your mon. */
+  taunt?: string[];
+  /** Gym leader line on whiteout. */
+  wipe?: string;
+  /** Extra mons for this trainer (gym leaders). Sent one after another. */
+  party?: { mon: SpeciesId; lv: number }[];
   /** Second trainer in a tag fight — their mon comes out after yours beats the first. */
   mate?: TrainerMate;
 };
@@ -174,11 +181,16 @@ export function npcTalk(npc: FieldNpc, npcs?: FieldNpc[]): Line | Line[] {
     Array.isArray(text)
       ? text.map((line) => ({ who: lead.name, text: line }))
       : { who: lead.name, text };
-  if (lead.trainer && isBeaten(lead.id)) return said(lead.trainer.after);
-  if (lead.trainer && !run.starter) return said("Get a Pompeymon first mush.");
-  if (lead.trainer?.need && !isBeaten(lead.trainer.need)) return said(lead.talk);
-  if (lead.intro && lead.trainer && !isBeaten(lead.id)) return lead.intro;
-  return said(lead.talk);
+  const withPal = (out: Line | Line[]): Line | Line[] => {
+    const extra = palAside(lead.id);
+    if (!extra) return out;
+    return [...(Array.isArray(out) ? out : [out]), extra];
+  };
+  if (lead.trainer && isBeaten(lead.id)) return withPal(said(lead.trainer.after));
+  if (lead.trainer && !run.starter) return withPal(said("Get a Pompeymon first mush."));
+  if (lead.trainer?.need && !isBeaten(lead.trainer.need)) return withPal(said(lead.talk));
+  if (lead.intro && lead.trainer && !isBeaten(lead.id)) return withPal(lead.intro);
+  return withPal(said(lead.talk));
 }
 
 export function startTrainerFight(
@@ -193,25 +205,37 @@ export function startTrainerFight(
   if (isBeaten(lead.id)) return false;
   if (lead.trainer.need && !isBeaten(lead.trainer.need)) return false;
   if (!run.starter) return false;
-  if ((partnerMon()?.hp ?? 0) <= 0) return false;
+  if ((ensureLeadAlive()?.hp ?? 0) <= 0) return false;
   saveOverworld(returnScene, pos);
   const mate = lead.trainer.mate;
+  const pick = lead.trainer.prize ? gymFoeMon : trainerFoeMon;
+  const taken: SpeciesId[] = [];
+  const mon = pick(lead.trainer.mon);
+  taken.push(mon);
+  const party = (lead.trainer.party ?? []).map((p) => {
+    const id = pick(p.mon, taken);
+    taken.push(id);
+    return { mon: id, lv: p.lv };
+  });
   scene.scene.start("encounter", {
     trainer: {
       id: lead.id,
       title: lead.trainer.title,
-      mon: lead.trainer.mon,
+      mon,
       lv: lead.trainer.lv,
       challenge: lead.trainer.challenge,
       win: lead.trainer.win,
       look: lead.look,
       who: lead.name,
       prize: lead.trainer.prize,
+      taunt: lead.trainer.taunt,
+      wipe: lead.trainer.wipe,
+      party: party.length ? party : undefined,
       mate: mate
         ? {
             who: mate.name,
             look: mate.look,
-            mon: mate.mon,
+            mon: pick(mate.mon, taken),
             lv: mate.lv,
             win: mate.win,
           }
@@ -224,7 +248,7 @@ export function startTrainerFight(
 /** True if Look should show intro chat then start the fight. */
 export function needsTrainerIntro(npc: FieldNpc, npcs: FieldNpc[]): boolean {
   const lead = trainerLead(npc, npcs);
-  return !!(lead.trainer && lead.intro && !isBeaten(lead.id) && run.starter && (partnerMon()?.hp ?? 0) > 0);
+  return !!(lead.trainer && lead.intro && !isBeaten(lead.id) && run.starter && (ensureLeadAlive()?.hp ?? 0) > 0);
 }
 
 export const HIGH_STREET_NPCS: NpcSpec[] = [
@@ -268,7 +292,10 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     y: 250,
     facing: "down",
     patrol: { x: 78, y: 230, w: 16, h: 50 },
-    talk: "You seen Steve mush? New bike. Cycles is down the street.",
+    talk: [
+      "You seen Steve mush? New bike. Cycles is down the street.",
+      "Chemist drain. I wouldn't.",
+    ],
   },
   {
     id: "hs-kay",
@@ -368,6 +395,7 @@ export const ROUNDABOUT_NPCS: NpcSpec[] = [
     talk: [
       "Give way. They never do.",
       "That's bang out of order mush.",
+      "Verge is loud after dark.",
     ],
   },
   {
@@ -412,14 +440,17 @@ export const BRIDGE_NPCS: NpcSpec[] = [
     y: 72,
     facing: "down",
     los: 40,
-    talk: "Over the island. That's Pompey mush.",
+    talk: [
+      "Over the island. That's Pompey mush.",
+      "These Pompeymon? Don't care about 'em. They're tools.",
+    ],
     trainer: {
       title: "YOUNGSTER DEAN",
       mon: "pidgeon",
       lv: 6,
-      challenge: "Let's see what Choke gave you mush.",
-      win: "Couldn't face the island anyway.",
-      after: "Go on. Pompey. I aint going over.",
+      challenge: "Don't care about mine. Don't care about yours. Battle.",
+      win: "Whatever. Keep walking.",
+      after: "Pompey. I aint going over. Don't care.",
     },
   },
 ];
@@ -516,7 +547,10 @@ export const SCHOOL_NPCS: NpcSpec[] = [
     x: 88,
     y: 80,
     facing: "down",
-    talk: "Gym's inside. Mr Atkins. Hilsea Badge.",
+    talk: [
+      "Gym's inside. Mr Atkins. Hilsea Badge.",
+      "Shed latch is off again.",
+    ],
   },
   {
     id: "sch-ryan",
@@ -660,13 +694,19 @@ export const SCHOOL_IN_NPCS: NpcSpec[] = [
       challenge: "Kit on. Hilsea Badge if you last.",
       win: "Don't skip PE.",
       after: "Badge is yours. Cross country next week.",
-      mate: {
-        name: "ATKINS",
-        look: "polo",
-        mon: "busstopper",
-        lv: 10,
-        win: "That's both of 'em.",
-      },
+      taunt: [
+        "That's PE. Don't squinny.",
+        "Kit's wet. You're wetter.",
+        "Is that it? Sit out.",
+        "Laps. You need laps mush.",
+        "Cross country would flatten you.",
+        "Don't cop. You fainted.",
+      ],
+      wipe: "Lab. Choke can mop you up.",
+      party: [
+        { mon: "starlimur", lv: 10 },
+        { mon: "busstopper", lv: 10 },
+      ],
     },
   },
 ];

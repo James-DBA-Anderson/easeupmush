@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GBA_W } from "../constants";
-import { cycleShopFront, furn, px, type Solid } from "./drawCommon";
+import { chippyFront, cycleShopFront, furn, px, spiceFront, type Solid } from "./drawCommon";
 
 export const HIGH_STREET_H = 480;
 
@@ -147,7 +147,7 @@ export function drawHighStreet(g: Phaser.GameObjects.Graphics): HighStreetLayout
 
   const centre = researchCentre(g, 8, 24);
   const centreDoor: Solid = { x: centre.x + centre.w - 14, y: centre.y + 36, w: 12, h: 28 };
-  const chippy = shopWest(g, 8, 108, 72, 48, C.brick, C.brickL, C.brickD, C.roof);
+  const chippy = chippyFront(g, 8, 108, 72, 48, true);
   const news = shopWest(g, 8, 160, 72, 48, C.cream, C.creamL, C.creamD, C.roof);
   const iceland = shopWest(g, 8, 280, 72, 52, C.navy, C.navyL, 0x1a2848, C.roof2);
   const chemistW = shopWest(g, 8, 340, 72, 48, C.pebble, C.creamL, C.creamD, C.roof);
@@ -158,7 +158,7 @@ export function drawHighStreet(g: Phaser.GameObjects.Graphics): HighStreetLayout
   const charity = shopEast(g, 156, 152, 76, 48, C.pebble, C.creamL, C.creamD, C.roof2);
   const pub = shopEast(g, 156, 280, 76, 52, C.brick, C.brickL, C.brickD, C.roof);
   const shut = shopEast(g, 156, 340, 76, 48, C.cream, C.creamL, C.creamD, C.roof);
-  const lastE = shopEast(g, 156, 396, 76, 48, C.navy, C.navyL, 0x1a2848, C.roof2);
+  const lastE = spiceFront(g, 156, 396, 76, 48, false);
 
   const spots: HighStreetSpot[] = [
     { at: centre, line: "Professor Choke's Pompeymon research centre." },

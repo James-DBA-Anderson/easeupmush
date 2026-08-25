@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GBA_H, GBA_W } from "../constants";
+import { GBA_H, GBA_W, UI_DEPTH } from "../constants";
 import { consumeDir, isTouchUi } from "../touch";
 import { bagLabel, eatFood, run, type ItemId, type PartyMon } from "../run";
 
@@ -54,7 +54,7 @@ export class FeedMenu {
       .setOrigin(0.5, 1);
 
     this.root = scene.add.container(0, 0, [dim, plate, this.title, this.cursor, hint]);
-    this.root.setDepth(44);
+    this.root.setDepth(UI_DEPTH + 2);
     this.root.setScrollFactor(0);
     this.root.setVisible(false);
   }

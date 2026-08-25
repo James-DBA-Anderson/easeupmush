@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
 import { run } from "../run";
 import { kidAnim } from "../sprites/kid";
-import { MsgBox } from "../ui/MsgBox";
+import { MsgBox, type Line } from "../ui/MsgBox";
 import { BagUi } from "../ui/BagUi";
 import {
   addWalls,
@@ -18,6 +18,7 @@ import {
 } from "../walk";
 import { isTouchUi } from "../touch";
 import { drawHall, type HallLayout } from "../world/drawHall";
+import { PalField } from "../world/pal";
 
 export class HallScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -26,6 +27,7 @@ export class HallScene extends Phaser.Scene {
   private layout!: HallLayout;
   private note?: MsgBox;
   private bagUi?: BagUi;
+  private pal!: PalField;
   private facing: Facing = "down";
   private flip = 1;
   private reaching = false;
@@ -69,6 +71,7 @@ export class HallScene extends Phaser.Scene {
     this.wasd = keys.wasd;
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
+    this.pal = new PalField(this, this.player, (line) => this.showNote(line));
 
     if (this.from === "kitchen-bye") this.meetFromKitchen();
 
@@ -111,6 +114,7 @@ export class HallScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
+    this.pal.tick(this.facing, this.flip);
 
     if (walkingInto(this.player, this.layout.kitchenDoor, "up")) {
       this.scene.start("kitchen");
@@ -172,6 +176,7 @@ export class HallScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
+    if (this.pal.tryTalk()) return;
     if (near(this.player, this.layout.stairFoot, 8) || near(this.player, this.layout.stairs, 6)) {
       this.scene.start("landing", { from: "hall" });
       return;
@@ -191,7 +196,7 @@ export class HallScene extends Phaser.Scene {
     });
   }
 
-  private showNote(text: string): void {
+  private showNote(text: string | Line | Line[]): void {
     this.note?.show(text);
   }
 }

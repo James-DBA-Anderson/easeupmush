@@ -5,10 +5,11 @@ import { attachAutosave } from "../save";
 import { ensureKidSheets, kidAnim, kidSheet, type OutfitId } from "../sprites/kid";
 import { ClothesMenu, type ClothesOption } from "../ui/ClothesMenu";
 import { BagUi } from "../ui/BagUi";
-import { MsgBox } from "../ui/MsgBox";
+import { MsgBox, type Line } from "../ui/MsgBox";
 import { isTouchUi } from "../touch";
 import { bindWalkKeys, justAction, justCancel, walkAxis, walkingInto, type WalkKeys } from "../walk";
 import { drawBedroom, type BedroomLayout } from "../world/drawBedroom";
+import { PalField } from "../world/pal";
 
 type Facing = "down" | "up" | "side";
 
@@ -25,6 +26,7 @@ export class BedroomScene extends Phaser.Scene {
   private outfit: OutfitId = "pj";
   private clothes!: ClothesMenu;
   private bagUi?: BagUi;
+  private pal!: PalField;
   private fromLanding = false;
 
   constructor() {
@@ -92,6 +94,7 @@ export class BedroomScene extends Phaser.Scene {
       onClose: () => this.showNote("Leave it."),
     });
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
+    this.pal = new PalField(this, this.player, (line) => this.showNote(line));
 
     this.time.delayedCall(400, () => {
       if (!skipWake) this.showNote("…2nd Avenue. Mum's downstairs.");
@@ -164,6 +167,7 @@ export class BedroomScene extends Phaser.Scene {
       this.playMove(this.idleKind());
     }
     this.player.setFlipX(this.flip < 0);
+    this.pal.tick(this.facing, this.flip);
 
     if (!this.busy && walkingInto(this.player, this.layout.door, "up")) {
       this.scene.start("landing", { from: "bedroom" });
@@ -222,6 +226,7 @@ export class BedroomScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
+    if (this.pal.tryTalk()) return;
     const p = this.player;
     const near = (s: { x: number; y: number; w: number; h: number }, pad = 12) =>
       p.x > s.x - pad && p.x < s.x + s.w + pad && p.y > s.y - pad && p.y < s.y + s.h + pad;
@@ -284,7 +289,7 @@ export class BedroomScene extends Phaser.Scene {
     });
   }
 
-  private showNote(text: string): void {
+  private showNote(text: string | Line | Line[]): void {
     this.note?.show(text);
   }
 }

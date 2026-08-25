@@ -22,6 +22,7 @@ import {
   type WalkKeys,
 } from "../walk";
 import { drawLab, type LabLayout } from "../world/drawLab";
+import { PalField, palAside } from "../world/pal";
 
 const choke = (text: string): Line => ({ who: "CHOKE", text });
 const you = (text: string): Line => ({ who: "YOU", text });
@@ -80,6 +81,7 @@ export class LabScene extends Phaser.Scene {
   private room!: Phaser.GameObjects.Image;
   private note?: MsgBox;
   private bagUi?: BagUi;
+  private pal!: PalField;
   private menu!: StarterMenu;
   private facing: Facing = "up";
   private flip = 1;
@@ -107,6 +109,7 @@ export class LabScene extends Phaser.Scene {
     this.wasd = keys.wasd;
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
+    this.pal = new PalField(this, this.player, (line) => this.showNote(line));
     this.menu = new StarterMenu(this, { onPick: (opt) => this.picked(opt.id) });
 
     if (consumeWhiteout()) {
@@ -171,6 +174,7 @@ export class LabScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
+    this.pal.tick(this.facing, this.flip);
 
     if (armSouthExit(this.player, this.cursors, this.wasd, this.southExit) && walkingInto(this.player, this.layout.door, "down")) {
       if (!run.starter) {
@@ -195,6 +199,7 @@ export class LabScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
+    if (this.pal.tryTalk()) return;
     if (!hasChomp() && near(this.player, this.layout.chomp, 10)) {
       this.findChomp();
       return;
@@ -250,12 +255,15 @@ export class LabScene extends Phaser.Scene {
       return;
     }
     if (run.starter) {
+      const extra = palAside("lab-choke");
       if (partyNeedsHeal()) {
         healParty();
-        this.reachThen(PATCH);
+        this.reachThen(extra ? [...PATCH, extra] : PATCH);
         return;
       }
-      this.reachThen(choke("Kebab boxes. Throw 'em. That's catching."));
+      this.reachThen(
+        extra ? [choke("Kebab boxes. Throw 'em. That's catching."), extra] : choke("Kebab boxes. Throw 'em. That's catching."),
+      );
       return;
     }
     if (run.refusedStarters) {

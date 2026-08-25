@@ -1,6 +1,6 @@
 import Phaser from "phaser";
-import { GBA_H, GBA_W } from "../constants";
-import { bagEntries, bagLabel, bagLine, battleBagEntries, isFood, run, syncBagChrome, type BagEntry } from "../run";
+import { GBA_H, GBA_W, UI_DEPTH } from "../constants";
+import { bagEntries, bagLabel, bagLine, battleBagEntries, isFood, monLabel, persistRun, run, setLead, syncBagChrome, type BagEntry } from "../run";
 import { consumeBag, consumeDir, isTouchUi } from "../touch";
 import { mountDebugBack } from "./debugBack";
 import { FeedMenu } from "./FeedMenu";
@@ -60,7 +60,7 @@ export class BagMenu {
     const hint = scene.add
       .text(GBA_W / 2, y + BAG_H - 10, this.battle
           ? isTouchUi() ? "LOOK  PICK    BACK" : "SPACE  PICK    ESC  BACK"
-          : isTouchUi() ? "LOOK  SEE    BACK" : "SPACE  SEE    ESC  BACK", {
+          : isTouchUi() ? "LOOK  PICK    BACK" : "SPACE  PICK    ESC  BACK", {
         fontFamily: '"Press Start 2P", monospace',
         fontSize: "6px",
         color: "#8aa3b0",
@@ -68,7 +68,7 @@ export class BagMenu {
       .setOrigin(0.5, 1);
 
     this.root = scene.add.container(0, 0, [dim, plate, title, this.cursor, this.empty, hint]);
-    this.root.setDepth(42);
+    this.root.setDepth(UI_DEPTH);
     this.root.setScrollFactor(0);
     this.root.setVisible(false);
   }
@@ -201,6 +201,23 @@ export class BagUi {
   constructor(scene: Phaser.Scene, onItem: (line: string) => void) {
     this.menu = new BagMenu(scene, {
       onPick: (entry) => {
+        if (entry.kind === "mon") {
+          if (entry.mon.hp <= 0) {
+            onItem("It's out.");
+            return;
+          }
+          if (run.party[run.lead] === entry.mon) {
+            onItem(bagLine(entry));
+            return;
+          }
+          if (!setLead(entry.mon)) {
+            onItem("It's out.");
+            return;
+          }
+          persistRun();
+          onItem(`${monLabel(entry.mon)} is your lead.`);
+          return;
+        }
         if (entry.kind === "item" && isFood(entry.id)) {
           if (!run.party.length) {
             onItem("Need a Pompeymon.");
@@ -216,7 +233,7 @@ export class BagUi {
     this.icon = scene.add.graphics();
     paintBagIcon(this.icon);
     this.icon.setPosition(ICON_X, ICON_Y);
-    this.icon.setDepth(41);
+    this.icon.setDepth(UI_DEPTH - 1);
     this.icon.setScrollFactor(0);
     scene.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       if (!run.hasBag || !this.icon.visible) return;

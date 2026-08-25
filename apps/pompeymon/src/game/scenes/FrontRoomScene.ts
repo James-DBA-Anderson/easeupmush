@@ -19,6 +19,7 @@ import {
 } from "../walk";
 import { isTouchUi } from "../touch";
 import { drawFrontRoom, type FrontRoomLayout } from "../world/drawFrontRoom";
+import { PalField } from "../world/pal";
 
 const SLEEP_TALK: string[] = [
   "Hic, no, no, no... hic.",
@@ -33,6 +34,7 @@ export class FrontRoomScene extends Phaser.Scene {
   private layout!: FrontRoomLayout;
   private note?: MsgBox;
   private bagUi?: BagUi;
+  private pal!: PalField;
   private facing: Facing = "side";
   private flip = 1;
   private reaching = false;
@@ -62,6 +64,7 @@ export class FrontRoomScene extends Phaser.Scene {
     this.wasd = keys.wasd;
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
+    this.pal = new PalField(this, this.player, (line) => this.showNote(line));
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
@@ -96,6 +99,7 @@ export class FrontRoomScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
+    this.pal.tick(this.facing, this.flip);
 
     if (walkingInto(this.player, this.layout.door, "left")) {
       this.scene.start("hall", { from: "frontroom" });
@@ -106,6 +110,7 @@ export class FrontRoomScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
+    if (this.pal.tryTalk()) return;
     if (near(this.player, this.layout.dad, 12) || near(this.player, this.layout.sofa, 10)) {
       this.talkDad();
       return;

@@ -1,7 +1,8 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
-import { partnerMon, resumePos, run } from "../run";
-import { SPECIES } from "../species";
+import { ensureLeadAlive, partnerMon, resumePos, returningTo, run } from "../run";
+import { rollWildLv } from "../battle";
+import { SPECIES, type WildId } from "../species";
 import { kidAnim } from "../sprites/kid";
 import { BagUi } from "../ui/BagUi";
 import { MsgBox, type Line } from "../ui/MsgBox";
@@ -20,7 +21,16 @@ import {
 } from "../walk";
 import { drawHill, type HillLayout } from "../world/drawHill";
 import { BikeField } from "../world/bike";
+import { PalField, palAside } from "../world/pal";
 import { HILL_NPCS, npcNear, npcTalk, spawnFieldNpcs, tickFieldNpcs, type FieldNpc } from "../world/npcs";
+import {
+  beginWildFight,
+  leaveField,
+  spawnAreaWilds,
+  tickWanderers,
+  wanderNear,
+  type Wanderer,
+} from "../world/wander";
 
 const nan = (text: string): Line => ({ who: "NAN", text });
 const you = (text: string): Line => ({ who: "YOU", text });
@@ -36,7 +46,9 @@ export class HillScene extends Phaser.Scene {
   private flip = 1;
   private reaching = false;
   private npcs: FieldNpc[] = [];
+  private wanderers: Wanderer[] = [];
   private bikes!: BikeField;
+  private pal!: PalField;
 
   constructor() {
     super("hill");
@@ -50,10 +62,12 @@ export class HillScene extends Phaser.Scene {
     art.destroy();
     this.add.image(0, 0, "hill").setOrigin(0);
 
+    const returning = returningTo("hill");
     const spawn = resumePos("hill", this.layout.spawn);
     this.player = spawnKid(this, spawn.x, spawn.y);
     const specs = HILL_NPCS.filter((n) => !(n.id === "hill-view" && run.hillNanGone));
     this.npcs = spawnFieldNpcs(this, specs);
+    this.wanderers = spawnAreaWilds(this, "hill", returning);
     addWalls(this, this.player, this.layout.solids);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
@@ -61,6 +75,7 @@ export class HillScene extends Phaser.Scene {
     this.note = new MsgBox(this);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
+    this.pal = new PalField(this, this.player, (line) => this.showNote(line));
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
@@ -96,10 +111,23 @@ export class HillScene extends Phaser.Scene {
     this.facing = walked.facing;
     this.flip = walked.flip;
     this.bikes.tick();
+    this.pal.tick(this.facing, this.flip);
     tickFieldNpcs(this, this.npcs);
+    tickWanderers(this, this.wanderers, this.player);
     this.player.setDepth(this.player.y);
 
+    const moving = this.player.body.velocity.x !== 0 || this.player.body.velocity.y !== 0;
+    const bumped = wanderNear(this.player, this.wanderers);
+    if (moving) {
+      if (run.grassCalm > 0) run.grassCalm -= 1;
+      else if (bumped && run.starter) {
+        this.startWild(bumped.id, bumped);
+        return;
+      }
+    }
+
     if (atSouthEdge(this.player)) {
+      leaveField("hill");
       this.scene.start("roundabout", { from: "hill" });
       return;
     }
@@ -108,11 +136,31 @@ export class HillScene extends Phaser.Scene {
     if (confirm) this.tryExamine();
   }
 
+  private startWild(wild: WildId, map?: Wanderer): void {
+    if (!run.starter) {
+      this.reachThen(`A ${SPECIES[wild].name}. Need a partner first.`);
+      return;
+    }
+    if ((ensureLeadAlive()?.hp ?? 0) <= 0) {
+      this.reachThen("Your Pompeymon's out.");
+      return;
+    }
+    run.grassCalm = 28;
+    beginWildFight("hill", { x: this.player.x, y: this.player.y }, this.wanderers, map);
+    this.scene.start("encounter", { wild, lv: map?.lv ?? rollWildLv(6, 8) });
+  }
+
   private tryExamine(): void {
     if (this.bikes.tryExamine()) return;
+    if (this.pal.tryTalk()) return;
     const person = npcNear(this.player, this.npcs);
     if (person) {
       this.reachThen(person.id === "hill-view" ? this.hillNanTalk() : npcTalk(person));
+      return;
+    }
+    const wild = wanderNear(this.player, this.wanderers);
+    if (wild) {
+      this.startWild(wild.id, wild);
       return;
     }
     if (near(this.player, this.layout.van, 10)) {
@@ -134,6 +182,7 @@ export class HillScene extends Phaser.Scene {
     const name = mon ? SPECIES[mon.id].name : "Pompeymon";
     const lv = mon?.lv ?? 5;
     run.hillNanGone = true;
+    const extra = palAside("hill-view");
     return [
       nan("I see you have your first Pompeymon."),
       you("How did you know, lady?"),
@@ -145,6 +194,7 @@ export class HillScene extends Phaser.Scene {
       you("Oh..."),
       nan("Oh don't give up yet. Ask Choke about his training dungeon."),
       you("Err. OK, lady. Thanks, I think."),
+      ...(extra ? [extra] : []),
     ];
   }
 

@@ -41,7 +41,7 @@ const AREAS: DebugArea[] = [
   { label: "CHARITY", scene: "junkshop", data: { kind: "charity", from: "highstreet" }, starter: true, steveGone: true },
   { label: "PAWN", scene: "junkshop", data: { kind: "pawn", from: "highstreet" }, starter: true, steveGone: true },
   { label: "CHIPPY", scene: "takeaway", data: { kind: "chippy", from: "highstreet" }, starter: true, steveGone: true },
-  { label: "HILSEA", scene: "island", starter: true, steveGone: true },
+  { label: "HILSEA", scene: "island", starter: true, steveGone: true, data: { from: "debug" } },
   { label: "SCHOOL", scene: "school", starter: true, steveGone: true },
   { label: "SCHOOL IN", scene: "schoolin", starter: true, steveGone: true },
 ];
@@ -314,6 +314,10 @@ export class DebugScene extends Phaser.Scene {
     run.chompKept = false;
     run.hillNanGone = false;
     run.lockChored = false;
+    run.mumRentPaid = false;
+    run.palJoined = false;
+    run.palWon = false;
+    run.palGreeted = false;
     run.cash = 200;
     run.mounted = false;
     run.parked = null;

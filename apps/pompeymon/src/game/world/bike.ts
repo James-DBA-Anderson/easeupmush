@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GBA_W } from "../constants";
-import { persistRun, run, takeItem } from "../run";
+import { persistRun, run, saveOverworld, takeItem } from "../run";
 import { ensureBikeArt } from "../sprites/bike";
 import { ensureNpcSheets, npcAnim, npcSheet } from "../sprites/npc";
 import { isTouchUi } from "../touch";
@@ -64,8 +64,9 @@ export class BikeField {
     return true;
   }
 
-  /** Park here if riding into a building. */
+  /** Park here if riding into a building. Always stamp the door so leaving does not use a stale street save. */
   stashIndoor(): void {
+    saveOverworld(this.key, { x: this.player.x, y: this.player.y });
     if (!run.mounted) return;
     this.dismount();
   }
