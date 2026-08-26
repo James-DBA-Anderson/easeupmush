@@ -33,6 +33,12 @@ export type TrainerSpec = {
   party?: { mon: SpeciesId; lv: number }[];
   /** Second trainer in a tag fight — their mon comes out after yours beats the first. */
   mate?: TrainerMate;
+  /** When Jess is with you — gym leader clocks their shared past (battle open). */
+  palPast?: string[];
+  /** Win line when Jess is there (instead of / after win). */
+  palWin?: string;
+  /** Overworld line when Jess is with you (before/around the fight). */
+  palTalk?: string | string[];
 };
 
 export type NpcSpec = {
@@ -188,8 +194,12 @@ export function npcTalk(npc: FieldNpc, npcs?: FieldNpc[]): Line | Line[] {
   };
   if (lead.trainer && isBeaten(lead.id)) return withPal(said(lead.trainer.after));
   if (lead.trainer && !run.starter) return withPal(said("Get a Pompeymon first mush."));
-  if (lead.trainer?.need && !isBeaten(lead.trainer.need)) return withPal(said(lead.talk));
+  if (lead.trainer?.need && !isBeaten(lead.trainer.need)) {
+    if (run.palJoined && lead.trainer.palTalk) return withPal(said(lead.trainer.palTalk));
+    return withPal(said(lead.talk));
+  }
   if (lead.intro && lead.trainer && !isBeaten(lead.id)) return withPal(lead.intro);
+  if (run.palJoined && lead.trainer?.palTalk && lead.trainer.prize) return withPal(said(lead.trainer.palTalk));
   return withPal(said(lead.talk));
 }
 
@@ -230,6 +240,8 @@ export function startTrainerFight(
       prize: lead.trainer.prize,
       taunt: lead.trainer.taunt,
       wipe: lead.trainer.wipe,
+      palPast: lead.trainer.palPast,
+      palWin: lead.trainer.palWin,
       party: party.length ? party : undefined,
       mate: mate
         ? {
@@ -694,6 +706,15 @@ export const SCHOOL_IN_NPCS: NpcSpec[] = [
       challenge: "Kit on. Hilsea Badge if you last.",
       win: "Don't skip PE.",
       after: "Badge is yours. Cross country next week.",
+      palTalk: [
+        "Jess. Still owes me three laps.",
+        "Stevie J first. Then PE. She knows.",
+      ],
+      palPast: [
+        "Jess. Back for another go.",
+        "Rain. Laps. She sat on the wall and swore she'd bring someone better.",
+      ],
+      palWin: "Tell Jess PE's still wet. You weren't.",
       taunt: [
         "That's PE. Don't squinny.",
         "Kit's wet. You're wetter.",

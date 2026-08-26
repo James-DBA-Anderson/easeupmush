@@ -1,26 +1,46 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W, UI_DEPTH } from "../constants";
-import { bagEntries, bagLabel, bagLine, battleBagEntries, isFood, monLabel, persistRun, run, setLead, syncBagChrome, type BagEntry } from "../run";
+import {
+  bagLabel,
+  bagLine,
+  bagMons,
+  bagPockets,
+  battleBagMons,
+  battleBagPockets,
+  isFood,
+  run,
+  syncBagChrome,
+  type BagEntry,
+} from "../run";
 import { consumeBag, consumeDir, isTouchUi } from "../touch";
 import { mountDebugBack } from "./debugBack";
 import { FeedMenu } from "./FeedMenu";
+import { MonDetail } from "./MonDetail";
+import type { Line } from "./MsgBox";
+import { canScan, PompdexEntry } from "./Pompdex";
+import type { SpeciesId } from "../species";
 
 type BagCallbacks = {
   onPick: (entry: BagEntry) => void;
 };
 
+type Pocket = "mons" | "pockets";
+
 const BAG_W = 216;
-const BAG_H = 112;
+const BAG_H = 120;
 const ROW = 12;
 const VISIBLE = 5;
-const LIST_Y = 28;
+const LIST_Y = 36;
 
-/** FireRed-style bag: items, then owned Pompeymon. */
+/** FireRed-style bag: MONS main, POCKETS for items. Left/right switches. */
 export class BagMenu {
   private root: Phaser.GameObjects.Container;
+  private title: Phaser.GameObjects.Text;
+  private tabs: Phaser.GameObjects.Text;
   private cursor: Phaser.GameObjects.Text;
   private lines: Phaser.GameObjects.Text[] = [];
   private empty: Phaser.GameObjects.Text;
+  private pocket: Pocket = "mons";
   private index = 0;
   private scroll = 0;
   private open = false;
@@ -37,11 +57,19 @@ export class BagMenu {
     const plate = scene.add.rectangle(GBA_W / 2, GBA_H / 2 - 8, BAG_W, BAG_H, 0x1a1814, 1);
     plate.setStrokeStyle(2, 0xf0a23a);
 
-    const title = scene.add
-      .text(GBA_W / 2, y + 8, "BAG", {
+    this.title = scene.add
+      .text(GBA_W / 2, y + 6, "BAG", {
         fontFamily: '"Press Start 2P", monospace',
         fontSize: "8px",
         color: "#f0a23a",
+      })
+      .setOrigin(0.5, 0);
+
+    this.tabs = scene.add
+      .text(GBA_W / 2, y + 18, "", {
+        fontFamily: '"Press Start 2P", monospace',
+        fontSize: "6px",
+        color: "#c8e0a8",
       })
       .setOrigin(0.5, 0);
 
@@ -51,23 +79,26 @@ export class BagMenu {
       color: "#f2e6d0",
     });
 
-    this.empty = scene.add.text(x + 22, y + LIST_Y, this.battle ? "Nothing." : "Empty.", {
+    this.empty = scene.add.text(x + 22, y + LIST_Y, "Empty.", {
       fontFamily: '"Press Start 2P", monospace',
       fontSize: "8px",
       color: "#8aa3b0",
     });
 
     const hint = scene.add
-      .text(GBA_W / 2, y + BAG_H - 10, this.battle
-          ? isTouchUi() ? "LOOK  PICK    BACK" : "SPACE  PICK    ESC  BACK"
-          : isTouchUi() ? "LOOK  PICK    BACK" : "SPACE  PICK    ESC  BACK", {
-        fontFamily: '"Press Start 2P", monospace',
-        fontSize: "6px",
-        color: "#8aa3b0",
-      })
+      .text(
+        GBA_W / 2,
+        y + BAG_H - 8,
+        isTouchUi() ? "LOOK  PICK   <>  POCKET   BACK" : "SPACE  PICK   <>  POCKET   ESC",
+        {
+          fontFamily: '"Press Start 2P", monospace',
+          fontSize: "6px",
+          color: "#8aa3b0",
+        },
+      )
       .setOrigin(0.5, 1);
 
-    this.root = scene.add.container(0, 0, [dim, plate, title, this.cursor, this.empty, hint]);
+    this.root = scene.add.container(0, 0, [dim, plate, this.title, this.tabs, this.cursor, this.empty, hint]);
     this.root.setDepth(UI_DEPTH);
     this.root.setScrollFactor(0);
     this.root.setVisible(false);
@@ -79,6 +110,7 @@ export class BagMenu {
 
   show(): void {
     this.open = true;
+    this.pocket = "mons";
     this.index = 0;
     this.scroll = 0;
     this.refresh();
@@ -92,11 +124,27 @@ export class BagMenu {
 
   update(
     cursors: Phaser.Types.Input.Keyboard.CursorKeys,
-    wasd: Record<"W" | "S", Phaser.Input.Keyboard.Key>,
+    wasd: Record<"W" | "A" | "S" | "D", Phaser.Input.Keyboard.Key>,
     confirm: boolean,
     cancel: boolean,
   ): void {
     if (!this.open) return;
+    if (
+      Phaser.Input.Keyboard.JustDown(cursors.left) ||
+      Phaser.Input.Keyboard.JustDown(wasd.A) ||
+      consumeDir("left")
+    ) {
+      this.switchPocket("mons");
+      return;
+    }
+    if (
+      Phaser.Input.Keyboard.JustDown(cursors.right) ||
+      Phaser.Input.Keyboard.JustDown(wasd.D) ||
+      consumeDir("right")
+    ) {
+      this.switchPocket("pockets");
+      return;
+    }
     const entries = this.list();
     const n = entries.length;
     if (n > 1) {
@@ -128,8 +176,19 @@ export class BagMenu {
     if (cancel) this.hide();
   }
 
+  private switchPocket(next: Pocket): void {
+    if (this.pocket === next) return;
+    this.pocket = next;
+    this.index = 0;
+    this.scroll = 0;
+    this.refresh();
+  }
+
   private list(): BagEntry[] {
-    return this.battle ? battleBagEntries() : bagEntries();
+    if (this.battle) {
+      return this.pocket === "mons" ? battleBagMons() : battleBagPockets();
+    }
+    return this.pocket === "mons" ? bagMons() : bagPockets();
   }
 
   private keepVisible(): void {
@@ -143,8 +202,12 @@ export class BagMenu {
     const scene = this.root.scene;
     const x = (GBA_W - BAG_W) / 2;
     const y = (GBA_H - BAG_H) / 2 - 8;
+    const onMons = this.pocket === "mons";
+    this.tabs.setText(onMons ? "> MONS   pockets" : "  mons   > POCKETS");
+    this.tabs.setColor(onMons ? "#c8e0a8" : "#e8d0a0");
     const entries = this.list();
     if (entries.length === 0) {
+      this.empty.setText(onMons ? (this.battle ? "No Pompeymon." : "No Pompeymon.") : "Pockets empty.");
       this.empty.setVisible(true);
       this.cursor.setVisible(false);
       return;
@@ -194,42 +257,49 @@ const ICON_H = 16;
 export class BagUi {
   readonly menu: BagMenu;
   private readonly feed: FeedMenu;
+  private readonly detail: MonDetail;
+  private readonly pompdex: PompdexEntry;
+  private readonly onSay: (msg: Line | Line[]) => void;
   private readonly icon: Phaser.GameObjects.Graphics;
   private readonly keyI: Phaser.Input.Keyboard.Key;
   private pointerUsed = false;
 
-  constructor(scene: Phaser.Scene, onItem: (line: string) => void) {
+  constructor(scene: Phaser.Scene, onSay: (msg: Line | Line[]) => void) {
+    this.onSay = onSay;
     this.menu = new BagMenu(scene, {
       onPick: (entry) => {
         if (entry.kind === "mon") {
-          if (entry.mon.hp <= 0) {
-            onItem("It's out.");
+          this.detail.show(entry.mon);
+          return;
+        }
+        if (entry.kind === "item" && entry.id === "pompdex") {
+          if (!run.seen.length) {
+            onSay(["Pompdex empty.", "Look near a wild Pompeymon to scan."]);
             return;
           }
-          if (run.party[run.lead] === entry.mon) {
-            onItem(bagLine(entry));
-            return;
-          }
-          if (!setLead(entry.mon)) {
-            onItem("It's out.");
-            return;
-          }
-          persistRun();
-          onItem(`${monLabel(entry.mon)} is your lead.`);
+          const last = run.seen[run.seen.length - 1]!;
+          this.pompdex.show(last);
           return;
         }
         if (entry.kind === "item" && isFood(entry.id)) {
           if (!run.party.length) {
-            onItem("Need a Pompeymon.");
+            onSay("Need a Pompeymon.");
             return;
           }
           this.feed.show(entry.id);
           return;
         }
-        onItem(bagLine(entry));
+        onSay(bagLine(entry));
       },
     });
-    this.feed = new FeedMenu(scene, { onDone: (line) => onItem(line) });
+    this.feed = new FeedMenu(scene, { onDone: (line) => onSay(line) });
+    this.detail = new MonDetail(scene, {
+      onSay,
+      onClose: () => {
+        /* stay in overworld; bag already closed */
+      },
+    });
+    this.pompdex = new PompdexEntry(scene);
     this.icon = scene.add.graphics();
     paintBagIcon(this.icon);
     this.icon.setPosition(ICON_X, ICON_Y);
@@ -247,11 +317,29 @@ export class BagUi {
     mountDebugBack(scene);
   }
 
+  /** Look near a wild — open Pompdex page and mark seen. */
+  scanWild(id: SpeciesId): boolean {
+    if (!canScan()) {
+      this.onSay("Need a Pompdex.");
+      return false;
+    }
+    this.pompdex.show(id);
+    return true;
+  }
+
   private hitIcon(pointer: Phaser.Input.Pointer): boolean {
     return pointer.x >= ICON_X - 2 && pointer.x < ICON_X + ICON_W + 2 && pointer.y >= ICON_Y - 2 && pointer.y < ICON_Y + ICON_H + 2;
   }
 
   private toggle(): void {
+    if (this.pompdex.active) {
+      this.pompdex.hide();
+      return;
+    }
+    if (this.detail.active) {
+      this.detail.hide();
+      return;
+    }
     if (this.menu.active) this.menu.hide();
     else this.menu.show();
   }
@@ -263,7 +351,7 @@ export class BagUi {
   }
 
   get busy(): boolean {
-    return this.menu.active || this.feed.active;
+    return this.menu.active || this.feed.active || this.detail.active || this.pompdex.active;
   }
 
   sync(): void {
@@ -275,11 +363,19 @@ export class BagUi {
   /** True if the bag ate this frame (menu open or just toggled). */
   update(
     cursors: Phaser.Types.Input.Keyboard.CursorKeys,
-    wasd: Record<"W" | "S", Phaser.Input.Keyboard.Key>,
+    wasd: Record<"W" | "A" | "S" | "D", Phaser.Input.Keyboard.Key>,
     confirm: boolean,
     cancel: boolean,
   ): boolean {
     this.sync();
+    if (this.pompdex.active) {
+      this.pompdex.update(confirm, cancel);
+      return true;
+    }
+    if (this.detail.active) {
+      this.detail.update(cursors, { W: wasd.W, S: wasd.S }, confirm, cancel);
+      return true;
+    }
     const toggle =
       run.hasBag && (Phaser.Input.Keyboard.JustDown(this.keyI) || consumeBag());
     if (toggle) {

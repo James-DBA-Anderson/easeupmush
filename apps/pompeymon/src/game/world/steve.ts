@@ -3,6 +3,7 @@ import { beatTrainer, isBeaten, persistRun, run, saveOverworld } from "../run";
 import type { Line } from "../ui/MsgBox";
 import { ensureNpcSheets, npcAnim, npcSheet, type NpcLook } from "../sprites/npc";
 import { ensureSteve, steveSheet } from "../sprites/steve";
+import { ensureBikeArt } from "../sprites/bike";
 
 export const STEVE_ID = "hs-steve";
 export const STEVE_NAME = "STEVE";
@@ -10,6 +11,9 @@ export const STEVE_LOOK: NpcLook = "cap";
 /** Strong mon he abandons when the bike gets chored. */
 export const STEVE_MON = "spikehedge" as const;
 export const STEVE_LV = 9;
+
+/** Parked bike spot in the Steve battle (near the trainer). */
+export const STEVE_BIKE = { x: 200, y: 118 };
 
 const steve = (text: string): Line => ({ who: STEVE_NAME, text });
 const you = (text: string): Line => ({ who: "YOU", text });
@@ -86,8 +90,18 @@ export function spawnBikeThief(
   ensureNpcSheets(scene);
   const spr = scene.add.sprite(x, y, npcSheet("hoodie"), "walk-side");
   spr.setOrigin(0.5, 1);
-  spr.setDepth(3);
+  spr.setDepth(5);
   spr.setScale(2);
   spr.play(npcAnim("hoodie", "walk-side"));
   return spr;
+}
+
+/** Steve's parked BMX — visible in the fight until it's chored. */
+export function spawnSteveBattleBike(scene: Phaser.Scene): Phaser.GameObjects.Image {
+  ensureBikeArt(scene);
+  return scene.add
+    .image(STEVE_BIKE.x, STEVE_BIKE.y, "bike-park")
+    .setScale(2)
+    .setOrigin(0.5, 1)
+    .setDepth(3);
 }

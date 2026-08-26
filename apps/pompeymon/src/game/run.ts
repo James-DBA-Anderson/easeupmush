@@ -30,7 +30,8 @@ export type ItemId =
   | "curry"
   | "doner"
   | "chips"
-  | "fish";
+  | "fish"
+  | "empty";
 export type StarterId = "scabfox" | "chipgull" | "moggit" | "donerrat";
 
 export type PartyMon = {
@@ -58,7 +59,7 @@ export const ITEM: Record<ItemId, { label: string; line: string; heal?: boolean 
     label: "CHOKE FLYER",
     line: "Professor Choke's. New trainers wanted.",
   },
-  pompdex: { label: "POMPDEX", line: "Head to Pompey. Catch Pompeymon." },
+  pompdex: { label: "POMPDEX", line: "Look near a wild to scan. Catch to finish the entry." },
   kebab: { label: "KEBAB BOX", line: "Choke's kebab boxes. Put one down when they're weak." },
   chomp: { label: "CHOMP BAR", line: "Choke's Chomp. Restores HP.", heal: true },
   hilsea: { label: "HILSEA BADGE", line: "Hilsea Badge. Mr Atkins. First gym." },
@@ -74,6 +75,7 @@ export const ITEM: Record<ItemId, { label: string; line: string; heal?: boolean 
   doner: { label: "DONER KEBAB", line: "Doner. Makes them POISON." },
   chips: { label: "CHIP CONE", line: "Chips. Makes them EARTH." },
   fish: { label: "BATTERED FISH", line: "Battered fish. Makes them WATER." },
+  empty: { label: "EMPTY TAKEAWAY", line: "Empty box or bag. Put one down when they're weak." },
 };
 
 export type RunState = {
@@ -98,6 +100,8 @@ export type RunState = {
   grassCalm: number;
   kebabBoxes: number;
   kebabCatch: boolean;
+  /** Empty takeaway boxes/bags from feeding — catch like kebab boxes. */
+  empties: number;
   whiteout: boolean;
   chompKept: boolean;
   hillNanGone: boolean;
@@ -144,6 +148,7 @@ function freshRun(): RunState {
     grassCalm: 0,
     kebabBoxes: 0,
     kebabCatch: false,
+    empties: 0,
     whiteout: false,
     chompKept: false,
     hillNanGone: false,
@@ -313,6 +318,7 @@ export function loadRun(): boolean {
     }
     next.lead = next.party.length ? Math.max(0, Math.min(next.party.length - 1, Number(src.lead) || 0)) : 0;
     next.kebabBoxes = Math.max(0, Number(src.kebabBoxes) || 0);
+    next.empties = Math.max(0, Number(src.empties) || 0);
     next.grassCalm = Math.max(0, Number(src.grassCalm) || 0);
     next.cash = Math.max(0, Number(src.cash) || 0);
     next.plasters = Math.max(0, Number(src.plasters) || 0);
@@ -409,7 +415,9 @@ export function applyXp(mon: PartyMon, gained: number): string[] {
     if (mon.xp < need) break;
     mon.xp -= need;
     mon.lv += 1;
-    mon.hp = scaled(BATTLE[mon.id].hp, mon.lv);
+    const max = scaled(BATTLE[mon.id].hp, mon.lv);
+    const heal = Math.floor(max * 0.2);
+    mon.hp = Math.min(max, Math.max(0, mon.hp) + heal);
     lines.push(`${SPECIES[mon.id].name} grew to Lv${mon.lv}!`);
     if (mon.stubborn) {
       mon.stubborn = false;
@@ -519,19 +527,47 @@ export function takeKebabBoxes(n = 5): void {
   if (!run.items.includes("kebab")) run.items.push("kebab");
 }
 
+export function takeEmpty(n = 1): void {
+  run.empties += Math.max(1, n);
+  if (!run.items.includes("empty")) run.items.push("empty");
+}
+
+/** Prefer Choke's boxes, then empty takeaway. */
+export function useCatchBox(): "kebab" | "empty" | null {
+  if (run.kebabBoxes > 0) {
+    run.kebabBoxes -= 1;
+    return "kebab";
+  }
+  if (run.empties > 0) {
+    run.empties -= 1;
+    if (run.empties <= 0) takeItem("empty");
+    return "empty";
+  }
+  return null;
+}
+
+/** @deprecated Prefer useCatchBox — kept for Steve auto-catch. */
 export function useKebabBox(): boolean {
-  if (run.kebabBoxes <= 0) return false;
-  run.kebabBoxes -= 1;
-  return true;
+  return useCatchBox() !== null;
 }
 
 export function battleBagEntries(): BagEntry[] {
-  return [
-    ...run.items
-      .filter((id) => ITEM[id].heal || (id === "kebab" && run.kebabBoxes > 0))
-      .map((id) => ({ kind: "item" as const, id })),
-    ...run.party.map((mon) => ({ kind: "mon" as const, mon })),
-  ];
+  return [...battleBagMons(), ...battleBagPockets()];
+}
+
+export function battleBagMons(): BagEntry[] {
+  return run.party.map((mon) => ({ kind: "mon" as const, mon }));
+}
+
+export function battleBagPockets(): BagEntry[] {
+  return run.items
+    .filter(
+      (id) =>
+        ITEM[id].heal ||
+        (id === "kebab" && run.kebabBoxes > 0) ||
+        (id === "empty" && run.empties > 0),
+    )
+    .map((id) => ({ kind: "item" as const, id }));
 }
 
 export function takeStack(id: "plaster" | "stale" | "curry" | "doner" | "chips" | "fish", n = 1): void {
@@ -596,7 +632,9 @@ export function eatFood(id: ItemId, mon: PartyMon, curryPick?: "fire" | "wind"):
     if (mon.moves.length < MAX_MOVES) mon.moves.push(mv);
     else mon.moves[mon.moves.length - 1] = mv;
   }
-  return `${SPECIES[mon.id].name} ate it. Now ${ELEM_LABEL[elem]}.`;
+  const vessel = id === "chips" || id === "fish" ? "bag" : "box";
+  takeEmpty(1);
+  return `${SPECIES[mon.id].name} ate it. Now ${ELEM_LABEL[elem]}. Empty ${vessel} left.`;
 }
 
 /** Heal amount. Charity/pawn stuff is weaker than a proper Chomp. */
@@ -720,8 +758,12 @@ export function takeStarter(id: StarterId): void {
 }
 
 export function itemLine(id: ItemId): string {
-  if (id === "pompdex") return `Pompdex. Seen ${run.seen.length}. Caught ${run.owned.length}.`;
+  if (id === "pompdex")
+    return run.seen.length
+      ? `Pompdex. Seen ${run.seen.length}. Caught ${run.owned.length}. Opens last scan.`
+      : "Pompdex empty. Look near a wild Pompeymon to scan.";
   if (id === "kebab") return `Kebab boxes. ${run.kebabBoxes} left. Weak ones crawl in.`;
+  if (id === "empty") return `Empty takeaway. ${run.empties} left. Weak ones crawl in.`;
   if (id === "plaster") return `Plasters. ${run.plasters} left. Barely heals.`;
   if (id === "stale") return `Stale Chomps. ${run.stale} left. Weaker.`;
   if (id === "curry") return `Curry. ${run.curry} left. FIRE or WIND.`;
@@ -732,10 +774,17 @@ export function itemLine(id: ItemId): string {
 }
 
 export function bagEntries(): BagEntry[] {
-  return [
-    ...run.items.filter((id) => id !== "bmx").map((id) => ({ kind: "item" as const, id })),
-    ...run.party.map((mon) => ({ kind: "mon" as const, mon })),
-  ];
+  return [...bagMons(), ...bagPockets()];
+}
+
+export function bagMons(): BagEntry[] {
+  return run.party.map((mon) => ({ kind: "mon" as const, mon }));
+}
+
+export function bagPockets(): BagEntry[] {
+  return run.items
+    .filter((id) => id !== "bmx" && !(id === "empty" && run.empties <= 0))
+    .map((id) => ({ kind: "item" as const, id }));
 }
 
 export function bagLine(entry: BagEntry): string {
@@ -754,6 +803,7 @@ export function bagLabel(entry: BagEntry): string {
   if (entry.kind === "item") {
     const name = ITEM[entry.id].label;
     if (entry.id === "kebab") return `${name} x${run.kebabBoxes}`;
+    if (entry.id === "empty") return `${name} x${run.empties}`;
     if (entry.id === "plaster") return `${name} x${run.plasters}`;
     if (entry.id === "stale") return `${name} x${run.stale}`;
     if (entry.id === "curry") return `${name} x${run.curry}`;

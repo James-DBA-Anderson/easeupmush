@@ -165,17 +165,21 @@ export function trainerDeploy(
     }
     scene.tweens.killTweensOf(mon);
     mon.setTexture(texture);
+    mon.clearTint();
+    mon.setFlipX(false);
     mon.setAlpha(1);
     mon.setScale(0.2);
     mon.setPosition(rest.x, rest.y);
     puff(scene, rest.x, rest.y - 18, 0xf0a23a);
     scene.tweens.add({
       targets: mon,
-      scaleX: 2,
-      scaleY: 2,
+      scale: 2,
       duration: 200,
       ease: "Back.easeOut",
-      onComplete: () => onLand?.(),
+      onComplete: () => {
+        mon.setScale(2);
+        onLand?.();
+      },
     });
   };
 

@@ -310,6 +310,7 @@ export class DebugScene extends Phaser.Scene {
     run.grassCalm = 0;
     run.kebabBoxes = 0;
     run.kebabCatch = false;
+    run.empties = 0;
     run.whiteout = false;
     run.chompKept = false;
     run.hillNanGone = false;

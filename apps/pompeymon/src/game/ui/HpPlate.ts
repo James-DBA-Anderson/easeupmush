@@ -15,6 +15,7 @@ export class HpPlate {
   private staMax = 3;
   private teamN = 0;
   private teamLeft = 0;
+  private readonly scene: Phaser.Scene;
 
   constructor(
     scene: Phaser.Scene,
@@ -24,6 +25,7 @@ export class HpPlate {
     max: number,
     lv: number,
   ) {
+    this.scene = scene;
     this.max = max;
     this.hp = max;
     const plate = scene.add.rectangle(x + HP_PLATE_W / 2, y + PLATE_H / 2, HP_PLATE_W, PLATE_H, 0x1a1814, 1);
@@ -75,6 +77,26 @@ export class HpPlate {
     this.lvText.setPosition(this.x + HP_PLATE_W - 5, this.y + 3);
     this.setHp(hp);
     this.setSta(sta, staMax);
+  }
+
+  /** Pop the Lv label when a mon grows mid-battle. */
+  flashLevel(lv: number): void {
+    this.lvText.setText(`Lv${lv}`);
+    this.lvText.setPosition(this.x + HP_PLATE_W - 5, this.y + 3);
+    this.scene.tweens.killTweensOf(this.lvText);
+    this.lvText.setScale(1);
+    this.lvText.setTint(0xf8f070);
+    this.scene.tweens.add({
+      targets: this.lvText,
+      scale: 1.5,
+      duration: 140,
+      yoyo: true,
+      ease: "Back.easeOut",
+      onComplete: () => {
+        this.lvText.clearTint();
+        this.lvText.setScale(1);
+      },
+    });
   }
 
   private paint(): void {

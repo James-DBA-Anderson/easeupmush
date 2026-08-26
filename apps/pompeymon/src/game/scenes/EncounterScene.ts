@@ -1,8 +1,8 @@
 import Phaser from "phaser";
-import { applyHit, BATTLE, canRun, doDefend, doDodge, drainSta, firstActor, makeBattler, pickFoeMove, rollCounter, rollDamage, rollDodge, rollHit, spendChase, spendFight, STA_FIGHT, STARTER_LV, tickPoison, tryCatch, tryPoison, xpForKo, type Battler } from "../battle";
+import { applyHit, BATTLE, canRun, doDefend, doDodge, drainSta, firstActor, makeBattler, movesForLevel, pickFoeMove, rollCounter, rollDamage, rollDodge, rollHit, scaled, spendChase, spendFight, STA_FIGHT, STARTER_LV, tickPoison, tryCatch, tryPoison, xpForKo, type Battler } from "../battle";
 import { GBA_W } from "../constants";
-import { isDamaging, type MoveDef } from "../moves";
-import { applyXp, beatTrainer, catchSpecies, ensureLeadAlive, healParty, ITEM, MAX_PARTY, partyAlive, persistRun, run, seeSpecies, setLead, takeCash, takePrize, useHealItem, useKebabBox, bondStolenMon, findStolenMon, monLabel, STOLEN_NICK, type BagEntry, type ItemId, type PartyMon } from "../run";
+import { isDamaging, resolveMoves, type MoveDef } from "../moves";
+import { applyXp, beatTrainer, catchSpecies, ensureLeadAlive, healParty, ITEM, MAX_PARTY, partyAlive, persistRun, run, seeSpecies, setLead, takeCash, takePrize, useCatchBox, useHealItem, useKebabBox, bondStolenMon, findStolenMon, monLabel, STOLEN_NICK, type BagEntry, type ItemId, type PartyMon } from "../run";
 import { ELEM_TINT, SPECIES, type SpeciesId } from "../species";
 import { ensureKidSheets, kidAnim, kidSheet } from "../sprites/kid";
 import { ensureMonSheets, monBattleKey } from "../sprites/mon";
@@ -25,10 +25,12 @@ import { MoveMenu } from "../ui/MoveMenu";
 import { MsgBox, lineWho, type Line } from "../ui/MsgBox";
 import { justAction, justCancel, bindWalkKeys, type WalkKeys } from "../walk";
 import { clearField, markWildBeat } from "../world/wander";
-import { joinPal, PAL_ID } from "../world/pal";
+import { joinPal, PAL_ID, PAL_LOOK, PAL_NAME, palBesidePlayer, palGymReply, pickPalCheer, type PalCheerKind } from "../world/pal";
 import {
   finishSteveCatch,
   spawnBikeThief,
+  spawnSteveBattleBike,
+  STEVE_BIKE,
   STEVE_ID,
   STEVE_NAME,
 } from "../world/steve";
@@ -37,6 +39,8 @@ import { ensureNpcSheets, npcAnim, npcSheet, type NpcLook } from "../sprites/npc
 const KID_X = 30;
 const KID_REST_Y = 192;
 const KID_TALK_Y = 76;
+/** Jess stands just right of the kid on the battle deck. */
+const PAL_X = 54;
 
 export type TrainerBattle = {
   id: string;
@@ -50,6 +54,8 @@ export type TrainerBattle = {
   prize?: ItemId;
   taunt?: string[];
   wipe?: string;
+  palPast?: string[];
+  palWin?: string;
   party?: { mon: SpeciesId; lv: number }[];
   mate?: {
     who: string;
@@ -60,7 +66,7 @@ export type TrainerBattle = {
   };
 };
 
-type AfterText = "menu" | "foe" | "next" | "done" | "counter" | "bag" | "afterPoison" | "steveTheft" | "steveCatch" | "stubborn" | "deanFlee" | "deanBlowKo";
+type AfterText = "menu" | "foe" | "next" | "done" | "counter" | "bag" | "afterPoison" | "steveTheft" | "steveChase" | "steveCatch" | "stubborn" | "deanFlee" | "deanBlowKo";
 
 export class EncounterScene extends Phaser.Scene {
   private foeId!: SpeciesId;
@@ -81,8 +87,11 @@ export class EncounterScene extends Phaser.Scene {
   private trainerSpr?: Phaser.GameObjects.Sprite;
   private mateSpr?: Phaser.GameObjects.Sprite;
   private kidSpr?: Phaser.GameObjects.Sprite;
+  private palSpr?: Phaser.GameObjects.Sprite;
   private kidUp = false;
   private kidGoal = KID_REST_Y;
+  private palCheerN = 0;
+  private lastPalCheer = -1;
   private done = false;
   private after: AfterText = "menu";
   private acts: Array<{ who: "me" | "foe"; kind: "fight" | "defend" }> = [];
@@ -101,6 +110,9 @@ export class EncounterScene extends Phaser.Scene {
   /** Steve ran off — mon is catchable. */
   private steveAbandoned = false;
   private steveBusy = false;
+  private steveBike?: Phaser.GameObjects.Image;
+  private steveThief?: Phaser.GameObjects.Sprite;
+  private steveHeldBike?: Phaser.GameObjects.Image;
   /** Youngster Dean self-destruct / PRICKLES event. */
   private deanEvent = false;
   /** Party index currently in battle — not species id (duplicates share an id). */
@@ -126,6 +138,9 @@ export class EncounterScene extends Phaser.Scene {
     this.steveStolen = false;
     this.steveAbandoned = false;
     this.steveBusy = false;
+    this.steveBike = undefined;
+    this.steveThief = undefined;
+    this.steveHeldBike = undefined;
     this.deanEvent = false;
     const partner = ensureLeadAlive();
     this.meSlot = run.lead;
@@ -151,6 +166,19 @@ export class EncounterScene extends Phaser.Scene {
     this.kidSpr.play(kidAnim(run.outfit, "idle-up"));
     this.kidUp = false;
     this.kidGoal = KID_REST_Y;
+    this.palCheerN = 0;
+    this.lastPalCheer = -1;
+    this.palSpr = undefined;
+    if (palBesidePlayer(this.trainer?.id)) {
+      ensureNpcSheets(this);
+      this.palSpr = this.add
+        .sprite(PAL_X, KID_REST_Y, npcSheet(PAL_LOOK), "idle-up")
+        .setScale(2)
+        .setOrigin(0.5, 1)
+        .setDepth(5)
+        .setScrollFactor(0);
+      this.palSpr.play(npcAnim(PAL_LOOK, "idle-up"));
+    }
     if (this.trainer) {
       ensureNpcSheets(this);
       const hasMate = !!this.trainer.mate;
@@ -160,6 +188,9 @@ export class EncounterScene extends Phaser.Scene {
         .setOrigin(0.5, 1)
         .setDepth(4);
       this.trainerSpr.play(npcAnim(this.trainer.look, "idle-down"));
+      if (this.trainer.id === STEVE_ID) {
+        this.steveBike = spawnSteveBattleBike(this);
+      }
       if (this.trainer.mate) {
         this.mateSpr = this.add
           .sprite(228, 108, npcSheet(this.trainer.mate.look), "idle-down")
@@ -202,13 +233,19 @@ export class EncounterScene extends Phaser.Scene {
     mountDebugBack(this);
 
     if (this.trainer) {
-      this.say(
-        [
-          `${this.trainer.title} ${this.trainer.mate ? "want" : "wants"} to fight!`,
-          { who: this.trainer.who, text: this.trainer.challenge },
-        ],
-        "menu",
-      );
+      const open: Line[] = [
+        `${this.trainer.title} ${this.trainer.mate ? "want" : "wants"} to fight!`,
+        { who: this.trainer.who, text: this.trainer.challenge },
+      ];
+      if (run.palJoined && this.trainer.palPast?.length) {
+        for (const text of this.trainer.palPast) {
+          open.push({ who: this.trainer.who, text });
+        }
+        const reply = palGymReply(this.trainer.id);
+        if (reply) open.push(reply);
+      }
+      this.pushPalCheer(open, "open");
+      this.say(open, "menu");
     } else {
       this.say(`Wild ${SPECIES[this.foeId].name}!`, "menu");
     }
@@ -238,7 +275,7 @@ export class EncounterScene extends Phaser.Scene {
     }
     if (this.steveBusy) return;
     if (this.bag?.active) {
-      this.bag.update(this.cursors, { W: this.wasd.W, S: this.wasd.S }, confirm, cancel);
+      this.bag.update(this.cursors, { W: this.wasd.W, A: this.wasd.A, S: this.wasd.S, D: this.wasd.D }, confirm, cancel);
       if (!this.bag.active && !this.note?.open) {
         if (this.mustSwitch) this.bag.show();
         else this.menu?.show();
@@ -262,6 +299,7 @@ export class EncounterScene extends Phaser.Scene {
   private showTalker(line?: Line): void {
     const who = line ? lineWho(line) : undefined;
     this.liftKid(who === "YOU");
+    if (who === PAL_NAME) actorReact(this, this.palSpr, "cheer");
   }
 
   private liftKid(up: boolean): void {
@@ -286,6 +324,7 @@ export class EncounterScene extends Phaser.Scene {
     else if (this.after === "next") this.nextAct();
     else if (this.after === "counter") this.counterHit();
     else if (this.after === "steveTheft") this.playSteveTheft();
+    else if (this.after === "steveChase") this.chaseSteveThief();
     else if (this.after === "steveCatch") this.autoSteveCatch();
     else if (this.after === "stubborn") this.startDefend();
     else if (this.after === "deanFlee") this.finishDeanFlee();
@@ -420,7 +459,7 @@ export class EncounterScene extends Phaser.Scene {
       this.switchTo(entry.mon);
       return;
     }
-    if (entry.id === "kebab") {
+    if (entry.id === "kebab" || entry.id === "empty") {
       this.tryBall();
       return;
     }
@@ -728,10 +767,14 @@ export class EncounterScene extends Phaser.Scene {
     if (nextOwn) {
       this.partyI += 1;
       this.sendNextFoe(nextOwn.mon, nextOwn.lv);
-      this.say(
-        [...lead, `Foe ${fainted} fainted.`, ...xpLines, { who: this.trainer!.who, text: `Go ${this.foe.name}!` }],
-        "menu",
-      );
+      const lines: Line[] = [
+        ...lead,
+        `Foe ${fainted} fainted.`,
+        ...xpLines,
+        { who: this.trainer!.who, text: `Go ${this.foe.name}!` },
+      ];
+      this.pushPalCheer(lines, "foeDown", 0.55);
+      this.say(lines, "menu");
       return;
     }
     const mate = this.trainer?.mate;
@@ -739,10 +782,14 @@ export class EncounterScene extends Phaser.Scene {
       actorReact(this, this.trainerSpr, "loss");
       this.mateOut = true;
       this.sendNextFoe(mate.mon, mate.lv);
-      this.say(
-        [...lead, `Foe ${fainted} fainted.`, ...xpLines, { who: mate.who, text: `Go ${this.foe.name}!` }],
-        "menu",
-      );
+      const lines: Line[] = [
+        ...lead,
+        `Foe ${fainted} fainted.`,
+        ...xpLines,
+        { who: mate.who, text: `Go ${this.foe.name}!` },
+      ];
+      this.pushPalCheer(lines, "foeDown", 0.55);
+      this.say(lines, "menu");
       return;
     }
     actorReact(this, this.activeTrainerSpr(), "loss");
@@ -753,6 +800,9 @@ export class EncounterScene extends Phaser.Scene {
       const dosh = this.trainer.lv * 5;
       takeCash(dosh);
       lines.push("You won.", `Got £${dosh} dosh.`, { who: this.trainer.who, text: this.trainer.win });
+      if (run.palJoined && this.trainer.palWin) {
+        lines.push({ who: this.trainer.who, text: this.trainer.palWin });
+      }
       if (this.trainer.prize && takePrize(this.trainer.prize)) {
         const label = ITEM[this.trainer.prize].label;
         lines.push(`You got the ${label}!`);
@@ -766,6 +816,7 @@ export class EncounterScene extends Phaser.Scene {
         actorReact(this, this.mateSpr, "loss");
       }
       if (this.trainer.id === PAL_ID) joinPal(true);
+      this.pushPalCheer(lines, "win", 0.65);
     } else {
       markWildBeat();
     }
@@ -781,6 +832,7 @@ export class EncounterScene extends Phaser.Scene {
       return;
     }
     if (this.tryDeanBlow(lines)) return;
+    this.maybeClutchCheer(lines);
     this.say(lines, this.acts.length ? "next" : "menu");
   }
 
@@ -827,6 +879,7 @@ export class EncounterScene extends Phaser.Scene {
         this.faint();
         return;
       }
+      this.maybeClutchCheer(lines);
       this.say(lines, this.acts.length ? "next" : "menu");
       return;
     }
@@ -836,6 +889,7 @@ export class EncounterScene extends Phaser.Scene {
       this.faint();
       return;
     }
+    this.maybeClutchCheer(lines);
     this.say(lines, this.acts.length ? "next" : "menu");
   }
 
@@ -847,6 +901,7 @@ export class EncounterScene extends Phaser.Scene {
       return;
     }
     if (this.tryDeanBlow(lines)) return;
+    this.maybeClutchCheer(lines);
     this.say(lines, this.acts.length ? "next" : "menu");
   }
 
@@ -863,10 +918,12 @@ export class EncounterScene extends Phaser.Scene {
       this.say("Six is enough. No room.", "menu");
       return;
     }
-    if (!useKebabBox()) {
-      this.say("No kebab boxes.", "menu");
+    const vessel = useCatchBox();
+    if (!vessel) {
+      this.say("No boxes or bags.", "menu");
       return;
     }
+    const putDown = vessel === "kebab" ? "You put down a kebab box." : "You put down an empty takeaway.";
     const caught = this.steveAbandoned || tryCatch(this.foe);
     if (caught) {
       const again = run.owned.includes(this.foeId);
@@ -875,9 +932,9 @@ export class EncounterScene extends Phaser.Scene {
       this.done = true;
       this.storeHp();
       const lines: Line[] = [
-        "You put down a kebab box.",
+        putDown,
         "The smell got it. It crawled in.",
-        "You snapped the box shut.",
+        "You snapped it shut.",
       ];
       if (!run.kebabCatch) {
         run.kebabCatch = true;
@@ -895,7 +952,7 @@ export class EncounterScene extends Phaser.Scene {
       return;
     }
     this.wantPoisonTick = true;
-    this.say(["You put down a kebab box.", "It sniffed. Not interested."], "foe");
+    this.say([putDown, "It sniffed. Not interested."], "foe");
   }
 
   private flee(): void {
@@ -1011,6 +1068,36 @@ export class EncounterScene extends Phaser.Scene {
     return true;
   }
 
+  private isBigBattle(): boolean {
+    if (!this.trainer || this.trainer.id === PAL_ID || !this.palSpr) return false;
+    return (
+      !!this.trainer.prize ||
+      !!this.trainer.party?.length ||
+      !!this.trainer.mate ||
+      this.foeTeam > 1 ||
+      this.trainer.id === "si-stevie" ||
+      this.trainer.id === "si-atkins"
+    );
+  }
+
+  /** Occasional Jess shout in gym / multi-mon fights — capped per battle. */
+  private pushPalCheer(lines: Line[], kind: PalCheerKind, chance = 0.48): void {
+    if (!this.isBigBattle() || this.palCheerN >= 2) return;
+    if (Math.random() > chance) return;
+    const jab = pickPalCheer(kind, this.lastPalCheer);
+    if (!jab) return;
+    this.lastPalCheer = jab.i;
+    this.palCheerN += 1;
+    actorReact(this, this.palSpr, "cheer");
+    lines.push(jab.line);
+  }
+
+  /** Clutch shout when someone is on the ropes. */
+  private maybeClutchCheer(lines: Line[]): void {
+    if (!(this.nearDefeat(this.me) || this.nearDefeat(this.foe))) return;
+    this.pushPalCheer(lines, "clutch", 0.38);
+  }
+
   private gymTaunt(wiped: boolean): string | undefined {
     if (!this.trainer) return undefined;
     if (wiped && this.trainer.wipe) return this.trainer.wipe;
@@ -1029,6 +1116,12 @@ export class EncounterScene extends Phaser.Scene {
     return pool[i];
   }
 
+  /** Steve mid-fight jab — not every hit, and avoid the last line. */
+  private pickSteveTaunt(): string | undefined {
+    if (Math.random() > 0.4) return undefined;
+    return this.pickTaunt();
+  }
+
   /** Near-defeat window for Steve's bike theft — close, but not a KO. */
   private nearDefeat(b: { hp: number; max: number }): boolean {
     const r = b.hp / b.max;
@@ -1037,7 +1130,7 @@ export class EncounterScene extends Phaser.Scene {
 
   private handleSteveBeat(lines: Line[], ko: boolean, victim: "me" | "foe"): boolean {
     if (!this.trainer || this.trainer.id !== STEVE_ID || this.steveStolen) return false;
-    const jab = this.pickTaunt();
+    const jab = this.pickSteveTaunt();
     if (jab) lines.push({ who: this.trainer.who, text: jab });
     const target = victim === "me" ? this.me : this.foe;
     if (ko) {
@@ -1053,27 +1146,80 @@ export class EncounterScene extends Phaser.Scene {
   private beginSteveTheft(lead: Line[]): void {
     this.steveStolen = true;
     this.acts = [];
-    const lines: Line[] = [
-      ...lead,
-      "Someone's nicking Steve's new bike!",
-      { who: STEVE_NAME, text: "OI! My bike! Come back you!" },
-      { who: STEVE_NAME, text: "Leave it — that's my new…" },
-    ];
-    this.say(lines, "steveTheft");
+    if (lead.length) this.say(lead, "steveTheft");
+    else this.playSteveTheft();
   }
 
   private playSteveTheft(): void {
     this.steveBusy = true;
-    const thief = spawnBikeThief(this, -20, 96);
-    const trainer = this.trainerSpr;
+    const bikeX = this.steveBike?.x ?? STEVE_BIKE.x;
+    const bikeY = this.steveBike?.y ?? STEVE_BIKE.y;
+    const thief = spawnBikeThief(this, -24, bikeY);
+    this.steveThief = thief;
     this.tweens.add({
       targets: thief,
-      x: GBA_W + 40,
-      duration: 1100,
+      x: bikeX,
+      duration: 900,
       ease: "Linear",
-      onComplete: () => thief.destroy(),
+      onComplete: () => this.grabSteveBike(),
     });
-    this.time.delayedCall(420, () => {
+  }
+
+  private grabSteveBike(): void {
+    const thief = this.steveThief;
+    if (!thief) {
+      this.steveBusy = false;
+      return;
+    }
+    this.steveBike?.destroy();
+    this.steveBike = undefined;
+    const held = this.add
+      .image(thief.x, thief.y + 8, "bike-park")
+      .setScale(2)
+      .setOrigin(0.5, 1)
+      .setDepth(4);
+    this.steveHeldBike = held;
+    this.tweens.add({
+      targets: held,
+      y: held.y - 4,
+      duration: 90,
+      yoyo: true,
+      ease: "Quad.easeOut",
+    });
+    this.steveBusy = false;
+    this.say(
+      [
+        "Steve's bike is being nicked!",
+        { who: STEVE_NAME, text: "OI! My bike! Come back you!" },
+        { who: STEVE_NAME, text: "Leave it — that's my new…" },
+      ],
+      "steveChase",
+    );
+  }
+
+  private chaseSteveThief(): void {
+    this.steveBusy = true;
+    const thief = this.steveThief;
+    const held = this.steveHeldBike;
+    const trainer = this.trainerSpr;
+    if (thief) {
+      this.tweens.add({
+        targets: thief,
+        x: GBA_W + 48,
+        duration: 900,
+        ease: "Linear",
+        onUpdate: () => {
+          if (held && thief.active) held.setPosition(thief.x, thief.y + 8);
+        },
+        onComplete: () => {
+          held?.destroy();
+          this.steveHeldBike = undefined;
+          thief.destroy();
+          this.steveThief = undefined;
+        },
+      });
+    }
+    this.time.delayedCall(280, () => {
       if (trainer) {
         trainer.play(npcAnim(this.trainer?.look ?? "cap", "walk-side"));
         this.tweens.add({
@@ -1088,7 +1234,7 @@ export class EncounterScene extends Phaser.Scene {
         });
       }
     });
-    this.time.delayedCall(1200, () => {
+    this.time.delayedCall(1100, () => {
       this.trainer = undefined;
       this.steveAbandoned = true;
       this.steveBusy = false;
@@ -1141,6 +1287,7 @@ export class EncounterScene extends Phaser.Scene {
       if (this.tryPricklesGuard(lines)) return;
       this.mustSwitch = true;
       lines.push("Send out another.");
+      this.pushPalCheer(lines, "pinch", 0.55);
       this.say(lines, "bag");
       return;
     }
@@ -1161,9 +1308,31 @@ export class EncounterScene extends Phaser.Scene {
   private grantXp(): string[] {
     const mine = run.party[this.meSlot];
     if (!mine) return [];
+    const beforeLv = mine.lv;
     const gained = xpForKo(this.foe.lv, BATTLE[this.foe.id].exp, !!this.trainer);
     const grew = applyXp(mine, gained);
+    this.syncMeFromParty(mine.lv > beforeLv);
     return [`${this.me.name} gained ${gained} XP.`, ...grew];
+  }
+
+  /** Pull party level / HP / moves onto the active battler after XP. */
+  private syncMeFromParty(leveled: boolean): void {
+    const mine = run.party[this.meSlot];
+    if (!mine) return;
+    const spec = BATTLE[mine.id];
+    this.me.lv = mine.lv;
+    this.me.max = scaled(spec.hp, mine.lv);
+    this.me.atk = scaled(spec.atk, mine.lv);
+    this.me.def = scaled(spec.def, mine.lv);
+    this.me.spd = scaled(spec.spd, mine.lv);
+    this.me.hp = Math.max(0, Math.min(mine.hp, this.me.max));
+    const known = resolveMoves(mine.moves.length ? mine.moves : []);
+    this.me.moves = known.length ? known : movesForLevel(mine.id, mine.lv);
+    if (!this.me.moves.some((m) => m.id === this.me.move.id)) {
+      this.me.move = this.me.moves[0] ?? this.me.move;
+    }
+    this.meBar?.setMon(this.me.name, this.me.max, this.me.lv, this.me.hp, this.me.sta, this.me.staMax);
+    if (leveled) this.meBar?.flashLevel(this.me.lv);
   }
 
   private storeHp(): void {

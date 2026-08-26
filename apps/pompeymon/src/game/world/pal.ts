@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { beatTrainer, isBeaten, persistRun, run, saveOverworld } from "../run";
+import { SPECIES, type SpeciesId } from "../species";
 import { ensureNpcSheets, npcAnim, npcSheet, playNpc, type NpcLook } from "../sprites/npc";
 import type { Line } from "../ui/MsgBox";
 import { near, type Facing } from "../walk";
@@ -98,6 +99,101 @@ export function palAside(npcId: string): Line | undefined {
   return text ? jess(text) : undefined;
 }
 
+/** Jess answers when a gym leader clocks their shared past. */
+export function palGymReply(gymId: string): Line | undefined {
+  if (!run.palJoined) return undefined;
+  const line: Record<string, string> = {
+    "si-atkins": "Told you I'd be back. Rain and all.",
+  };
+  const text = line[gymId];
+  return text ? jess(text) : undefined;
+}
+
+/** Mid-battle shout — gym / multi-mon scraps only. */
+export type PalCheerKind = "open" | "clutch" | "foeDown" | "pinch" | "win";
+
+const PAL_CHEERS: Record<PalCheerKind, string[]> = {
+  open: [
+    "You've got this mush.",
+    "Watch their lead. Don't squinny.",
+    "Kit on. Batter them.",
+  ],
+  clutch: [
+    "Finish it!",
+    "They're soft now — go on!",
+    "Defend if you have to. Then hit.",
+    "Don't freeze. Move!",
+  ],
+  foeDown: [
+    "One down. Keep going.",
+    "Nice. Next.",
+    "Don't get cocky. More coming.",
+  ],
+  pinch: [
+    "Send another. You're not done.",
+    "Ease up — switch. We've got this.",
+    "They're not through you yet.",
+  ],
+  win: [
+    "Cushty. Told you.",
+    "That's how you do it.",
+    "Badge's that way next. Or dosh. Either.",
+  ],
+};
+
+/** True once she's joined and you're not battling her. */
+export function palBesidePlayer(trainerId?: string): boolean {
+  return !!run.palJoined && trainerId !== PAL_ID;
+}
+
+export function pickPalCheer(kind: PalCheerKind, avoid = -1): { line: Line; i: number } | undefined {
+  const pool = PAL_CHEERS[kind];
+  if (!pool.length) return undefined;
+  let i = Math.floor(Math.random() * pool.length);
+  if (pool.length > 1 && i === avoid) i = (i + 1) % pool.length;
+  return { line: jess(pool[i]!), i };
+}
+
+/** Jess's take on a party mon from the bag detail screen. */
+export function palMonTake(mon: { id: string; lv: number; nick?: string; stubborn?: boolean; cheeky?: boolean; elem?: string }): Line[] {
+  if (!run.palJoined) return [jess("…")];
+  const who = mon.nick?.trim() || SPECIES[mon.id as SpeciesId]?.name || mon.id.toUpperCase();
+  if (mon.stubborn) {
+    return [
+      jess(`${who}. Won't listen. Still worth it.`),
+      jess("That jump on the bridge though. Proper."),
+    ];
+  }
+  if (mon.cheeky && (mon.nick === "PRICKLES" || mon.id === "spikehedge")) {
+    return [
+      jess(`${who}. Moody now. Better than stubborn.`),
+      jess("Might jump in again. Keep them healthy."),
+    ];
+  }
+  const takes: Record<string, string[]> = {
+    scabfox: ["Scabfox. Nicked ear. Street smart.", "Good lead if they listen."],
+    chipgull: ["Chipgull. Thieving git. I like them.", "Quick. Don't feed them your chips."],
+    moggit: ["Moggit. Mine's meaner.", "Still a solid scrap."],
+    donerrat: ["Donerrat. Bin's their gym.", "Greasy. Hits harder than they look."],
+    pidgeon: ["Pidgeon. Fat town bird.", "Everywhere. Easy XP."],
+    squirral: ["Squirral. Park lunatic.", "Fast. Don't let them start."],
+    spikehedge: ["Spikehedge. Rolls up. Painful.", "Defend into them. Beard."],
+    starlimur: ["Starlimur. Estate starling.", "Noisy. Useful though."],
+    busstopper: ["Busstopper. Lives at the shelter.", "Tanky. Atkins material."],
+    kerbite: ["Kerbite. Gutter bite.", "Rare. Don't squinny — catch it."],
+    honkace: ["Honkace. Wrong bird. Loud.", "I heard one on the roundabout."],
+    chalklur: ["Chalklur. Pale as the hill.", "Portsdown's got them."],
+    linelurker: ["Linelurker. Keeps to the ditch.", "Lines. Don't stare too long."],
+    kitthief: ["Kitthief. Nicks PE socks.", "School shed. Atkins would cop."],
+  };
+  const lines = takes[mon.id] ?? ["Alright. It's yours.", "Train it. Don't skip PE."];
+  const out = lines.map((t) => jess(t));
+  if (mon.lv < 8) out.push(jess("Low level. Grass. School field."));
+  else if (mon.lv >= 10) out.push(jess("That's gym weight. Go on."));
+  if (mon.elem) out.push(jess(`They've eaten. ${mon.elem.toUpperCase()} now.`));
+  return out;
+}
+
 export function joinPal(won: boolean): void {
   run.palJoined = true;
   run.palWon = won;
@@ -133,6 +229,8 @@ type Say = (line: Line | Line[]) => void;
 export class PalField {
   private sprite?: Phaser.GameObjects.Sprite;
   private trail: { x: number; y: number }[] = [];
+  private facing: Facing = "down";
+  private flip = 1;
 
   constructor(
     scene: Phaser.Scene,
@@ -152,6 +250,8 @@ export class PalField {
   tick(facing: Facing, flip: number): void {
     const spr = this.sprite;
     if (!spr) return;
+    this.facing = facing;
+    this.flip = flip;
     this.trail.unshift({ x: this.player.x, y: this.player.y });
     if (this.trail.length > 14) this.trail.pop();
     const goal = this.trail[this.trail.length - 1];
@@ -176,9 +276,18 @@ export class PalField {
     playNpc(spr, PAL_LOOK, palFacing, moving);
   }
 
+  /** Only when you're looking at her — she trails behind, so she shouldn't steal NPC talks. */
   tryTalk(): boolean {
     if (!this.sprite || !run.palJoined) return false;
-    if (!near(this.player, { x: this.sprite.x - 8, y: this.sprite.y - 16, w: 16, h: 16 }, 14)) return false;
+    if (!near(this.player, { x: this.sprite.x - 8, y: this.sprite.y - 16, w: 16, h: 16 }, 12)) return false;
+    const dx = this.sprite.x - this.player.x;
+    const dy = this.sprite.y - this.player.y;
+    const facingHer =
+      (this.facing === "up" && dy < -2) ||
+      (this.facing === "down" && dy > 2) ||
+      (this.facing === "side" && this.flip < 0 && dx < -2) ||
+      (this.facing === "side" && this.flip > 0 && dx > 2);
+    if (!facingHer) return false;
     this.say(palAdvice());
     return true;
   }

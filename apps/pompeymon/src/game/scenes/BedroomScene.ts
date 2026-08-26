@@ -131,7 +131,7 @@ export class BedroomScene extends Phaser.Scene {
       return;
     }
 
-    if (this.bagUi?.update(this.cursors, { W: this.wasdKeys.W, S: this.wasdKeys.S }, confirm, cancel)) {
+    if (this.bagUi?.update(this.cursors, { W: this.wasdKeys.W, A: this.wasdKeys.A, S: this.wasdKeys.S, D: this.wasdKeys.D }, confirm, cancel)) {
       this.player.body.setVelocity(0, 0);
       return;
     }

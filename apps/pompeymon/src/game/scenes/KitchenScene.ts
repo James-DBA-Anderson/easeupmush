@@ -106,7 +106,7 @@ export class KitchenScene extends Phaser.Scene {
       return;
     }
 
-    if (this.bagUi?.update(this.cursors, { W: this.wasd.W, S: this.wasd.S }, confirm, cancel)) {
+    if (this.bagUi?.update(this.cursors, { W: this.wasd.W, A: this.wasd.A, S: this.wasd.S, D: this.wasd.D }, confirm, cancel)) {
       this.player.body.setVelocity(0, 0);
       return;
     }

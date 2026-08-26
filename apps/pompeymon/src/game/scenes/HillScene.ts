@@ -91,7 +91,7 @@ export class HillScene extends Phaser.Scene {
     const confirm = justAction(this.cursors, this.wasd);
     const cancel = justCancel(this.wasd);
 
-    if (this.bagUi?.update(this.cursors, { W: this.wasd.W, S: this.wasd.S }, confirm, cancel)) {
+    if (this.bagUi?.update(this.cursors, { W: this.wasd.W, A: this.wasd.A, S: this.wasd.S, D: this.wasd.D }, confirm, cancel)) {
       this.player.body.setVelocity(0, 0);
       return;
     }
@@ -160,7 +160,7 @@ export class HillScene extends Phaser.Scene {
     }
     const wild = wanderNear(this.player, this.wanderers);
     if (wild) {
-      this.startWild(wild.id, wild);
+      this.bagUi?.scanWild(wild.id);
       return;
     }
     if (near(this.player, this.layout.van, 10)) {
