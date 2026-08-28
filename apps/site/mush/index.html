@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta
+      name="description"
+      content="Ease Up Mush — the back room. Games still being built."
+    />
+    <meta name="theme-color" content="#0b1c24" />
+    <title>Ease Up Mush</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Source+Sans+3:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div class="sea" aria-hidden="true">
+      <div class="sea__glow"></div>
+      <div class="sea__horizon"></div>
+      <div class="sea__wave sea__wave--a"></div>
+      <div class="sea__wave sea__wave--b"></div>
+    </div>
+
+    <div class="page">
+      <header class="hero">
+        <p class="hero__mark">easeupmush.com · back room</p>
+        <h1 class="hero__brand">
+          <img
+            class="hero__logo"
+            src="/brand/ease-up-mush-header.png"
+            width="1520"
+            height="344"
+            alt="Ease Up Mush"
+          />
+        </h1>
+        <p class="hero__line">Browser games from Pompey for Pompey</p>
+      </header>
+
+      <main>
+        <section id="games" class="games" aria-labelledby="games-heading">
+          <h2 id="games-heading" class="games__heading">Games</h2>
+          <p class="games__lede">One out now. One being built in the open.</p>
+
+          <article class="feature">
+            <div class="feature__visual">
+              <img
+                class="feature__shot"
+                src="/shots/pompey-punch-up.png"
+                width="960"
+                height="540"
+                alt="Pompey Punch-Up — Southsea seafront at the start of the game"
+              />
+            </div>
+            <div class="feature__copy">
+              <p class="feature__eyebrow">Out now</p>
+              <h3 class="feature__title">Pompey Punch-Up</h3>
+              <p class="feature__version">v%APP_VERSION%</p>
+              <p class="feature__blurb">
+                Wake up hungover on Southsea beach. Mean lads pile out of a car.
+                A crude hand-drawn Streets of Rage–style brawler — wear them down,
+                no health bars, all body language.
+              </p>
+              <p class="feature__actions">
+                <a class="btn btn--primary" href="/games/pompey-punch-up/">Play</a>
+                <a
+                  class="btn btn--ghost"
+                  href="/games/pompey-punch-up/debug.html"
+                  >Debug arena</a
+                >
+              </p>
+            </div>
+          </article>
+
+          <article class="feature feature--wip">
+            <div class="feature__visual feature__visual--none">
+              <p class="feature__none">No shot yet</p>
+            </div>
+            <div class="feature__copy">
+              <p class="feature__eyebrow">Half built</p>
+              <h3 class="feature__title">Pompeymon</h3>
+              <p class="feature__version">Cosham to Hilsea</p>
+              <p class="feature__blurb">
+                A GBA-style scrap round Cosham and Hilsea. Wake up in your
+                Y-fronts, chore a starter off Professor Choke, box wild
+                Pompeymon in kebab trays and take the Hilsea Badge off Atkins.
+              </p>
+              <p class="feature__actions">
+                <a class="btn btn--primary" href="/games/pompeymon/">Play</a>
+                <a class="btn btn--ghost" href="/games/pompeymon/?debug">Debug</a>
+                <a class="btn btn--ghost" href="/mush/phraseology/">Phraseology</a>
+              </p>
+            </div>
+          </article>
+        </section>
+      </main>
+
+      <footer class="foot">
+        <p>
+          © <span id="year"></span> Ease Up Mush · Portsmouth ·
+          <a href="/about/">About</a>
+        </p>
+        <a
+          class="foot__social"
+          href="https://www.instagram.com/ease_up_mush/"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Ease Up Mush on Instagram"
+        >
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+            <rect
+              x="3.5"
+              y="3.5"
+              width="17"
+              height="17"
+              rx="5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+            />
+            <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8" />
+            <circle cx="17.2" cy="6.8" r="1.15" fill="currentColor" />
+          </svg>
+        </a>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

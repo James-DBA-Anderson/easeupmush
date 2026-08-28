@@ -20,7 +20,7 @@ npm run dev:game     # Pompey Punch-Up alone → http://localhost:5299/
 npm run debug        # fight sandbox → http://localhost:5299/debug
 ```
 
-`npm run dev` starts the site on **:5300** and the game on **:5299**, and proxies `/games/pompey-punch-up/` so Play / Debug match production.
+`npm run dev` starts the site on **:5300**, Pompey Punch-Up on **:5299** and Pompeymon on **:5303**, and proxies `/games/pompey-punch-up/` and `/games/pompeymon/` so Play / Debug match production.
 Production URLs after deploy:
 
 | Path | What |
@@ -28,6 +28,9 @@ Production URLs after deploy:
 | `/` | Ease Up Mush homepage |
 | `/games/pompey-punch-up/` | Pompey Punch-Up |
 | `/games/pompey-punch-up/debug.html` | Debug arena |
+| `/mush/` | Back room — unlisted homepage with the in-progress games. Reached by clicking the logo on `/about/` |
+| `/mush/phraseology/` | Pompey phraseology reference |
+| `/games/pompeymon/` | Pompeymon (unlisted, linked from the back room only) |
 
 To try the full assembled site locally (homepage + Play link):
 

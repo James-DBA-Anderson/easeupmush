@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** Run homepage + game so /games/pompey-punch-up/ works on :5300 like production. */
+/** Run homepage + both games so /games/<slug>/ works on :5300 like production. */
 const kids = [
   spawn("npm run dev -w @easeupmush/site", {
     cwd: root,
@@ -18,6 +18,16 @@ const kids = [
     env: {
       ...process.env,
       GAME_BASE: "/games/pompey-punch-up/",
+      BROWSER: "none",
+    },
+    shell: true,
+  }),
+  spawn("npm run dev -w @easeupmush/pompeymon", {
+    cwd: root,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      GAME_BASE: "/games/pompeymon/",
       BROWSER: "none",
     },
     shell: true,

@@ -170,6 +170,13 @@ body {
   margin-left: -0.35rem;
 }
 
+/* Way into the back room. Reads as the plain logo — no pointer, no hover. */
+.hero__secret {
+  display: block;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .hero__line {
   margin: 0.15rem 0 0;
   max-width: 28rem;
@@ -309,6 +316,101 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
+}
+
+.feature--wip {
+  margin-top: 2.5rem;
+  padding-top: 2.5rem;
+  border-top: 1px solid rgba(200, 221, 230, 0.08);
+}
+
+.feature__visual--none {
+  display: grid;
+  place-items: center;
+  background: repeating-linear-gradient(
+    -45deg,
+    #152830,
+    #152830 10px,
+    #172d36 10px,
+    #172d36 20px
+  );
+}
+
+.feature__none {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1rem, 3vw, 1.4rem);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* --- Phraseology --- */
+
+.page--lingo {
+  max-width: 52rem;
+}
+
+.lingo {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.98rem;
+}
+
+.lingo th,
+.lingo td {
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(200, 221, 230, 0.1);
+}
+
+.lingo thead th {
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--sodium);
+}
+
+.lingo tbody th {
+  width: 11rem;
+  color: var(--chalk);
+  font-weight: 700;
+}
+
+.lingo td {
+  color: var(--foam);
+  line-height: 1.55;
+}
+
+.lingo em {
+  color: var(--chalk);
+}
+
+@media (max-width: 620px) {
+  .lingo,
+  .lingo tbody,
+  .lingo tr,
+  .lingo th,
+  .lingo td {
+    display: block;
+  }
+
+  .lingo thead {
+    display: none;
+  }
+
+  .lingo tr {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid rgba(200, 221, 230, 0.1);
+  }
+
+  .lingo tbody th,
+  .lingo td {
+    width: auto;
+    padding: 0.15rem 0;
+    border: 0;
+  }
 }
 
 .foot {

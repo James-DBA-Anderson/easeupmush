@@ -16,6 +16,12 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
+      // Pompeymon is only linked from the back room, but it lives at the same kind of path.
+      "/games/pompeymon": {
+        target: "http://127.0.0.1:5303",
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   preview: {
@@ -29,6 +35,8 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         about: resolve(__dirname, "about/index.html"),
+        mush: resolve(__dirname, "mush/index.html"),
+        phraseology: resolve(__dirname, "mush/phraseology/index.html"),
       },
     },
   },

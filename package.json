@@ -13,7 +13,7 @@
     "dev:game": "npm run dev -w @easeupmush/pompey-punch-up",
     "dev:pompeymon": "npm run dev -w @easeupmush/pompeymon",
     "debug": "npm run debug -w @easeupmush/pompey-punch-up",
-    "build": "npm run build -w @easeupmush/site && GAME_BASE=/games/pompey-punch-up/ npm run build -w @easeupmush/pompey-punch-up && node scripts/assemble-dist.mjs",
+    "build": "npm run build -w @easeupmush/site && GAME_BASE=/games/pompey-punch-up/ npm run build -w @easeupmush/pompey-punch-up && GAME_BASE=/games/pompeymon/ npm run build -w @easeupmush/pompeymon && node scripts/assemble-dist.mjs",
     "preview": "vite preview --config vite.preview.config.ts",
     "site": "npm run build && npm run preview",
     "deploy": "npm run build && npx wrangler deploy",

@@ -6,6 +6,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dist = resolve(root, "dist");
 const siteDist = resolve(root, "apps/site/dist");
 const gameDist = resolve(root, "apps/pompey-punch-up/dist");
+const monDist = resolve(root, "apps/pompeymon/dist");
 
 if (!existsSync(siteDist)) {
   console.error("Missing apps/site/dist — run site build first.");
@@ -13,6 +14,10 @@ if (!existsSync(siteDist)) {
 }
 if (!existsSync(gameDist)) {
   console.error("Missing apps/pompey-punch-up/dist — run game build first.");
+  process.exit(1);
+}
+if (!existsSync(monDist)) {
+  console.error("Missing apps/pompeymon/dist — run game build first.");
   process.exit(1);
 }
 
@@ -24,6 +29,11 @@ const gameOut = resolve(dist, "games/pompey-punch-up");
 mkdirSync(gameOut, { recursive: true });
 cpSync(gameDist, gameOut, { recursive: true });
 
+// Pompeymon ships unlisted — only the back room links to it.
+const monOut = resolve(dist, "games/pompeymon");
+mkdirSync(monOut, { recursive: true });
+cpSync(monDist, monOut, { recursive: true });
+
 writeFileSync(resolve(dist, "CNAME"), "easeupmush.com\n");
 
-console.log("Assembled dist/ (site + games/pompey-punch-up)");
+console.log("Assembled dist/ (site + games/pompey-punch-up + games/pompeymon)");
