@@ -69,6 +69,7 @@ export class DebugScene extends Phaser.Scene {
   private keyEnter?: Phaser.Input.Keyboard.Key;
   private keyEsc?: Phaser.Input.Keyboard.Key;
   private keyD?: Phaser.Input.Keyboard.Key;
+  private keyS?: Phaser.Input.Keyboard.Key;
   /** Ignore leftover click/tap from leaving a battle. */
   private inputArmed = false;
 
@@ -125,6 +126,18 @@ export class DebugScene extends Phaser.Scene {
         color: "#d8e8f0",
       })
       .setDepth(2);
+    this.add
+      .text(150, 8, "S  STORY >", {
+        fontFamily: '"Press Start 2P", monospace',
+        fontSize: "8px",
+        color: "#a8d8a0",
+      })
+      .setDepth(2)
+      .setInteractive({ useHandCursor: true })
+      .on("pointerup", () => {
+        if (!this.inputArmed) return;
+        this.scene.start("story");
+      });
 
     this.addPanel(6, 58, 108, 94, "AREAS");
     this.addPanel(126, 58, 108, 94, "BATTLES");
@@ -210,6 +223,11 @@ export class DebugScene extends Phaser.Scene {
       this.refresh();
     }
 
+    if (Phaser.Input.Keyboard.JustDown(this.keyS!)) {
+      this.scene.start("story");
+      return;
+    }
+
     const launch =
       Phaser.Input.Keyboard.JustDown(this.keySpace!) ||
       Phaser.Input.Keyboard.JustDown(this.keyEnter!) ||
@@ -239,6 +257,7 @@ export class DebugScene extends Phaser.Scene {
     this.keyEnter = kb.addKey("ENTER");
     this.keyEsc = kb.addKey("ESC");
     this.keyD = kb.addKey("D");
+    this.keyS = kb.addKey("S");
   }
 
   private paintBg(): void {

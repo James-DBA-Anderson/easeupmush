@@ -229,6 +229,66 @@ export function trainerDeploy(
   });
 }
 
+/** A mon nobody asked launches itself out of the bag, slams someone, and drops in beside you. */
+export function bagLeap(
+  scene: Phaser.Scene,
+  texture: string,
+  from: { x: number; y: number },
+  target: { x: number; y: number },
+  land: { x: number; y: number },
+  onHit?: () => void,
+): void {
+  const mon = scene.add.image(from.x, from.y, texture).setOrigin(0.5, 1).setScale(0.4).setDepth(15);
+  puff(scene, from.x, from.y - 10, 0xf0a23a);
+
+  const arc = (
+    to: { x: number; y: number },
+    lift: number,
+    ms: number,
+    scale: number,
+    spin: number,
+    done: () => void,
+  ): void => {
+    scene.tweens.add({ targets: mon, x: to.x, duration: ms, ease: "Linear" });
+    scene.tweens.add({ targets: mon, scale, angle: mon.angle + spin, duration: ms, ease: "Linear" });
+    scene.tweens.add({
+      targets: mon,
+      y: Math.min(from.y, to.y) - lift,
+      duration: ms / 2,
+      ease: "Quad.easeOut",
+      onComplete: () => {
+        scene.tweens.add({
+          targets: mon,
+          y: to.y,
+          duration: ms / 2,
+          ease: "Quad.easeIn",
+          onComplete: done,
+        });
+      },
+    });
+  };
+
+  arc(target, 46, 540, 2, 360, () => {
+    onHit?.();
+    sparks(scene, mon.x, mon.y - 16);
+    scene.time.delayedCall(220, () => {
+      arc(land, 30, 460, 2, -360, () => {
+        mon.setAngle(0);
+        puff(scene, land.x, land.y - 10, 0xd0e0f0);
+        scene.tweens.add({
+          targets: mon,
+          scaleY: 1.7,
+          scaleX: 2.3,
+          duration: 70,
+          yoyo: true,
+          ease: "Quad.easeOut",
+          onComplete: () => mon.destroy(),
+        });
+      });
+    });
+  });
+}
+
 /** Trainer / kid body language. */
 export function actorReact(
   scene: Phaser.Scene,
@@ -325,7 +385,7 @@ function puff(scene: Phaser.Scene, x: number, y: number, color: number): void {
 
 export type FlameHandle = { stop: () => void };
 
-/** Short DBZ-style power flame while SUPER — rising gold/orange flecks only (no spr tween fights). */
+/** DBZ-style power up while SUPER — the mon glows gold and flecks lick up its body. */
 export function flameAura(
   scene: Phaser.Scene,
   spr: Phaser.GameObjects.Image | undefined,
@@ -334,12 +394,55 @@ export function flameAura(
   let alive = true;
   const bits: Phaser.GameObjects.Graphics[] = [];
 
+  const ghost = (depth: number, tint: number, blowUp: number, alpha: number) => {
+    const g = scene.add.image(spr.x, spr.y, spr.texture.key);
+    g.setOrigin(spr.originX, spr.originY);
+    g.setDepth(depth);
+    // Fill, not multiply — a dark mon's own colours would swallow a plain tint.
+    g.setTintFill(tint);
+    g.setAlpha(alpha);
+    g.setBlendMode(Phaser.BlendModes.ADD);
+    g.setScale(spr.scaleX * blowUp, spr.scaleY * blowUp);
+    return { g, blowUp, alpha };
+  };
+
+  // Wide soft falloff, a tight bright rim, then a light wash over the mon itself.
+  const shells = [
+    ghost(spr.depth - 1, 0xff6000, 1.26, 0.16),
+    ghost(spr.depth - 1, 0xffd020, 1.08, 0.52),
+    ghost(spr.depth + 1, 0xfff0b0, 1, 0.16),
+  ];
+
+  const follow = (): void => {
+    if (!spr.active) return;
+    for (const shell of shells) {
+      shell.g.setPosition(spr.x, spr.y);
+      shell.g.setFlipX(spr.flipX);
+      shell.g.setScale(spr.scaleX * shell.blowUp, spr.scaleY * shell.blowUp);
+    }
+  };
+  scene.events.on(Phaser.Scenes.Events.UPDATE, follow);
+
+  const pulses = shells.map((shell) =>
+    scene.tweens.add({
+      targets: shell.g,
+      alpha: shell.alpha * 0.45,
+      duration: 340,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+    }),
+  );
+
   const spit = (): void => {
     if (!alive || !spr.active) return;
     const g = scene.add.graphics().setDepth(spr.depth - 1);
     bits.push(g);
-    const bx = spr.x + (Math.random() * 14 - 7);
-    const by = spr.y + 6;
+    const wide = spr.displayWidth * 0.42;
+    const tall = spr.displayHeight;
+    const bx = spr.x + (Math.random() * 2 - 1) * wide;
+    // Origin is the feet, so climb up the body from there.
+    const by = spr.y - Math.random() * tall * 0.9;
     const colors = [0xf8f070, 0xf0a23a, 0xff6020, 0xffe8a0];
     g.fillStyle(colors[Math.floor(Math.random() * colors.length)]!, 1);
     g.fillRect(bx, by, 2 + Math.floor(Math.random() * 2), 3 + Math.floor(Math.random() * 3));
@@ -349,7 +452,7 @@ export function flameAura(
     }
     scene.tweens.add({
       targets: g,
-      y: g.y - (10 + Math.random() * 10),
+      y: g.y - (10 + Math.random() * 12),
       alpha: 0,
       duration: 220 + Math.random() * 120,
       ease: "Quad.easeOut",
@@ -359,14 +462,18 @@ export function flameAura(
         if (i >= 0) bits.splice(i, 1);
       },
     });
-    scene.time.delayedCall(55 + Math.random() * 40, spit);
+    scene.time.delayedCall(45 + Math.random() * 35, spit);
   };
+  spit();
   spit();
   spit();
 
   return {
     stop: () => {
       alive = false;
+      scene.events.off(Phaser.Scenes.Events.UPDATE, follow);
+      for (const p of pulses) p.remove();
+      for (const shell of shells) shell.g.destroy();
       for (const g of bits) g.destroy();
       bits.length = 0;
     },

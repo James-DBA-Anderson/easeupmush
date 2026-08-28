@@ -62,6 +62,15 @@ export function startSteveFight(
   });
 }
 
+/** Sinks in after you've boxed a mon that wasn't yours. */
+export const STEVE_SHAME: Line[] = [
+  you("..."),
+  you("That's Steve's mon. In my kebab box."),
+  you("I've just chored a Pompeymon."),
+  you("Hope no one finds out about this."),
+  "It won't look at you.",
+];
+
 export function finishSteveCatch(): void {
   beatTrainer(STEVE_ID);
   persistRun();

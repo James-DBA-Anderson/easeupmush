@@ -13,6 +13,7 @@ import {
   actorReact,
   attackLunge,
   attackMiss,
+  bagLeap,
   braceGuard,
   dodgeLean,
   faintDrop,
@@ -34,6 +35,7 @@ import {
   spawnSteveBattleBike,
   STEVE_BIKE,
   STEVE_ID,
+  STEVE_SHAME,
   STEVE_NAME,
 } from "../world/steve";
 import { ensureNpcSheets, npcAnim, npcSheet, type NpcLook } from "../sprites/npc";
@@ -68,7 +70,7 @@ export type TrainerBattle = {
   };
 };
 
-type AfterText = "menu" | "foe" | "next" | "done" | "counter" | "bag" | "afterPoison" | "steveTheft" | "steveChase" | "steveCatch" | "stubborn" | "deanFlee" | "deanBlowKo";
+type AfterText = "menu" | "foe" | "next" | "done" | "counter" | "bag" | "afterPoison" | "steveTheft" | "steveChase" | "steveCatch" | "stubborn" | "deanLeap" | "deanFlee" | "deanBlowKo";
 
 export class EncounterScene extends Phaser.Scene {
   private foeId!: SpeciesId;
@@ -119,6 +121,8 @@ export class EncounterScene extends Phaser.Scene {
   private steveThief?: Phaser.GameObjects.Sprite;
   /** Youngster Dean self-destruct / PRICKLES event. */
   private deanEvent = false;
+  /** Who's about to come flying out of the bag at Dean. */
+  private stolenId?: SpeciesId;
   /** Party index currently in battle — not species id (duplicates share an id). */
   private meSlot = 0;
   private meFlame?: FlameHandle;
@@ -342,6 +346,7 @@ export class EncounterScene extends Phaser.Scene {
     else if (this.after === "steveChase") this.chaseSteveThief();
     else if (this.after === "steveCatch") this.autoSteveCatch();
     else if (this.after === "stubborn") this.startDefend();
+    else if (this.after === "deanLeap") this.playDeanLeap();
     else if (this.after === "deanFlee") this.finishDeanFlee();
     else if (this.after === "deanBlowKo") this.finishFoeKo([]);
     else this.finishLeave();
@@ -1032,7 +1037,8 @@ export class EncounterScene extends Phaser.Scene {
             ? `Gotcha. ${this.foe.name} again.`
             : `Gotcha. ${this.foe.name}.`,
       );
-      if (!this.steveAbandoned) markWildBeat();
+      if (this.steveAbandoned) lines.push(...STEVE_SHAME);
+      else markWildBeat();
       this.say(lines, "done");
       return;
     }
@@ -1103,12 +1109,40 @@ export class EncounterScene extends Phaser.Scene {
       );
       return true;
     }
-    const who = monLabel(stolen);
+    this.stolenId = stolen.id;
     this.say(
       [
         ...lead,
         { who: dean, text: "Blow yourself up. Don't care about you." },
         `Foe ${this.foe.name} starts shaking…`,
+      ],
+      "deanLeap",
+    );
+    return true;
+  }
+
+  /** PRICKLES launches itself out of the bag at Dean. */
+  private playDeanLeap(): void {
+    const dean = this.trainer?.who ?? "DEAN";
+    const stolen = findStolenMon();
+    const who = stolen ? monLabel(stolen) : STOLEN_NICK;
+    const id = stolen?.id ?? this.stolenId;
+    const mark = this.trainerSpr ?? this.foeSpr;
+    if (id && mark) {
+      bagLeap(
+        this,
+        monBattleKey(id),
+        { x: KID_X + 8, y: KID_TALK_Y + 26 },
+        { x: mark.x - 12, y: mark.y - 4 },
+        { x: 78, y: 84 },
+        () => {
+          hitImpact(this, this.trainerSpr, false, true);
+          actorReact(this, this.kidSpr, "cheer");
+        },
+      );
+    }
+    this.say(
+      [
         `${who} burst out of the bag!`,
         `${who} slammed into ${dean}!`,
         { who: dean, text: "Ow! Mad hedgehog—!" },
@@ -1119,7 +1153,6 @@ export class EncounterScene extends Phaser.Scene {
       ],
       "deanFlee",
     );
-    return true;
   }
 
   private finishDeanFlee(): void {
@@ -1378,7 +1411,7 @@ export class EncounterScene extends Phaser.Scene {
       run.kebabCatch = true;
       lines.push({ who: "YOU", text: "Wow it actually worked." });
     }
-    lines.push(`Gotcha. ${STOLEN_NICK}!`);
+    lines.push(`Gotcha. ${STOLEN_NICK}!`, ...STEVE_SHAME);
     this.say(lines, "done");
   }
 

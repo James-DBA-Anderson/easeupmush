@@ -5,6 +5,7 @@ import { BathroomScene } from "./scenes/BathroomScene";
 import { BedroomScene } from "./scenes/BedroomScene";
 import { BridgeScene } from "./scenes/BridgeScene";
 import { DebugScene } from "./scenes/DebugScene";
+import { StoryScene } from "./scenes/StoryScene";
 import { FrontRoomScene } from "./scenes/FrontRoomScene";
 import { HallScene } from "./scenes/HallScene";
 import { HighStreetScene } from "./scenes/HighStreetScene";
@@ -36,11 +37,14 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
   },
   scale: {
     mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
+    // The screen holder centres the canvas itself; Phaser's own margins would
+    // stack on top of that and shove it down and right.
+    autoCenter: Phaser.Scale.NO_CENTER,
   },
   scene: [
     TitleScene,
     DebugScene,
+    StoryScene,
     BedroomScene,
     LandingScene,
     BathroomScene,

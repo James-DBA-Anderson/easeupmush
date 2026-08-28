@@ -7,9 +7,9 @@ import { consumeAction, consumeDir, isTouchUi } from "../touch";
 import { drawEaseLogo, drawPompeymonLogo } from "../ui/pixelLogo";
 import { drawTitleSkyline } from "../ui/titleArt";
 
-/** Right-hand menu column — 6px keeps the longest line ("PRESS D DEBUG") on screen. */
-const MENU_PX = "6px";
-const MENU_X = 196;
+/** Right-hand menu column. 8px reads on a big screen; 184 keeps "PRESS D DEBUG" on it. */
+const MENU_PX = "8px";
+const MENU_X = 184;
 
 /** GBA title — harbour skyline, kid, a few Pompeymon. No place name. */
 export class TitleScene extends Phaser.Scene {
@@ -140,7 +140,8 @@ export class TitleScene extends Phaser.Scene {
         color: "#fff8e8",
       })
       .setOrigin(0.5)
-      .setDepth(9);
+      .setDepth(9)
+      .setShadow(1, 1, "#0b1c24", 0, false, true);
 
     if (this.saved) {
       this.menu = ["CONTINUE", "NEW GAME"].map((label, i) =>
@@ -151,7 +152,8 @@ export class TitleScene extends Phaser.Scene {
             color: "#fff8e8",
           })
           .setOrigin(0.5)
-          .setDepth(9),
+          .setDepth(9)
+          .setShadow(1, 1, "#0b1c24", 0, false, true),
       );
       this.paintMenu();
     }
@@ -163,7 +165,8 @@ export class TitleScene extends Phaser.Scene {
         color: "#e0d0b0",
       })
       .setOrigin(0.5)
-      .setDepth(9);
+      .setDepth(9)
+      .setShadow(1, 1, "#0b1c24", 0, false, true);
 
     this.add
       .text(4, GBA_H - 3, `v${__APP_VERSION__}`, {
