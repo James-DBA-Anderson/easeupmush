@@ -5,6 +5,7 @@ import { ensureNpcSheets, npcSheet, playNpc, type NpcLook } from "../sprites/npc
 import type { Facing } from "../walk";
 import type { Line } from "../ui/MsgBox";
 import { palAside } from "./pal";
+import { setNpcBlockers, type WanderBox } from "./wander";
 
 export type TrainerMate = {
   name: string;
@@ -41,6 +42,18 @@ export type TrainerSpec = {
   palTalk?: string | string[];
 };
 
+export type RouteStep = {
+  /** Where they're heading. */
+  x: number;
+  y: number;
+  /** What they do once they get there. */
+  act?: "wait" | "shop" | "catch";
+  /** How long they stop for (ms). */
+  hold?: number;
+  /** Line they give if you talk to them mid-errand. */
+  say?: string;
+};
+
 export type NpcSpec = {
   id: string;
   name: string;
@@ -52,6 +65,10 @@ export type NpcSpec = {
   los?: number;
   patrol?: { x: number; y: number; w: number; h: number };
   talk: string | string[];
+  /** Extra chat cycled through when you talk to them again. */
+  more?: (string | string[])[];
+  /** Errand loop — walk the map, duck into shops, hunt the grass. Overrides `patrol`. */
+  route?: RouteStep[];
   /** Mid-chat lines before a trainer fight (Look only — no LOS). */
   intro?: Line[];
   /** Interact uses this NPC's trainer / intro / beaten state. */
@@ -61,37 +78,86 @@ export type NpcSpec = {
 
 export type FieldNpc = Omit<NpcSpec, "flip"> & {
   sprite: Phaser.GameObjects.Sprite;
+  /** Feet-sized solid body — the player walks round it. */
+  zone: Phaser.GameObjects.Zone;
   flip: number;
   dx: number;
   dy: number;
   until: number;
+  /** Errand state: which step they're on, when they can move again, and whether they're indoors. */
+  step: number;
+  hold: number;
+  inside: boolean;
+  /** Set while they're busy — what they say if you interrupt. */
+  saying?: string;
 };
+
+/** Feet footprint of an NPC (sprite y is the feet line). */
+const BODY_W = 12;
+const BODY_H = 10;
+/** Wider pad wild mons steer round, so none end up hidden behind a person. */
+const SHOO_PAD = 6;
 
 export function spawnFieldNpcs(scene: Phaser.Scene, specs: NpcSpec[]): FieldNpc[] {
   ensureNpcSheets(scene);
-  return specs.map((spec, i) => {
+  const npcs = specs.map((spec, i) => {
     const sprite = scene.add.sprite(spec.x, spec.y, npcSheet(spec.look), "idle-down");
     sprite.setOrigin(0.5, 1);
     sprite.setDepth(spec.y);
     const flip = spec.flip ?? 1;
     sprite.setFlipX(flip < 0);
     playNpc(sprite, spec.look, spec.facing, false);
+    const zone = scene.add.zone(spec.x, spec.y - BODY_H / 2, BODY_W, BODY_H);
+    scene.physics.add.existing(zone);
+    const body = zone.body as Phaser.Physics.Arcade.Body;
+    body.setAllowGravity(false);
+    body.setImmovable(true);
+    body.moves = false;
     return {
       ...spec,
       sprite,
+      zone,
       flip,
       dx: 0,
       dy: 0,
       until: scene.time.now + 280 + i * 160,
+      step: 0,
+      hold: scene.time.now + 400 + i * 300,
+      inside: false,
     };
   });
+  setNpcBlockers(npcBoxes(npcs));
+  return npcs;
+}
+
+/** Keep-off rects round each person — used by wild spawning and wandering. */
+export function npcBoxes(npcs: FieldNpc[]): WanderBox[] {
+  return npcs.filter((n) => !n.inside).map((n) => ({
+    x: n.sprite.x - BODY_W / 2 - SHOO_PAD,
+    y: n.sprite.y - BODY_H - SHOO_PAD,
+    w: BODY_W + SHOO_PAD * 2,
+    h: BODY_H + SHOO_PAD * 2,
+  }));
+}
+
+/** Make the people solid for the player — call after `addWalls`. */
+export function blockNpcs(
+  scene: Phaser.Scene,
+  player: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody,
+  npcs: FieldNpc[],
+): void {
+  for (const n of npcs) scene.physics.add.collider(player, n.zone);
 }
 
 export function tickFieldNpcs(scene: Phaser.Scene, npcs: FieldNpc[]): void {
   const now = scene.time.now;
   const dt = scene.game.loop.delta / 1000;
+  let moved = false;
   for (const n of npcs) {
-    if (n.patrol) {
+    if (n.route?.length) {
+      moved = moved || runRoute(scene, n, now, dt);
+    } else if (n.patrol) {
+      moved = moved || n.dx !== 0 || n.dy !== 0;
       if (now > n.until) {
         n.until = now + 500 + Math.random() * 1200;
         const r = Math.random();
@@ -138,19 +204,109 @@ export function tickFieldNpcs(scene: Phaser.Scene, npcs: FieldNpc[]): void {
       }
       n.sprite.setPosition(nx, ny);
     }
+    if (n.inside) continue;
     n.sprite.setFlipX(n.flip < 0);
     n.sprite.setDepth(n.sprite.y);
+    (n.zone.body as Phaser.Physics.Arcade.Body).reset(n.sprite.x, n.sprite.y - BODY_H / 2);
     playNpc(n.sprite, n.look, n.facing, n.dx !== 0 || n.dy !== 0);
   }
+  if (moved) setNpcBlockers(npcBoxes(npcs));
+}
+
+const ROUTE_SPEED = 26;
+
+/** Walk an errand loop — one leg at a time, then whatever they came to do. Returns true if they shifted. */
+function runRoute(scene: Phaser.Scene, n: FieldNpc, now: number, dt: number): boolean {
+  const route = n.route!;
+  const step = route[n.step % route.length]!;
+  if (now < n.hold) {
+    n.dx = 0;
+    n.dy = 0;
+    return false;
+  }
+  if (n.inside) {
+    showNpc(n, true);
+    n.saying = undefined;
+    n.step += 1;
+    return true;
+  }
+  n.saying = undefined;
+  const dx = step.x - n.sprite.x;
+  const dy = step.y - n.sprite.y;
+  // One axis at a time keeps them on the pavement instead of cutting corners.
+  if (Math.abs(dx) > 1) {
+    n.dx = Math.sign(dx) * ROUTE_SPEED;
+    n.dy = 0;
+    n.facing = "side";
+    n.flip = dx > 0 ? 1 : -1;
+  } else if (Math.abs(dy) > 1) {
+    n.dx = 0;
+    n.dy = Math.sign(dy) * ROUTE_SPEED;
+    n.facing = dy > 0 ? "down" : "up";
+    n.flip = 1;
+  } else {
+    n.dx = 0;
+    n.dy = 0;
+    arriveAt(scene, n, step, now);
+    return false;
+  }
+  const nx = n.sprite.x + n.dx * dt;
+  const ny = n.sprite.y + n.dy * dt;
+  n.sprite.setPosition(
+    n.dx ? clampStep(n.sprite.x, nx, step.x) : nx,
+    n.dy ? clampStep(n.sprite.y, ny, step.y) : ny,
+  );
+  return true;
+}
+
+/** Don't overshoot the waypoint on a long frame. */
+function clampStep(from: number, to: number, target: number): number {
+  return from < target ? Math.min(to, target) : Math.max(to, target);
+}
+
+function arriveAt(scene: Phaser.Scene, n: FieldNpc, step: RouteStep, now: number): void {
+  n.saying = step.say;
+  if (step.act === "shop") {
+    showNpc(n, false);
+    n.hold = now + (step.hold ?? 3200);
+    return;
+  }
+  if (step.act === "catch") {
+    n.facing = "down";
+    scene.tweens.add({
+      targets: n.sprite,
+      y: n.sprite.y - 4,
+      duration: 160,
+      yoyo: true,
+      repeat: 2,
+      ease: "Quad.easeOut",
+    });
+    n.hold = now + (step.hold ?? 2200);
+    n.step += 1;
+    return;
+  }
+  n.hold = now + (step.hold ?? 1400);
+  n.step += 1;
+}
+
+/** Duck into a shop / come back out. */
+function showNpc(n: FieldNpc, on: boolean): void {
+  n.inside = !on;
+  n.sprite.setVisible(on);
+  (n.zone.body as Phaser.Physics.Arcade.Body).enable = on;
 }
 
 export function npcNear(
   player: { x: number; y: number },
   npcs: FieldNpc[],
   dist = 16,
+  keepOff?: WanderBox[],
 ): FieldNpc | undefined {
+  if (keepOff?.some((z) => player.x >= z.x && player.x <= z.x + z.w && player.y >= z.y && player.y <= z.y + z.h)) {
+    return undefined;
+  }
   return npcs.find(
-    (n) => Phaser.Math.Distance.Between(player.x, player.y, n.sprite.x, n.sprite.y - 8) < dist,
+    (n) => !n.inside && Phaser.Math.Distance.Between(player.x, player.y, n.sprite.x, n.sprite.y - 8) < dist,
   );
 }
 
@@ -171,8 +327,15 @@ export function npcInLos(player: { x: number; y: number }, npc: FieldNpc): boole
   return Math.abs(player.y - y) < 12 && dx * dir > 0 && Math.abs(dx) < range;
 }
 
-export function losTrainer(player: { x: number; y: number }, npcs: FieldNpc[]): FieldNpc | undefined {
-  return npcs.find((n) => npcInLos(player, n));
+export function losTrainer(
+  player: { x: number; y: number },
+  npcs: FieldNpc[],
+  keepOff?: WanderBox[],
+): FieldNpc | undefined {
+  if (keepOff?.some((z) => player.x >= z.x && player.x <= z.x + z.w && player.y >= z.y && player.y <= z.y + z.h)) {
+    return undefined;
+  }
+  return npcs.find((n) => !n.inside && npcInLos(player, n));
 }
 
 /** Resolve pair mate → lead so both share one fight / beaten flag. */
@@ -192,15 +355,72 @@ export function npcTalk(npc: FieldNpc, npcs?: FieldNpc[]): Line | Line[] {
     if (!extra) return out;
     return [...(Array.isArray(out) ? out : [out]), extra];
   };
+  if (lead.saying) return withPal(said(lead.saying));
   if (lead.trainer && isBeaten(lead.id)) return withPal(said(lead.trainer.after));
-  if (lead.trainer && !run.starter) return withPal(said("Get a Pompeymon first mush."));
+  if (lead.trainer && !run.starter) {
+    return withPal(
+      said(
+        run.labVisited
+          ? "Get a Pompeymon first mush."
+          : [
+              "Get a Pompeymon first mush.",
+              "Choke's research centre — north end of High Street. Cream. Navy board.",
+            ],
+      ),
+    );
+  }
   if (lead.trainer?.need && !isBeaten(lead.trainer.need)) {
     if (run.palJoined && lead.trainer.palTalk) return withPal(said(lead.trainer.palTalk));
     return withPal(said(lead.talk));
   }
   if (lead.intro && lead.trainer && !isBeaten(lead.id)) return withPal(lead.intro);
   if (run.palJoined && lead.trainer?.palTalk && lead.trainer.prize) return withPal(said(lead.trainer.palTalk));
-  return withPal(said(lead.talk));
+  const turn = chatTurn(lead.id);
+  if (!run.labVisited) {
+    const tip = labTip(lead.id);
+    if (tip && turn === 0) return withPal(said(tip));
+  }
+  const spare = lead.more ?? [];
+  const pick = (run.labVisited ? turn : Math.max(0, turn - 1)) % (spare.length + 1);
+  return withPal(said(pick === 0 ? lead.talk : spare[pick - 1]!));
+}
+
+const chats = new Map<string, number>();
+
+/** How many times we've chatted this one — drives their next line. */
+function chatTurn(id: string): number {
+  const n = chats.get(id) ?? 0;
+  chats.set(id, n + 1);
+  return n;
+}
+
+/** Point players at Choke's before they've stepped inside. */
+function labTip(id: string): string | string[] | undefined {
+  switch (id) {
+    case "hs-nan":
+      return [
+        "Looking for Choke's? Research centre's up the north end.",
+        "Cream building. Navy board. Can't miss it mush.",
+      ];
+    case "hs-steve-mate":
+      return [
+        "Steve's somewhere. Research centre's up by the top of High Street.",
+        "Choke's place. Cream. Navy. New trainers wanted — flyer said.",
+      ];
+    case "hs-kay":
+      return "Chippy's here. Research centre's further up — north, west side.";
+    case "rb-giveway":
+      return [
+        "Give way. They never do.",
+        "Want Choke's research centre? High Street east, then north. Cream building.",
+      ];
+    case "rb-lee":
+      return "High Street that way. Research centre's up the north end mush.";
+    case "hs-pub":
+      return "Research centre? Top of the street. Past the chippy. I'm busy mush.";
+    default:
+      return undefined;
+  }
 }
 
 export function startTrainerFight(
@@ -272,17 +492,23 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     y: 318,
     facing: "down",
     talk: "Charity's up the street. Pawn's by the pub.",
+    more: [
+      "Don't squinny at me mush. I only said.",
+      ["Gulls had me chips last Tuesday.", "Bold as you like."],
+      "My Ron kept a Pompeymon. Bit the postman.",
+      "Bus don't come no more. Nor does Ron.",
+    ],
   },
   {
     id: "hs-pub",
     name: "DAVE",
     look: "drunk",
     x: 148,
-    y: 328,
+    y: 300,
     facing: "side",
     flip: -1,
     los: 36,
-    patrol: { x: 142, y: 316, w: 16, h: 22 },
+    patrol: { x: 142, y: 288, w: 16, h: 22 },
     talk: [
       "You're my best mate mush. You are.",
       "I aint never been to portsmuth before.",
@@ -303,10 +529,18 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     x: 84,
     y: 250,
     facing: "down",
-    patrol: { x: 78, y: 230, w: 16, h: 50 },
     talk: [
       "You seen Steve mush? New bike. Cycles is down the street.",
       "Chemist drain. I wouldn't.",
+    ],
+    route: [
+      { x: 84, y: 250, hold: 2400, say: "Waiting on Steve. He's always late." },
+      { x: 104, y: 250 },
+      { x: 104, y: 414 },
+      { x: 90, y: 420, act: "shop", hold: 5200 },
+      { x: 104, y: 420 },
+      { x: 104, y: 300, hold: 1600, say: "Ninety quid for a lock. Ninety." },
+      { x: 84, y: 250, hold: 2000 },
     ],
   },
   {
@@ -314,10 +548,10 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     name: "KAY",
     look: "lass",
     x: 84,
-    y: 136,
+    y: 176,
     facing: "side",
     flip: 1,
-    los: 44,
+    los: 40,
     talk: "Chips first. Then you mush. Chippy's open. Feed 'em.",
     trainer: {
       title: "LASS KAY",
@@ -332,8 +566,8 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     id: "hs-sharon",
     name: "SHARON",
     look: "blond",
-    x: 138,
-    y: 124,
+    x: 148,
+    y: 220,
     facing: "side",
     flip: 1,
     talk: "We're busy mush.",
@@ -364,19 +598,41 @@ export const HIGH_STREET_NPCS: NpcSpec[] = [
     id: "hs-tracy",
     name: "TRACY",
     look: "coat",
-    x: 150,
-    y: 124,
+    x: 160,
+    y: 220,
     facing: "side",
     flip: -1,
     pairLead: "hs-sharon",
     talk: "We're busy mush.",
   },
   {
+    id: "hs-jan",
+    name: "JAN",
+    look: "blond",
+    x: 148,
+    y: 330,
+    facing: "up",
+    talk: "Chips, then the charity. Same every Friday mush.",
+    more: ["Bag for life. Six of 'em at home.", "Pawn's got my Ron's watch. Long story."],
+    route: [
+      { x: 148, y: 330, hold: 2000 },
+      { x: 148, y: 190 },
+      { x: 148, y: 178, act: "shop", hold: 4600 },
+      { x: 148, y: 200 },
+      { x: 120, y: 200 },
+      { x: 90, y: 140 },
+      { x: 90, y: 132, act: "shop", hold: 5000 },
+      { x: 90, y: 160, hold: 1800, say: "Large chips. Don't tell my Ron." },
+      { x: 120, y: 260 },
+      { x: 148, y: 330, hold: 2400 },
+    ],
+  },
+  {
     id: "hs-tom",
     name: "TOM",
     look: "hoodie",
     x: 150,
-    y: 372,
+    y: 260,
     facing: "side",
     flip: -1,
     los: 40,
@@ -400,7 +656,7 @@ export const ROUNDABOUT_NPCS: NpcSpec[] = [
     id: "rb-giveway",
     name: "BLOKE",
     look: "polo",
-    x: 52,
+    x: 70,
     y: 92,
     facing: "side",
     flip: 1,
@@ -414,7 +670,7 @@ export const ROUNDABOUT_NPCS: NpcSpec[] = [
     id: "rb-lee",
     name: "LEE",
     look: "cap",
-    x: 176,
+    x: 160,
     y: 82,
     facing: "side",
     flip: 1,
@@ -440,6 +696,11 @@ export const HILL_NPCS: NpcSpec[] = [
     y: 88,
     facing: "up",
     talk: "You can see the island from here mush.",
+    more: [
+      "Clear day you get the spinnaker. Not today.",
+      ["Walked up here every morning for forty year.", "Knees know it."],
+      "Wind's off the harbour. Do your coat up.",
+    ],
   },
 ];
 
@@ -473,11 +734,11 @@ export const ISLAND_NPCS: NpcSpec[] = [
     name: "MICK",
     look: "drunk",
     x: 140,
-    y: 158,
+    y: 128,
     facing: "side",
     flip: 1,
     los: 36,
-    patrol: { x: 132, y: 148, w: 20, h: 22 },
+    patrol: { x: 132, y: 118, w: 20, h: 22 },
     talk: [
       "Green Posts. I'm barred. Allegedly.",
       "I'd bang him out if he said that to me.",
@@ -509,11 +770,29 @@ export const ISLAND_NPCS: NpcSpec[] = [
     ],
   },
   {
+    id: "is-ryan",
+    name: "RYAN",
+    look: "cap",
+    x: 44,
+    y: 318,
+    facing: "down",
+    talk: "Grass by the lines is heaving mush. Boxes ready.",
+    more: ["Had one this morning. It got out the box.", "Don't tell the bus lad. He'll want one."],
+    route: [
+      { x: 44, y: 318, hold: 1600 },
+      { x: 44, y: 372, act: "catch", hold: 2600, say: "Sshh. It's right there mush." },
+      { x: 44, y: 430 },
+      { x: 40, y: 484, act: "catch", hold: 2800, say: "Nearly had it. Nearly." },
+      { x: 60, y: 430 },
+      { x: 44, y: 318, hold: 2200 },
+    ],
+  },
+  {
     id: "is-bex",
     name: "BEX",
     look: "lass",
     x: 90,
-    y: 396,
+    y: 420,
     facing: "side",
     flip: 1,
     los: 48,
@@ -532,7 +811,7 @@ export const ISLAND_NPCS: NpcSpec[] = [
     name: "GAZ",
     look: "cap",
     x: 150,
-    y: 248,
+    y: 290,
     facing: "side",
     flip: -1,
     los: 48,
@@ -556,8 +835,8 @@ export const SCHOOL_NPCS: NpcSpec[] = [
     id: "sch-pe",
     name: "SIR",
     look: "polo",
-    x: 88,
-    y: 80,
+    x: 120,
+    y: 100,
     facing: "down",
     talk: [
       "Gym's inside. Mr Atkins. Hilsea Badge.",

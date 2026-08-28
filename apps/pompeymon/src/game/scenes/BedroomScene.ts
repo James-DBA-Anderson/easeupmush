@@ -222,11 +222,9 @@ export class BedroomScene extends Phaser.Scene {
     const block = this.add.rectangle(s.x + s.w / 2, s.y + s.h / 2, s.w, s.h, 0x000000, 0);
     this.physics.add.existing(block, true);
     this.physics.add.collider(this.player, block);
-    this.showNote("Y-fronts. Wardrobe.");
   }
 
   private tryExamine(): void {
-    if (this.pal.tryTalk()) return;
     const p = this.player;
     const near = (s: { x: number; y: number; w: number; h: number }, pad = 12) =>
       p.x > s.x - pad && p.x < s.x + s.w + pad && p.y > s.y - pad && p.y < s.y + s.h + pad;
@@ -257,6 +255,7 @@ export class BedroomScene extends Phaser.Scene {
       this.reachThen("Duvet's a heap.");
       return;
     }
+    this.pal.tryTalk();
   }
 
   private lookBin(): void {

@@ -113,20 +113,83 @@ function shopEast(
 }
 
 function researchCentre(g: Phaser.GameObjects.Graphics, x: number, y: number): Solid {
-  const w = 72;
-  const h = 78;
-  px(g, C.roof2, x - 2, y, w + 4, 12);
-  px(g, C.navyL, x - 2, y, w + 4, 3);
-  furn(g, x, y + 10, w, h - 10, C.cream, C.creamL, C.creamD);
-  px(g, C.navy, x + 6, y + 16, 60, 10);
-  px(g, 0xf0e8d0, x + 10, y + 18, 52, 6);
-  px(g, C.ink, x + 14, y + 19, 44, 4);
-  px(g, C.glass, x + 8, y + 30, 18, 14);
-  px(g, C.glass, x + 30, y + 30, 18, 14);
-  px(g, C.glassL, x + 9, y + 31, 6, 5);
-  px(g, C.wood, x + w - 14, y + 36, 10, h - 46);
-  px(g, C.ink, x + w - 6, y + 50, 2, 2);
-  px(g, C.navy, x + 8, y + h - 14, 36, 6);
+  const w = 76;
+  const h = 82;
+  const slate = 0x3a4860;
+  const slateL = 0x5a6880;
+  const slateD = 0x2a3048;
+  const brass = 0xc8a048;
+  const brassL = 0xe8c868;
+  const glass = 0x58b0d0;
+  const glassL = 0x88d8f0;
+  const glassD = 0x387898;
+
+  // Flat institutional roof + parapet
+  px(g, slateD, x - 4, y, w + 8, 14);
+  px(g, slate, x - 2, y + 2, w + 4, 10);
+  px(g, slateL, x - 2, y + 2, w + 4, 2);
+  // Antenna / weather mast
+  px(g, C.ink, x + w - 10, y - 6, 2, 8);
+  px(g, brass, x + w - 12, y - 8, 6, 2);
+  px(g, brassL, x + w - 11, y - 10, 4, 2);
+
+  // Body — cream with navy trim (matches interior)
+  furn(g, x, y + 12, w, h - 12, C.cream, C.creamL, C.creamD);
+  px(g, C.navy, x, y + 12, w, 3);
+  px(g, C.navyL, x, y + 12, w, 1);
+
+  // Fascia board + pale name strip
+  px(g, C.navy, x + 4, y + 18, w - 8, 12);
+  px(g, C.navyL, x + 4, y + 18, w - 8, 2);
+  px(g, 0xf0e8d0, x + 8, y + 21, w - 16, 7);
+  // Block lettering (CHOKE-ish dashes)
+  px(g, C.ink, x + 12, y + 22, 5, 5);
+  px(g, C.ink, x + 20, y + 22, 5, 5);
+  px(g, C.ink, x + 28, y + 22, 5, 5);
+  px(g, C.ink, x + 36, y + 22, 5, 5);
+  px(g, C.ink, x + 44, y + 22, 5, 5);
+  px(g, brass, x + 52, y + 23, 10, 3);
+
+  // Twin lab windows with mullions + deep reveal
+  const win = (wx: number): void => {
+    px(g, glassD, wx - 1, y + 34, 22, 20);
+    px(g, glass, wx, y + 35, 20, 18);
+    px(g, glassL, wx + 1, y + 36, 8, 6);
+    px(g, C.ink, wx + 9, y + 35, 2, 18);
+    px(g, C.ink, wx, y + 43, 20, 2);
+    // Tiny specimen silhouette in glass
+    px(g, 0x2a5868, wx + 13, y + 46, 4, 4);
+    px(g, 0x2a5868, wx + 14, y + 44, 2, 2);
+  };
+  win(x + 6);
+  win(x + 30);
+
+  // Pillars framing the door
+  px(g, C.creamL, x + w - 22, y + 34, 4, h - 42);
+  px(g, C.creamD, x + w - 6, y + 34, 4, h - 42);
+  px(g, brass, x + w - 22, y + 34, 4, 2);
+  px(g, brass, x + w - 6, y + 34, 4, 2);
+
+  // Door + step
+  px(g, C.wood, x + w - 18, y + 40, 12, h - 48);
+  px(g, 0xe8c078, x + w - 18, y + 40, 12, 2);
+  px(g, 0xa07038, x + w - 18, y + h - 10, 12, 2);
+  px(g, C.ink, x + w - 9, y + 54, 2, 2);
+  px(g, glass, x + w - 16, y + 44, 8, 6);
+  px(g, glassL, x + w - 15, y + 45, 3, 2);
+  px(g, 0x8a8274, x + w - 20, y + h - 8, 16, 4);
+  px(g, 0xa8a090, x + w - 19, y + h - 7, 14, 2);
+
+  // Brass plaque under windows
+  px(g, brass, x + 8, y + h - 16, 36, 8);
+  px(g, brassL, x + 8, y + h - 16, 36, 2);
+  px(g, C.ink, x + 12, y + h - 13, 28, 3);
+
+  // Planter
+  px(g, 0x5a4830, x + 4, y + h - 10, 14, 6);
+  px(g, 0x3a6840, x + 6, y + h - 14, 4, 4);
+  px(g, 0x3a6840, x + 12, y + h - 13, 4, 3);
+
   return { x, y, w, h };
 }
 
@@ -145,8 +208,8 @@ export function drawHighStreet(g: Phaser.GameObjects.Graphics): HighStreetLayout
   roadH(g, 0, joinY, roadX + 4, joinH);
   const join: Solid = { x: 0, y: joinY, w: 48, h: joinH };
 
-  const centre = researchCentre(g, 8, 24);
-  const centreDoor: Solid = { x: centre.x + centre.w - 14, y: centre.y + 36, w: 12, h: 28 };
+  const centre = researchCentre(g, 6, 20);
+  const centreDoor: Solid = { x: centre.x + centre.w - 18, y: centre.y + 40, w: 14, h: 30 };
   const chippy = chippyFront(g, 8, 108, 72, 48, true);
   const news = shopWest(g, 8, 160, 72, 48, C.cream, C.creamL, C.creamD, C.roof);
   const iceland = shopWest(g, 8, 280, 72, 52, C.navy, C.navyL, 0x1a2848, C.roof2);
@@ -161,7 +224,7 @@ export function drawHighStreet(g: Phaser.GameObjects.Graphics): HighStreetLayout
   const lastE = spiceFront(g, 156, 396, 76, 48, false);
 
   const spots: HighStreetSpot[] = [
-    { at: centre, line: "Professor Choke's Pompeymon research centre." },
+    { at: centre, line: "Professor Choke's research centre. Navy board. Brass plaque." },
     { at: chippy, line: "Chippy. Open." },
     { at: news, line: "Papers. Not going in." },
     { at: iceland, line: "Iceland. Freezers humming." },
@@ -199,7 +262,7 @@ export function drawHighStreet(g: Phaser.GameObjects.Graphics): HighStreetLayout
     mapH,
     solids,
     spawnFromWest: { x: 40, y: joinY + 22 },
-    spawnFromLab: { x: 90, y: 70 },
+    spawnFromLab: { x: 94, y: 74 },
     spawnFromBike: { x: 90, y: 420 },
     spawnFromCharity: { x: 148, y: 178 },
     spawnFromPawn: { x: 148, y: 366 },

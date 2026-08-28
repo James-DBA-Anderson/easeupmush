@@ -1,8 +1,8 @@
 import Phaser from "phaser";
-import { applyHit, BATTLE, canRun, doDefend, doDodge, drainSta, firstActor, makeBattler, movesForLevel, pickFoeMove, rollCounter, rollDamage, rollDodge, rollHit, scaled, spendChase, spendFight, STA_FIGHT, STARTER_LV, tickPoison, tryCatch, tryPoison, xpForKo, type Battler } from "../battle";
+import { applyHit, BATTLE, canRun, doDefend, doDodge, drainSta, firstActor, isTired, makeBattler, moveAllowed, movesForLevel, pickFoeMove, resolveSuper, restSta, rollCounter, rollDamage, rollDodge, rollHit, scaled, spendChase, spendFight, STARTER_LV, tickPoison, tickSuper, tryCatch, tryPoison, xpForKo, type Battler } from "../battle";
 import { GBA_W } from "../constants";
 import { isDamaging, resolveMoves, type MoveDef } from "../moves";
-import { applyXp, beatTrainer, catchSpecies, ensureLeadAlive, healParty, ITEM, MAX_PARTY, partyAlive, persistRun, run, seeSpecies, setLead, takeCash, takePrize, useCatchBox, useHealItem, useKebabBox, bondStolenMon, findStolenMon, monLabel, STOLEN_NICK, type BagEntry, type ItemId, type PartyMon } from "../run";
+import { applyXp, beatTrainer, catchSpecies, ensureLeadAlive, healParty, ITEM, MAX_PARTY, partnerMon, partyCanFight, persistRun, run, seeSpecies, setLead, takeCash, takePrize, useCatchBox, useHealItem, useKebabBox, bondStolenMon, findStolenMon, monLabel, STOLEN_NICK, type BagEntry, type ItemId, type PartyMon } from "../run";
 import { ELEM_TINT, SPECIES, type SpeciesId } from "../species";
 import { ensureKidSheets, kidAnim, kidSheet } from "../sprites/kid";
 import { ensureMonSheets, monBattleKey } from "../sprites/mon";
@@ -16,8 +16,10 @@ import {
   braceGuard,
   dodgeLean,
   faintDrop,
+  flameAura,
   hitImpact,
   trainerDeploy,
+  type FlameHandle,
 } from "../ui/battleFx";
 import { leaveDebugSession, mountDebugBack, inDebugSession } from "../ui/debugBack";
 import { HpPlate, HP_PLATE_W } from "../ui/HpPlate";
@@ -112,11 +114,12 @@ export class EncounterScene extends Phaser.Scene {
   private steveBusy = false;
   private steveBike?: Phaser.GameObjects.Image;
   private steveThief?: Phaser.GameObjects.Sprite;
-  private steveHeldBike?: Phaser.GameObjects.Image;
   /** Youngster Dean self-destruct / PRICKLES event. */
   private deanEvent = false;
   /** Party index currently in battle — not species id (duplicates share an id). */
   private meSlot = 0;
+  private meFlame?: FlameHandle;
+  private foeFlame?: FlameHandle;
 
   constructor() {
     super("encounter");
@@ -140,8 +143,8 @@ export class EncounterScene extends Phaser.Scene {
     this.steveBusy = false;
     this.steveBike = undefined;
     this.steveThief = undefined;
-    this.steveHeldBike = undefined;
     this.deanEvent = false;
+    const wanted = partnerMon();
     const partner = ensureLeadAlive();
     this.meSlot = run.lead;
     const partnerId = partner?.id ?? run.starter ?? "scabfox";
@@ -149,6 +152,10 @@ export class EncounterScene extends Phaser.Scene {
     this.foe = makeBattler(this.foeId, this.foeLv);
     seeSpecies(this.foeId);
     seeSpecies(partnerId);
+    const refusedLead =
+      !!wanted?.stubborn && wanted.hp > 0 && (!partner || wanted !== partner)
+        ? monLabel(wanted)
+        : undefined;
 
     paintBattleBg(this, run.overworld?.scene ?? "field");
 
@@ -210,15 +217,15 @@ export class EncounterScene extends Phaser.Scene {
     });
     this.foeRestY = 100;
 
-    this.foeBar = new HpPlate(this, GBA_W - HP_PLATE_W - 4, 8, this.foe.name, this.foe.max, this.foe.lv);
-    this.foeBar.setSta(this.foe.sta, this.foe.staMax);
+    this.foeBar = new HpPlate(this, GBA_W - HP_PLATE_W - 4, 8, this.foe.name, this.foe.max, this.foe.lv, this.foe.hp);
+    this.foeBar.setSta(this.foe.sta, this.foe.staMax, this.foe.overcharged);
     if (this.trainer) {
       this.foeTeam = 1 + (this.trainer.party?.length ?? 0) + (this.trainer.mate ? 1 : 0);
       this.foeLeft = this.foeTeam;
       this.foeBar.setTeam(this.foeTeam, this.foeLeft);
     }
-    this.meBar = new HpPlate(this, 8, 80, this.me.name, this.me.max, this.me.lv);
-    this.meBar.setSta(this.me.sta, this.me.staMax);
+    this.meBar = new HpPlate(this, 8, 80, this.me.name, this.me.max, this.me.lv, this.me.hp);
+    this.meBar.setSta(this.me.sta, this.me.staMax, this.me.overcharged);
 
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
@@ -237,6 +244,7 @@ export class EncounterScene extends Phaser.Scene {
         `${this.trainer.title} ${this.trainer.mate ? "want" : "wants"} to fight!`,
         { who: this.trainer.who, text: this.trainer.challenge },
       ];
+      if (refusedLead) open.push(`${refusedLead} won't come out of the bag!`);
       if (run.palJoined && this.trainer.palPast?.length) {
         for (const text of this.trainer.palPast) {
           open.push({ who: this.trainer.who, text });
@@ -247,7 +255,9 @@ export class EncounterScene extends Phaser.Scene {
       this.pushPalCheer(open, "open");
       this.say(open, "menu");
     } else {
-      this.say(`Wild ${SPECIES[this.foeId].name}!`, "menu");
+      const open: Line[] = [`Wild ${SPECIES[this.foeId].name}!`];
+      if (refusedLead) open.push(`${refusedLead} won't come out of the bag!`);
+      this.say(open, "menu");
     }
   }
 
@@ -277,8 +287,10 @@ export class EncounterScene extends Phaser.Scene {
     if (this.bag?.active) {
       this.bag.update(this.cursors, { W: this.wasd.W, A: this.wasd.A, S: this.wasd.S, D: this.wasd.D }, confirm, cancel);
       if (!this.bag.active && !this.note?.open) {
-        if (this.mustSwitch) this.bag.show();
-        else this.menu?.show();
+        if (this.mustSwitch) {
+          if (!partyCanFight()) this.blackoutStubborn();
+          else this.bag.show();
+        } else this.menu?.show();
       }
       return;
     }
@@ -337,15 +349,62 @@ export class EncounterScene extends Phaser.Scene {
     this.foe.guard = false;
     this.me.dodging = false;
     this.foe.dodging = false;
+    const meDrop = tickSuper(this.me);
+    const foeDrop = tickSuper(this.foe);
+    this.syncPowerFx();
     if (this.wantPoisonTick) {
       this.wantPoisonTick = false;
       const lines = this.poisonTicks();
+      if (meDrop) lines.unshift(`${this.me.name}'s power faded.`);
+      if (foeDrop) lines.unshift(`Foe ${this.foe.name}'s power faded.`);
       if (lines.length) {
         this.say(lines, "afterPoison");
         return;
       }
     }
+    if (meDrop || foeDrop) {
+      const lines: Line[] = [];
+      if (meDrop) lines.push(`${this.me.name}'s power faded.`);
+      if (foeDrop) lines.push(`Foe ${this.foe.name}'s power faded.`);
+      this.say(lines, "menu");
+      return;
+    }
     this.menu?.show();
+  }
+
+  private syncSta(side: "me" | "foe" | "both" = "both"): void {
+    if (side !== "foe") this.meBar?.setSta(this.me.sta, this.me.staMax, this.me.overcharged);
+    if (side !== "me") this.foeBar?.setSta(this.foe.sta, this.foe.staMax, this.foe.overcharged);
+  }
+
+  private syncPowerFx(): void {
+    this.syncSta();
+    if (this.me.overcharged) {
+      if (!this.meFlame) this.meFlame = flameAura(this, this.meSpr);
+    } else if (this.meFlame) {
+      this.meFlame.stop();
+      this.meFlame = undefined;
+    }
+    if (this.foe.overcharged) {
+      if (!this.foeFlame) this.foeFlame = flameAura(this, this.foeSpr);
+    } else if (this.foeFlame) {
+      this.foeFlame.stop();
+      this.foeFlame = undefined;
+    }
+  }
+
+  /** Cash in a charge defend as the move plays — buffs, gold bar, flames. */
+  private playSuper(side: "me" | "foe"): boolean {
+    const lit = resolveSuper(side === "me" ? this.me : this.foe);
+    if (lit) this.syncPowerFx();
+    return lit;
+  }
+
+  private stopFlames(): void {
+    this.meFlame?.stop();
+    this.foeFlame?.stop();
+    this.meFlame = undefined;
+    this.foeFlame = undefined;
   }
 
   private afterPoison(): void {
@@ -388,7 +447,7 @@ export class EncounterScene extends Phaser.Scene {
   private picked(opt: "fight" | "bag" | "defend" | "dodge" | "run"): void {
     if (opt === "fight" || opt === "dodge") {
       if (this.ignoresOrder()) {
-        this.refuseOrder(this.leadCheeky() && !this.leadStubborn());
+        this.refuseOrder();
         return;
       }
     }
@@ -401,52 +460,52 @@ export class EncounterScene extends Phaser.Scene {
 
   private openMoves(): void {
     this.menu?.hide();
-    this.moves?.show(this.me.moves);
+    const moves = this.me.moves;
+    this.moves?.show(
+      moves,
+      moves.map((m) => moveAllowed(this.me, m)),
+    );
   }
 
   private pickedMove(move: MoveDef): void {
     if (move.kind === "defend") {
       this.me.move = move;
-      this.startDefend();
+      this.startDefend(move);
+      return;
+    }
+    if (move.kind === "mega" && !this.me.overcharged) {
+      this.say("Not powered up.", "menu");
+      return;
+    }
+    if (!moveAllowed(this.me, move)) {
+      this.say(move.kind === "mega" ? "Not powered up." : "Too tired for that.", "menu");
       return;
     }
     if (this.ignoresOrder()) {
       this.moves?.hide();
-      this.refuseOrder(this.leadCheeky() && !this.leadStubborn());
+      this.refuseOrder();
       return;
     }
-    if (!spendFight(this.me)) {
-      this.say("Too tired. Defend.", "menu");
-      return;
-    }
+    spendFight(this.me);
     this.me.move = move;
-    this.meBar?.setSta(this.me.sta, this.me.staMax);
+    this.syncSta("me");
     this.queueRound("fight");
   }
 
-  private leadStubborn(): boolean {
-    return !!run.party[this.meSlot]?.stubborn;
-  }
-
-  /** Soft bond — sometimes ignores Fight/Dodge. */
+  /** Soft bond — sometimes ignores Fight/Dodge while out. */
   private leadCheeky(): boolean {
     const mon = run.party[this.meSlot];
     return !!mon?.cheeky && !mon.stubborn;
   }
 
-  private refuseOrder(soft = false): void {
+  private refuseOrder(): void {
     const who = this.me.name;
-    const lines = soft
-      ? [`${who} doesn't feel like it.`, `${who} just braces.`]
-      : [`${who} won't listen!`, `${who} just braces.`];
-    this.say(lines, "stubborn");
+    this.say([`${who} doesn't feel like it.`, `${who} just braces.`], "stubborn");
   }
 
-  /** True if this order is ignored (always if stubborn, sometimes if cheeky). */
+  /** Cheeky only — stubborn never leaves the bag. */
   private ignoresOrder(): boolean {
-    if (this.leadStubborn()) return true;
-    if (this.leadCheeky() && Math.random() < 0.4) return true;
-    return false;
+    return this.leadCheeky() && Math.random() < 0.4;
   }
 
   private openBag(): void {
@@ -477,10 +536,14 @@ export class EncounterScene extends Phaser.Scene {
     this.storeHp();
     const revived = this.mustSwitch && this.me.hp > 0;
     if (revived) this.mustSwitch = false;
-    this.say(
-      [`You used ${ITEM[entry.id].label}.`, `${this.me.name} recovered ${got} HP.`],
-      revived || this.mustSwitch ? "menu" : "foe",
-    );
+    const lines: Line[] = [`You used ${ITEM[entry.id].label}.`, `${this.me.name} recovered ${got} HP.`];
+    const costsTurn = !(revived || this.mustSwitch);
+    if (costsTurn) {
+      const pip = restSta(this.me);
+      this.syncSta("me");
+      if (pip > 0) lines.push(`${this.me.name} caught its breath.`);
+    }
+    this.say(lines, costsTurn ? "foe" : "menu");
   }
 
   private switchTo(mon: PartyMon): void {
@@ -491,6 +554,15 @@ export class EncounterScene extends Phaser.Scene {
     }
     if (mon.hp <= 0) {
       this.say("It's out.", this.mustSwitch ? "bag" : "menu");
+      return;
+    }
+    if (mon.stubborn) {
+      const who = monLabel(mon);
+      if (this.mustSwitch && !partyCanFight()) {
+        this.blackoutStubborn([`${who} won't come out of the bag!`]);
+        return;
+      }
+      this.say(`${who} won't come out of the bag!`, this.mustSwitch ? "bag" : "menu");
       return;
     }
     if (slot === this.meSlot && this.me.hp > 0) {
@@ -510,6 +582,8 @@ export class EncounterScene extends Phaser.Scene {
     }
     const forced = this.mustSwitch;
     this.mustSwitch = false;
+    this.meFlame?.stop();
+    this.meFlame = undefined;
     this.me = makeBattler(next.id, next.lv, next.hp, next.moves, next.elem, next.nick);
     this.meSpr?.setTexture(monBattleKey(next.id));
     this.meSpr?.clearTint();
@@ -519,14 +593,14 @@ export class EncounterScene extends Phaser.Scene {
     this.kidSpr?.clearTint();
     this.kidSpr?.setAlpha(1);
     if (this.kidSpr) this.kidSpr.y = this.kidUp ? KID_TALK_Y : KID_REST_Y;
-    this.meBar?.setMon(this.me.name, this.me.max, this.me.lv, this.me.hp, this.me.sta, this.me.staMax);
+    this.meBar?.setMon(this.me.name, this.me.max, this.me.lv, this.me.hp, this.me.sta, this.me.staMax, false);
     actorReact(this, this.kidSpr, "cheer");
     this.say(`Go ${this.me.name}!`, forced ? "menu" : "foe");
   }
 
-  private startDefend(): void {
-    doDefend(this.me);
-    this.meBar?.setSta(this.me.sta, this.me.staMax);
+  private startDefend(move?: MoveDef): void {
+    doDefend(this.me, move);
+    this.syncSta("me");
     this.queueRound("defend");
   }
 
@@ -536,7 +610,9 @@ export class EncounterScene extends Phaser.Scene {
     actorReact(this, this.kidSpr, "stamp");
     const theirs = this.planFoe();
     if (theirs === "defend") {
-      this.say([`${this.me.name} waits to dodge.`, `Foe ${this.foe.name} is defending.`], "menu");
+      const lines: Line[] = [`${this.me.name} waits to dodge.`, `Foe ${this.foe.name} is defending.`];
+      if (this.playSuper("foe")) lines.push(`Foe ${this.foe.name} powered up!`);
+      this.say(lines, "menu");
       return;
     }
     this.wantPoisonTick = true;
@@ -546,23 +622,19 @@ export class EncounterScene extends Phaser.Scene {
 
   private planFoe(): "fight" | "defend" {
     const worn = this.foe.sta < this.foe.staMax && Math.random() < 0.22;
-    if (this.foe.sta < STA_FIGHT || worn) {
+    if (worn && !isTired(this.foe) && Math.random() < 0.5) {
       doDefend(this.foe);
-      this.foeBar?.setSta(this.foe.sta, this.foe.staMax);
+      this.syncSta("foe");
       return "defend";
     }
     this.foe.move = pickFoeMove(this.foe);
     if (this.foe.move.kind === "defend") {
-      doDefend(this.foe);
-      this.foeBar?.setSta(this.foe.sta, this.foe.staMax);
+      doDefend(this.foe, this.foe.move);
+      this.syncSta("foe");
       return "defend";
     }
-    if (!spendFight(this.foe)) {
-      doDefend(this.foe);
-      this.foeBar?.setSta(this.foe.sta, this.foe.staMax);
-      return "defend";
-    }
-    this.foeBar?.setSta(this.foe.sta, this.foe.staMax);
+    spendFight(this.foe);
+    this.syncSta("foe");
     return "fight";
   }
 
@@ -575,7 +647,9 @@ export class EncounterScene extends Phaser.Scene {
       braceGuard(this, this.foeSpr);
       this.resumeFoeBob(200);
       actorReact(this, this.activeTrainerSpr(), "stamp");
-      this.say(`Foe ${this.foe.name} is defending.`, "menu");
+      const lines: Line[] = [`Foe ${this.foe.name} is defending.`];
+      if (this.playSuper("foe")) lines.push(`Foe ${this.foe.name} powered up!`);
+      this.say(lines, "menu");
       return;
     }
     this.foeStrike();
@@ -600,7 +674,9 @@ export class EncounterScene extends Phaser.Scene {
     if (act.who === "me" && act.kind === "defend") {
       braceGuard(this, this.meSpr);
       actorReact(this, this.kidSpr, "stamp");
-      this.say(`${this.me.name} is defending.`, this.acts.length ? "next" : "menu");
+      const lines: Line[] = [`${this.me.name} is defending.`];
+      if (this.playSuper("me")) lines.push(`${this.me.name} powered up!`);
+      this.say(lines, this.acts.length ? "next" : "menu");
       return;
     }
     if (act.who === "foe" && act.kind === "defend") {
@@ -608,7 +684,9 @@ export class EncounterScene extends Phaser.Scene {
       braceGuard(this, this.foeSpr);
       this.resumeFoeBob(200);
       actorReact(this, this.activeTrainerSpr(), "stamp");
-      this.say(`Foe ${this.foe.name} is defending.`, this.acts.length ? "next" : "menu");
+      const lines: Line[] = [`Foe ${this.foe.name} is defending.`];
+      if (this.playSuper("foe")) lines.push(`Foe ${this.foe.name} powered up!`);
+      this.say(lines, this.acts.length ? "next" : "menu");
       return;
     }
     if (act.who === "me") this.hitMe();
@@ -630,12 +708,15 @@ export class EncounterScene extends Phaser.Scene {
   private flavorLead(atk: Battler, foeLabel: boolean): Line[] {
     const who = foeLabel ? `Foe ${atk.name}` : atk.name;
     const m = atk.move;
-    if (m.kind === "quick") return [`${who} strikes first.`];
-    if (m.kind === "defend") return [`${who} braced itself.`];
-    if (m.kind === "speed") return [`${who} sped up!`];
-    if (m.kind === "drain") return [`${who} goes for the stamina.`];
-    if (m.kind === "poison") return [`${who} goes dirty.`];
-    return [];
+    const lines: Line[] = [];
+    if (atk.weary && m.kind !== "defend") lines.push(`${who} is worn out.`);
+    if (m.kind === "quick") lines.push(`${who} strikes first.`);
+    else if (m.kind === "defend") lines.push(`${who} braced itself.`);
+    else if (m.kind === "speed") lines.push(`${who} sped up!`);
+    else if (m.kind === "drain") lines.push(`${who} goes for the stamina.`);
+    else if (m.kind === "poison") lines.push(`${who} goes dirty.`);
+    else if (m.kind === "mega") lines.push(`${who} goes all out!`);
+    return lines;
   }
 
   private resolveMove(
@@ -717,13 +798,7 @@ export class EncounterScene extends Phaser.Scene {
 
     if (move.kind === "drain" && (move.drain ?? 0) > 0) {
       const took = drainSta(atk, def, move.drain ?? 1);
-      if (atkIsMe) {
-        this.meBar?.setSta(this.me.sta, this.me.staMax);
-        this.foeBar?.setSta(this.foe.sta, this.foe.staMax);
-      } else {
-        this.meBar?.setSta(this.me.sta, this.me.staMax);
-        this.foeBar?.setSta(this.foe.sta, this.foe.staMax);
-      }
+      this.syncSta();
       if (took > 0) lines.push(`${who} nicked some stamina!`);
       else lines.push(`${who} found no stamina to nick.`);
     }
@@ -741,12 +816,14 @@ export class EncounterScene extends Phaser.Scene {
   private sendNextFoe(id: SpeciesId, lv: number): void {
     this.foeId = id;
     this.foeLv = lv;
+    this.foeFlame?.stop();
+    this.foeFlame = undefined;
     this.foe = makeBattler(id, lv);
     seeSpecies(id);
     const deployer = this.activeTrainerSpr();
     this.time.delayedCall(280, () => {
       trainerDeploy(this, deployer, this.foeSpr, { x: 180, y: this.foeRestY }, monBattleKey(id), () => {
-        this.foeBar?.setMon(this.foe.name, this.foe.max, this.foe.lv, this.foe.hp, this.foe.sta, this.foe.staMax);
+        this.foeBar?.setMon(this.foe.name, this.foe.max, this.foe.lv, this.foe.hp, this.foe.sta, this.foe.staMax, false);
         this.resumeFoeBob(0);
       });
     });
@@ -847,7 +924,7 @@ export class EncounterScene extends Phaser.Scene {
       }
       if (rollDodge(this.me, this.foe)) {
         const chased = spendChase(this.foe);
-        this.foeBar?.setSta(this.foe.sta, this.foe.staMax);
+        this.syncSta("foe");
         this.pauseFoeBob();
         attackLunge(this, this.foeSpr, false, () => {
           dodgeLean(this, this.meSpr, true);
@@ -952,7 +1029,11 @@ export class EncounterScene extends Phaser.Scene {
       return;
     }
     this.wantPoisonTick = true;
-    this.say([putDown, "It sniffed. Not interested."], "foe");
+    const pip = restSta(this.me);
+    this.syncSta("me");
+    const lines: Line[] = [putDown, "It sniffed. Not interested."];
+    if (pip > 0) lines.push(`${this.me.name} caught its breath.`);
+    this.say(lines, "foe");
   }
 
   private flee(): void {
@@ -1047,6 +1128,8 @@ export class EncounterScene extends Phaser.Scene {
     if (!setLead(stolen)) return false;
     this.meSlot = run.lead;
     this.mustSwitch = false;
+    this.meFlame?.stop();
+    this.meFlame = undefined;
     this.me = makeBattler(stolen.id, stolen.lv, stolen.hp, stolen.moves, stolen.elem, stolen.nick);
     const scrape = Math.max(1, Math.floor(this.me.max * 0.12));
     this.me.hp = Math.max(1, this.me.hp - scrape);
@@ -1055,7 +1138,7 @@ export class EncounterScene extends Phaser.Scene {
     this.meSpr?.clearTint();
     if (stolen.elem) this.meSpr?.setTint(ELEM_TINT[stolen.elem]);
     this.meSpr?.setAlpha(1);
-    this.meBar?.setMon(this.me.name, this.me.max, this.me.lv, this.me.hp, this.me.sta, this.me.staMax);
+    this.meBar?.setMon(this.me.name, this.me.max, this.me.lv, this.me.hp, this.me.sta, this.me.staMax, false);
     actorReact(this, this.kidSpr, "cheer");
     this.say(
       [
@@ -1178,7 +1261,6 @@ export class EncounterScene extends Phaser.Scene {
       .setScale(2)
       .setOrigin(0.5, 1)
       .setDepth(4);
-    this.steveHeldBike = held;
     this.tweens.add({
       targets: held,
       y: held.y - 4,
@@ -1186,55 +1268,50 @@ export class EncounterScene extends Phaser.Scene {
       yoyo: true,
       ease: "Quad.easeOut",
     });
-    this.steveBusy = false;
-    this.say(
-      [
-        "Steve's bike is being nicked!",
-        { who: STEVE_NAME, text: "OI! My bike! Come back you!" },
-        { who: STEVE_NAME, text: "Leave it — that's my new…" },
-      ],
-      "steveChase",
-    );
+    // Run off with the bike before any dialogue.
+    this.tweens.add({
+      targets: thief,
+      x: GBA_W + 48,
+      duration: 900,
+      ease: "Linear",
+      delay: 120,
+      onUpdate: () => {
+        if (held.active && thief.active) held.setPosition(thief.x, thief.y + 8);
+      },
+      onComplete: () => {
+        held.destroy();
+        thief.destroy();
+        this.steveThief = undefined;
+        this.steveBusy = false;
+        this.say(
+          [
+            "Steve's bike just got chored!",
+            { who: STEVE_NAME, text: "OI! My bike! Come back you!" },
+            { who: STEVE_NAME, text: "Leave it — that's my new…" },
+          ],
+          "steveChase",
+        );
+      },
+    });
   }
 
   private chaseSteveThief(): void {
     this.steveBusy = true;
-    const thief = this.steveThief;
-    const held = this.steveHeldBike;
     const trainer = this.trainerSpr;
-    if (thief) {
+    if (trainer) {
+      trainer.play(npcAnim(this.trainer?.look ?? "cap", "walk-side"));
       this.tweens.add({
-        targets: thief,
-        x: GBA_W + 48,
-        duration: 900,
-        ease: "Linear",
-        onUpdate: () => {
-          if (held && thief.active) held.setPosition(thief.x, thief.y + 8);
-        },
+        targets: trainer,
+        x: GBA_W + 50,
+        duration: 700,
+        ease: "Sine.easeIn",
         onComplete: () => {
-          held?.destroy();
-          this.steveHeldBike = undefined;
-          thief.destroy();
-          this.steveThief = undefined;
+          trainer.destroy();
+          this.trainerSpr = undefined;
         },
       });
     }
-    this.time.delayedCall(280, () => {
-      if (trainer) {
-        trainer.play(npcAnim(this.trainer?.look ?? "cap", "walk-side"));
-        this.tweens.add({
-          targets: trainer,
-          x: GBA_W + 50,
-          duration: 700,
-          ease: "Sine.easeIn",
-          onComplete: () => {
-            trainer.destroy();
-            this.trainerSpr = undefined;
-          },
-        });
-      }
-    });
-    this.time.delayedCall(1100, () => {
+    this.time.delayedCall(800, () => {
       this.trainer = undefined;
       this.steveAbandoned = true;
       this.steveBusy = false;
@@ -1279,11 +1356,11 @@ export class EncounterScene extends Phaser.Scene {
     faintDrop(this, this.meSpr);
     actorReact(this, this.kidSpr, "loss");
     actorReact(this, this.activeTrainerSpr(), "cheer");
-    const still = partyAlive();
+    const canFight = partyCanFight();
     const lines: Line[] = [`${this.me.name} fainted.`];
-    const jab = this.gymTaunt(!still);
+    const jab = this.gymTaunt(!canFight);
     if (jab && this.trainer) lines.push({ who: this.trainer.who, text: jab });
-    if (still) {
+    if (canFight) {
       if (this.tryPricklesGuard(lines)) return;
       this.mustSwitch = true;
       lines.push("Send out another.");
@@ -1299,8 +1376,33 @@ export class EncounterScene extends Phaser.Scene {
       this.say(lines, "done");
       return;
     }
+    const sulk = run.party.find((p) => p.hp > 0 && p.stubborn);
+    if (sulk) lines.push(`${monLabel(sulk)} won't come out of the bag!`);
     this.done = true;
     run.whiteout = true;
+    lines.push("You blacked out.");
+    this.say(lines, "done");
+  }
+
+  /** Only stubborn left awake — treat as a wipe. */
+  private blackoutStubborn(extra: Line[] = []): void {
+    this.mustSwitch = false;
+    this.bag?.hide();
+    this.menu?.hide();
+    if (this.trainer?.id === PAL_ID) {
+      this.done = true;
+      joinPal(false);
+      healParty();
+      this.say([...extra, "You lost."], "done");
+      return;
+    }
+    this.done = true;
+    run.whiteout = true;
+    const sulk = run.party.find((p) => p.hp > 0 && p.stubborn);
+    const lines = [...extra];
+    if (sulk && !extra.some((l) => (typeof l === "string" ? l : l.text).includes("won't come out"))) {
+      lines.push(`${monLabel(sulk)} won't come out of the bag!`);
+    }
     lines.push("You blacked out.");
     this.say(lines, "done");
   }
@@ -1331,7 +1433,7 @@ export class EncounterScene extends Phaser.Scene {
     if (!this.me.moves.some((m) => m.id === this.me.move.id)) {
       this.me.move = this.me.moves[0] ?? this.me.move;
     }
-    this.meBar?.setMon(this.me.name, this.me.max, this.me.lv, this.me.hp, this.me.sta, this.me.staMax);
+    this.meBar?.setMon(this.me.name, this.me.max, this.me.lv, this.me.hp, this.me.sta, this.me.staMax, this.me.overcharged);
     if (leveled) this.meBar?.flashLevel(this.me.lv);
   }
 
@@ -1369,6 +1471,7 @@ export class EncounterScene extends Phaser.Scene {
   }
 
   private finishLeave(): void {
+    this.stopFlames();
     this.goBack();
   }
 
@@ -1384,7 +1487,8 @@ export class EncounterScene extends Phaser.Scene {
       this.scene.start("lab");
       return;
     }
+    const dest = run.overworld?.scene ?? "island";
     persistRun();
-    this.scene.start(run.overworld?.scene ?? "island");
+    this.scene.start(dest, { from: "battle" });
   }
 }

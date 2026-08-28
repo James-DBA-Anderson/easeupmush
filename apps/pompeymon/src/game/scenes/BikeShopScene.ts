@@ -155,7 +155,6 @@ export class BikeShopScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
-    if (this.pal.tryTalk()) return;
     if (near(this.player, this.layout.counter, 14)) {
       if (run.lockChored && run.items.includes("lock") && !run.items.includes("bmx")) {
         run.lockChored = false;
@@ -186,6 +185,7 @@ export class BikeShopScene extends Phaser.Scene {
     if (near(this.player, this.layout.rack, 10)) {
       this.reachThen("Second-hand BMXs. Ray's on the till.");
     }
+    this.pal.tryTalk();
   }
 
   private reachThen(line: Line | Line[], onDone?: () => void): void {

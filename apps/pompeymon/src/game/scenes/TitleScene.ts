@@ -7,6 +7,10 @@ import { consumeAction, consumeDir, isTouchUi } from "../touch";
 import { drawEaseLogo, drawPompeymonLogo } from "../ui/pixelLogo";
 import { drawTitleSkyline } from "../ui/titleArt";
 
+/** Right-hand menu column — 6px keeps the longest line ("PRESS D DEBUG") on screen. */
+const MENU_PX = "6px";
+const MENU_X = 196;
+
 /** GBA title — harbour skyline, kid, a few Pompeymon. No place name. */
 export class TitleScene extends Phaser.Scene {
   private started = false;
@@ -130,9 +134,9 @@ export class TitleScene extends Phaser.Scene {
 
     this.saved = hasSave();
     const prompt = this.add
-      .text(200, 128, this.saved ? (isTouchUi() ? "LOOK  PICK" : "SPACE  PICK") : isTouchUi() ? "PRESS LOOK" : "PRESS SPACE", {
+      .text(MENU_X, 128, this.saved ? (isTouchUi() ? "LOOK  PICK" : "SPACE  PICK") : isTouchUi() ? "PRESS LOOK" : "PRESS SPACE", {
         fontFamily: '"Press Start 2P", monospace',
-        fontSize: "8px",
+        fontSize: MENU_PX,
         color: "#fff8e8",
       })
       .setOrigin(0.5)
@@ -141,9 +145,9 @@ export class TitleScene extends Phaser.Scene {
     if (this.saved) {
       this.menu = ["CONTINUE", "NEW GAME"].map((label, i) =>
         this.add
-          .text(200, 108 + i * 10, label, {
+          .text(MENU_X, 108 + i * 10, label, {
             fontFamily: '"Press Start 2P", monospace',
-            fontSize: "8px",
+            fontSize: MENU_PX,
             color: "#fff8e8",
           })
           .setOrigin(0.5)
@@ -153,9 +157,9 @@ export class TitleScene extends Phaser.Scene {
     }
 
     this.add
-      .text(200, 144, isTouchUi() ? "OPEN ?DEBUG" : "PRESS D DEBUG", {
+      .text(MENU_X, 144, isTouchUi() ? "OPEN ?DEBUG" : "PRESS D DEBUG", {
         fontFamily: '"Press Start 2P", monospace',
-        fontSize: "8px",
+        fontSize: MENU_PX,
         color: "#e0d0b0",
       })
       .setOrigin(0.5)

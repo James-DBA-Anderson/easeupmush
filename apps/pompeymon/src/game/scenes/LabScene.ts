@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
-import { consumeWhiteout, foundItem, hasChomp, healParty, partyNeedsHeal, run, takeChomp, takeStarter, type StarterId } from "../run";
+import { consumeWhiteout, foundItem, hasChomp, healParty, markLabVisited, partyNeedsHeal, run, takeChomp, takeStarter, type StarterId } from "../run";
 import { ensureChoke } from "../sprites/choke";
 import { kidAnim } from "../sprites/kid";
 import { ensureMonSheets, monOwAnim, monOwSheet } from "../sprites/mon";
@@ -97,6 +97,7 @@ export class LabScene extends Phaser.Scene {
 
   create(): void {
     this.southExit = { armed: false };
+    markLabVisited();
     this.paint();
     ensureChoke(this);
     this.add.image(this.layout.choke.x + 8, this.layout.choke.y + 10, "choke").setDepth(9);
@@ -199,7 +200,6 @@ export class LabScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
-    if (this.pal.tryTalk()) return;
     if (!hasChomp() && near(this.player, this.layout.chomp, 10)) {
       this.findChomp();
       return;
@@ -220,6 +220,7 @@ export class LabScene extends Phaser.Scene {
       this.reachThen(hasChomp() ? "Folders. Empty wrapper." : "Folders. Dust.");
       return;
     }
+    this.pal.tryTalk();
   }
 
   private findChomp(): void {

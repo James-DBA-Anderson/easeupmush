@@ -7,6 +7,7 @@ import { MsgBox, type Line } from "../ui/MsgBox";
 import { BagUi } from "../ui/BagUi";
 import {
   addWalls,
+  armSouthExit,
   bindWalkKeys,
   justAction,
   justCancel,
@@ -48,12 +49,18 @@ export class KitchenScene extends Phaser.Scene {
   private mumSaid = false;
   private bye: "off" | "walk" | "wait" | "line" = "off";
   private rent?: ChoiceMenu;
+  private doorGate = { armed: true };
 
   constructor() {
     super("kitchen");
   }
 
   create(): void {
+    this.bye = "off";
+    this.mumSaid = false;
+    this.reaching = false;
+    this.facing = "up";
+    this.flip = 1;
     if (this.textures.exists("kitchen")) this.textures.remove("kitchen");
     const art = this.add.graphics().setVisible(false);
     this.layout = drawKitchen(art);
@@ -74,6 +81,7 @@ export class KitchenScene extends Phaser.Scene {
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.pal = new PalField(this, this.player, (line) => this.showNote(line));
     this.rent = new ChoiceMenu(this, ["GIVE £50", "KEEP IT"], "RENT?");
+    this.doorGate = { armed: false };
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
@@ -127,7 +135,7 @@ export class KitchenScene extends Phaser.Scene {
     this.flip = walked.flip;
     this.pal.tick(this.facing, this.flip);
 
-    if (walkingInto(this.player, this.layout.door, "down")) {
+    if (armSouthExit(this.player, this.cursors, this.wasd, this.doorGate) && walkingInto(this.player, this.layout.door, "down")) {
       if (!this.mumSaid) {
         this.playByeLeave();
         return;
@@ -140,7 +148,6 @@ export class KitchenScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
-    if (this.pal.tryTalk()) return;
     if (!run.hasBag && near(this.player, this.layout.bag, 10)) {
       takeBag();
       this.bagUi?.sync();
@@ -185,6 +192,7 @@ export class KitchenScene extends Phaser.Scene {
       this.reachThen("Milk. Leftover mash. Don't.");
       return;
     }
+    this.pal.tryTalk();
   }
 
   private pickRent(give: boolean): void {

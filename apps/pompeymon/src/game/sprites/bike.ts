@@ -45,6 +45,30 @@ const PARKED_LOCK = [
   "....RrR.........RrR.....",
 ];
 
+/** Rear — riding away (north). */
+const RIDE_UP = [
+  "......y..y......",
+  ".......YY.......",
+  ".......mm.......",
+  "......mMMm......",
+  ".....R.mm.R.....",
+  "....R.u..u.R....",
+  ".....Rr..rR.....",
+  "......R..R......",
+];
+
+/** Front — riding toward camera (south). */
+const RIDE_DOWN = [
+  ".....b.YY.b.....",
+  "......Y..Y......",
+  ".......mm.......",
+  "......mmmm......",
+  ".....R....R.....",
+  "....R.u..u.R....",
+  ".....Rr..rR.....",
+  "......R..R......",
+];
+
 const WHEEL = [
   "............",
   "...RrR......",
@@ -57,6 +81,8 @@ export function ensureBikeArt(scene: Phaser.Scene): void {
   paint(scene, "bike-park", 24, 8, PARKED);
   paint(scene, "bike-lock", 24, 8, PARKED_LOCK);
   paint(scene, "bike-wheel", 12, 5, WHEEL);
+  paint(scene, "bike-up", 16, 8, RIDE_UP);
+  paint(scene, "bike-down", 16, 8, RIDE_DOWN);
 }
 
 function paint(scene: Phaser.Scene, key: string, w: number, h: number, rows: string[]): void {

@@ -97,7 +97,6 @@ export class BathroomScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
-    if (this.pal.tryTalk()) return;
     if (near(this.player, this.layout.window, 10) && this.facing === "up") {
       this.reachThen("Frosted. Next door's fence.");
       return;
@@ -114,6 +113,7 @@ export class BathroomScene extends Phaser.Scene {
       this.reachThen("Mint. Gums sting.");
       return;
     }
+    this.pal.tryTalk();
   }
 
   private reachThen(line: string): void {

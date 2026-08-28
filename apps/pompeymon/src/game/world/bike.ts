@@ -5,7 +5,7 @@ import { ensureBikeArt } from "../sprites/bike";
 import { ensureNpcSheets, npcAnim, npcSheet } from "../sprites/npc";
 import { isTouchUi } from "../touch";
 import type { Line } from "../ui/MsgBox";
-import { near } from "../walk";
+import { near, type Facing } from "../walk";
 
 export const CHORE_LINE = "Ahh my biek's been chored.";
 
@@ -23,6 +23,7 @@ export class BikeField {
   private thief?: Phaser.GameObjects.Sprite;
   private stealing = false;
   private wait = 90;
+  private facing: Facing = "side";
   private readonly key: string;
 
   constructor(
@@ -38,7 +39,8 @@ export class BikeField {
     this.syncRide();
   }
 
-  tick(): void {
+  tick(facing: Facing = "side"): void {
+    this.facing = facing;
     this.syncRide();
     this.tryChore();
   }
@@ -114,11 +116,15 @@ export class BikeField {
       this.rideSpr = undefined;
       return;
     }
+    const tex =
+      this.facing === "up" ? "bike-up" : this.facing === "down" ? "bike-down" : "bike-park";
     if (!this.rideSpr) {
-      this.rideSpr = this.scene.add.image(this.player.x, this.player.y + 8, "bike-park").setDepth(9);
+      this.rideSpr = this.scene.add.image(this.player.x, this.player.y + 8, tex).setDepth(9);
+    } else if (this.rideSpr.texture.key !== tex) {
+      this.rideSpr.setTexture(tex);
     }
     this.rideSpr.setPosition(this.player.x, this.player.y + 8);
-    this.rideSpr.setFlipX(this.player.flipX);
+    this.rideSpr.setFlipX(this.facing === "side" && this.player.flipX);
     this.rideSpr.setDepth(this.player.y + 1);
   }
 

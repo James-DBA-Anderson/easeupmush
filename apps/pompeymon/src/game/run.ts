@@ -104,6 +104,8 @@ export type RunState = {
   empties: number;
   whiteout: boolean;
   chompKept: boolean;
+  /** Stepped into Professor Choke's lab at least once. */
+  labVisited: boolean;
   hillNanGone: boolean;
   debugSession: boolean;
   cash: number;
@@ -113,6 +115,12 @@ export type RunState = {
   palJoined: boolean;
   palWon: boolean;
   palGreeted: boolean;
+  /** Watched Stevie J batter Ollie on the school pitch. */
+  matchSeen: boolean;
+  /** Ollie's still sat on the pitch waiting for someone to cheer him up. */
+  mateSad: boolean;
+  /** Fed Ollie — he tags along. */
+  mateJoined: boolean;
   mounted: boolean;
   parked: null | { scene: string; x: number; y: number; locked: boolean; wheel: boolean };
   /** Locked bike was chored — Ray gets an earful. */
@@ -151,6 +159,7 @@ function freshRun(): RunState {
     empties: 0,
     whiteout: false,
     chompKept: false,
+    labVisited: false,
     hillNanGone: false,
     debugSession: false,
     cash: 0,
@@ -158,6 +167,9 @@ function freshRun(): RunState {
     palJoined: false,
     palWon: false,
     palGreeted: false,
+    matchSeen: false,
+    mateSad: false,
+    mateJoined: false,
     mounted: false,
     parked: null,
     lockChored: false,
@@ -288,12 +300,16 @@ export function loadRun(): boolean {
     next.flyerOnRoad = !!src.flyerOnRoad;
     next.refusedStarters = !!src.refusedStarters;
     next.chompKept = !!src.chompKept;
+    next.labVisited = !!src.labVisited;
     next.hillNanGone = !!src.hillNanGone;
     next.lockChored = !!src.lockChored;
     next.mumRentPaid = !!src.mumRentPaid;
     next.palJoined = !!src.palJoined;
     next.palWon = !!src.palWon;
     next.palGreeted = !!src.palGreeted;
+    next.matchSeen = !!src.matchSeen;
+    next.mateSad = !!src.mateSad;
+    next.mateJoined = !!src.mateJoined;
     next.whiteout = !!src.whiteout;
     next.mounted = !!src.mounted;
     if (src.starter && STARTERS.has(src.starter)) next.starter = src.starter;
@@ -374,20 +390,29 @@ export function partnerMon(): PartyMon | undefined {
   return run.party[run.lead] ?? run.party[0];
 }
 
-/** If the lead fainted, move to the next healthy party member. */
+/** If the lead fainted or won't obey, move to the next healthy fighter. */
 export function ensureLeadAlive(): PartyMon | undefined {
   const cur = run.party[run.lead];
-  if (cur && cur.hp > 0) return cur;
-  const i = run.party.findIndex((p) => p.hp > 0);
+  if (cur && monWillFight(cur)) return cur;
+  const i = run.party.findIndex((p) => monWillFight(p));
   if (i >= 0) {
     run.lead = i;
     return run.party[i];
   }
-  return cur ?? run.party[0];
+  return undefined;
 }
 
 export function partyAlive(): boolean {
   return run.party.some((p) => p.hp > 0);
+}
+
+/** Healthy and willing to battle (stubborn stolen mon stays in the bag). */
+export function monWillFight(mon: PartyMon): boolean {
+  return mon.hp > 0 && !mon.stubborn;
+}
+
+export function partyCanFight(): boolean {
+  return run.party.some((p) => monWillFight(p));
 }
 
 export function setLead(mon: PartyMon): boolean {
@@ -442,9 +467,11 @@ export function applyXp(mon: PartyMon, gained: number): string[] {
 }
 
 export function saveOverworld(scene: string, pos: { x: number; y: number }): void {
-  run.overworld = { scene, x: pos.x, y: pos.y };
-  markPlace(scene, pos);
-  if (scene === "island") run.islandPos = { x: pos.x, y: pos.y };
+  const x = Math.round(pos.x);
+  const y = Math.round(pos.y);
+  run.overworld = { scene, x, y };
+  markPlace(scene, { x, y });
+  if (scene === "island") run.islandPos = { x, y };
   persistRun();
 }
 
@@ -452,24 +479,19 @@ export function returningTo(scene: string): boolean {
   return run.overworld?.scene === scene;
 }
 
+/** Battle / continue resume always wins over door spawns. */
 export function resumePos(scene: string, fallback: { x: number; y: number }, atDoor = false): { x: number; y: number } {
-  if (atDoor) {
-    if (run.overworld?.scene === scene) {
-      run.overworld = null;
-      persistRun();
-    }
-    markPlace(scene, fallback);
-    return fallback;
-  }
   if (run.overworld?.scene === scene) {
-    const pos = { x: run.overworld.x, y: run.overworld.y };
+    const pos = { x: Math.round(run.overworld.x), y: Math.round(run.overworld.y) };
     markPlace(scene, pos);
     run.overworld = null;
     if (scene === "island") run.islandPos = null;
     persistRun();
     return pos;
   }
-  return fallback;
+  const pos = { x: Math.round(fallback.x), y: Math.round(fallback.y) };
+  if (atDoor) markPlace(scene, pos);
+  return pos;
 }
 
 export function beatTrainer(id: string): void {
@@ -506,6 +528,12 @@ export function takeChomp(): void {
 
 export function hasChomp(): boolean {
   return run.items.includes("chomp");
+}
+
+export function markLabVisited(): void {
+  if (run.labVisited) return;
+  run.labVisited = true;
+  persistRun();
 }
 
 export function foundItem(id: ItemId): string {

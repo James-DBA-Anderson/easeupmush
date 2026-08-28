@@ -24,6 +24,7 @@ import {
   losTrainer,
   npcNear,
   npcTalk,
+  blockNpcs,
   spawnFieldNpcs,
   startTrainerFight,
   tickFieldNpcs,
@@ -61,11 +62,15 @@ export class BridgeScene extends Phaser.Scene {
     art.destroy();
     this.add.image(0, 0, "bridge").setOrigin(0);
 
-    this.facing = this.from === "island" ? "up" : "down";
-    const start = resumePos("bridge", this.from === "island" ? this.layout.spawnFromSouth : this.layout.spawn);
+    this.facing = this.from === "battle" ? "down" : this.from === "island" ? "up" : "down";
+    const start = resumePos(
+      "bridge",
+      this.from === "island" ? this.layout.spawnFromSouth : this.layout.spawn,
+    );
     this.player = spawnKid(this, start.x, start.y);
     this.npcs = spawnFieldNpcs(this, BRIDGE_NPCS);
     addWalls(this, this.player, this.layout.solids);
+    blockNpcs(this, this.player, this.npcs);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
@@ -107,7 +112,7 @@ export class BridgeScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
-    this.bikes.tick();
+    this.bikes.tick(this.facing);
     this.pal.tick(this.facing, this.flip);
     tickFieldNpcs(this, this.npcs);
     this.player.setDepth(this.player.y);
@@ -125,7 +130,7 @@ export class BridgeScene extends Phaser.Scene {
         this.player.y = 116;
         return;
       }
-      this.scene.start("island");
+      this.scene.start("island", { from: "bridge" });
       return;
     }
 
@@ -135,7 +140,6 @@ export class BridgeScene extends Phaser.Scene {
 
   private tryExamine(): void {
     if (this.bikes.tryExamine()) return;
-    if (this.pal.tryTalk()) return;
     const person = npcNear(this.player, this.npcs);
     if (person) {
       if (startTrainerFight(this, person, "bridge", this.player)) return;
@@ -146,6 +150,7 @@ export class BridgeScene extends Phaser.Scene {
       this.reachThen("Creek. Then the island.");
       return;
     }
+    this.pal.tryTalk();
   }
 
   private reachThen(line: Line | Line[]): void {

@@ -26,6 +26,7 @@ import {
   needsTrainerIntro,
   npcNear,
   npcTalk,
+  blockNpcs,
   spawnFieldNpcs,
   startTrainerFight,
   tickFieldNpcs,
@@ -35,7 +36,7 @@ import {
 import { BikeField } from "../world/bike";
 import { PalField } from "../world/pal";
 import { spawnSteveWait, startSteveFight, steveFightPending, STEVE_AMBUSH } from "../world/steve";
-import { spawnAreaWilds, beginWildFight, leaveField, snapshotField, tickWanderers, wanderNear, type Wanderer } from "../world/wander";
+import { spawnAreaWilds, beginWildFight, leaveField, snapshotField, tickWanderers, wanderNear, areaDoorKeepOff, type Wanderer } from "../world/wander";
 
 export class HighStreetScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -64,6 +65,9 @@ export class HighStreetScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.meeting = false;
+    this.reaching = false;
+    this.steveSpr = undefined;
     if (this.textures.exists("highstreet")) this.textures.remove("highstreet");
     const art = this.add.graphics().setVisible(false);
     this.layout = drawHighStreet(art);
@@ -86,15 +90,16 @@ export class HighStreetScene extends Phaser.Scene {
                 : this.from === "lab" || rude
                   ? this.layout.spawnFromLab
                   : this.layout.spawnFromWest;
-    const returning = returningTo("highstreet");
+    const returning = returningTo("highstreet") || this.from === "battle";
     const atDoor =
-      this.from === "charity" ||
-      this.from === "pawn" ||
-      this.from === "chippy" ||
-      this.from === "spice" ||
-      this.from === "bikeshop" ||
-      this.from === "lab" ||
-      rude;
+      !returning &&
+      (this.from === "charity" ||
+        this.from === "pawn" ||
+        this.from === "chippy" ||
+        this.from === "spice" ||
+        this.from === "bikeshop" ||
+        this.from === "lab" ||
+        rude);
     const spawn = resumePos("highstreet", fallback, atDoor);
     this.facing = "side";
     this.flip = 1;
@@ -105,6 +110,7 @@ export class HighStreetScene extends Phaser.Scene {
     this.npcs = spawnFieldNpcs(this, HIGH_STREET_NPCS);
     this.wanderers = spawnAreaWilds(this, "highstreet", returning);
     addWalls(this, this.player, this.layout.solids);
+    blockNpcs(this, this.player, this.npcs);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
@@ -114,6 +120,7 @@ export class HighStreetScene extends Phaser.Scene {
     this.pal = new PalField(this, this.player, (line) => this.showNote(line));
 
     const wantSteve = (this.from === "lab" || rude) && steveFightPending();
+    if (wantSteve) this.placeSteveWait();
     if (rude) this.meetOutside(wantSteve ? () => this.ambushSteve() : undefined);
     else {
       this.cameras.main.startFollow(this.player, true, 1, 1);
@@ -158,13 +165,13 @@ export class HighStreetScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
-    this.bikes.tick();
+    this.bikes.tick(this.facing);
     this.pal.tick(this.facing, this.flip);
     tickFieldNpcs(this, this.npcs);
     tickWanderers(this, this.wanderers, this.player);
     this.player.setDepth(this.player.y);
 
-    const spotted = losTrainer(this.player, this.npcs);
+    const spotted = losTrainer(this.player, this.npcs, areaDoorKeepOff("highstreet"));
     if (spotted) {
       snapshotField(this.wanderers);
       if (startTrainerFight(this, spotted, "highstreet", this.player)) return;
@@ -253,13 +260,20 @@ export class HighStreetScene extends Phaser.Scene {
     });
   }
 
+  /** Steve stands outside Choke's before you finish walking out. */
+  private placeSteveWait(): void {
+    if (this.steveSpr || !steveFightPending()) return;
+    const door = this.layout.spawnFromLab;
+    this.steveSpr = spawnSteveWait(this, door.x + 28, door.y + 8);
+  }
+
   private ambushSteve(): void {
     if (!steveFightPending()) return;
     this.meeting = true;
     this.player.body.setVelocity(0, 0);
-    const door = this.layout.spawnFromLab;
-    this.steveSpr = spawnSteveWait(this, door.x + 28, door.y + 8);
+    this.placeSteveWait();
     this.showNote(STEVE_AMBUSH, () => {
+      this.meeting = false;
       this.steveSpr?.destroy();
       this.steveSpr = undefined;
       startSteveFight(this, "highstreet", { x: this.player.x, y: this.player.y });
@@ -282,8 +296,7 @@ export class HighStreetScene extends Phaser.Scene {
 
   private tryExamine(): void {
     if (this.bikes.tryExamine()) return;
-    if (this.pal.tryTalk()) return;
-    const person = npcNear(this.player, this.npcs);
+    const person = npcNear(this.player, this.npcs, 16, areaDoorKeepOff("highstreet"));
     if (person) {
       snapshotField(this.wanderers);
       const lead = trainerLead(person, this.npcs);
@@ -318,6 +331,7 @@ export class HighStreetScene extends Phaser.Scene {
         return;
       }
     }
+    this.pal.tryTalk();
   }
 
   private reachThen(line: Line | Line[], onDone?: () => void): void {

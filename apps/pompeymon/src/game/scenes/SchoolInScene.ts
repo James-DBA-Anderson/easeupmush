@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GBA_W } from "../constants";
-import { resumePos, returningTo, run } from "../run";
+import { resumePos, run } from "../run";
 import { kidAnim } from "../sprites/kid";
 import { BagUi } from "../ui/BagUi";
 import { MsgBox, type Line } from "../ui/MsgBox";
@@ -23,6 +23,7 @@ import {
   losTrainer,
   npcNear,
   npcTalk,
+  blockNpcs,
   spawnFieldNpcs,
   startTrainerFight,
   tickFieldNpcs,
@@ -55,7 +56,6 @@ export class SchoolInScene extends Phaser.Scene {
     art.destroy();
     this.add.image(0, 0, "schoolin").setOrigin(0);
 
-    returningTo("schoolin");
     const spawn = resumePos("schoolin", this.layout.spawnFromField);
     this.facing = "up";
     this.flip = 1;
@@ -63,6 +63,7 @@ export class SchoolInScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.player, true, 1, 1);
     this.npcs = spawnFieldNpcs(this, SCHOOL_IN_NPCS);
     addWalls(this, this.player, this.layout.solids);
+    blockNpcs(this, this.player, this.npcs);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
@@ -121,7 +122,6 @@ export class SchoolInScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
-    if (this.pal.tryTalk()) return;
     const person = npcNear(this.player, this.npcs);
     if (person) {
       if (startTrainerFight(this, person, "schoolin", this.player, this.npcs)) return;
@@ -138,6 +138,7 @@ export class SchoolInScene extends Phaser.Scene {
         return;
       }
     }
+    this.pal.tryTalk();
   }
 
   private reachThen(line: Line | Line[]): void {

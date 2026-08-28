@@ -155,7 +155,6 @@ export class TakeawayScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
-    if (this.pal.tryTalk()) return;
     if (near(this.player, this.layout.counter, 14)) {
       const line =
         this.kind === "chippy"
@@ -167,6 +166,7 @@ export class TakeawayScene extends Phaser.Scene {
     if (near(this.player, this.layout.rack, 10)) {
       this.reachThen(this.kind === "chippy" ? "Hot fat. Papers." : "Chillies. Meat on the spit.");
     }
+    this.pal.tryTalk();
   }
 
   private reachThen(line: Line | Line[], onDone?: () => void): void {

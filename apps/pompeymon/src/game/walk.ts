@@ -70,6 +70,24 @@ export function armSouthExit(
   return true;
 }
 
+/** Leaving kitchen into the hall — don't bounce straight back through the door. */
+export function armNorthExit(
+  player: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody,
+  cursors: Phaser.Types.Input.Keyboard.CursorKeys,
+  wasd: WalkKeys,
+  gate: { armed: boolean },
+): boolean {
+  const holdUp = cursors.up.isDown || wasd.W.isDown || pad.up;
+  if (!gate.armed) {
+    if (holdUp) {
+      if (player.body.velocity.y < 0) player.body.setVelocityY(0);
+      return false;
+    }
+    gate.armed = true;
+  }
+  return true;
+}
+
 /** Feet body vs map edge — sprite centre never reaches y > 152 with collideWorldBounds. */
 export function atSouthEdge(
   player: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody,
@@ -97,11 +115,13 @@ export function spawnKid(
   world = { w: GBA_W, h: GBA_H },
 ): Phaser.Types.Physics.Arcade.SpriteWithDynamicBody {
   ensureKidSheets(scene);
+  // Caller usually already resumed; this still catches continue / direct starts.
   const pos = resumePos(scene.scene.key, { x, y });
   const player = scene.physics.add.sprite(pos.x, pos.y, kidSheet(run.outfit), "idle-down");
   player.setCollideWorldBounds(true);
   player.setSize(10, 6).setOffset(11, 24);
   player.setDepth(10);
+  player.setVelocity(0, 0);
   player.anims.play(kidAnim(run.outfit, "idle-down"));
   scene.physics.world.setBounds(0, 0, world.w, world.h);
   scene.cameras.main.setBounds(0, 0, world.w, world.h);

@@ -46,6 +46,14 @@ export type Battler = {
   guard: boolean;
   dodging: boolean;
   poisoned: boolean;
+  /** This action was started with no stamina — weak / basic-only. */
+  weary: boolean;
+  /** Full-sta charge defend — gold bar, buffs, megas. Lasts one turn after charging. */
+  overcharged: boolean;
+  /** Just entered SUPER this round — survive one settleToMenu before countdown. */
+  superFresh: boolean;
+  /** Charge defend chosen but not yet played out — buffs land when the move happens. */
+  pendingSuper: boolean;
   elem?: ElemId;
 };
 
@@ -53,8 +61,89 @@ export const MAX_LV = 50;
 export const STARTER_LV = 5;
 export const STA_FIGHT = 1;
 export const STA_DEFEND = 2;
+/** Natural stamina while digging in the bag (no guard — less than Defend). */
+export const STA_REST = 1;
 /** Extra stamina the attacker burns chasing a successful dodge. */
 export const STA_CHASE = 1;
+/** Damage multiplier when fighting with no stamina left. */
+export const TIRED_DMG = 0.55;
+/** SUPER state stat multipliers (1 turn after a charge defend at full sta). */
+export const SUPER_ATK = 1.35;
+export const SUPER_DEF = 1.35;
+export const SUPER_SPD = 1.25;
+
+export function isTired(b: Battler): boolean {
+  return b.sta < STA_FIGHT;
+}
+
+/** Basic attacks + braces stay available when worn out; fancy moves need stamina. Mega needs SUPER. */
+export function moveAllowed(b: Battler, move: MoveDef): boolean {
+  if (move.kind === "mega") return b.overcharged && !isTired(b);
+  if (!isTired(b)) return true;
+  if (move.kind === "attack" || move.kind === "defend") return true;
+  const hasBasic = b.moves.some((m) => m.kind === "attack" || m.kind === "defend");
+  return !hasBasic && move.id === b.moves[0]?.id;
+}
+
+export function spendFight(b: Battler): boolean {
+  b.weary = b.sta < STA_FIGHT;
+  b.guard = false;
+  if (!b.weary) b.sta -= STA_FIGHT;
+  return true;
+}
+
+export function enterSuper(b: Battler): void {
+  b.overcharged = true;
+  b.superFresh = true;
+}
+
+export function clearSuper(b: Battler): void {
+  b.overcharged = false;
+  b.superFresh = false;
+  b.pendingSuper = false;
+}
+
+/** Cash in a charge defend at the moment the move plays. Returns true if SUPER just started. */
+export function resolveSuper(b: Battler): boolean {
+  if (!b.pendingSuper) return false;
+  b.pendingSuper = false;
+  enterSuper(b);
+  return true;
+}
+
+/** After a round: keep SUPER for one menu turn, then drop it. Returns true if it just ended. */
+export function tickSuper(b: Battler): boolean {
+  if (!b.overcharged) return false;
+  if (b.superFresh) {
+    b.superFresh = false;
+    return false;
+  }
+  clearSuper(b);
+  return true;
+}
+
+export type DefendResult = { gained: number; charged: boolean };
+
+export function doDefend(b: Battler, move?: MoveDef): DefendResult {
+  b.guard = true;
+  b.dodging = false;
+  if (move?.charge && b.sta >= b.staMax) {
+    b.pendingSuper = true;
+    return { gained: 0, charged: true };
+  }
+  const before = b.sta;
+  b.sta = Math.min(b.staMax, b.sta + STA_DEFEND);
+  return { gained: b.sta - before, charged: false };
+}
+
+/** Catch breath on a bag turn — restores less than Defend and leaves you open. */
+export function restSta(b: Battler): number {
+  b.guard = false;
+  b.dodging = false;
+  const before = b.sta;
+  b.sta = Math.min(b.staMax, b.sta + STA_REST);
+  return b.sta - before;
+}
 
 /** GBA-simple stats at Lv5. Catch 0–255. exp is KO yield. sta is fight stamina pips. */
 export const BATTLE: Record<SpeciesId, SpeciesBattle> = {
@@ -94,7 +183,16 @@ export function rollWildLv(min: number, max: number): number {
 }
 
 export function effectiveSpd(b: Battler): number {
-  return b.spd + b.spdBoost;
+  const n = b.spd + b.spdBoost;
+  return b.overcharged ? Math.max(1, Math.floor(n * SUPER_SPD)) : n;
+}
+
+export function effectiveAtk(b: Battler): number {
+  return b.overcharged ? Math.max(1, Math.floor(b.atk * SUPER_ATK)) : b.atk;
+}
+
+export function effectiveDef(b: Battler): number {
+  return b.overcharged ? Math.max(1, Math.floor(b.def * SUPER_DEF)) : b.def;
 }
 
 export function makeBattler(id: SpeciesId, lv: number, hp?: number, moveIds?: string[], elem?: ElemId, nick?: string): Battler {
@@ -124,23 +222,12 @@ export function makeBattler(id: SpeciesId, lv: number, hp?: number, moveIds?: st
     guard: false,
     dodging: false,
     poisoned: false,
+    weary: false,
+    overcharged: false,
+    superFresh: false,
+    pendingSuper: false,
     elem,
   };
-}
-
-export function spendFight(b: Battler): boolean {
-  if (b.sta < STA_FIGHT) return false;
-  b.sta -= STA_FIGHT;
-  b.guard = false;
-  return true;
-}
-
-export function doDefend(b: Battler): number {
-  b.guard = true;
-  b.dodging = false;
-  const before = b.sta;
-  b.sta = Math.min(b.staMax, b.sta + STA_DEFEND);
-  return b.sta - before;
 }
 
 export function doDodge(b: Battler): void {
@@ -188,10 +275,11 @@ export function rollHit(atk: Battler, def: Battler, move = atk.move): boolean {
 
 export function rollDamage(atk: Battler, def: Battler, move = atk.move): number {
   if (!isDamaging(move)) return 0;
-  const raw = Math.floor((atk.atk * move.pow) / Math.max(def.def, 1) / 5) + 3;
+  const raw = Math.floor((effectiveAtk(atk) * move.pow) / Math.max(effectiveDef(def), 1) / 5) + 3;
   let dmg = Math.max(1, raw + Math.floor(Math.random() * 3));
   if (atk.elem && move.elem === atk.elem) dmg = Math.max(1, Math.floor(dmg * 1.25));
   if (def.guard) dmg = Math.max(1, Math.floor(dmg / 2));
+  if (atk.weary) dmg = Math.max(1, Math.floor(dmg * TIRED_DMG));
   return dmg;
 }
 
@@ -245,5 +333,12 @@ export function firstActor(
 
 export function pickFoeMove(foe: Battler): MoveDef {
   const pool = foe.moves.length ? foe.moves : movesForLevel(foe.id, foe.lv);
-  return pool[Math.floor(Math.random() * pool.length)] ?? pool[0];
+  const allowed = pool.filter((m) => moveAllowed(foe, m));
+  const megas = allowed.filter((m) => m.kind === "mega");
+  if (megas.length && Math.random() < 0.65) {
+    return megas[Math.floor(Math.random() * megas.length)]!;
+  }
+  const use = allowed.length ? allowed : pool.filter((m) => m.kind === "attack");
+  const pick = use.length ? use : pool;
+  return pick[Math.floor(Math.random() * pick.length)] ?? pick[0];
 }

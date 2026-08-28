@@ -33,14 +33,24 @@ type AreaWilds = {
 const FLEE_RANGE = 42;
 const FLEE_SPEED = 54;
 
+/** Pad a door / mouth so wilds and accidental bumps stay clear. */
+function mouth(x: number, y: number, w = 48, h = 48): WanderBox {
+  return { x, y, w, h };
+}
+
 const AREA_WILDS: Record<string, AreaWilds> = {
   island: {
     count: 4,
     lv: [3, 5],
     pool: ["starlimur", "busstopper", "donerrat", "spikehedge", "chipgull", "pidgeon", "squirral"],
     keepOff: [
-      { x: 88, y: 0, w: 64, h: 56 },
-      { x: 68, y: 220, w: 56, h: 56 },
+      mouth(88, 0, 64, 56), // bridge
+      mouth(68, 220, 56, 56), // school gate
+      mouth(66, 148, 56, 48), // bike shop
+      mouth(128, 166, 48, 48), // spice
+      mouth(128, 224, 48, 48), // chippy
+      mouth(128, 280, 48, 48), // pawn
+      mouth(128, 336, 48, 48), // charity
     ],
     slots: [
       { x: 8, y: 352, w: 76, h: 40 },
@@ -49,7 +59,7 @@ const AREA_WILDS: Record<string, AreaWilds> = {
       { x: 8, y: 566, w: 76, h: 48 },
       { x: 156, y: 566, w: 76, h: 48 },
       { x: 100, y: 300, w: 40, h: 32 },
-      { x: 100, y: 348, w: 40, h: 36 },
+      { x: 100, y: 380, w: 40, h: 36 },
       { x: 100, y: 510, w: 40, h: 40 },
     ],
     hidden: { id: "linelurker", lv: [6, 8], slot: { x: 8, y: 440, w: 48, h: 32 } },
@@ -58,13 +68,16 @@ const AREA_WILDS: Record<string, AreaWilds> = {
     count: 3,
     lv: [4, 6],
     pool: ["squirral", "starlimur", "pidgeon", "spikehedge"],
-    keepOff: [{ x: 188, y: 96, w: 52, h: 56 }],
+    keepOff: [
+      mouth(188, 96, 52, 56), // road gate
+      mouth(50, 52, 56, 48), // main doors
+    ],
     slots: [
       { x: 8, y: 96, w: 14, h: 72 },
       { x: 100, y: 196, w: 80, h: 40 },
       { x: 182, y: 160, w: 32, h: 28 },
-      { x: 40, y: 108, w: 48, h: 56 },
-      { x: 116, y: 108, w: 48, h: 56 },
+      { x: 40, y: 120, w: 48, h: 44 },
+      { x: 116, y: 120, w: 48, h: 44 },
     ],
     hidden: { id: "kitthief", lv: [7, 9], slot: { x: 28, y: 198, w: 40, h: 28 } },
   },
@@ -73,27 +86,32 @@ const AREA_WILDS: Record<string, AreaWilds> = {
     lv: [2, 3],
     pool: ["pidgeon", "donerrat", "chipgull"],
     keepOff: [
-      { x: 0, y: 196, w: 100, h: 84 },
-      { x: 56, y: 40, w: 56, h: 56 },
+      mouth(0, 196, 100, 84), // west join
+      mouth(66, 48, 56, 56), // research centre
+      mouth(66, 108, 56, 52), // chippy
+      mouth(128, 154, 48, 52), // charity
+      mouth(128, 342, 48, 52), // pawn
+      mouth(66, 396, 56, 52), // bike shop
+      mouth(128, 398, 48, 52), // spice
     ],
     slots: [
-      { x: 96, y: 108, w: 40, h: 36 },
-      { x: 96, y: 152, w: 44, h: 36 },
-      { x: 96, y: 288, w: 44, h: 44 },
-      { x: 96, y: 348, w: 44, h: 40 },
-      { x: 96, y: 408, w: 44, h: 40 },
+      { x: 100, y: 200, w: 36, h: 40 },
+      { x: 100, y: 250, w: 36, h: 36 },
+      { x: 100, y: 300, w: 36, h: 36 },
+      { x: 100, y: 340, w: 36, h: 32 },
+      { x: 72, y: 280, w: 28, h: 36 },
     ],
-    hidden: { id: "kerbite", lv: [4, 5], slot: { x: 148, y: 360, w: 24, h: 28 } },
+    hidden: { id: "kerbite", lv: [4, 5], slot: { x: 144, y: 248, w: 24, h: 28 } },
   },
   roundabout: {
     count: 2,
     lv: [2, 3],
     pool: ["pidgeon", "starlimur"],
     keepOff: [
-      { x: 0, y: 56, w: 52, h: 48 },
-      { x: 96, y: 0, w: 48, h: 44 },
-      { x: 96, y: 116, w: 48, h: 44 },
-      { x: 188, y: 56, w: 52, h: 48 },
+      mouth(0, 56, 56, 48),
+      mouth(96, 0, 48, 48),
+      mouth(96, 116, 48, 48),
+      mouth(184, 56, 56, 48),
     ],
     slots: [
       { x: 104, y: 64, w: 32, h: 30 },
@@ -107,7 +125,7 @@ const AREA_WILDS: Record<string, AreaWilds> = {
     count: 0,
     lv: [4, 5],
     pool: ["spikehedge"],
-    keepOff: [{ x: 100, y: 148, w: 40, h: 16 }],
+    keepOff: [mouth(100, 140, 40, 28)],
     slots: [],
     hidden: { id: "chalklur", lv: [6, 8], slot: { x: 108, y: 64, w: 22, h: 24 } },
   },
@@ -125,6 +143,13 @@ function blocked(x: number, y: number, zones: WanderBox[]): boolean {
   return zones.some((z) => inBox(x, y, z));
 }
 
+/** People currently on the map — wilds neither spawn nor wander into them. */
+let npcZones: WanderBox[] = [];
+
+export function setNpcBlockers(zones: WanderBox[]): void {
+  npcZones = zones;
+}
+
 function shufflePick<T>(list: T[], n: number): T[] {
   const idx = list.map((_, i) => i);
   for (let i = idx.length - 1; i > 0; i -= 1) {
@@ -134,18 +159,26 @@ function shufflePick<T>(list: T[], n: number): T[] {
   return idx.slice(0, Math.min(n, list.length)).map((i) => list[i]);
 }
 
-function placeIn(box: WanderBox): { x: number; y: number } {
-  return { x: box.x + box.w / 2, y: box.y + Math.floor(box.h * 0.7) };
+function placeIn(box: WanderBox, keepOff: WanderBox[] = []): { x: number; y: number } {
+  const mid = { x: box.x + box.w / 2, y: box.y + Math.floor(box.h * 0.7) };
+  if (!blocked(mid.x, mid.y, keepOff)) return mid;
+  for (let i = 0; i < 8; i += 1) {
+    const x = box.x + 6 + Math.random() * Math.max(4, box.w - 12);
+    const y = box.y + 10 + Math.random() * Math.max(4, box.h - 14);
+    if (!blocked(x, y, keepOff)) return { x, y };
+  }
+  return mid;
 }
 
 function rollField(scene: string, cfg: AreaWilds): FieldMon[] {
   const hide = cfg.hidden;
+  const keepOff = [...cfg.keepOff, ...npcZones];
   const slots = cfg.slots.filter(
     (box) => !cfg.keepOff.some((z) => overlaps(box, z)) && !(hide && overlaps(box, hide.slot)),
   );
   const mons = shufflePick(slots, cfg.count).map((box, i) => {
     const id = cfg.pool[Math.floor(Math.random() * cfg.pool.length)];
-    const pos = placeIn(box);
+    const pos = placeIn(box, keepOff);
     return {
       key: `${scene}-${i}`,
       id,
@@ -156,7 +189,7 @@ function rollField(scene: string, cfg: AreaWilds): FieldMon[] {
     };
   });
   if (hide && !cfg.keepOff.some((z) => overlaps(hide.slot, z))) {
-    const pos = placeIn(hide.slot);
+    const pos = placeIn(hide.slot, keepOff);
     mons.push({
       key: `${scene}-hidden`,
       id: hide.id,
@@ -190,6 +223,15 @@ function fieldMons(scene: string, returning: boolean): FieldMon[] {
 export function spawnAreaWilds(scene: Phaser.Scene, area: string, returning: boolean): Wanderer[] {
   const cfg = AREA_WILDS[area];
   return spawnWanderers(scene, fieldMons(area, returning), cfg?.keepOff ?? []);
+}
+
+/** Door / mouth pads for an outdoor area — also used to skip NPC bumps on the way in. */
+export function areaDoorKeepOff(area: string): WanderBox[] {
+  return AREA_WILDS[area]?.keepOff ?? [];
+}
+
+export function inDoorKeepOff(x: number, y: number, area: string): boolean {
+  return blocked(x, y, areaDoorKeepOff(area));
 }
 
 export function snapshotField(wanderers: Wanderer[]): void {
@@ -343,7 +385,7 @@ export function tickWanderers(
       w.facing = w.dy > 0 ? "down" : w.dy < 0 ? "up" : w.facing;
       ny = Phaser.Math.Clamp(ny, minY, maxY);
     }
-    if (blocked(nx, ny, w.keepOff)) {
+    if (blocked(nx, ny, w.keepOff) || blocked(nx, ny, npcZones)) {
       w.dx *= -1;
       w.dy *= -1;
       if (w.facing === "side") w.flip *= -1;

@@ -48,10 +48,12 @@ function furn(
 
 const C = {
   void: 0x000000,
-  paper: 0xe8dcc8,
-  paperStripe: 0xd8ccb8,
-  wallDark: 0xb8a888,
-  skirting: 0x7a6248,
+  /** Downstairs — cool sage, not the cream stripe upstairs. */
+  paper: 0xb8c8a8,
+  paperHi: 0xc8d8b8,
+  paperLo: 0x98a888,
+  wallDark: 0x7a8a68,
+  skirting: 0x5a4830,
   floor: 0xb07040,
   floorDark: 0x945830,
   floorLite: 0xc88850,
@@ -77,9 +79,17 @@ function floorPlanks(g: Phaser.GameObjects.Graphics, x: number, y: number, w: nu
   }
 }
 
+/** Ground-floor paper — soft diamonds, distinct from upstairs cream stripes. */
 function paperWall(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number): void {
   px(g, C.paper, x, y, w, h);
-  for (let i = 0; i < w; i += 8) px(g, C.paperStripe, x + i, y, 3, h);
+  px(g, C.paperHi, x, y, w, 1);
+  for (let yy = y + 4; yy < y + h; yy += 8) {
+    for (let xx = x + 3; xx < x + w; xx += 8) {
+      const ox = ((yy - y) / 8) % 2 === 0 ? 0 : 4;
+      px(g, C.paperLo, xx + ox, yy, 2, 2);
+      px(g, C.paperHi, xx + ox + 1, yy - 1, 1, 1);
+    }
+  }
 }
 
 /** Ground-floor hall — stairs, kitchen, front room, front door. */
@@ -124,10 +134,14 @@ export function drawHall(g: Phaser.GameObjects.Graphics): HallLayout {
   stairsUp(g, stairX, stairY, stairW, stairH);
   const stairFoot: Solid = { x: stairX, y: 94, w: stairW, h: 22 };
 
+  const northRight = hallX + hallW;
   const solids: Solid[] = [
     { x: 0, y: 0, w: stairX, h: GBA_H },
-    { x: hallX + hallW, y: 0, w: GBA_W - (hallX + hallW), h: GBA_H },
-    { x: stairX, y: 0, w: hallX + hallW - stairX, h: topY },
+    { x: northRight, y: 0, w: GBA_W - northRight, h: GBA_H },
+    // North wall with a gap at the kitchen door so you can walk in
+    { x: stairX, y: 0, w: kitchenDoor.x - stairX, h: topY },
+    { x: kitchenDoor.x + kitchenDoor.w, y: 0, w: northRight - (kitchenDoor.x + kitchenDoor.w), h: topY },
+    { x: kitchenDoor.x, y: 0, w: kitchenDoor.w, h: kitchenDoor.y },
     { x: stairX, y: stairY, w: hallX - stairX, h: stairH },
     { x: stairX, y: 116, w: frontDoor.x - stairX, h: GBA_H - 116 },
     {
@@ -142,7 +156,7 @@ export function drawHall(g: Phaser.GameObjects.Graphics): HallLayout {
   return {
     solids,
     spawnFromLanding: { x: 80, y: 98 },
-    spawnFromKitchen: { x: 124, y: 58 },
+    spawnFromKitchen: { x: 124, y: 62 },
     spawnFromFront: { x: 124, y: 92 },
     spawnFromAvenue: { x: 124, y: 108 },
     stairs,

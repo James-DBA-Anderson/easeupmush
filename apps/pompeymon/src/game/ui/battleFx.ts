@@ -322,3 +322,53 @@ function puff(scene: Phaser.Scene, x: number, y: number, color: number): void {
     onComplete: () => g.destroy(),
   });
 }
+
+export type FlameHandle = { stop: () => void };
+
+/** Short DBZ-style power flame while SUPER — rising gold/orange flecks only (no spr tween fights). */
+export function flameAura(
+  scene: Phaser.Scene,
+  spr: Phaser.GameObjects.Image | undefined,
+): FlameHandle {
+  if (!spr) return { stop: () => undefined };
+  let alive = true;
+  const bits: Phaser.GameObjects.Graphics[] = [];
+
+  const spit = (): void => {
+    if (!alive || !spr.active) return;
+    const g = scene.add.graphics().setDepth(spr.depth - 1);
+    bits.push(g);
+    const bx = spr.x + (Math.random() * 14 - 7);
+    const by = spr.y + 6;
+    const colors = [0xf8f070, 0xf0a23a, 0xff6020, 0xffe8a0];
+    g.fillStyle(colors[Math.floor(Math.random() * colors.length)]!, 1);
+    g.fillRect(bx, by, 2 + Math.floor(Math.random() * 2), 3 + Math.floor(Math.random() * 3));
+    if (Math.random() < 0.55) {
+      g.fillStyle(0xfff8e0, 1);
+      g.fillRect(bx + 3, by + 2, 2, 2);
+    }
+    scene.tweens.add({
+      targets: g,
+      y: g.y - (10 + Math.random() * 10),
+      alpha: 0,
+      duration: 220 + Math.random() * 120,
+      ease: "Quad.easeOut",
+      onComplete: () => {
+        g.destroy();
+        const i = bits.indexOf(g);
+        if (i >= 0) bits.splice(i, 1);
+      },
+    });
+    scene.time.delayedCall(55 + Math.random() * 40, spit);
+  };
+  spit();
+  spit();
+
+  return {
+    stop: () => {
+      alive = false;
+      for (const g of bits) g.destroy();
+      bits.length = 0;
+    },
+  };
+}

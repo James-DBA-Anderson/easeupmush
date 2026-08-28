@@ -22,13 +22,14 @@ import {
 import { drawHill, type HillLayout } from "../world/drawHill";
 import { BikeField } from "../world/bike";
 import { PalField, palAside } from "../world/pal";
-import { HILL_NPCS, npcNear, npcTalk, spawnFieldNpcs, tickFieldNpcs, type FieldNpc } from "../world/npcs";
+import { blockNpcs, HILL_NPCS, npcNear, npcTalk, spawnFieldNpcs, tickFieldNpcs, type FieldNpc } from "../world/npcs";
 import {
   beginWildFight,
   leaveField,
   spawnAreaWilds,
   tickWanderers,
   wanderNear,
+  areaDoorKeepOff,
   type Wanderer,
 } from "../world/wander";
 
@@ -64,11 +65,13 @@ export class HillScene extends Phaser.Scene {
 
     const returning = returningTo("hill");
     const spawn = resumePos("hill", this.layout.spawn);
+    this.facing = "up";
     this.player = spawnKid(this, spawn.x, spawn.y);
     const specs = HILL_NPCS.filter((n) => !(n.id === "hill-view" && run.hillNanGone));
     this.npcs = spawnFieldNpcs(this, specs);
     this.wanderers = spawnAreaWilds(this, "hill", returning);
     addWalls(this, this.player, this.layout.solids);
+    blockNpcs(this, this.player, this.npcs);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
@@ -110,7 +113,7 @@ export class HillScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
-    this.bikes.tick();
+    this.bikes.tick(this.facing);
     this.pal.tick(this.facing, this.flip);
     tickFieldNpcs(this, this.npcs);
     tickWanderers(this, this.wanderers, this.player);
@@ -152,8 +155,7 @@ export class HillScene extends Phaser.Scene {
 
   private tryExamine(): void {
     if (this.bikes.tryExamine()) return;
-    if (this.pal.tryTalk()) return;
-    const person = npcNear(this.player, this.npcs);
+    const person = npcNear(this.player, this.npcs, 16, areaDoorKeepOff("hill"));
     if (person) {
       this.reachThen(person.id === "hill-view" ? this.hillNanTalk() : npcTalk(person));
       return;
@@ -171,6 +173,7 @@ export class HillScene extends Phaser.Scene {
       this.reachThen("Portsdown. That's the island.");
       return;
     }
+    this.pal.tryTalk();
   }
 
   /** Pep talk after you have a starter — then she's gone next visit. */

@@ -134,7 +134,6 @@ export class LandingScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
-    if (this.pal.tryTalk()) return;
     if (near(this.player, this.layout.parentsDoor, 8)) {
       this.reachThen("Mum and Dad's. Locked.");
       return;
@@ -147,6 +146,7 @@ export class LandingScene extends Phaser.Scene {
       this.scene.start("hall", { from: "landing" });
       return;
     }
+    this.pal.tryTalk();
   }
 
   private reachThen(line: string): void {

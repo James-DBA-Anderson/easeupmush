@@ -26,6 +26,7 @@ import {
   losTrainer,
   npcNear,
   npcTalk,
+  blockNpcs,
   spawnFieldNpcs,
   startTrainerFight,
   tickFieldNpcs,
@@ -41,6 +42,7 @@ import {
   tickWanderers,
   wanderNear,
   wanderInGrass,
+  areaDoorKeepOff,
   type Wanderer,
 } from "../world/wander";
 
@@ -92,27 +94,32 @@ export class IslandScene extends Phaser.Scene {
                 ? this.layout.spawnFromChippy
                 : this.from === "spice"
                   ? this.layout.spawnFromSpice
-                  : (run.islandPos ?? this.layout.spawnFromNorth);
-    const returning = returningTo("island");
+                  : this.layout.spawnFromNorth;
+    const returning = returningTo("island") || this.from === "battle";
     const atDoor =
-      this.from === "school" ||
-      this.from === "bikeshop" ||
-      this.from === "charity" ||
-      this.from === "pawn" ||
-      this.from === "chippy" ||
-      this.from === "spice";
+      !returning &&
+      (this.from === "school" ||
+        this.from === "bikeshop" ||
+        this.from === "charity" ||
+        this.from === "pawn" ||
+        this.from === "chippy" ||
+        this.from === "spice");
     const spawn = resumePos("island", fallback, atDoor);
     this.player = spawnKid(this, spawn.x, spawn.y, { w: GBA_W, h: this.layout.mapH });
     if (this.from === "school") {
       this.facing = "side";
       this.flip = 1;
       this.player.setFlipX(false);
+    } else if (returning) {
+      this.facing = "down";
+      this.flip = 1;
     }
     this.cameras.main.startFollow(this.player, true, 1, 1);
-    this.wanderers = spawnAreaWilds(this, "island", returning);
     this.npcs = spawnFieldNpcs(this, ISLAND_NPCS);
+    this.wanderers = spawnAreaWilds(this, "island", returning);
     run.islandPos = null;
     addWalls(this, this.player, this.layout.solids);
+    blockNpcs(this, this.player, this.npcs);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
@@ -186,13 +193,13 @@ export class IslandScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
-    this.bikes.tick();
+    this.bikes.tick(this.facing);
     this.pal.tick(this.facing, this.flip);
     tickWanderers(this, this.wanderers, this.player);
     tickFieldNpcs(this, this.npcs);
     this.player.setDepth(this.player.y);
 
-    const spotted = losTrainer(this.player, this.npcs);
+    const spotted = losTrainer(this.player, this.npcs, areaDoorKeepOff("island"));
     if (spotted) {
       snapshotField(this.wanderers);
       if (startTrainerFight(this, spotted, "island", this.player)) return;
@@ -290,8 +297,7 @@ export class IslandScene extends Phaser.Scene {
 
   private tryExamine(): void {
     if (this.bikes.tryExamine()) return;
-    if (this.pal.tryTalk()) return;
-    const person = npcNear(this.player, this.npcs);
+    const person = npcNear(this.player, this.npcs, 16, areaDoorKeepOff("island"));
     if (person) {
       snapshotField(this.wanderers);
       if (startTrainerFight(this, person, "island", this.player)) return;
@@ -313,6 +319,7 @@ export class IslandScene extends Phaser.Scene {
       this.reachThen("Tall grass. Pompeymon in there.");
       return;
     }
+    this.pal.tryTalk();
   }
 
   private reachThen(line: Line | Line[]): void {

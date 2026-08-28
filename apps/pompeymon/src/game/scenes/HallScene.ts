@@ -6,6 +6,7 @@ import { MsgBox, type Line } from "../ui/MsgBox";
 import { BagUi } from "../ui/BagUi";
 import {
   addWalls,
+  armNorthExit,
   bindWalkKeys,
   justAction,
   justCancel,
@@ -34,6 +35,7 @@ export class HallScene extends Phaser.Scene {
   private from = "landing";
   private meeting = false;
   private dressedWarn = false;
+  private kitchenGate = { armed: true };
 
   constructor() {
     super("hall");
@@ -44,6 +46,9 @@ export class HallScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.meeting = false;
+    this.reaching = false;
+    this.dressedWarn = false;
     if (this.textures.exists("hall")) this.textures.remove("hall");
     const art = this.add.graphics().setVisible(false);
     this.layout = drawHall(art);
@@ -52,6 +57,7 @@ export class HallScene extends Phaser.Scene {
     this.add.image(0, 0, "hall").setOrigin(0);
 
     const fromKitchen = this.from === "kitchen" || this.from === "kitchen-bye";
+    this.kitchenGate = { armed: !fromKitchen };
     const spawn =
       fromKitchen
         ? this.layout.spawnFromKitchen
@@ -116,7 +122,7 @@ export class HallScene extends Phaser.Scene {
     this.flip = walked.flip;
     this.pal.tick(this.facing, this.flip);
 
-    if (walkingInto(this.player, this.layout.kitchenDoor, "up")) {
+    if (armNorthExit(this.player, this.cursors, this.wasd, this.kitchenGate) && walkingInto(this.player, this.layout.kitchenDoor, "up")) {
       this.scene.start("kitchen");
       return;
     }
@@ -176,11 +182,11 @@ export class HallScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
-    if (this.pal.tryTalk()) return;
     if (near(this.player, this.layout.stairFoot, 8) || near(this.player, this.layout.stairs, 6)) {
       this.scene.start("landing", { from: "hall" });
       return;
     }
+    this.pal.tryTalk();
   }
 
   private reachThen(line: string): void {

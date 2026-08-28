@@ -110,7 +110,6 @@ export class FrontRoomScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
-    if (this.pal.tryTalk()) return;
     if (near(this.player, this.layout.dad, 12) || near(this.player, this.layout.sofa, 10)) {
       this.talkDad();
       return;
@@ -127,6 +126,7 @@ export class FrontRoomScene extends Phaser.Scene {
       this.reachThen("2nd Avenue. Quiet out.");
       return;
     }
+    this.pal.tryTalk();
   }
 
   private talkDad(): void {

@@ -155,7 +155,7 @@ export class AvenueScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
-    this.bikes.tick();
+    this.bikes.tick(this.facing);
     this.pal.tick(this.facing, this.flip);
 
     if (walkingInto(this.player, this.layout.homeDoor, "left")) {
@@ -185,7 +185,6 @@ export class AvenueScene extends Phaser.Scene {
 
   private tryExamine(): void {
     if (this.bikes.tryExamine()) return;
-    if (this.pal.tryTalk()) return;
     if (run.flyerOnRoad && !hasFlyer() && near(this.player, this.layout.flyer, 12)) {
       takeFlyer();
       this.flyerSpr?.destroy();
@@ -214,6 +213,7 @@ export class AvenueScene extends Phaser.Scene {
       this.reachThen("End of 2nd Avenue.");
       return;
     }
+    this.pal.tryTalk();
   }
 
   private meetSteve(): void {

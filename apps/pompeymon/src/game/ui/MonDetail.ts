@@ -7,7 +7,7 @@ import { ELEM_LABEL, ELEM_TINT, SPECIES } from "../species";
 import { ensureMonSheets, monBattleKey } from "../sprites/mon";
 import { consumeDir, isTouchUi } from "../touch";
 import { palMonTake } from "../world/pal";
-import type { Line } from "./MsgBox";
+import { MsgBox, type Line } from "./MsgBox";
 
 type DetailCallbacks = {
   onSay: (msg: Line | Line[]) => void;
@@ -21,6 +21,7 @@ export class MonDetail {
   private body: Phaser.GameObjects.Text;
   private optRows: Phaser.GameObjects.Text[] = [];
   private cursor: Phaser.GameObjects.Text;
+  private readonly chat: MsgBox;
   private open = false;
   private mon?: PartyMon;
   private opts: string[] = [];
@@ -33,7 +34,7 @@ export class MonDetail {
     this.scene = scene;
     this.callbacks = callbacks;
     const w = 224;
-    const h = 140;
+    const h = 148;
     const x = (GBA_W - w) / 2;
     const y = (GBA_H - h) / 2;
 
@@ -41,32 +42,39 @@ export class MonDetail {
     const plate = scene.add.rectangle(GBA_W / 2, GBA_H / 2, w, h, 0x1a1814, 1);
     plate.setStrokeStyle(2, 0xf0a23a);
 
-    this.body = scene.add.text(x + 52, y + 10, "", {
+    // 8px matches Press Start 2P's grid — 6px looks soft when the canvas is scaled.
+    this.body = crispText(scene, x + 52, y + 10, "", {
       fontFamily: '"Press Start 2P", monospace',
-      fontSize: "6px",
+      fontSize: "8px",
       color: "#e8f0f4",
-      lineSpacing: 4,
-      wordWrap: { width: w - 60 },
+      lineSpacing: 2,
+      wordWrap: { width: w - 64 },
     });
 
-    this.cursor = scene.add.text(x + 10, y + h - 36, ">", {
+    this.cursor = crispText(scene, x + 10, y + h - 40, ">", {
       fontFamily: '"Press Start 2P", monospace',
       fontSize: "8px",
       color: "#f2e6d0",
     });
 
-    const hint = scene.add
-      .text(GBA_W / 2, y + h - 6, isTouchUi() ? "LOOK  PICK    BACK" : "SPACE  PICK    ESC  BACK", {
+    const hint = crispText(
+      scene,
+      GBA_W / 2,
+      y + h - 6,
+      isTouchUi() ? "LOOK  PICK    BACK" : "SPACE  PICK    ESC  BACK",
+      {
         fontFamily: '"Press Start 2P", monospace',
-        fontSize: "6px",
+        fontSize: "8px",
         color: "#8aa3b0",
-      })
-      .setOrigin(0.5, 1);
+      },
+    ).setOrigin(0.5, 1);
 
     this.root = scene.add.container(0, 0, [dim, plate, this.body, this.cursor, hint]);
     this.root.setDepth(UI_DEPTH + 2);
     this.root.setScrollFactor(0);
     this.root.setVisible(false);
+
+    this.chat = new MsgBox(scene);
   }
 
   get active(): boolean {
@@ -83,6 +91,7 @@ export class MonDetail {
   }
 
   hide(): void {
+    this.chat.hide();
     this.open = false;
     this.mon = undefined;
     this.portrait?.destroy();
@@ -97,6 +106,10 @@ export class MonDetail {
     cancel: boolean,
   ): void {
     if (!this.open || !this.mon) return;
+    if (this.chat.open) {
+      if (confirm || cancel) this.chat.advance();
+      return;
+    }
     const n = this.opts.length;
     if (n > 1) {
       if (
@@ -132,15 +145,15 @@ export class MonDetail {
     const choice = this.opts[this.index];
     if (choice === "LEAD") {
       if (mon.hp <= 0) {
-        this.callbacks.onSay("It's out.");
+        this.chat.show("It's out.");
         return;
       }
       if (run.party[run.lead] === mon) {
-        this.callbacks.onSay("Already lead.");
+        this.chat.show("Already lead.");
         return;
       }
       if (!setLead(mon)) {
-        this.callbacks.onSay("It's out.");
+        this.chat.show("It's out.");
         return;
       }
       persistRun();
@@ -150,9 +163,7 @@ export class MonDetail {
       return;
     }
     if (choice === "ASK JESS") {
-      this.hide();
-      this.callbacks.onSay(palMonTake(mon));
-      this.callbacks.onClose();
+      this.chat.show(palMonTake(mon));
       return;
     }
     this.hide();
@@ -163,10 +174,10 @@ export class MonDetail {
     const mon = this.mon;
     if (!mon) return;
     const x = (GBA_W - 224) / 2;
-    const y = (GBA_H - 140) / 2;
+    const y = (GBA_H - 148) / 2;
     this.portrait?.destroy();
     this.portrait = this.scene.add
-      .image(x + 28, y + 48, monBattleKey(mon.id))
+      .image(x + 28, y + 52, monBattleKey(mon.id))
       .setScale(2)
       .setOrigin(0.5, 1)
       .setDepth(UI_DEPTH + 3);
@@ -179,14 +190,13 @@ export class MonDetail {
     const moves = (mon.moves?.length ? mon.moves : [])
       .map((id) => MOVES[id]?.name ?? id.toUpperCase())
       .join(" ");
-    const lead = run.party[run.lead] === mon ? " LEAD" : "";
+    const lead = run.party[run.lead] === mon ? " *" : "";
     const elem = mon.elem ? ELEM_LABEL[mon.elem] : "—";
-    const mood = mon.stubborn ? "Stubborn." : mon.cheeky ? "Cheeky." : "";
+    const mood = mon.stubborn ? "Stubborn" : mon.cheeky ? "Cheeky" : "";
     this.body.setText(
       [
         `${monLabel(mon)}${lead}`,
-        `Lv${mon.lv}  HP ${mon.hp}/${max}`,
-        `XP ${xp}`,
+        `Lv${mon.lv}  ${mon.hp}/${max}  XP ${xp}`,
         SPECIES[mon.id].kind,
         `Type ${elem}${mood ? `  ${mood}` : ""}`,
         moves ? `Moves ${moves}` : "Moves —",
@@ -199,21 +209,35 @@ export class MonDetail {
     if (mon.hp > 0) this.opts.push("LEAD");
     if (run.palJoined) this.opts.push("ASK JESS");
     this.opts.push("BACK");
-    const optTop = y + 92;
+    const optTop = y + 98;
     this.optTop = optTop;
     this.optRows = this.opts.map((label, i) =>
-      this.scene.add.text(x + 22, optTop + i * 10, label, {
+      crispText(this.scene, x + 22, optTop + i * 11, label, {
         fontFamily: '"Press Start 2P", monospace',
         fontSize: "8px",
         color: "#e8f0f4",
       }),
     );
     for (const row of this.optRows) this.root.add(row);
-    this.index = 0;
+    this.index = Math.min(this.index, this.opts.length - 1);
     this.placeCursor();
   }
 
   private placeCursor(): void {
-    this.cursor.setY(this.optTop + this.index * 10);
+    this.cursor.setY(this.optTop + this.index * 11);
   }
+}
+
+/** Render UI text at device scale so FIT upscaling stays sharp. */
+function crispText(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  text: string,
+  style: Phaser.Types.GameObjects.Text.TextStyle,
+): Phaser.GameObjects.Text {
+  const t = scene.add.text(x, y, text, style);
+  const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+  t.setResolution(Math.max(2, Math.round(dpr)));
+  return t;
 }

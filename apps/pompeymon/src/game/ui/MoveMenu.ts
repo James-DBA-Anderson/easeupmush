@@ -14,6 +14,7 @@ export class MoveMenu {
   private cursor: Phaser.GameObjects.Text;
   private labels: Phaser.GameObjects.Text[] = [];
   private moves: MoveDef[] = [];
+  private enabled: boolean[] = [];
   private index = 0;
   private open = false;
   private arm = false;
@@ -65,17 +66,26 @@ export class MoveMenu {
     return this.open;
   }
 
-  show(moves: MoveDef[]): void {
+  /** `enabled` marks which moves can be picked; locked ones stay visible but are skipped. */
+  show(moves: MoveDef[], enabled?: boolean[]): void {
     this.moves = moves.slice(0, 6);
-    this.index = 0;
+    this.enabled = this.moves.map((_, i) => enabled?.[i] !== false);
     this.open = true;
     this.arm = false;
     this.drainDirs();
     this.labels.forEach((label, i) => {
       const m = this.moves[i];
-      label.setText(m ? m.name : "");
-      label.setVisible(!!m);
+      if (!m) {
+        label.setText("");
+        label.setVisible(false);
+        return;
+      }
+      const ok = this.enabled[i];
+      label.setText(ok ? m.name : `${m.name} --`);
+      label.setColor(ok ? "#e8f0f4" : "#6a7880");
+      label.setVisible(true);
     });
+    this.index = this.firstEnabled();
     this.root.setVisible(true);
     this.placeCursor();
   }
@@ -97,33 +107,49 @@ export class MoveMenu {
       this.drainDirs();
       return;
     }
-    const n = Math.max(1, this.moves.length);
     if (
       Phaser.Input.Keyboard.JustDown(cursors.up) ||
       Phaser.Input.Keyboard.JustDown(wasd.W) ||
       consumeDir("up")
     ) {
-      this.index = (this.index + n - 1) % n;
-      this.placeCursor();
+      this.step(-1);
     }
     if (
       Phaser.Input.Keyboard.JustDown(cursors.down) ||
       Phaser.Input.Keyboard.JustDown(wasd.S) ||
       consumeDir("down")
     ) {
-      this.index = (this.index + 1) % n;
-      this.placeCursor();
+      this.step(1);
     }
     if (confirm) {
       const move = this.moves[this.index];
+      if (!move || !this.enabled[this.index]) return;
       this.hide();
-      if (move) this.callbacks.onPick(move);
-      else this.callbacks.onCancel();
+      this.callbacks.onPick(move);
       return;
     }
     if (cancel) {
       this.hide();
       this.callbacks.onCancel();
+    }
+  }
+
+  private firstEnabled(): number {
+    const i = this.enabled.findIndex((ok, n) => ok && this.moves[n]);
+    return i >= 0 ? i : 0;
+  }
+
+  private step(dir: 1 | -1): void {
+    const n = this.moves.length;
+    if (n <= 0) return;
+    let i = this.index;
+    for (let k = 0; k < n; k += 1) {
+      i = (i + dir + n) % n;
+      if (this.enabled[i] && this.moves[i]) {
+        this.index = i;
+        this.placeCursor();
+        return;
+      }
     }
   }
 
@@ -136,5 +162,6 @@ export class MoveMenu {
 
   private placeCursor(): void {
     this.cursor.setPosition(this.x + 6, this.y + 8 + this.index * 10);
+    this.cursor.setVisible(this.enabled[this.index] !== false);
   }
 }

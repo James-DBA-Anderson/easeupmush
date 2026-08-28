@@ -3,7 +3,8 @@ import { beatTrainer, isBeaten, persistRun, run, saveOverworld } from "../run";
 import { SPECIES, type SpeciesId } from "../species";
 import { ensureNpcSheets, npcAnim, npcSheet, playNpc, type NpcLook } from "../sprites/npc";
 import type { Line } from "../ui/MsgBox";
-import { near, type Facing } from "../walk";
+import { type Facing } from "../walk";
+import { mateAdvice, MATE_LOOK } from "./mate";
 
 export const PAL_ID = "pal-jess";
 export const PAL_NAME = "JESS";
@@ -75,6 +76,7 @@ export function palAside(npcId: string): Line | undefined {
     "si-stevie": "Stevie J. He thinks he's hard.",
     "sch-pe": "Sir's alright. Atkins is the one.",
     "sch-ryan": "Ryan's always on the field. Easy XP.",
+    "sch-ollie": "Give him something. Anything. He's had a week of it.",
     "is-mick": "Mick's barred. Gym's still the school.",
     "is-gaz": "Gaz is opposite the school. Warm-up.",
     "is-bex": "Bex is on the Lines. Good scrap if you need it.",
@@ -225,71 +227,117 @@ export function startPalFight(
 
 type Say = (line: Line | Line[]) => void;
 
-/** Overworld follower after she joins. */
-export class PalField {
+const PAL_GAP = 18;
+/** Ollie hangs back behind Jess. */
+const MATE_GAP = 30;
+
+/** One person trailing the player. */
+class Follower {
   private sprite?: Phaser.GameObjects.Sprite;
   private trail: { x: number; y: number }[] = [];
-  private facing: Facing = "down";
-  private flip = 1;
 
   constructor(
     scene: Phaser.Scene,
     private readonly player: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody,
-    private readonly say: Say,
+    private readonly look: NpcLook,
+    private readonly gap: number,
+    private readonly lag: number,
   ) {
-    if (!run.palJoined) return;
     ensureNpcSheets(scene);
-    const sprite = scene.add.sprite(player.x, player.y + 18, npcSheet(PAL_LOOK), "idle-down");
+    const sprite = scene.add.sprite(player.x, player.y + gap, npcSheet(look), "idle-down");
     sprite.setOrigin(0.5, 1);
     sprite.setDepth(player.y);
-    playNpc(sprite, PAL_LOOK, "down", false);
+    playNpc(sprite, look, "down", false);
     this.sprite = sprite;
-    this.trail = Array.from({ length: 12 }, () => ({ x: player.x, y: player.y + 18 }));
+    this.trail = Array.from({ length: lag }, () => ({ x: player.x, y: player.y + gap }));
+  }
+
+  near(dist: number): boolean {
+    if (!this.sprite) return false;
+    return Math.hypot(this.sprite.x - this.player.x, this.sprite.y - this.player.y) < dist;
   }
 
   tick(facing: Facing, flip: number): void {
     const spr = this.sprite;
     if (!spr) return;
-    this.facing = facing;
-    this.flip = flip;
     this.trail.unshift({ x: this.player.x, y: this.player.y });
-    if (this.trail.length > 14) this.trail.pop();
-    const goal = this.trail[this.trail.length - 1];
-    const dx = goal.x - spr.x;
-    const dy = goal.y - spr.y;
-    const dist = Math.hypot(dx, dy);
-    const moving = dist > 4;
-    if (moving) {
-      spr.x += dx * 0.22;
-      spr.y += dy * 0.22;
+    if (this.trail.length > this.lag + 2) this.trail.pop();
+
+    const toX = spr.x - this.player.x;
+    const toY = spr.y - this.player.y;
+    const toDist = Math.hypot(toX, toY);
+
+    const vx = this.player.body.velocity.x;
+    const vy = this.player.body.velocity.y;
+    const playerMoving = Math.hypot(vx, vy) > 12;
+    // Walking into her would otherwise shove her away along the trail.
+    const approaching = playerMoving && vx * toX + vy * toY > 40;
+    // Idle trail collapses onto the player — keep a gap.
+    const hold = approaching || (!playerMoving && toDist < this.gap);
+
+    let moving = false;
+    if (!hold) {
+      const goal = this.trail[this.trail.length - 1]!;
+      const dx = goal.x - spr.x;
+      const dy = goal.y - spr.y;
+      const dist = Math.hypot(dx, dy);
+      moving = dist > 4;
+      if (moving) {
+        spr.x += dx * 0.22;
+        spr.y += dy * 0.22;
+      }
     }
+
     let palFacing: Facing = facing;
     let palFlip = flip;
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
-      if (Math.abs(dx) > Math.abs(dy)) {
+    if (Math.abs(toX) > 3 || Math.abs(toY) > 3) {
+      if (Math.abs(toX) > Math.abs(toY)) {
         palFacing = "side";
-        palFlip = dx < 0 ? -1 : 1;
-      } else palFacing = dy < 0 ? "up" : "down";
+        palFlip = toX > 0 ? -1 : 1;
+      } else palFacing = toY > 0 ? "up" : "down";
     }
     spr.setFlipX(palFlip < 0);
     spr.setDepth(spr.y);
-    playNpc(spr, PAL_LOOK, palFacing, moving);
+    playNpc(spr, this.look, palFacing, moving);
+  }
+}
+
+/** Everyone tagging along — Jess, and Ollie once you've fed him. */
+export class PalField {
+  private pal?: Follower;
+  private mate?: Follower;
+
+  constructor(
+    scene: Phaser.Scene,
+    player: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody,
+    private readonly say: Say,
+  ) {
+    if (run.palJoined) this.pal = new Follower(scene, player, PAL_LOOK, PAL_GAP, 12);
+    if (run.mateJoined) this.mate = new Follower(scene, player, MATE_LOOK, MATE_GAP, 20);
   }
 
-  /** Only when you're looking at her — she trails behind, so she shouldn't steal NPC talks. */
+  tick(facing: Facing, flip: number): void {
+    this.pal?.tick(facing, flip);
+    this.mate?.tick(facing, flip);
+  }
+
+  /** Ollie falls in behind after you've fed him. */
+  addMate(scene: Phaser.Scene, player: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody): void {
+    if (this.mate) return;
+    this.mate = new Follower(scene, player, MATE_LOOK, MATE_GAP, 20);
+  }
+
+  /** Look with nothing else nearby — the crew is always close when they're following. */
   tryTalk(): boolean {
-    if (!this.sprite || !run.palJoined) return false;
-    if (!near(this.player, { x: this.sprite.x - 8, y: this.sprite.y - 16, w: 16, h: 16 }, 12)) return false;
-    const dx = this.sprite.x - this.player.x;
-    const dy = this.sprite.y - this.player.y;
-    const facingHer =
-      (this.facing === "up" && dy < -2) ||
-      (this.facing === "down" && dy > 2) ||
-      (this.facing === "side" && this.flip < 0 && dx < -2) ||
-      (this.facing === "side" && this.flip > 0 && dx > 2);
-    if (!facingHer) return false;
-    this.say(palAdvice());
-    return true;
+    if (this.pal?.near(48)) {
+      this.say(palAdvice());
+      return true;
+    }
+    if (this.mate?.near(48)) {
+      this.say(mateAdvice());
+      return true;
+    }
+    return false;
   }
 }
 

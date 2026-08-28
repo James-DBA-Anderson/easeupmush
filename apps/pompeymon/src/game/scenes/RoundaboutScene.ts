@@ -25,12 +25,13 @@ import {
   losTrainer,
   npcNear,
   npcTalk,
+  blockNpcs,
   spawnFieldNpcs,
   startTrainerFight,
   tickFieldNpcs,
   type FieldNpc,
 } from "../world/npcs";
-import { spawnAreaWilds, beginWildFight, leaveField, snapshotField, tickWanderers, wanderNear, type Wanderer } from "../world/wander";
+import { spawnAreaWilds, beginWildFight, leaveField, snapshotField, tickWanderers, wanderNear, areaDoorKeepOff, type Wanderer } from "../world/wander";
 import { BikeField } from "../world/bike";
 import { PalField } from "../world/pal";
 
@@ -74,16 +75,24 @@ export class RoundaboutScene extends Phaser.Scene {
           : this.from === "highstreet"
             ? this.layout.spawnFromEast
             : this.layout.spawnFromWest;
-    const returning = returningTo("roundabout");
+    const returning = returningTo("roundabout") || this.from === "battle";
     const spawn = resumePos("roundabout", fallback);
-    this.facing =
-      this.from === "hill" ? "down" : this.from === "bridge" ? "up" : this.from === "highstreet" ? "side" : "side";
-    this.flip = this.from === "avenue" ? 1 : this.from === "highstreet" ? -1 : 1;
+    this.facing = returning
+      ? "down"
+      : this.from === "hill"
+        ? "down"
+        : this.from === "bridge"
+          ? "up"
+          : this.from === "highstreet"
+            ? "side"
+            : "side";
+    this.flip = returning ? 1 : this.from === "avenue" ? 1 : this.from === "highstreet" ? -1 : 1;
     this.player = spawnKid(this, spawn.x, spawn.y);
     this.player.setFlipX(this.flip < 0);
     this.npcs = spawnFieldNpcs(this, ROUNDABOUT_NPCS);
     this.wanderers = spawnAreaWilds(this, "roundabout", returning);
     addWalls(this, this.player, this.layout.solids);
+    blockNpcs(this, this.player, this.npcs);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
@@ -125,13 +134,13 @@ export class RoundaboutScene extends Phaser.Scene {
     const walked = tickWalk(this.player, this.cursors, this.wasd, this.facing, this.flip);
     this.facing = walked.facing;
     this.flip = walked.flip;
-    this.bikes.tick();
+    this.bikes.tick(this.facing);
     this.pal.tick(this.facing, this.flip);
     tickFieldNpcs(this, this.npcs);
     tickWanderers(this, this.wanderers, this.player);
     this.player.setDepth(this.player.y);
 
-    const spotted = losTrainer(this.player, this.npcs);
+    const spotted = losTrainer(this.player, this.npcs, areaDoorKeepOff("roundabout"));
     if (spotted) {
       snapshotField(this.wanderers);
       if (startTrainerFight(this, spotted, "roundabout", this.player)) return;
@@ -188,8 +197,7 @@ export class RoundaboutScene extends Phaser.Scene {
 
   private tryExamine(): void {
     if (this.bikes.tryExamine()) return;
-    if (this.pal.tryTalk()) return;
-    const person = npcNear(this.player, this.npcs);
+    const person = npcNear(this.player, this.npcs, 16, areaDoorKeepOff("roundabout"));
     if (person) {
       snapshotField(this.wanderers);
       if (startTrainerFight(this, person, "roundabout", this.player)) return;
@@ -209,6 +217,7 @@ export class RoundaboutScene extends Phaser.Scene {
       this.reachThen("Roundabout. Give way.");
       return;
     }
+    this.pal.tryTalk();
   }
 
   private reachThen(line: Line | Line[]): void {

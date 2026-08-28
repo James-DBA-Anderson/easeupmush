@@ -3,7 +3,7 @@ import type { ElemId, SpeciesId } from "./species";
 export const MAX_MOVES = 6;
 
 /** How a move behaves in a turn. */
-export type MoveKind = "attack" | "quick" | "defend" | "drain" | "poison" | "speed";
+export type MoveKind = "attack" | "quick" | "defend" | "drain" | "poison" | "speed" | "mega";
 
 export type MoveDef = {
   id: string;
@@ -18,6 +18,8 @@ export type MoveDef = {
   drain?: number;
   /** Flat speed added for the rest of the fight (speed). */
   boost?: number;
+  /** Defend: if stamina is already full, charge into a 1-turn SUPER state. */
+  charge?: boolean;
   /** Takeaway evolution type. */
   elem?: ElemId;
 };
@@ -45,11 +47,11 @@ export const MOVES: Record<string, MoveDef> = {
   zip_peck: { id: "zip_peck", name: "ZIP PECK", kind: "quick", pow: 14, acc: 90 },
   lunge: { id: "lunge", name: "LUNGE", kind: "quick", pow: 17 },
 
-  // Defend
-  curl: { id: "curl", name: "CURL", kind: "defend", pow: 0 },
-  brace: { id: "brace", name: "BRACE", kind: "defend", pow: 0 },
+  // Defend — curl / brace / hunker can overcharge full stamina into SUPER
+  curl: { id: "curl", name: "CURL", kind: "defend", pow: 0, charge: true },
+  brace: { id: "brace", name: "BRACE", kind: "defend", pow: 0, charge: true },
   fluff: { id: "fluff", name: "FLUFF", kind: "defend", pow: 0 },
-  hunker: { id: "hunker", name: "HUNKER", kind: "defend", pow: 0 },
+  hunker: { id: "hunker", name: "HUNKER", kind: "defend", pow: 0, charge: true },
 
   // Drain stamina
   snatch: { id: "snatch", name: "SNATCH", kind: "drain", pow: 12, drain: 1 },
@@ -60,6 +62,16 @@ export const MOVES: Record<string, MoveDef> = {
   zip: { id: "zip", name: "ZIP", kind: "speed", pow: 0, boost: 4 },
   wind: { id: "wind", name: "WIND UP", kind: "speed", pow: 0, boost: 5 },
   scamper: { id: "scamper", name: "SCAMPER", kind: "speed", pow: 0, boost: 4 },
+
+  // Mega — only usable while SUPER (after a charge defend at full stamina)
+  bin_blast: { id: "bin_blast", name: "BIN BLAST", kind: "mega", pow: 34, poison: 35 },
+  spike_out: { id: "spike_out", name: "SPIKE OUT", kind: "mega", pow: 36 },
+  cat_slash: { id: "cat_slash", name: "CAT SLASH", kind: "mega", pow: 36 },
+  rat_rush: { id: "rat_rush", name: "RAT RUSH", kind: "mega", pow: 34 },
+  bus_bash: { id: "bus_bash", name: "BUS BASH", kind: "mega", pow: 38 },
+  chalk_bomb: { id: "chalk_bomb", name: "CHALK BOMB", kind: "mega", pow: 36 },
+  line_crash: { id: "line_crash", name: "LINE CRASH", kind: "mega", pow: 38 },
+  honk_slam: { id: "honk_slam", name: "HONK SLAM", kind: "mega", pow: 36 },
 
   chilli: { id: "chilli", name: "CHILLI", kind: "attack", pow: 20, elem: "fire" },
   puff: { id: "puff", name: "PUFF", kind: "quick", pow: 16, elem: "wind" },
@@ -80,6 +92,7 @@ export const LEARNSETS: Record<SpeciesId, Learn[]> = {
     { lv: 14, move: "nick" },
     { lv: 18, move: "gutter" },
     { lv: 24, move: "scamper" },
+    { lv: 28, move: "bin_blast" },
   ],
   chipgull: [
     { lv: 1, move: "peck" },
@@ -98,6 +111,7 @@ export const LEARNSETS: Record<SpeciesId, Learn[]> = {
     { lv: 15, move: "scamper" },
     { lv: 19, move: "lunge" },
     { lv: 25, move: "gutter" },
+    { lv: 29, move: "cat_slash" },
   ],
   donerrat: [
     { lv: 1, move: "nibble" },
@@ -107,6 +121,7 @@ export const LEARNSETS: Record<SpeciesId, Learn[]> = {
     { lv: 14, move: "zip" },
     { lv: 18, move: "hunker" },
     { lv: 23, move: "mug" },
+    { lv: 27, move: "rat_rush" },
   ],
   pidgeon: [
     { lv: 1, move: "wing" },
@@ -131,6 +146,7 @@ export const LEARNSETS: Record<SpeciesId, Learn[]> = {
     { lv: 11, move: "lunge" },
     { lv: 15, move: "brace" },
     { lv: 19, move: "mug" },
+    { lv: 26, move: "spike_out" },
   ],
   starlimur: [
     { lv: 1, move: "dart" },
@@ -147,6 +163,7 @@ export const LEARNSETS: Record<SpeciesId, Learn[]> = {
     { lv: 14, move: "lunge" },
     { lv: 18, move: "nick" },
     { lv: 24, move: "brace" },
+    { lv: 30, move: "bus_bash" },
   ],
   kerbite: [
     { lv: 1, move: "nibble" },
@@ -163,6 +180,7 @@ export const LEARNSETS: Record<SpeciesId, Learn[]> = {
     { lv: 12, move: "hunker" },
     { lv: 16, move: "wind" },
     { lv: 22, move: "mug" },
+    { lv: 28, move: "honk_slam" },
   ],
   chalklur: [
     { lv: 1, move: "roll" },
@@ -171,6 +189,7 @@ export const LEARNSETS: Record<SpeciesId, Learn[]> = {
     { lv: 12, move: "hunker" },
     { lv: 16, move: "brace" },
     { lv: 22, move: "lunge" },
+    { lv: 28, move: "chalk_bomb" },
   ],
   linelurker: [
     { lv: 1, move: "roll" },
@@ -179,6 +198,7 @@ export const LEARNSETS: Record<SpeciesId, Learn[]> = {
     { lv: 13, move: "brace" },
     { lv: 17, move: "mug" },
     { lv: 23, move: "lunge" },
+    { lv: 29, move: "line_crash" },
   ],
   kitthief: [
     { lv: 1, move: "scratch" },
@@ -234,4 +254,8 @@ export function movePriority(m: MoveDef): number {
 
 export function isDamaging(m: MoveDef): boolean {
   return m.pow > 0 && m.kind !== "defend" && m.kind !== "speed";
+}
+
+export function isMega(m: MoveDef): boolean {
+  return m.kind === "mega";
 }

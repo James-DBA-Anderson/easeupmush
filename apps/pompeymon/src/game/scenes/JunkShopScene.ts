@@ -164,7 +164,6 @@ export class JunkShopScene extends Phaser.Scene {
   }
 
   private tryExamine(): void {
-    if (this.pal.tryTalk()) return;
     if (near(this.player, this.layout.counter, 14)) {
       const line =
         this.kind === "charity"
@@ -176,6 +175,7 @@ export class JunkShopScene extends Phaser.Scene {
     if (near(this.player, this.layout.rack, 10)) {
       this.reachThen(this.kind === "charity" ? "Rails of old coats. Moths." : "Trays of watches. Most stopped.");
     }
+    this.pal.tryTalk();
   }
 
   private reachThen(line: Line | Line[], onDone?: () => void): void {

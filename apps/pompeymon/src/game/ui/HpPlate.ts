@@ -13,6 +13,7 @@ export class HpPlate {
   private max = 1;
   private sta = 3;
   private staMax = 3;
+  private powered = false;
   private teamN = 0;
   private teamLeft = 0;
   private readonly scene: Phaser.Scene;
@@ -24,10 +25,11 @@ export class HpPlate {
     name: string,
     max: number,
     lv: number,
+    hp = max,
   ) {
     this.scene = scene;
     this.max = max;
-    this.hp = max;
+    this.hp = Math.max(0, Math.min(max, hp));
     const plate = scene.add.rectangle(x + HP_PLATE_W / 2, y + PLATE_H / 2, HP_PLATE_W, PLATE_H, 0x1a1814, 1);
     plate.setStrokeStyle(2, 0xf0a23a);
     plate.setScrollFactor(0);
@@ -58,9 +60,15 @@ export class HpPlate {
     this.paint();
   }
 
-  setSta(sta: number, max = this.staMax): void {
+  setSta(sta: number, max = this.staMax, powered = this.powered): void {
     this.staMax = max;
     this.sta = Math.max(0, Math.min(max, sta));
+    this.powered = powered;
+    this.paint();
+  }
+
+  setPowered(on: boolean): void {
+    this.powered = on;
     this.paint();
   }
 
@@ -70,13 +78,13 @@ export class HpPlate {
     this.paint();
   }
 
-  setMon(name: string, max: number, lv: number, hp: number, sta: number, staMax: number): void {
+  setMon(name: string, max: number, lv: number, hp: number, sta: number, staMax: number, powered = false): void {
     this.max = max;
     this.nameText.setText(name);
     this.lvText.setText(`Lv${lv}`);
     this.lvText.setPosition(this.x + HP_PLATE_W - 5, this.y + 3);
     this.setHp(hp);
-    this.setSta(sta, staMax);
+    this.setSta(sta, staMax, powered);
   }
 
   /** Pop the Lv label when a mon grows mid-battle. */
@@ -110,11 +118,13 @@ export class HpPlate {
     this.bar.fillRect(this.x + 6, this.y + 14, w, 4);
     const pipX = this.x + 86;
     const pipY = this.y + 14;
+    const filled = this.powered ? 0xf8d040 : 0x48a0d8;
+    const empty = this.powered ? 0x6a5820 : 0x3a3830;
     for (let i = 0; i < this.staMax; i += 1) {
       const x = pipX + i * 8;
       this.bar.fillStyle(0x2a2820, 1);
       this.bar.fillRect(x, pipY, 6, 4);
-      this.bar.fillStyle(i < this.sta ? 0x48a0d8 : 0x3a3830, 1);
+      this.bar.fillStyle(i < this.sta ? filled : empty, 1);
       this.bar.fillRect(x, pipY, 6, 4);
     }
     this.paintTeam();
