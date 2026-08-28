@@ -22,6 +22,7 @@ import {
 import { drawHill, type HillLayout } from "../world/drawHill";
 import { BikeField } from "../world/bike";
 import { PalField, palAside } from "../world/pal";
+import { TalkFx } from "../world/talkFx";
 import { blockNpcs, HILL_NPCS, npcNear, npcTalk, spawnFieldNpcs, tickFieldNpcs, type FieldNpc } from "../world/npcs";
 import {
   beginWildFight,
@@ -50,6 +51,7 @@ export class HillScene extends Phaser.Scene {
   private wanderers: Wanderer[] = [];
   private bikes!: BikeField;
   private pal!: PalField;
+  private talk!: TalkFx;
 
   constructor() {
     super("hill");
@@ -68,14 +70,18 @@ export class HillScene extends Phaser.Scene {
     this.facing = "up";
     this.player = spawnKid(this, spawn.x, spawn.y);
     const specs = HILL_NPCS.filter((n) => !(n.id === "hill-view" && run.hillNanGone));
-    this.npcs = spawnFieldNpcs(this, specs);
+    this.npcs = spawnFieldNpcs(this, specs, this.layout.solids);
     this.wanderers = spawnAreaWilds(this, "hill", returning);
     addWalls(this, this.player, this.layout.solids);
     blockNpcs(this, this.player, this.npcs);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
-    this.note = new MsgBox(this);
+    this.talk = new TalkFx(this, () => [
+      ...this.npcs.map((n) => ({ name: n.name, spr: n.sprite })),
+      ...(this.pal?.cast() ?? []),
+    ]);
+    this.note = new MsgBox(this, this.talk.onPage);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
     this.pal = new PalField(this, this.player, (line) => this.showNote(line));

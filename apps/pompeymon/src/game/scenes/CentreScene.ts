@@ -1,11 +1,10 @@
 import Phaser from "phaser";
 import { GBA_H, GBA_W } from "../constants";
-import { ITEM, run, takeStack } from "../run";
+import { consumeWhiteout, healParty, partyNeedsHeal, persistRun, run } from "../run";
 import { kidAnim } from "../sprites/kid";
 import { ensureNpcSheets, npcAnim, npcSheet } from "../sprites/npc";
 import { BagUi } from "../ui/BagUi";
 import { MsgBox, type Line } from "../ui/MsgBox";
-import { ShopMenu, type ShopStock } from "../ui/ShopMenu";
 import { isTouchUi } from "../touch";
 import {
   addWalls,
@@ -20,63 +19,51 @@ import {
   type Facing,
   type WalkKeys,
 } from "../walk";
-import { drawTakeaway, type TakeawayKind, type TakeawayLayout } from "../world/drawTakeaway";
+import { drawCentre, type CentreLayout } from "../world/drawCentre";
 import { PalField } from "../world/pal";
 import { TalkFx } from "../world/talkFx";
 
-const CHIPPY: ShopStock[] = [
-  { id: "chips", label: ITEM.chips.label, price: 4, stack: true, line: "Chip cone. EARTH if they eat it." },
-  { id: "fish", label: ITEM.fish.label, price: 6, stack: true, line: "Battered fish. WATER." },
-];
+const NURSE = "SANDRA";
+const FEE = 20;
 
-const SPICE: ShopStock[] = [
-  { id: "curry", label: ITEM.curry.label, price: 5, stack: true, line: "Hot curry. FIRE or WIND." },
-  { id: "doner", label: ITEM.doner.label, price: 5, stack: true, line: "Doner kebab. POISON." },
-];
+const nurse = (text: string): Line => ({ who: NURSE, text });
 
-type Street = "highstreet" | "island";
-
-export class TakeawayScene extends Phaser.Scene {
+/** Hilsea Pompeymon Centre — patch-up for cash, and where you wake up if you go down over the bridge. */
+export class CentreScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: WalkKeys;
   private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
-  private layout!: TakeawayLayout;
+  private layout!: CentreLayout;
   private note?: MsgBox;
   private talk!: TalkFx;
   private clerkSpr?: Phaser.GameObjects.Sprite;
   private bagUi?: BagUi;
   private pal!: PalField;
-  private shop?: ShopMenu;
   private facing: Facing = "up";
   private flip = 1;
   private reaching = false;
-  private kind: TakeawayKind = "chippy";
-  private from: Street = "highstreet";
   private southExit = { armed: false };
 
   constructor() {
-    super("takeaway");
+    super("centre");
   }
 
-  init(data: { kind?: TakeawayKind; from?: Street }): void {
-    this.kind = data.kind === "spice" ? "spice" : "chippy";
-    this.from = data.from === "island" ? "island" : "highstreet";
+  init(): void {
     this.southExit = { armed: false };
   }
 
   create(): void {
-    if (this.textures.exists("takeaway")) this.textures.remove("takeaway");
+    if (this.textures.exists("centre")) this.textures.remove("centre");
     const art = this.add.graphics().setVisible(false);
-    this.layout = drawTakeaway(art, this.kind);
-    art.generateTexture("takeaway", GBA_W, GBA_H);
+    this.layout = drawCentre(art);
+    art.generateTexture("centre", GBA_W, GBA_H);
     art.destroy();
-    this.add.image(0, 0, "takeaway").setOrigin(0);
+    this.add.image(0, 0, "centre").setOrigin(0);
 
     ensureNpcSheets(this);
-    const look = this.kind === "chippy" ? "polo" : "hoodie";
     this.clerkSpr = this.add
-      .sprite(156, 46, npcSheet(look), "idle-down")
-      .play(npcAnim(look, "idle-down"))
+      .sprite(120, 50, npcSheet("lass"), "idle-down")
+      .play(npcAnim("lass", "idle-down"))
       .setDepth(9);
 
     this.player = spawnKid(this, this.layout.spawn.x, this.layout.spawn.y);
@@ -85,38 +72,43 @@ export class TakeawayScene extends Phaser.Scene {
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
     this.talk = new TalkFx(this, () => [
-      { name: this.clerk(), spr: this.clerkSpr },
+      { name: NURSE, spr: this.clerkSpr },
       ...(this.pal?.cast() ?? []),
     ]);
     this.note = new MsgBox(this, this.talk.onPage);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.pal = new PalField(this, this.player, (line) => this.showNote(line));
-    this.shop = new ShopMenu(
-      this,
-      this.kind === "chippy" ? CHIPPY : SPICE,
-      { cash: () => run.cash, onPick: (item, qty) => this.buy(item, qty) },
-      this.kind === "chippy" ? "CHIPPY" : "SPICE",
-    );
+
+    if (consumeWhiteout()) this.wakeUp();
 
     if (!isTouchUi()) {
       this.input.on("pointerdown", () => {
         if (this.bagUi?.atePointer()) return;
         if (this.note?.advance()) return;
-        if (this.shop?.active || this.bagUi?.busy) return;
+        if (this.bagUi?.busy) return;
         if (!this.reaching) this.tryExamine();
       });
     }
   }
 
+  /** Carried in off the field — patched up on the house. */
+  private wakeUp(): void {
+    healParty();
+    persistRun();
+    this.player.setPosition(120, 84);
+    this.facing = "up";
+    this.player.anims.play(kidAnim(run.outfit, "idle-up"));
+    this.showNote([
+      nurse("Alright mush. You went down on the Lines."),
+      nurse("Someone carried you in. Don't ask who."),
+      nurse("They're patched up. On the house this once."),
+      nurse("Next time it's twenty quid."),
+    ]);
+  }
+
   update(): void {
     const confirm = justAction(this.cursors, this.wasd);
     const cancel = justCancel(this.wasd);
-
-    if (this.shop?.active) {
-      this.player.body.setVelocity(0, 0);
-      this.shop.update(this.cursors, { W: this.wasd.W, A: this.wasd.A, S: this.wasd.S, D: this.wasd.D }, confirm, cancel);
-      return;
-    }
 
     if (this.bagUi?.update(this.cursors, { W: this.wasd.W, A: this.wasd.A, S: this.wasd.S, D: this.wasd.D }, confirm, cancel)) {
       this.player.body.setVelocity(0, 0);
@@ -140,43 +132,54 @@ export class TakeawayScene extends Phaser.Scene {
     this.pal.tick(this.facing, this.flip);
 
     if (armSouthExit(this.player, this.cursors, this.wasd, this.southExit) && walkingInto(this.player, this.layout.door, "down")) {
-      this.scene.start(this.from, { from: this.kind });
+      this.scene.start("island", { from: "centre" });
       return;
     }
 
+    if (cancel) return;
     if (confirm) this.tryExamine();
-  }
-
-  private clerk(): string {
-    return this.kind === "chippy" ? "TERRY" : "RAJ";
-  }
-
-  private buy(item: ShopStock, qty: number): void {
-    const n = Math.max(1, qty);
-    const cost = item.price * n;
-    if (run.cash < cost) {
-      this.showNote({ who: this.clerk(), text: "Aint got the dosh." });
-      return;
-    }
-    run.cash -= cost;
-    takeStack(item.id as "curry" | "doner" | "chips" | "fish", n);
-    const got = n > 1 ? `Bought ${item.label} x${n}.` : `Bought ${item.label}.`;
-    this.showNote([{ who: this.clerk(), text: "There y'are." }, got]);
   }
 
   private tryExamine(): void {
     if (near(this.player, this.layout.counter, 14)) {
-      const line =
-        this.kind === "chippy"
-          ? { who: "TERRY", text: "Chippy. Chips. Fish. Feed your Pompeymon." }
-          : { who: "RAJ", text: "Curry. Kebab. Changes 'em." };
-      this.reachThen(line, () => this.shop?.show());
+      this.askHeal();
       return;
     }
-    if (near(this.player, this.layout.rack, 10)) {
-      this.reachThen(this.kind === "chippy" ? "Hot fat. Papers." : "Chillies. Meat on the spit.");
+    if (near(this.player, this.layout.bed, 12)) {
+      this.reachThen("Patch-up machine. Three pads, all humming.");
+      return;
+    }
+    if (near(this.player, this.layout.plant, 10)) {
+      this.reachThen("Plastic plant. Dusty.");
+      return;
     }
     this.pal.tryTalk();
+  }
+
+  private askHeal(): void {
+    if (!run.party.length) {
+      this.reachThen(nurse("Come back when you've got one mush."));
+      return;
+    }
+    if (!partyNeedsHeal()) {
+      this.reachThen([nurse("They're all sound. Save your money.")]);
+      return;
+    }
+    if (run.cash < FEE) {
+      this.reachThen([
+        nurse(`Twenty quid the lot. You've got £${run.cash}.`),
+        nurse("Chore some empties in. I'm not a charity."),
+      ]);
+      return;
+    }
+    run.cash -= FEE;
+    healParty();
+    persistRun();
+    this.reachThen([
+      nurse("Twenty quid. Pop 'em on the pads."),
+      nurse("...Right. Sorted. Don't let 'em get battered again."),
+      `Paid £${FEE}. Your Pompeymon are fighting fit.`,
+    ]);
   }
 
   private reachThen(line: Line | Line[], onDone?: () => void): void {

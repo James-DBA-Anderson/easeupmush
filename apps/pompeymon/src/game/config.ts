@@ -21,6 +21,7 @@ import { TitleScene } from "./scenes/TitleScene";
 import { BikeShopScene } from "./scenes/BikeShopScene";
 import { JunkShopScene } from "./scenes/JunkShopScene";
 import { TakeawayScene } from "./scenes/TakeawayScene";
+import { CentreScene } from "./scenes/CentreScene";
 
 export const gameConfig: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -55,6 +56,7 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
     BikeShopScene,
     JunkShopScene,
     TakeawayScene,
+    CentreScene,
     IslandScene,
     SchoolScene,
     SchoolInScene,

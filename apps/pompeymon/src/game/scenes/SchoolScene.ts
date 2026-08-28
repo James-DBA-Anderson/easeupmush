@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GBA_W } from "../constants";
-import { ensureLeadAlive, persistRun, resumePos, returningTo, run } from "../run";
+import { ensureLeadAlive, persistRun, resumePos, returningTo, run, type ItemId } from "../run";
 import { rollWildLv } from "../battle";
 import { kidAnim } from "../sprites/kid";
 import type { WildId } from "../species";
@@ -22,15 +22,17 @@ import {
 import { drawSchool, type GrassZone, type SchoolLayout } from "../world/drawSchool";
 import { BikeField, grassOnBike } from "../world/bike";
 import { PalField } from "../world/pal";
+import { TalkFx } from "../world/talkFx";
 import {
+  giftOptions,
   giveMateGift,
   mateGiftChat,
   mateNoGiftChat,
   mateWaitChat,
-  spareGift,
   MATE_ID,
   MATE_NPC,
 } from "../world/mate";
+import { PickMenu } from "../ui/PickMenu";
 import { matchPending, PitchMatch } from "../world/pitchMatch";
 import {
   SCHOOL_NPCS,
@@ -73,6 +75,8 @@ export class SchoolScene extends Phaser.Scene {
   private pal!: PalField;
   private meeting = false;
   private match?: PitchMatch;
+  private talk!: TalkFx;
+  private gift?: PickMenu;
 
   constructor() {
     super("school");
@@ -99,17 +103,24 @@ export class SchoolScene extends Phaser.Scene {
     this.player.setFlipX(this.flip < 0);
     this.cameras.main.startFollow(this.player, true, 1, 1);
     const specs = run.mateSad && !run.mateJoined ? [...SCHOOL_NPCS, MATE_NPC] : SCHOOL_NPCS;
-    this.npcs = spawnFieldNpcs(this, specs);
+    this.npcs = spawnFieldNpcs(this, specs, this.layout.solids);
     this.wanderers = spawnAreaWilds(this, "school", returning);
     addWalls(this, this.player, this.layout.solids);
     blockNpcs(this, this.player, this.npcs);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
-    this.note = new MsgBox(this);
+    this.talk = new TalkFx(this, () => [
+      ...this.npcs.map((n) => ({ name: n.name, spr: n.sprite })),
+      ...(this.match?.cast() ?? []),
+      ...(this.pal?.cast() ?? []),
+    ]);
+    this.note = new MsgBox(this, this.talk.onPage);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
     this.pal = new PalField(this, this.player, (line) => this.showNote(line));
+
+    this.gift = new PickMenu(this, { onPick: (opt) => this.gaveGift(opt?.id) });
 
     this.meeting = false;
     if (matchPending(this.from)) this.watchMatch();
@@ -127,6 +138,12 @@ export class SchoolScene extends Phaser.Scene {
   update(): void {
     const confirm = justAction(this.cursors, this.wasd);
     const cancel = justCancel(this.wasd);
+
+    if (this.gift?.active) {
+      this.player.body.setVelocity(0, 0);
+      this.gift.update(this.cursors, { W: this.wasd.W, S: this.wasd.S }, confirm, cancel);
+      return;
+    }
 
     if (this.bagUi?.update(this.cursors, { W: this.wasd.W, A: this.wasd.A, S: this.wasd.S, D: this.wasd.D }, confirm, cancel)) {
       this.player.body.setVelocity(0, 0);
@@ -213,17 +230,42 @@ export class SchoolScene extends Phaser.Scene {
     this.time.delayedCall(820, () => this.match?.start(() => this.offerGift()));
   }
 
-  /** Give the lad something, or don't. */
+  /** Pick something out of the bag for him — or don't. */
   private offerGift(): void {
     run.matchSeen = true;
-    const gift = giveMateGift();
-    if (gift) {
-      this.showNote(mateGiftChat(gift), () => this.endMatch(true));
+    const stock = giftOptions();
+    if (!stock.length) {
+      this.sulk(true);
       return;
     }
+    this.gift?.show("GIVE HIM WHAT?", [...stock, { id: "none", label: "NOTHING" }]);
+  }
+
+  private gaveGift(id?: string): void {
+    if (!id || id === "none") {
+      this.sulk(false);
+      return;
+    }
+    if (!giveMateGift(id as ItemId)) {
+      this.sulk(true);
+      return;
+    }
+    const chat = mateGiftChat(id as ItemId);
+    if (this.meeting) this.showNote(chat, () => this.endMatch(true));
+    else {
+      this.dropSadMate();
+      this.reachThen(chat);
+      this.pal.addMate(this, this.player);
+    }
+  }
+
+  /** He stays on the pitch, worse than before. */
+  private sulk(empty: boolean): void {
     run.mateSad = true;
     persistRun();
-    this.showNote(mateNoGiftChat(), () => this.endMatch(false));
+    const chat = mateNoGiftChat(empty);
+    if (this.meeting) this.showNote(chat, () => this.endMatch(false));
+    else this.reachThen(chat);
   }
 
   private endMatch(joined: boolean): void {
@@ -249,23 +291,24 @@ export class SchoolScene extends Phaser.Scene {
     blockNpcs(this, this.player, [sad]);
   }
 
-  /** Talking to Ollie while he's sat there — hand something over and he's yours. */
+  /** Talking to Ollie while he's sat there — offer him something out of the bag. */
   private tryGiveMate(): boolean {
-    if (!spareGift()) {
+    const stock = giftOptions();
+    if (!stock.length) {
       this.reachThen(mateWaitChat());
       return true;
     }
-    const gift = giveMateGift();
-    if (!gift) return false;
-    const i = this.npcs.findIndex((n) => n.id === MATE_ID);
-    if (i >= 0) {
-      this.npcs[i]!.sprite.destroy();
-      this.npcs[i]!.zone.destroy();
-      this.npcs.splice(i, 1);
-    }
-    this.reachThen(mateGiftChat(gift));
-    this.pal.addMate(this, this.player);
+    this.gift?.show("GIVE HIM WHAT?", [...stock, { id: "none", label: "NOTHING" }]);
     return true;
+  }
+
+  /** He gets up off the pitch once he's fed. */
+  private dropSadMate(): void {
+    const i = this.npcs.findIndex((n) => n.id === MATE_ID);
+    if (i < 0) return;
+    this.npcs[i]!.sprite.destroy();
+    this.npcs[i]!.zone.destroy();
+    this.npcs.splice(i, 1);
   }
 
   private grassZone(): GrassZone | undefined {

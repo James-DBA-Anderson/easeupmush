@@ -23,6 +23,7 @@ import {
 import { dismountHint } from "../world/bike";
 import { drawBikeShop, type BikeShopLayout } from "../world/drawBikeShop";
 import { PalField } from "../world/pal";
+import { TalkFx } from "../world/talkFx";
 
 const COSHAM: ShopStock[] = [{ id: "bmx", label: ITEM.bmx.label, price: 80, line: "Second-hand BMX. Faster. Wilds bounce off." }];
 const HILSEA: ShopStock[] = [
@@ -36,6 +37,8 @@ export class BikeShopScene extends Phaser.Scene {
   private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
   private layout!: BikeShopLayout;
   private note?: MsgBox;
+  private talk!: TalkFx;
+  private clerkSpr?: Phaser.GameObjects.Sprite;
   private bagUi?: BagUi;
   private pal!: PalField;
   private shop?: ShopMenu;
@@ -63,14 +66,21 @@ export class BikeShopScene extends Phaser.Scene {
     this.add.image(0, 0, "bikeshop").setOrigin(0);
 
     ensureNpcSheets(this);
-    this.add.sprite(156, 46, npcSheet("polo"), "idle-down").play(npcAnim("polo", "idle-down")).setDepth(9);
+    this.clerkSpr = this.add
+      .sprite(156, 46, npcSheet("polo"), "idle-down")
+      .play(npcAnim("polo", "idle-down"))
+      .setDepth(9);
 
     this.player = spawnKid(this, this.layout.spawn.x, this.layout.spawn.y);
     addWalls(this, this.player, this.layout.solids);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
-    this.note = new MsgBox(this);
+    this.talk = new TalkFx(this, () => [
+      { name: "RAY", spr: this.clerkSpr },
+      ...(this.pal?.cast() ?? []),
+    ]);
+    this.note = new MsgBox(this, this.talk.onPage);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.pal = new PalField(this, this.player, (line) => this.showNote(line));
     this.shop = new ShopMenu(this, this.from === "island" ? HILSEA : COSHAM, {

@@ -19,6 +19,7 @@ import {
 import { drawBridge, type BridgeLayout } from "../world/drawBridge";
 import { BikeField } from "../world/bike";
 import { PalField } from "../world/pal";
+import { TalkFx } from "../world/talkFx";
 import {
   BRIDGE_NPCS,
   losTrainer,
@@ -45,6 +46,7 @@ export class BridgeScene extends Phaser.Scene {
   private npcs: FieldNpc[] = [];
   private bikes!: BikeField;
   private pal!: PalField;
+  private talk!: TalkFx;
 
   constructor() {
     super("bridge");
@@ -68,13 +70,17 @@ export class BridgeScene extends Phaser.Scene {
       this.from === "island" ? this.layout.spawnFromSouth : this.layout.spawn,
     );
     this.player = spawnKid(this, start.x, start.y);
-    this.npcs = spawnFieldNpcs(this, BRIDGE_NPCS);
+    this.npcs = spawnFieldNpcs(this, BRIDGE_NPCS, this.layout.solids);
     addWalls(this, this.player, this.layout.solids);
     blockNpcs(this, this.player, this.npcs);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
-    this.note = new MsgBox(this);
+    this.talk = new TalkFx(this, () => [
+      ...this.npcs.map((n) => ({ name: n.name, spr: n.sprite })),
+      ...(this.pal?.cast() ?? []),
+    ]);
+    this.note = new MsgBox(this, this.talk.onPage);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
     this.pal = new PalField(this, this.player, (line) => this.showNote(line));

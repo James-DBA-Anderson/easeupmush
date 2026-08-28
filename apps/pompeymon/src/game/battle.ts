@@ -242,8 +242,9 @@ export function spendChase(b: Battler): number {
   return n;
 }
 
-/** Steal stamina from foe into self. Returns pips taken. */
+/** Steal stamina from foe into self. Bracing protects it. Returns pips taken. */
 export function drainSta(atk: Battler, def: Battler, n: number): number {
+  if (def.guard) return 0;
   const took = Math.min(def.sta, Math.max(0, n));
   def.sta -= took;
   atk.sta = Math.min(atk.staMax, atk.sta + took);

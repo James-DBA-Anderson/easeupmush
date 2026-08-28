@@ -21,7 +21,9 @@ export type IslandLayout = {
   spawnFromPawn: { x: number; y: number };
   spawnFromChippy: { x: number; y: number };
   spawnFromSpice: { x: number; y: number };
+  spawnFromCentre: { x: number; y: number };
   schoolGate: Solid;
+  centreDoor: Solid;
   bikeDoor: Solid;
   charityDoor: Solid;
   pawnDoor: Solid;
@@ -162,6 +164,29 @@ function shop(
   return { x, y, w, h };
 }
 
+/** Pompeymon Centre — red roof, white cross board, lit windows. Door on the west face. */
+function pompCentre(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number): Solid {
+  px(g, C.roof, x - 3, y, w + 6, 12);
+  px(g, C.roofL, x - 3, y, w + 6, 3);
+  px(g, C.roof, x - 3, y + 12, w + 6, 2);
+  furn(g, x, y + 12, w, h - 12, C.cream, C.creamL, C.creamD);
+
+  // Board over the door with a chunky cross on it.
+  px(g, C.ink, x + 12, y + 16, 40, 14);
+  px(g, C.pebbleL, x + 13, y + 17, 38, 12);
+  px(g, 0xc03828, x + 29, y + 18, 6, 10);
+  px(g, 0xc03828, x + 25, y + 21, 14, 4);
+
+  px(g, C.glass, x + 14, y + 34, 14, 12);
+  px(g, C.glassL, x + 15, y + 35, 5, 4);
+  px(g, C.glass, x + 40, y + 34, 14, 12);
+  px(g, C.glassL, x + 41, y + 35, 5, 4);
+  px(g, C.creamD, x + 4, y + h - 6, w - 8, 2);
+
+  sideDoor(g, x, y + 22, 8, h - 30);
+  return { x, y, w, h };
+}
+
 function post(g: Phaser.GameObjects.Graphics, x: number, y: number): Solid {
   px(g, C.greenD, x, y + 4, 6, 16);
   px(g, C.greenL, x + 1, y + 4, 4, 16);
@@ -273,7 +298,7 @@ export function drawIsland(g: Phaser.GameObjects.Graphics): IslandLayout {
   garden(g, 144, 28, 12, 52);
 
   const t1w = terrace(g, 8, 28, 76, 52, true, true);
-  const t1e = terrace(g, 156, 28, 76, 52, false, false);
+  const centre = pompCentre(g, 156, 28, 76, 52);
   const h1w = hedge(g, 8, 78, 76);
   const h1e = hedge(g, 156, 78, 76);
   const t2w = terrace(g, 8, 84, 76, 48, false, true);
@@ -342,7 +367,7 @@ export function drawIsland(g: Phaser.GameObjects.Graphics): IslandLayout {
 
   const spots: IslandSpot[] = [
     { at: t1w, line: "Terrace. Telly's on." },
-    { at: t1e, line: "Net curtains." },
+    { at: centre, line: "Pompeymon Centre. They patch 'em up. For a price." },
     { at: t2w, line: "They're in." },
     { at: posts.pub, line: "The Green Posts. Not going in." },
     { at: news, line: "Hilsea Cycles. Bikes in the window. Get a lock." },
@@ -370,7 +395,7 @@ export function drawIsland(g: Phaser.GameObjects.Graphics): IslandLayout {
     { x: 0, y: mapH - 16, w: 96, h: 16 },
     { x: 144, y: mapH - 16, w: 96, h: 16 },
     t1w,
-    t1e,
+    centre,
     h1w,
     h1e,
     t2w,
@@ -411,7 +436,9 @@ export function drawIsland(g: Phaser.GameObjects.Graphics): IslandLayout {
     spawnFromPawn: { x: 148, y: 300 },
     spawnFromChippy: { x: 148, y: 244 },
     spawnFromSpice: { x: 148, y: 186 },
+    spawnFromCentre: { x: 148, y: 62 },
     schoolGate: school.gate,
+    centreDoor: { x: centre.x, y: centre.y + 22, w: 10, h: centre.h - 30 },
     bikeDoor: { x: news.x + news.w - 12, y: news.y + 18, w: 10, h: news.h - 22 },
     charityDoor: { x: charity.x, y: charity.y + 18, w: 10, h: charity.h - 22 },
     pawnDoor: { x: shut.x, y: shut.y + 18, w: 10, h: shut.h - 22 },

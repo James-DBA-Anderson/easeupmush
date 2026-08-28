@@ -8,6 +8,11 @@ type BattleMenuCallbacks = {
   onPick: (opt: BattleOpt) => void;
 };
 
+type BattleMenuOpts = {
+  /** Trainer fights can't be run from — you forfeit instead. */
+  trainer?: boolean;
+};
+
 const COL = 56;
 
 /** FIGHT / BAG / DEFEND / DODGE / RUN. Catch is via kebab boxes in the bag. */
@@ -19,13 +24,16 @@ export class CatchMenu {
   /** Skip one update so leftover walk/touch input cannot move the cursor. */
   private arm = false;
   private readonly opts: BattleOpt[] = ["fight", "bag", "defend", "dodge", "run"];
+  private readonly trainer: boolean;
   private readonly x: number;
   private readonly y: number;
 
   constructor(
     scene: Phaser.Scene,
     private readonly callbacks: BattleMenuCallbacks,
+    opts: BattleMenuOpts = {},
   ) {
+    this.trainer = !!opts.trainer;
     const w = 128;
     const h = 64;
     this.x = GBA_W - w - 8;
@@ -45,7 +53,7 @@ export class CatchMenu {
       bag: "BAG",
       defend: "DEFEND",
       dodge: "DODGE",
-      run: "RUN",
+      run: opts.trainer ? "GIVE UP" : "RUN",
     };
     const lines = this.opts.map((opt, i) => {
       const pos = this.slot(i);
@@ -139,7 +147,8 @@ export class CatchMenu {
       this.callbacks.onPick(this.opts[this.index] ?? "run");
       return;
     }
-    if (cancel) {
+    // Back out of a wild fight, but never forfeit a trainer on a stray cancel.
+    if (cancel && !this.trainer) {
       this.hide();
       this.callbacks.onPick("run");
     }

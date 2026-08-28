@@ -4,6 +4,7 @@ import { ensureMonSheets, monOwAnim, monOwSheet } from "../sprites/mon";
 import { ensureNpcSheets, npcAnim, npcSheet } from "../sprites/npc";
 import type { Line } from "../ui/MsgBox";
 import { MATE_LOOK, MATE_NAME } from "./mate";
+import type { Talker } from "./talkFx";
 
 const STEVIE_NAME = "STEVIE J";
 const STEVIE_LOOK = "hoodie" as const;
@@ -157,6 +158,14 @@ export class PitchMatch {
         });
       });
     });
+  }
+
+  /** Who's on the pitch, so the talking nudge finds them. */
+  cast(): Talker[] {
+    return [
+      { name: STEVIE_NAME, spr: this.stevieSpr },
+      { name: MATE_NAME, spr: this.ollieSpr },
+    ];
   }
 
   /** Ollie's left sat where he lost — the scene takes it from here. */

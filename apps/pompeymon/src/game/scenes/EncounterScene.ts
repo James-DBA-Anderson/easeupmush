@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { applyHit, BATTLE, canRun, doDefend, doDodge, drainSta, firstActor, isTired, makeBattler, moveAllowed, movesForLevel, pickFoeMove, resolveSuper, restSta, rollCounter, rollDamage, rollDodge, rollHit, scaled, spendChase, spendFight, STARTER_LV, tickPoison, tickSuper, tryCatch, tryPoison, xpForKo, type Battler } from "../battle";
+import { applyHit, BATTLE, canRun, doDefend, doDodge, drainSta, firstActor, isTired, makeBattler, moveAllowed, movesForLevel, pickFoeMove, resolveSuper, restSta, rollCounter, rollDamage, rollDodge, rollHit, scaled, spendChase, spendFight, STARTER_LV, tickPoison, tickSuper, tryCatch, tryPoison, xpForKo, type Battler, type DefendResult } from "../battle";
 import { GBA_W } from "../constants";
 import { isDamaging, resolveMoves, type MoveDef } from "../moves";
 import { applyXp, beatTrainer, catchSpecies, ensureLeadAlive, healParty, ITEM, MAX_PARTY, partnerMon, partyCanFight, persistRun, run, seeSpecies, setLead, takeCash, takePrize, useCatchBox, useHealItem, useKebabBox, bondStolenMon, findStolenMon, monLabel, STOLEN_NICK, type BagEntry, type ItemId, type PartyMon } from "../run";
@@ -95,6 +95,9 @@ export class EncounterScene extends Phaser.Scene {
   private palCheerN = 0;
   private lastPalCheer = -1;
   private done = false;
+  /** GIVE UP asks twice — losing a trainer fight by fat finger is grim. */
+  private quitArmed = false;
+  private myBrace?: DefendResult;
   private after: AfterText = "menu";
   private acts: Array<{ who: "me" | "foe"; kind: "fight" | "defend" }> = [];
   private mustSwitch = false;
@@ -231,7 +234,7 @@ export class EncounterScene extends Phaser.Scene {
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
     this.note = new MsgBox(this, (line) => this.showTalker(line));
-    this.menu = new CatchMenu(this, { onPick: (opt) => this.picked(opt) });
+    this.menu = new CatchMenu(this, { onPick: (opt) => this.picked(opt) }, { trainer: !!this.trainer });
     this.moves = new MoveMenu(this, {
       onPick: (move) => this.pickedMove(move),
       onCancel: () => this.menu?.show(),
@@ -445,6 +448,7 @@ export class EncounterScene extends Phaser.Scene {
   }
 
   private picked(opt: "fight" | "bag" | "defend" | "dodge" | "run"): void {
+    if (opt !== "run") this.quitArmed = false;
     if (opt === "fight" || opt === "dodge") {
       if (this.ignoresOrder()) {
         this.refuseOrder();
@@ -599,7 +603,7 @@ export class EncounterScene extends Phaser.Scene {
   }
 
   private startDefend(move?: MoveDef): void {
-    doDefend(this.me, move);
+    this.myBrace = doDefend(this.me, move);
     this.syncSta("me");
     this.queueRound("defend");
   }
@@ -675,6 +679,9 @@ export class EncounterScene extends Phaser.Scene {
       braceGuard(this, this.meSpr);
       actorReact(this, this.kidSpr, "stamp");
       const lines: Line[] = [`${this.me.name} is defending.`];
+      const got = this.myBrace?.gained ?? 0;
+      if (got > 0) lines.push(`${this.me.name} got its breath back.`);
+      this.myBrace = undefined;
       if (this.playSuper("me")) lines.push(`${this.me.name} powered up!`);
       this.say(lines, this.acts.length ? "next" : "menu");
       return;
@@ -800,6 +807,7 @@ export class EncounterScene extends Phaser.Scene {
       const took = drainSta(atk, def, move.drain ?? 1);
       this.syncSta();
       if (took > 0) lines.push(`${who} nicked some stamina!`);
+      else if (def.guard) lines.push(`${def.name} kept hold of it.`);
       else lines.push(`${who} found no stamina to nick.`);
     }
 
@@ -1036,9 +1044,32 @@ export class EncounterScene extends Phaser.Scene {
     this.say(lines, "foe");
   }
 
+  /** Trainer fights have GIVE UP where a wild has RUN — you concede the scrap. */
+  private giveUp(): void {
+    const t = this.trainer;
+    if (!t) return;
+    if (!this.quitArmed) {
+      this.quitArmed = true;
+      this.say("Give up? Pick GIVE UP again.", "menu");
+      return;
+    }
+    this.menu?.hide();
+    this.done = true;
+    const lines: Line[] = ["You gave up."];
+    if (t.id === PAL_ID) {
+      joinPal(false);
+      healParty();
+      this.say(lines, "done");
+      return;
+    }
+    lines.push({ who: t.who, text: t.win });
+    run.whiteout = true;
+    this.say(lines, "done");
+  }
+
   private flee(): void {
     if (this.trainer) {
-      this.say("No running from a trainer.", "menu");
+      this.giveUp();
       return;
     }
     if (canRun(this.me, this.foe)) {
@@ -1481,10 +1512,13 @@ export class EncounterScene extends Phaser.Scene {
       return;
     }
     if (run.whiteout) {
+      // Over the bridge you come round in the Hilsea centre, not Choke's.
+      const where = run.overworld?.scene ?? "";
+      const hilsea = where === "island" || where === "school" || where === "schoolin" || where === "bridge";
       run.overworld = null;
       clearField();
       persistRun();
-      this.scene.start("lab");
+      this.scene.start(hilsea ? "centre" : "lab");
       return;
     }
     const dest = run.overworld?.scene ?? "island";

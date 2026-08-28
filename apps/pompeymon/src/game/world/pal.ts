@@ -4,7 +4,8 @@ import { SPECIES, type SpeciesId } from "../species";
 import { ensureNpcSheets, npcAnim, npcSheet, playNpc, type NpcLook } from "../sprites/npc";
 import type { Line } from "../ui/MsgBox";
 import { type Facing } from "../walk";
-import { mateAdvice, MATE_LOOK } from "./mate";
+import { mateAdvice, MATE_LOOK, MATE_NAME } from "./mate";
+import type { Talker } from "./talkFx";
 
 export const PAL_ID = "pal-jess";
 export const PAL_NAME = "JESS";
@@ -81,6 +82,7 @@ export function palAside(npcId: string): Line | undefined {
     "is-gaz": "Gaz is opposite the school. Warm-up.",
     "is-bex": "Bex is on the Lines. Good scrap if you need it.",
     "is-bus": "Bus is late. Gym's not.",
+    "is-ryan": "He's been after that one all week.",
     "si-janitor": "Latch is off. Atkins doesn't care.",
     "si-miss": "Miss is alright. Gym's still that way.",
     "si-dot": "Dot'll feed you. Then Atkins feeds you to the floor.",
@@ -252,6 +254,10 @@ class Follower {
     this.trail = Array.from({ length: lag }, () => ({ x: player.x, y: player.y + gap }));
   }
 
+  get spr(): Phaser.GameObjects.Sprite | undefined {
+    return this.sprite;
+  }
+
   near(dist: number): boolean {
     if (!this.sprite) return false;
     return Math.hypot(this.sprite.x - this.player.x, this.sprite.y - this.player.y) < dist;
@@ -319,6 +325,14 @@ export class PalField {
   tick(facing: Facing, flip: number): void {
     this.pal?.tick(facing, flip);
     this.mate?.tick(facing, flip);
+  }
+
+  /** Who's following, for the talking nudge. */
+  cast(): Talker[] {
+    return [
+      { name: PAL_NAME, spr: this.pal?.spr },
+      { name: MATE_NAME, spr: this.mate?.spr },
+    ];
   }
 
   /** Ollie falls in behind after you've fed him. */

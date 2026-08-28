@@ -202,6 +202,7 @@ const SAVE_SCENES = new Set([
   "bikeshop",
   "junkshop",
   "takeaway",
+  "centre",
   "island",
   "school",
   "schoolin",

@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { ensureLeadAlive, gymFoeMon, isBeaten, run, saveOverworld, trainerFoeMon, type ItemId } from "../run";
 import type { SpeciesId } from "../species";
 import { ensureNpcSheets, npcSheet, playNpc, type NpcLook } from "../sprites/npc";
-import type { Facing } from "../walk";
+import type { Facing, Solid } from "../walk";
 import type { Line } from "../ui/MsgBox";
 import { palAside } from "./pal";
 import { setNpcBlockers, type WanderBox } from "./wander";
@@ -88,6 +88,9 @@ export type FieldNpc = Omit<NpcSpec, "flip"> & {
   step: number;
   hold: number;
   inside: boolean;
+  /** Which way they're sidestepping round an obstacle, and how long they've been stuck. */
+  dodge: number;
+  stuck: number;
   /** Set while they're busy — what they say if you interrupt. */
   saying?: string;
 };
@@ -98,8 +101,21 @@ const BODY_H = 10;
 /** Wider pad wild mons steer round, so none end up hidden behind a person. */
 const SHOO_PAD = 6;
 
-export function spawnFieldNpcs(scene: Phaser.Scene, specs: NpcSpec[]): FieldNpc[] {
+/** Map walls for the current area — people can't walk through buildings either. */
+let areaWalls: Solid[] = [];
+
+export function setNpcWalls(solids: Solid[]): void {
+  areaWalls = solids;
+}
+
+/** Feet-point test against the map walls. */
+function intoWall(x: number, y: number): boolean {
+  return areaWalls.some((s) => x > s.x - 5 && x < s.x + s.w + 5 && y > s.y && y < s.y + s.h + 3);
+}
+
+export function spawnFieldNpcs(scene: Phaser.Scene, specs: NpcSpec[], solids?: Solid[]): FieldNpc[] {
   ensureNpcSheets(scene);
+  if (solids) setNpcWalls(solids);
   const npcs = specs.map((spec, i) => {
     const sprite = scene.add.sprite(spec.x, spec.y, npcSheet(spec.look), "idle-down");
     sprite.setOrigin(0.5, 1);
@@ -124,6 +140,8 @@ export function spawnFieldNpcs(scene: Phaser.Scene, specs: NpcSpec[]): FieldNpc[
       step: 0,
       hold: scene.time.now + 400 + i * 300,
       inside: false,
+      dodge: 0,
+      stuck: 0,
     };
   });
   setNpcBlockers(npcBoxes(npcs));
@@ -140,12 +158,16 @@ export function npcBoxes(npcs: FieldNpc[]): WanderBox[] {
   }));
 }
 
+/** The kid, so people walking their rounds go round you as well. */
+let areaPlayer: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody | undefined;
+
 /** Make the people solid for the player — call after `addWalls`. */
 export function blockNpcs(
   scene: Phaser.Scene,
   player: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody,
   npcs: FieldNpc[],
 ): void {
+  areaPlayer = player;
   for (const n of npcs) scene.physics.add.collider(player, n.zone);
 }
 
@@ -155,7 +177,7 @@ export function tickFieldNpcs(scene: Phaser.Scene, npcs: FieldNpc[]): void {
   let moved = false;
   for (const n of npcs) {
     if (n.route?.length) {
-      moved = moved || runRoute(scene, n, now, dt);
+      moved = moved || runRoute(scene, n, npcs, now, dt);
     } else if (n.patrol) {
       moved = moved || n.dx !== 0 || n.dy !== 0;
       if (now > n.until) {
@@ -202,6 +224,14 @@ export function tickFieldNpcs(scene: Phaser.Scene, npcs: FieldNpc[]): void {
         n.facing = n.dy > 0 ? "down" : n.dy < 0 ? "up" : n.facing;
         ny = Phaser.Math.Clamp(ny, minY, maxY);
       }
+      if (blockedAt(n, nx, ny, npcs)) {
+        n.dx *= -1;
+        n.dy *= -1;
+        if (n.facing === "side") n.flip *= -1;
+        n.facing = n.dy > 0 ? "down" : n.dy < 0 ? "up" : n.facing;
+        nx = n.sprite.x;
+        ny = n.sprite.y;
+      }
       n.sprite.setPosition(nx, ny);
     }
     if (n.inside) continue;
@@ -214,9 +244,11 @@ export function tickFieldNpcs(scene: Phaser.Scene, npcs: FieldNpc[]): void {
 }
 
 const ROUTE_SPEED = 26;
+/** Give up on a leg after this long shuffling about with nowhere to go. */
+const STUCK_MS = 1800;
 
 /** Walk an errand loop — one leg at a time, then whatever they came to do. Returns true if they shifted. */
-function runRoute(scene: Phaser.Scene, n: FieldNpc, now: number, dt: number): boolean {
+function runRoute(scene: Phaser.Scene, n: FieldNpc, npcs: FieldNpc[], now: number, dt: number): boolean {
   const route = n.route!;
   const step = route[n.step % route.length]!;
   if (now < n.hold) {
@@ -233,30 +265,77 @@ function runRoute(scene: Phaser.Scene, n: FieldNpc, now: number, dt: number): bo
   n.saying = undefined;
   const dx = step.x - n.sprite.x;
   const dy = step.y - n.sprite.y;
-  // One axis at a time keeps them on the pavement instead of cutting corners.
-  if (Math.abs(dx) > 1) {
-    n.dx = Math.sign(dx) * ROUTE_SPEED;
-    n.dy = 0;
-    n.facing = "side";
-    n.flip = dx > 0 ? 1 : -1;
-  } else if (Math.abs(dy) > 1) {
-    n.dx = 0;
-    n.dy = Math.sign(dy) * ROUTE_SPEED;
-    n.facing = dy > 0 ? "down" : "up";
-    n.flip = 1;
-  } else {
+  if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) {
     n.dx = 0;
     n.dy = 0;
+    n.stuck = 0;
     arriveAt(scene, n, step, now);
     return false;
   }
-  const nx = n.sprite.x + n.dx * dt;
-  const ny = n.sprite.y + n.dy * dt;
-  n.sprite.setPosition(
-    n.dx ? clampStep(n.sprite.x, nx, step.x) : nx,
-    n.dy ? clampStep(n.sprite.y, ny, step.y) : ny,
-  );
-  return true;
+
+  const reach = ROUTE_SPEED * dt;
+  const goX = Math.abs(dx) > 1 ? Math.sign(dx) : 0;
+  const goY = Math.abs(dy) > 1 ? Math.sign(dy) : 0;
+  // Straight at it first (one axis at a time keeps them on the pavement), then
+  // sidestep round whatever's in the way, keeping the same side once committed.
+  const tries: [number, number, boolean][] = [];
+  if (goX) tries.push([goX, 0, false]);
+  if (goY) tries.push([0, goY, false]);
+  const side = n.dodge || 1;
+  if (goX) tries.push([0, side, true], [0, -side, true]);
+  else if (goY) tries.push([side, 0, true], [-side, 0, true]);
+
+  for (const [ax, ay, detour] of tries) {
+    const rawX = n.sprite.x + ax * reach;
+    const rawY = n.sprite.y + ay * reach;
+    const nx = ax ? (detour ? rawX : clampStep(n.sprite.x, rawX, step.x)) : n.sprite.x;
+    const ny = ay ? (detour ? rawY : clampStep(n.sprite.y, rawY, step.y)) : n.sprite.y;
+    if (blockedAt(n, nx, ny, npcs)) continue;
+    n.dx = ax * ROUTE_SPEED;
+    n.dy = ay * ROUTE_SPEED;
+    n.dodge = detour ? (ax || ay) : 0;
+    if (ax) {
+      n.facing = "side";
+      n.flip = ax > 0 ? 1 : -1;
+    } else {
+      n.facing = ay > 0 ? "down" : "up";
+      n.flip = 1;
+    }
+    if (!detour) n.stuck = 0;
+    else {
+      // Two people sidestepping the same way would shuffle along together forever.
+      n.stuck += dt * 1000;
+      if (n.stuck > 900) {
+        n.dodge = -n.dodge;
+        n.stuck = 0;
+      }
+    }
+    n.sprite.setPosition(nx, ny);
+    return true;
+  }
+
+  // Boxed in — stand there a moment, then write the leg off.
+  n.dx = 0;
+  n.dy = 0;
+  n.dodge = 0;
+  n.stuck += dt * 1000;
+  if (n.stuck > STUCK_MS) {
+    n.stuck = 0;
+    n.step += 1;
+    n.hold = now + 300;
+  }
+  return false;
+}
+
+/** Buildings, the kid, and other people. */
+function blockedAt(self: FieldNpc, x: number, y: number, npcs: FieldNpc[]): boolean {
+  if (intoWall(x, y)) return true;
+  const feet = areaPlayer?.body.center;
+  if (feet && Math.abs(feet.x - x) < BODY_W && Math.abs(feet.y + 3 - y) < BODY_H) return true;
+  return npcs.some((o) => {
+    if (o === self || o.inside) return false;
+    return Math.abs(o.sprite.x - x) < BODY_W && Math.abs(o.sprite.y - y) < BODY_H;
+  });
 }
 
 /** Don't overshoot the waypoint on a long frame. */
@@ -773,18 +852,20 @@ export const ISLAND_NPCS: NpcSpec[] = [
     id: "is-ryan",
     name: "RYAN",
     look: "cap",
-    x: 44,
-    y: 318,
+    x: 110,
+    y: 340,
     facing: "down",
     talk: "Grass by the lines is heaving mush. Boxes ready.",
     more: ["Had one this morning. It got out the box.", "Don't tell the bus lad. He'll want one."],
     route: [
-      { x: 44, y: 318, hold: 1600 },
-      { x: 44, y: 372, act: "catch", hold: 2600, say: "Sshh. It's right there mush." },
-      { x: 44, y: 430 },
-      { x: 40, y: 484, act: "catch", hold: 2800, say: "Nearly had it. Nearly." },
-      { x: 60, y: 430 },
-      { x: 44, y: 318, hold: 2200 },
+      { x: 110, y: 340, hold: 1600 },
+      { x: 110, y: 372 },
+      { x: 60, y: 372, act: "catch", hold: 2600, say: "Sshh. It's right there mush." },
+      { x: 110, y: 372 },
+      { x: 110, y: 482 },
+      { x: 58, y: 482, act: "catch", hold: 2800, say: "Nearly had it. Nearly." },
+      { x: 110, y: 482 },
+      { x: 110, y: 340, hold: 2200 },
     ],
   },
   {

@@ -30,6 +30,7 @@ import {
   type FieldNpc,
 } from "../world/npcs";
 import { PalField } from "../world/pal";
+import { TalkFx } from "../world/talkFx";
 
 export class SchoolInScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -43,6 +44,7 @@ export class SchoolInScene extends Phaser.Scene {
   private reaching = false;
   private npcs: FieldNpc[] = [];
   private pal!: PalField;
+  private talk!: TalkFx;
 
   constructor() {
     super("schoolin");
@@ -61,13 +63,17 @@ export class SchoolInScene extends Phaser.Scene {
     this.flip = 1;
     this.player = spawnKid(this, spawn.x, spawn.y, { w: GBA_W, h: this.layout.mapH });
     this.cameras.main.startFollow(this.player, true, 1, 1);
-    this.npcs = spawnFieldNpcs(this, SCHOOL_IN_NPCS);
+    this.npcs = spawnFieldNpcs(this, SCHOOL_IN_NPCS, this.layout.solids);
     addWalls(this, this.player, this.layout.solids);
     blockNpcs(this, this.player, this.npcs);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
-    this.note = new MsgBox(this);
+    this.talk = new TalkFx(this, () => [
+      ...this.npcs.map((n) => ({ name: n.name, spr: n.sprite })),
+      ...(this.pal?.cast() ?? []),
+    ]);
+    this.note = new MsgBox(this, this.talk.onPage);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.pal = new PalField(this, this.player, (line) => this.showNote(line));
 

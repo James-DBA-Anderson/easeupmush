@@ -34,6 +34,7 @@ import {
 } from "../world/npcs";
 import { BikeField, grassOnBike } from "../world/bike";
 import { PalField, PAL_AMBUSH, palJoinChat, runPalAmbush, startPalFight } from "../world/pal";
+import { TalkFx } from "../world/talkFx";
 import {
   beginWildFight,
   leaveField,
@@ -62,6 +63,7 @@ export class IslandScene extends Phaser.Scene {
   private from = "bridge";
   private bikes!: BikeField;
   private pal!: PalField;
+  private talk!: TalkFx;
   private palAfter?: "fight" | "greet";
   private palSpr?: Phaser.GameObjects.Sprite;
 
@@ -94,7 +96,9 @@ export class IslandScene extends Phaser.Scene {
                 ? this.layout.spawnFromChippy
                 : this.from === "spice"
                   ? this.layout.spawnFromSpice
-                  : this.layout.spawnFromNorth;
+                  : this.from === "centre"
+                    ? this.layout.spawnFromCentre
+                    : this.layout.spawnFromNorth;
     const returning = returningTo("island") || this.from === "battle";
     const atDoor =
       !returning &&
@@ -103,7 +107,8 @@ export class IslandScene extends Phaser.Scene {
         this.from === "charity" ||
         this.from === "pawn" ||
         this.from === "chippy" ||
-        this.from === "spice");
+        this.from === "spice" ||
+        this.from === "centre");
     const spawn = resumePos("island", fallback, atDoor);
     this.player = spawnKid(this, spawn.x, spawn.y, { w: GBA_W, h: this.layout.mapH });
     if (this.from === "school") {
@@ -115,7 +120,7 @@ export class IslandScene extends Phaser.Scene {
       this.flip = 1;
     }
     this.cameras.main.startFollow(this.player, true, 1, 1);
-    this.npcs = spawnFieldNpcs(this, ISLAND_NPCS);
+    this.npcs = spawnFieldNpcs(this, ISLAND_NPCS, this.layout.solids);
     this.wanderers = spawnAreaWilds(this, "island", returning);
     run.islandPos = null;
     addWalls(this, this.player, this.layout.solids);
@@ -123,7 +128,11 @@ export class IslandScene extends Phaser.Scene {
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
-    this.note = new MsgBox(this);
+    this.talk = new TalkFx(this, () => [
+      ...this.npcs.map((n) => ({ name: n.name, spr: n.sprite })),
+      ...(this.pal?.cast() ?? []),
+    ]);
+    this.note = new MsgBox(this, this.talk.onPage);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
     this.pal = new PalField(this, this.player, (line) => this.showNote(line));
@@ -227,6 +236,12 @@ export class IslandScene extends Phaser.Scene {
       this.bikes.stashIndoor();
       leaveField("island");
       this.scene.start("bikeshop", { from: "island" });
+      return;
+    }
+    if (walkingInto(this.player, this.layout.centreDoor, "right")) {
+      this.bikes.stashIndoor();
+      leaveField("island");
+      this.scene.start("centre");
       return;
     }
     if (walkingInto(this.player, this.layout.charityDoor, "right")) {

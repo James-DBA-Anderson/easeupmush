@@ -22,6 +22,7 @@ import {
 } from "../walk";
 import { drawJunkShop, type JunkKind, type JunkShopLayout } from "../world/drawJunkShop";
 import { PalField } from "../world/pal";
+import { TalkFx } from "../world/talkFx";
 
 const CHARITY: ShopStock[] = [
   { id: "plaster", label: ITEM.plaster.label, price: 3, stack: true, line: "Old plaster. Barely sticks." },
@@ -44,6 +45,8 @@ export class JunkShopScene extends Phaser.Scene {
   private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
   private layout!: JunkShopLayout;
   private note?: MsgBox;
+  private talk!: TalkFx;
+  private clerkSpr?: Phaser.GameObjects.Sprite;
   private bagUi?: BagUi;
   private pal!: PalField;
   private shop?: ShopMenu;
@@ -74,14 +77,21 @@ export class JunkShopScene extends Phaser.Scene {
 
     const look: NpcLook = this.kind === "charity" ? "coat" : "drunk";
     ensureNpcSheets(this);
-    this.add.sprite(156, 46, npcSheet(look), "idle-down").play(npcAnim(look, "idle-down")).setDepth(9);
+    this.clerkSpr = this.add
+      .sprite(156, 46, npcSheet(look), "idle-down")
+      .play(npcAnim(look, "idle-down"))
+      .setDepth(9);
 
     this.player = spawnKid(this, this.layout.spawn.x, this.layout.spawn.y);
     addWalls(this, this.player, this.layout.solids);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
-    this.note = new MsgBox(this);
+    this.talk = new TalkFx(this, () => [
+      { name: this.clerk(), spr: this.clerkSpr },
+      ...(this.pal?.cast() ?? []),
+    ]);
+    this.note = new MsgBox(this, this.talk.onPage);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.pal = new PalField(this, this.player, (line) => this.showNote(line));
     this.shop = new ShopMenu(
@@ -143,6 +153,7 @@ export class JunkShopScene extends Phaser.Scene {
   private clerk(): string {
     return this.kind === "charity" ? "NAN" : "LEN";
   }
+
 
   private buy(item: ShopStock, qty: number): void {
     const id = item.id as ItemId;

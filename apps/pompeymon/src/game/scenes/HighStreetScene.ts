@@ -35,6 +35,7 @@ import {
 } from "../world/npcs";
 import { BikeField } from "../world/bike";
 import { PalField } from "../world/pal";
+import { TalkFx } from "../world/talkFx";
 import { spawnSteveWait, startSteveFight, steveFightPending, STEVE_AMBUSH } from "../world/steve";
 import { spawnAreaWilds, beginWildFight, leaveField, snapshotField, tickWanderers, wanderNear, areaDoorKeepOff, type Wanderer } from "../world/wander";
 
@@ -54,6 +55,7 @@ export class HighStreetScene extends Phaser.Scene {
   private meeting = false;
   private bikes!: BikeField;
   private pal!: PalField;
+  private talk!: TalkFx;
   private steveSpr?: Phaser.GameObjects.Sprite;
 
   constructor() {
@@ -107,14 +109,18 @@ export class HighStreetScene extends Phaser.Scene {
       w: GBA_W,
       h: this.layout.mapH,
     });
-    this.npcs = spawnFieldNpcs(this, HIGH_STREET_NPCS);
+    this.npcs = spawnFieldNpcs(this, HIGH_STREET_NPCS, this.layout.solids);
     this.wanderers = spawnAreaWilds(this, "highstreet", returning);
     addWalls(this, this.player, this.layout.solids);
     blockNpcs(this, this.player, this.npcs);
     const keys = bindWalkKeys(this);
     this.cursors = keys.cursors;
     this.wasd = keys.wasd;
-    this.note = new MsgBox(this);
+    this.talk = new TalkFx(this, () => [
+      ...this.npcs.map((n) => ({ name: n.name, spr: n.sprite })),
+      ...(this.pal?.cast() ?? []),
+    ]);
+    this.note = new MsgBox(this, this.talk.onPage);
     this.bagUi = new BagUi(this, (line) => this.showNote(line));
     this.bikes = new BikeField(this, this.player, (line) => this.showNote(line));
     this.pal = new PalField(this, this.player, (line) => this.showNote(line));

@@ -14,8 +14,12 @@ const ollie = (text: string): Line => ({ who: MATE_NAME, text });
 /** Anything you could hand a sad lad. Stacked food first, then the tat. */
 const GIFTS: ItemId[] = ["chips", "fish", "doner", "curry", "stale", "plaster"];
 
-export function spareGift(): ItemId | undefined {
-  return GIFTS.find((id) => run.items.includes(id) && stackLeft(id) > 0);
+/** What you could hand over, for the picker. */
+export function giftOptions(): { id: ItemId; label: string }[] {
+  return GIFTS.filter((id) => run.items.includes(id) && stackLeft(id) > 0).map((id) => {
+    const n = stackLeft(id);
+    return { id, label: n > 1 ? `${ITEM[id].label} x${n}` : ITEM[id].label };
+  });
 }
 
 function stackLeft(id: ItemId): number {
@@ -38,15 +42,14 @@ function dropStack(id: ItemId): void {
   if (stackLeft(id) <= 0) takeItem(id);
 }
 
-/** Hand it over — he cheers up and tags along. Returns what you gave. */
-export function giveMateGift(): ItemId | undefined {
-  const id = spareGift();
-  if (!id) return undefined;
+/** Hand something over — he cheers up and tags along. */
+export function giveMateGift(id: ItemId): boolean {
+  if (!run.items.includes(id) || stackLeft(id) <= 0) return false;
   dropStack(id);
   run.mateJoined = true;
   run.mateSad = false;
   persistRun();
-  return id;
+  return true;
 }
 
 export function mateGiftChat(id: ItemId): Line[] {
@@ -58,10 +61,17 @@ export function mateGiftChat(id: ItemId): Line[] {
   ];
 }
 
-export function mateNoGiftChat(): Line[] {
+export function mateNoGiftChat(empty: boolean): Line[] {
+  if (empty) {
+    return [
+      { who: "YOU", text: "...I've got nothing." },
+      ollie("S'alright. Everyone's got nuffin for me."),
+      ollie("I'll sit here then."),
+    ];
+  }
   return [
-    { who: "YOU", text: "...I've got nothing." },
-    ollie("S'alright. Everyone's got nuffin for me."),
+    { who: "YOU", text: "...Nah. Sorry." },
+    ollie("Right. Yeah. Course."),
     ollie("I'll sit here then."),
   ];
 }
