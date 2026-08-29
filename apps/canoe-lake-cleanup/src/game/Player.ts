@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import type { Game } from './Game';
+import { MobileControls } from './MobileControls';
 
 export class Player {
   private camera: THREE.PerspectiveCamera;
   private domElement: HTMLElement;
   private game: Game;
+  private mobileControls: MobileControls;
   
   private moveForward = false;
   private moveBackward = false;
@@ -30,6 +32,7 @@ export class Player {
     this.game = game;
     
     this.sprayIndicator = document.getElementById('spray-indicator')!;
+    this.mobileControls = new MobileControls();
     
     this.setupPointerLock();
     this.setupEventListeners();
@@ -121,7 +124,7 @@ export class Player {
   }
 
   private onMouseMove(event: MouseEvent): void {
-    if (!this.locked) return;
+    if (!this.locked || this.mobileControls.isEnabled()) return;
 
     const movementX = event.movementX || 0;
     const movementY = event.movementY || 0;
@@ -134,21 +137,55 @@ export class Player {
   }
 
   public update(delta: number): void {
-    if (!this.locked) return;
+    const usingMobile = this.mobileControls.isEnabled();
+    
+    if (!this.locked && !usingMobile) return;
+
+    if (usingMobile) {
+      const lookDelta = this.mobileControls.getLookDelta();
+      if (lookDelta.x !== 0 || lookDelta.y !== 0) {
+        this.euler.setFromQuaternion(this.camera.quaternion);
+        this.euler.y -= lookDelta.x;
+        this.euler.x -= lookDelta.y;
+        this.euler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.euler.x));
+        this.camera.quaternion.setFromEuler(this.euler);
+      }
+    }
 
     const damping = 10.0;
     this.velocity.x -= this.velocity.x * damping * delta;
     this.velocity.z -= this.velocity.z * damping * delta;
 
-    this.direction.z = Number(this.moveForward) - Number(this.moveBackward);
-    this.direction.x = Number(this.moveRight) - Number(this.moveLeft);
-    this.direction.normalize();
+    if (usingMobile) {
+      const mobileInput = this.mobileControls.getMoveInput();
+      this.direction.x = mobileInput.x;
+      this.direction.z = mobileInput.y;
+      
+      const length = this.direction.length();
+      if (length > 0) {
+        this.direction.normalize();
+        this.velocity.x -= this.direction.x * this.moveSpeed * delta;
+        this.velocity.z -= this.direction.z * this.moveSpeed * delta;
+      }
+      
+      if (this.mobileControls.getIsSpraying()) {
+        this.isSpraying = true;
+        this.sprayIndicator.classList.add('spraying');
+      } else {
+        this.isSpraying = false;
+        this.sprayIndicator.classList.remove('spraying');
+      }
+    } else {
+      this.direction.z = Number(this.moveForward) - Number(this.moveBackward);
+      this.direction.x = Number(this.moveRight) - Number(this.moveLeft);
+      this.direction.normalize();
 
-    if (this.moveForward || this.moveBackward) {
-      this.velocity.z -= this.direction.z * this.moveSpeed * delta;
-    }
-    if (this.moveLeft || this.moveRight) {
-      this.velocity.x -= this.direction.x * this.moveSpeed * delta;
+      if (this.moveForward || this.moveBackward) {
+        this.velocity.z -= this.direction.z * this.moveSpeed * delta;
+      }
+      if (this.moveLeft || this.moveRight) {
+        this.velocity.x -= this.direction.x * this.moveSpeed * delta;
+      }
     }
 
     const moveVector = new THREE.Vector3();

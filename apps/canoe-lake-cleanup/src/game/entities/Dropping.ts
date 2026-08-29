@@ -2,12 +2,10 @@ import * as THREE from 'three';
 
 export class Dropping {
   private mesh: THREE.Mesh;
-  private scene: THREE.Scene;
   private cleanProgress = 0;
   private maxHealth = 100;
 
   constructor(position: THREE.Vector3, scene: THREE.Scene) {
-    this.scene = scene;
     
     const geometry = new THREE.CylinderGeometry(0.15, 0.2, 0.1, 8);
     const material = new THREE.MeshStandardMaterial({ 
