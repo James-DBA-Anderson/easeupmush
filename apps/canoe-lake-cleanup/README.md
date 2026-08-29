@@ -21,13 +21,30 @@ Authentic recreation of Canoe Lake, Southsea — Victorian boating lake from 188
 
 ## Development
 
-Not yet implemented. See `PLAN.md` for technical stack, gameplay mechanics, and development roadmap.
-
 ```bash
-# When ready:
 npm install
-npm run dev:canoe-lake  # TBD
+npm run dev:canoe-lake  # Runs on http://localhost:5304/
 ```
+
+### Testing Mobile Controls
+
+Mobile controls automatically appear on touch devices. To test on desktop:
+
+- **Desktop browser:** Add `?mobile` to URL: `http://localhost:5304/?mobile`
+- **Browser DevTools:** Use device emulation (Chrome: F12 → Device Toolbar)
+
+### Controls
+
+**Desktop:**
+- WASD: Move
+- Mouse: Look
+- Click: Spray
+- ESC: Lock/Unlock mouse
+
+**Mobile:**
+- Joystick (bottom-left): Move
+- Touch right side: Look
+- Spray button (bottom-right): Clean
 
 ## Links
 
