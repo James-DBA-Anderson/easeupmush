@@ -35,14 +35,22 @@ export class MobileControls {
   }
 
   private checkIfMobile(): void {
+    const urlParams = new URLSearchParams(window.location.search);
+    const forceMobile = urlParams.has('mobile');
+    
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
     
-    this.isActive = isMobile || isTouchDevice;
+    this.isActive = forceMobile || isMobile || isTouchDevice;
     
     if (this.isActive) {
-      this.joystickContainer.style.display = 'block';
-      this.sprayButton.style.display = 'block';
+      this.joystickContainer.classList.add('visible');
+      this.sprayButton.classList.add('visible');
+      
+      const instructions = document.getElementById('instructions');
+      if (instructions) {
+        instructions.textContent = 'Joystick: Move | Touch right: Look | Spray button: Clean';
+      }
     }
   }
 
