@@ -95,6 +95,7 @@ Street NPCs (and some trainers) speak Portsmouth. Talking to one again cycles th
 | **beard** | You don't believe someone. Can stretch to **beard on tash** (*“Beard. Beard on tash.”*). |
 | **chore** | Steal. *“You going down town on the chore?”* = are you going into town to nick stuff. |
 | **shant** | Get on the booze. *“I love a shant.”* *“He can ever have a shant.”* *“I got shanted last night.”* *“You were shanted mush.”* |
+| **shant on** | Cheers — let's go and drink. Said once the drinking's been settled on (*“Shant on! Cheers mush.”*). Doubles as a shrug when something goes wrong: *“Oh well. Shant on.”* |
 | **chuffed** | Happy / proud (*“I'm well chuffed with that.”*). If they're too pleased: *“Alright mush, what do you want, a chuffdy badge?”* |
 | **dosh** | Money (*“Aint got the dosh.”*). |
 | **init** | Isn't it. Tag on the end of a line (*“Cushty init.”*). |
@@ -102,7 +103,7 @@ Street NPCs (and some trainers) speak Portsmouth. Talking to one again cycles th
 
 **th → f (denser speakers):** Drunks and thicker lads replace **th** with **f** in speech — *fink*, *nuffin*, *wiv*, *portsmuth*. Not every street voice: nans, Sir, Choke, Mum stay clearer. Examples: *“I aint never been to portsmuth before.”* *“Who's that mush fink he is?”*
 
-Who uses what (rough guide): **Steve** (2nd Avenue) is a dense lad — **cushty**, **init**, **beard**, **fings**; street lads / trainers lean **mush** / **geezer** + fight talk (**decked**, **copped** / *copping*); Kay / give-way bloke / bus lad **squinny**; Tom's challenge rare **dinlo**; Gaz / Mick **bang out**; Lee / Kay **bang out of order**; Gaz / Ryan **batter**; Dave / Mick / Ryan losses **ease up mush**; Dave / Mick **shant** + **cushty**; older nans / 80s voices rare **lakes**; denser lads **beard**, **chore**, **dane tane**, **init**, **chuffed** / **chuffdy badge**; Dave / Tom / bus lad / Steve the **f**-for-**th** voice. Dialogue lives in `world/npcs.ts` and Steve’s chat in `AvenueScene.ts`.
+Who uses what (rough guide): **Steve** (2nd Avenue) is a dense lad — **cushty**, **init**, **beard**, **fings**; street lads / trainers lean **mush** / **geezer** + fight talk (**decked**, **copped** / *copping*); Kay / give-way bloke / bus lad **squinny**; Tom's challenge rare **dinlo**; Gaz / Mick **bang out**; Lee / Kay **bang out of order**; Gaz / Ryan **batter**; Dave / Mick / Ryan losses **ease up mush**; Dave / Mick **shant** + **cushty**; Dave takes a win or a hiding with **shant on**; older nans / 80s voices rare **lakes**; denser lads **beard**, **chore**, **dane tane**, **init**, **chuffed** / **chuffdy badge**; Dave / Tom / bus lad / Steve the **f**-for-**th** voice. Dialogue lives in `world/npcs.ts` and Steve’s chat in `AvenueScene.ts`.
 
 ### Run state
 

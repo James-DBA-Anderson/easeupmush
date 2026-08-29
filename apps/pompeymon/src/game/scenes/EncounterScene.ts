@@ -497,7 +497,6 @@ export class EncounterScene extends Phaser.Scene {
     }
     spendFight(this.me);
     this.me.move = move;
-    this.syncSta("me");
     this.queueRound("fight");
   }
 
@@ -643,7 +642,6 @@ export class EncounterScene extends Phaser.Scene {
       return "defend";
     }
     spendFight(this.foe);
-    this.syncSta("foe");
     return "fight";
   }
 
@@ -740,6 +738,9 @@ export class EncounterScene extends Phaser.Scene {
     const foeLabel = !atkIsMe;
     const who = foeLabel ? `Foe ${atk.name}` : atk.name;
     const lines: Line[] = [...this.flavorLead(atk, foeLabel)];
+    // The pip was paid when the move was picked, but it only drops off the
+    // plate now, as the mon actually swings.
+    this.syncSta(atkIsMe ? "me" : "foe");
 
     if (move.kind === "defend") {
       atk.guard = true;
