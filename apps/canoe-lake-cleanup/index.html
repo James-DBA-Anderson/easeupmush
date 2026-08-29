@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Canoe Lake Clean Up - PoC</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow: hidden;
+      background: #87ceeb;
+    }
+
+    #game-container {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    #hud {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      color: white;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+      font-size: 16px;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #cleanliness-meter {
+      background: rgba(0,0,0,0.5);
+      padding: 10px 15px;
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+
+    #cleanliness-bar {
+      width: 200px;
+      height: 20px;
+      background: #333;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 5px;
+      border: 2px solid #666;
+    }
+
+    #cleanliness-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4caf50, #8bc34a);
+      transition: width 0.3s, background 0.3s;
+    }
+
+    #cleanliness-fill.warning {
+      background: linear-gradient(90deg, #ff9800, #ffc107);
+    }
+
+    #cleanliness-fill.danger {
+      background: linear-gradient(90deg, #f44336, #ff5722);
+    }
+
+    #score {
+      background: rgba(0,0,0,0.5);
+      padding: 8px 15px;
+      border-radius: 8px;
+    }
+
+    #crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 20px;
+      height: 20px;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    #crosshair::before,
+    #crosshair::after {
+      content: '';
+      position: absolute;
+      background: rgba(255,255,255,0.8);
+    }
+
+    #crosshair::before {
+      left: 50%;
+      transform: translateX(-50%);
+      width: 2px;
+      height: 100%;
+    }
+
+    #crosshair::after {
+      top: 50%;
+      transform: translateY(-50%);
+      width: 100%;
+      height: 2px;
+    }
+
+    #instructions {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.7);
+      padding: 15px 25px;
+      border-radius: 8px;
+      color: white;
+      text-align: center;
+      font-size: 14px;
+      pointer-events: none;
+    }
+
+    #spray-indicator {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 60px;
+      height: 60px;
+      border: 3px solid rgba(100, 200, 255, 0);
+      border-radius: 50%;
+      pointer-events: none;
+      transition: border-color 0.1s;
+      z-index: 5;
+    }
+
+    #spray-indicator.spraying {
+      border-color: rgba(100, 200, 255, 0.6);
+      animation: pulse 0.3s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: translate(-50%, -50%) scale(1); }
+      50% { transform: translate(-50%, -50%) scale(1.1); }
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <div id="hud">
+      <div id="cleanliness-meter">
+        <div>Cleanliness: <span id="cleanliness-value">100</span>%</div>
+        <div id="cleanliness-bar">
+          <div id="cleanliness-fill" style="width: 100%"></div>
+        </div>
+      </div>
+      <div id="score">
+        Score: <span id="score-value">0</span>
+      </div>
+    </div>
+    <div id="crosshair"></div>
+    <div id="spray-indicator"></div>
+    <div id="instructions">
+      WASD: Move | Mouse: Look | Click: Spray | ESC: Lock/Unlock mouse
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
