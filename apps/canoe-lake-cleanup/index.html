@@ -30,7 +30,7 @@
     #hud {
       position: absolute;
       top: 20px;
-      left: 20px;
+      right: 20px;
       color: white;
       text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
       font-size: 16px;
@@ -69,56 +69,327 @@
       background: linear-gradient(90deg, #f44336, #ff5722);
     }
 
-    #score {
+    #score-panel {
       background: rgba(0,0,0,0.5);
-      padding: 8px 15px;
+      padding: 10px 15px;
       border-radius: 8px;
+      margin-bottom: 10px;
+      text-align: right;
+      min-width: 200px;
     }
 
-    #crosshair {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 20px;
-      height: 20px;
-      pointer-events: none;
-      z-index: 5;
+    #score-value {
+      font-size: 26px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
     }
 
-    #crosshair::before,
-    #crosshair::after {
-      content: '';
-      position: absolute;
-      background: rgba(255,255,255,0.8);
+    #cleaned {
+      font-size: 12px;
+      opacity: 0.8;
+      margin-top: 2px;
     }
 
-    #crosshair::before {
-      left: 50%;
-      transform: translateX(-50%);
-      width: 2px;
+    #complaints-line {
+      font-size: 12px;
+      opacity: 0.8;
+      margin-top: 1px;
+    }
+
+    #complaints-line.bad {
+      opacity: 1;
+      color: #ff9c7a;
+    }
+
+    #combo {
+      margin-top: 6px;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    #combo.active {
+      opacity: 1;
+    }
+
+    #combo-value {
+      font-size: 18px;
+      font-weight: 700;
+      color: #ffd23a;
+    }
+
+    #combo-bar {
+      height: 4px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 3px;
+    }
+
+    #combo-fill {
       height: 100%;
-    }
-
-    #crosshair::after {
-      top: 50%;
-      transform: translateY(-50%);
       width: 100%;
-      height: 2px;
+      background: linear-gradient(90deg, #ffd23a, #ff8a2b);
     }
 
     #instructions {
       position: absolute;
-      bottom: 20px;
+      top: 20px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(0,0,0,0.7);
-      padding: 15px 25px;
+      background: rgba(0,0,0,0.55);
+      padding: 8px 16px;
       border-radius: 8px;
       color: white;
       text-align: center;
-      font-size: 14px;
+      font-size: 13px;
       pointer-events: none;
+      z-index: 10;
+    }
+
+    #hurt-flash {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.45s ease-out;
+      z-index: 15;
+      background: radial-gradient(
+        ellipse at center,
+        rgba(180,20,20,0) 35%,
+        rgba(180,20,20,0.55) 100%
+      );
+    }
+
+    #hurt-flash.on {
+      opacity: 1;
+      transition: opacity 0.05s;
+    }
+
+    #minimap-panel {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(0,0,0,0.5);
+      border: 2px solid rgba(255,255,255,0.25);
+      border-radius: 8px;
+      padding: 6px;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #minimap {
+      display: block;
+      width: 220px;
+      height: 132px;
+      border-radius: 4px;
+    }
+
+    #clock-panel {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      background: rgba(0,0,0,0.55);
+      border-radius: 8px;
+      padding: 10px 16px;
+      color: white;
+      pointer-events: none;
+      z-index: 10;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+    }
+
+    #clock {
+      font-size: 30px;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 1px;
+      line-height: 1;
+    }
+
+    #weather {
+      font-size: 13px;
+      opacity: 0.85;
+      margin-top: 4px;
+    }
+
+    #mugshot-panel {
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.55);
+      border: 2px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      padding: 4px;
+      pointer-events: none;
+      z-index: 10;
+      line-height: 0;
+    }
+
+    #mugshot {
+      display: block;
+      width: 96px;
+      image-rendering: pixelated;
+    }
+
+    #messages {
+      position: absolute;
+      bottom: 90px;
+      right: 20px;
+      width: 300px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: flex-end;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    .message {
+      width: 100%;
+      background: rgba(0,0,0,0.62);
+      border-left: 3px solid #ffd23a;
+      border-radius: 6px;
+      padding: 7px 10px;
+      color: #f2f2ee;
+      font-size: 12px;
+      line-height: 1.35;
+      text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
+      opacity: 0;
+      transform: translateX(24px);
+      transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+
+    .message.in {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    .message-from {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      letter-spacing: 1px;
+      color: #ffd23a;
+      margin-bottom: 2px;
+    }
+
+    .message-from span {
+      color: rgba(255,255,255,0.55);
+      letter-spacing: 0;
+    }
+
+    #tool-panel {
+      position: absolute;
+      bottom: 24px;
+      right: 20px;
+      background: rgba(0,0,0,0.55);
+      border-radius: 8px;
+      padding: 8px 14px;
+      color: white;
+      text-align: right;
+      letter-spacing: 1px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #tool-name {
+      display: block;
+      font-size: 15px;
+      color: #ffd23a;
+    }
+
+    #tool-hint {
+      font-size: 10px;
+      opacity: 0.7;
+    }
+
+    #health-panel {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(80px);
+      width: 150px;
+      background: rgba(0,0,0,0.55);
+      border-radius: 8px;
+      padding: 8px 10px;
+      color: white;
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #health-bar {
+      height: 12px;
+      background: #331a1a;
+      border: 2px solid #6b3a3a;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+
+    #health-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #d33a2c, #ff7a5c);
+      transition: width 0.2s;
+    }
+
+    #health-fill.low {
+      animation: throb 0.7s ease-in-out infinite;
+    }
+
+    @keyframes throb {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.45; }
+    }
+
+    #game-over {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      background: rgba(40,0,0,0.72);
+      color: #fff;
+      text-align: center;
+      text-shadow: 2px 2px 6px rgba(0,0,0,0.9);
+      z-index: 30;
+    }
+
+    #game-over.on {
+      display: flex;
+    }
+
+    #game-over h1 {
+      font-size: 46px;
+      letter-spacing: 3px;
+    }
+
+    #game-over p {
+      font-size: 15px;
+      opacity: 0.9;
+      line-height: 1.6;
+    }
+
+    #restart {
+      margin-top: 8px;
+      padding: 12px 26px;
+      font: inherit;
+      font-size: 16px;
+      letter-spacing: 1px;
+      color: #2b1a12;
+      background: #ffd23a;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    #restart:hover {
+      background: #ffe27a;
     }
 
     #spray-indicator {
@@ -236,9 +507,57 @@
 
     @media (max-width: 768px) {
       #instructions {
+        font-size: 11px;
+        padding: 6px 10px;
+      }
+
+      #minimap {
+        width: 150px;
+        height: 90px;
+      }
+
+      /* Clear of the joystick, which owns the bottom-left corner on touch. */
+      #clock-panel {
+        bottom: 180px;
+        padding: 6px 10px;
+      }
+
+      #clock {
+        font-size: 22px;
+      }
+
+      #mugshot {
+        width: 72px;
+      }
+
+      #mugshot-panel {
+        bottom: 8px;
+      }
+
+      #health-panel {
+        bottom: 14px;
+        width: 110px;
+        transform: translateX(62px);
+      }
+
+      #tool-panel {
+        bottom: 120px;
+        padding: 6px 10px;
+      }
+
+      #messages {
+        bottom: 175px;
+        width: 200px;
+        font-size: 10px;
+      }
+
+      .message {
+        font-size: 10px;
+        padding: 5px 8px;
+      }
+
+      #tool-name {
         font-size: 12px;
-        padding: 10px 15px;
-        bottom: 200px;
       }
     }
 
@@ -272,20 +591,50 @@
 <body>
   <div id="game-container">
     <div id="hud">
+      <div id="score-panel">
+        <div>Score <span id="score-value">0</span></div>
+        <div id="cleaned">Cleaned: <span id="cleaned-value">0</span></div>
+        <div id="complaints-line">Complaints: <span id="complaints">0</span></div>
+        <div id="combo">
+          <span id="combo-value">x2</span>
+          <div id="combo-bar"><div id="combo-fill"></div></div>
+        </div>
+      </div>
       <div id="cleanliness-meter">
         <div>Cleanliness: <span id="cleanliness-value">100</span>%</div>
         <div id="cleanliness-bar">
           <div id="cleanliness-fill" style="width: 100%"></div>
         </div>
       </div>
-      <div id="score">
-        Score: <span id="score-value">0</span>
-      </div>
     </div>
-    <div id="crosshair"></div>
+    <div id="hurt-flash"></div>
+    <div id="minimap-panel">
+      <canvas id="minimap"></canvas>
+    </div>
+    <div id="clock-panel">
+      <div id="clock">06:00</div>
+      <div id="weather">Cloudy</div>
+    </div>
+    <div id="mugshot-panel">
+      <canvas id="mugshot"></canvas>
+    </div>
+    <div id="health-panel">
+      HEALTH
+      <div id="health-bar"><div id="health-fill"></div></div>
+    </div>
+    <div id="game-over">
+      <h1>PECKED TO DEATH</h1>
+      <p id="game-over-detail"></p>
+      <button id="restart">BACK TO WORK</button>
+    </div>
     <div id="spray-indicator"></div>
+    <div id="messages"></div>
+    <div id="tool-panel">
+      <span id="tool-name">PRESSURE WASHER</span>
+      <span id="tool-hint">Q / 1 / 2 to swap</span>
+    </div>
     <div id="instructions">
-      WASD: Move | Mouse: Look | Click: Spray | ESC: Lock/Unlock mouse
+      WASD: Move | Shift: Run | Mouse: Look | Click: Spray | ESC: Lock/Unlock mouse
     </div>
     <div id="mobile-controls">
       <div id="joystick-container">
