@@ -1,5 +1,18 @@
 import * as THREE from "three";
-import { PATH_OUTER, SHORE, offsetShore } from "../world/lake";
+import {
+  PATH_OUTER,
+  SHORE,
+  offsetShore,
+  pathSpurs,
+  type PathSpur,
+} from "../world/lake";
+import {
+  getPlayPark,
+  parkBuildingFootprints,
+  type PlayParkSite,
+} from "../world/park";
+import { surroundFootprints } from "../world/buildings";
+import type { Footprint } from "../world/collision";
 
 const REFRESH = 1 / 15;
 
@@ -27,6 +40,7 @@ export class MiniMap {
   private height: number;
   private scale: number;
   private since = 0;
+  private spurs: PathSpur[];
 
   constructor(canvas: HTMLCanvasElement) {
     const dpr = Math.min(window.devicePixelRatio, 2);
@@ -40,12 +54,14 @@ export class MiniMap {
     ctx.scale(dpr, dpr);
     this.ctx = ctx;
 
-    // Fit the whole park, path included, with a little breathing room.
-    const extent = 165 + PATH_OUTER + 6;
+    // Fit the whole grounds: lake, path, play park and the parade walls.
+    const halfX = 195;
+    const halfZ = 140;
     this.scale = Math.min(
-      this.width / (extent * 2),
-      this.height / (58 + PATH_OUTER + 8) / 2,
+      this.width / (halfX * 2),
+      this.height / (halfZ * 2),
     );
+    this.spurs = pathSpurs();
   }
 
   private toScreen(x: number, z: number): [number, number] {
@@ -70,6 +86,70 @@ export class MiniMap {
     this.ctx.fill();
   }
 
+  /** Oriented rectangle in world XZ — buildings, spurs, play park. */
+  private rect(
+    x: number,
+    z: number,
+    halfWide: number,
+    halfDeep: number,
+    yaw: number,
+    fill: string,
+    stroke?: string,
+  ): void {
+    const cos = Math.cos(yaw);
+    const sin = Math.sin(yaw);
+    const corners: [number, number][] = [
+      [-halfWide, -halfDeep],
+      [halfWide, -halfDeep],
+      [halfWide, halfDeep],
+      [-halfWide, halfDeep],
+    ];
+    this.ctx.beginPath();
+    corners.forEach(([lx, lz], i) => {
+      const wx = x + lx * cos + lz * sin;
+      const wz = z - lx * sin + lz * cos;
+      const [sx, sy] = this.toScreen(wx, wz);
+      if (i === 0) this.ctx.moveTo(sx, sy);
+      else this.ctx.lineTo(sx, sy);
+    });
+    this.ctx.closePath();
+    this.ctx.fillStyle = fill;
+    this.ctx.fill();
+    if (stroke) {
+      this.ctx.strokeStyle = stroke;
+      this.ctx.lineWidth = 0.75;
+      this.ctx.stroke();
+    }
+  }
+
+  private footprint(solid: Footprint, fill: string, stroke?: string): void {
+    this.rect(
+      solid.x,
+      solid.z,
+      solid.halfWide,
+      solid.halfDeep,
+      solid.yaw,
+      fill,
+      stroke,
+    );
+  }
+
+  private spur(s: PathSpur): void {
+    this.rect(s.x, s.z, s.width / 2, s.length / 2, s.yaw, "#9a958a");
+  }
+
+  private playPark(site: PlayParkSite): void {
+    this.rect(
+      site.x,
+      site.z,
+      site.wide / 2,
+      site.deep / 2,
+      site.yaw,
+      "#5a4a52",
+      "rgba(255,255,255,0.2)",
+    );
+  }
+
   public update(delta: number, data: MapData): void {
     this.since += delta;
     if (this.since < REFRESH) return;
@@ -84,9 +164,11 @@ export class MiniMap {
     ctx.fillStyle = "#3c5f40";
     ctx.fillRect(0, 0, this.width, this.height);
 
+    // Path ring, then the spurs out to the gates / esplanade.
     this.trace(offsetShore(PATH_OUTER));
     ctx.fillStyle = "#9a958a";
     ctx.fill();
+    for (const spur of this.spurs) this.spur(spur);
 
     this.trace(SHORE);
     ctx.fillStyle = "#2f6d7c";
@@ -94,6 +176,16 @@ export class MiniMap {
     ctx.strokeStyle = "rgba(255,255,255,0.35)";
     ctx.lineWidth = 1;
     ctx.stroke();
+
+    // Surround terraces first (far), then park buildings on top.
+    for (const solid of surroundFootprints()) {
+      this.footprint(solid, "#8a8378", "rgba(0,0,0,0.25)");
+    }
+    const play = getPlayPark();
+    if (play) this.playPark(play);
+    for (const solid of parkBuildingFootprints()) {
+      this.footprint(solid, "#6b5a48", "rgba(0,0,0,0.35)");
+    }
 
     for (const spot of data.droppings)
       this.dot(spot, 0.8, "rgba(240,255,235,0.5)");

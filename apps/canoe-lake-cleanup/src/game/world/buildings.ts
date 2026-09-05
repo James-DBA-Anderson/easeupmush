@@ -424,3 +424,8 @@ export function buildSurrounds(scene: THREE.Scene): void {
 export function atSurroundBuilding(x: number, z: number): boolean {
   return hitsAny(x, z, surrounds);
 }
+
+/** Surround footprints for the mini map — terraces and seafront buildings. */
+export function surroundFootprints(): readonly Footprint[] {
+  return surrounds;
+}

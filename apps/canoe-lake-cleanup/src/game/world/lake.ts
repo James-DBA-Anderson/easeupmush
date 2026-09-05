@@ -414,6 +414,41 @@ export function isOnPath(x: number, z: number): boolean {
   return false;
 }
 
+/** Spur rectangles for the mini map — same layout as `buildPaths`. */
+export interface PathSpur {
+  x: number;
+  z: number;
+  length: number;
+  width: number;
+  /** Facing along the spur, away from the lake. */
+  yaw: number;
+}
+
+export function pathSpurs(): PathSpur[] {
+  const out: PathSpur[] = [];
+  for (const [dx, dz] of PATH_SPURS) {
+    const dir = new THREE.Vector2(dx, dz).normalize();
+    let from = 0;
+    for (let d = 0; d < 200; d += 1) {
+      const p = dir.clone().multiplyScalar(d);
+      if (!isInLake(p.x, p.y) && distanceToShore(p.x, p.y) > PATH_OUTER - 1) {
+        from = d;
+        break;
+      }
+    }
+    const length = 175 - from;
+    const mid = dir.clone().multiplyScalar(from + length / 2);
+    out.push({
+      x: mid.x,
+      z: mid.y,
+      length,
+      width: 4,
+      yaw: Math.atan2(dir.y, dir.x),
+    });
+  }
+  return out;
+}
+
 export function buildPaths(scene: THREE.Scene): void {
   const paving = new THREE.MeshStandardMaterial({ color: 0xa8a294, roughness: 0.95 });
 

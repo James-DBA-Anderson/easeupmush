@@ -666,3 +666,8 @@ export function bobPedalos(time: number): void {
 export function atParkBuilding(x: number, z: number): boolean {
   return hitsAny(x, z, solids);
 }
+
+/** Footprints for the mini map — boat house, café, toilets. */
+export function parkBuildingFootprints(): readonly Footprint[] {
+  return solids;
+}

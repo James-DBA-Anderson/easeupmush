@@ -221,16 +221,18 @@ export function updateTrees(time: number, wind: THREE.Vector2): void {
   const nx = wind.x / mag;
   const nz = wind.y / mag;
   // A few m/s is a light breeze; Solent blows harder in the wet.
-  const strength = Math.min(1.5, mag * 0.16);
+  const strength = Math.min(1.4, 0.4 + mag * 0.2);
 
   for (const plant of swaying) {
     const wave = Math.sin(time * plant.rate + plant.phase);
-    const gust = Math.sin(time * 0.52 + plant.phase * 0.7);
-    const amount =
-      plant.flex * strength * (0.72 + 0.28 * gust + 0.38 * wave);
-    // Same axes as the baked lean: +Z wind tips rotation.x, +X tips -rotation.z.
-    plant.group.rotation.x = plant.baseX + nz * amount;
-    plant.group.rotation.z = plant.baseZ - nx * amount;
+    const gust = Math.sin(time * 0.68 + plant.phase * 1.4);
+    const flutter = Math.sin(time * plant.rate * 2.6 + plant.phase * 0.5);
+    // Steady push downwind, plus a clear rock so the motion reads from the path.
+    const lean = plant.flex * strength * 0.4;
+    const rock =
+      plant.flex * strength * (0.95 * wave + 0.4 * gust + 0.2 * flutter);
+    plant.group.rotation.x = plant.baseX + nz * (lean + rock);
+    plant.group.rotation.z = plant.baseZ - nx * (lean + rock);
   }
 }
 
@@ -256,8 +258,8 @@ export function plantTrees(scene: THREE.Scene): void {
       baseX: tree.rotation.x,
       baseZ: tree.rotation.z,
       phase: rand() * Math.PI * 2,
-      rate: hasBranches ? 0.75 + rand() * 0.85 : 1.1 + rand() * 1.1,
-      flex: hasBranches ? 0.028 + rand() * 0.018 : 0.055 + rand() * 0.035,
+      rate: hasBranches ? 0.45 + rand() * 0.55 : 0.85 + rand() * 0.9,
+      flex: hasBranches ? 0.08 + rand() * 0.05 : 0.14 + rand() * 0.08,
     });
   };
 
