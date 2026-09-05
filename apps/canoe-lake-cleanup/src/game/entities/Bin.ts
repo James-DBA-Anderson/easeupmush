@@ -1,9 +1,9 @@
 import * as THREE from "three";
 
-/** How long a bin takes to fill on its own, near enough a park day. */
-const FILL_TIME = 260;
 /** Full enough to be worth a phone call, and full enough to spill. */
 const REPORT_AT = 0.8;
+/** One finished bag / coffee cup — a handful of visits fills a bin. */
+const DEPOSIT = 0.14;
 
 const STEEL = new THREE.MeshStandardMaterial({
   color: 0x8f969c,
@@ -21,14 +21,14 @@ const RUBBISH = new THREE.MeshStandardMaterial({
 });
 
 /**
- * A council bin on its post. Fills up over the day on its own and quicker
- * once the park is busy, and overflows in a heap on the lid until it's
- * emptied with the litter picker.
+ * A council bin on its post. Starts empty; fills when people actually put
+ * something in, and overflows in a heap on the lid until it's emptied with
+ * the litter picker.
  */
 export class Bin {
   private group: THREE.Group;
   private heap: THREE.Group;
-  private fill = Math.random() * 0.5;
+  private fill = 0;
   private reported = false;
 
   constructor(scene: THREE.Scene, x: number, z: number) {
@@ -108,12 +108,14 @@ export class Bin {
     this.heap.visible = false;
   }
 
-  /** `busy` is how much of the park's public is stood near it. */
-  public update(delta: number, busy: number): void {
-    this.fill = Math.min(1, this.fill + (delta / FILL_TIME) * (1 + busy));
+  /** Someone put their rubbish in — the only way a bin fills. */
+  public deposit(amount = DEPOSIT): void {
+    this.fill = Math.min(1, this.fill + amount);
     this.heap.visible = this.isFull();
-    this.heap.scale.setScalar(
-      0.6 + ((this.fill - REPORT_AT) / (1 - REPORT_AT)) * 0.6,
-    );
+    if (this.isFull()) {
+      this.heap.scale.setScalar(
+        0.6 + ((this.fill - REPORT_AT) / (1 - REPORT_AT)) * 0.6,
+      );
+    }
   }
 }

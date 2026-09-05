@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { PATH_OUTER, distanceToShore, isInLake } from './lake';
+import { PATH_OUTER, PATH_SPURS, distanceToShore, isInLake } from './lake';
 
 /**
  * The planting round Canoe Lake, following the real park.
@@ -173,13 +173,7 @@ export function buildScrub(scale: number, rand: () => number): THREE.Group {
 
 /** Keeps planting off the paved spurs that run out from the lake. */
 function onSpur(x: number, z: number): boolean {
-  const spurs: ReadonlyArray<readonly [number, number]> = [
-    [0, -1],
-    [0, 1],
-    [-1, -0.35],
-    [1, 0.35],
-  ];
-  for (const [dx, dz] of spurs) {
+  for (const [dx, dz] of PATH_SPURS) {
     const len = Math.hypot(dx, dz);
     const ux = dx / len;
     const uz = dz / len;
@@ -199,14 +193,52 @@ function plantable(x: number, z: number): boolean {
 /** Where the big trees ended up, for anything that needs to stand under one. */
 const grown: THREE.Vector2[] = [];
 
+/** Live plantings that tip with the breeze. */
+interface SwayPlant {
+  group: THREE.Group;
+  /** Permanent lean (salt-blasted oaks etc) — sway adds on top. */
+  baseX: number;
+  baseZ: number;
+  phase: number;
+  rate: number;
+  /** How much extra tip the wind can put on, in radians. */
+  flex: number;
+}
+
+const swaying: SwayPlant[] = [];
+
 export function treeSpots(): ReadonlyArray<THREE.Vector2> {
   return grown;
+}
+
+/**
+ * Tip every planting with the park wind. Strength follows the breeze; each
+ * tree keeps its own phase so the avenue doesn't flap in lockstep.
+ */
+export function updateTrees(time: number, wind: THREE.Vector2): void {
+  const mag = Math.hypot(wind.x, wind.y);
+  if (mag < 0.05) return;
+  const nx = wind.x / mag;
+  const nz = wind.y / mag;
+  // A few m/s is a light breeze; Solent blows harder in the wet.
+  const strength = Math.min(1.5, mag * 0.16);
+
+  for (const plant of swaying) {
+    const wave = Math.sin(time * plant.rate + plant.phase);
+    const gust = Math.sin(time * 0.52 + plant.phase * 0.7);
+    const amount =
+      plant.flex * strength * (0.72 + 0.28 * gust + 0.38 * wave);
+    // Same axes as the baked lean: +Z wind tips rotation.x, +X tips -rotation.z.
+    plant.group.rotation.x = plant.baseX + nz * amount;
+    plant.group.rotation.z = plant.baseZ - nx * amount;
+  }
 }
 
 /** Lays out the park's trees as they stand round the real lake. */
 export function plantTrees(scene: THREE.Scene): void {
   const rand = seeded(1886);
   grown.length = 0;
+  swaying.length = 0;
 
   const place = (
     tree: THREE.Group,
@@ -218,12 +250,21 @@ export function plantTrees(scene: THREE.Scene): void {
     tree.rotation.y = rand() * Math.PI * 2;
     scene.add(tree);
     if (hasBranches) grown.push(new THREE.Vector2(x, z));
+    // Scrub bends more; mature oaks only nod. Slight per-tree rate so rows ripple.
+    swaying.push({
+      group: tree,
+      baseX: tree.rotation.x,
+      baseZ: tree.rotation.z,
+      phase: rand() * Math.PI * 2,
+      rate: hasBranches ? 0.75 + rand() * 0.85 : 1.1 + rand() * 1.1,
+      flex: hasBranches ? 0.028 + rand() * 0.018 : 0.055 + rand() * 0.035,
+    });
   };
 
   // The 1910 avenue along St Helens Parade: a formal, evenly spaced line of
   // big mature oaks, the ones you see behind the lake in every photograph.
-  for (let x = -116; x <= 120; x += 11) {
-    const z = 70 + (rand() - 0.5) * 2.5;
+  for (let x = -140; x <= 145; x += 12) {
+    const z = 95 + (rand() - 0.5) * 3;
     if (!plantable(x, z)) continue;
     place(
       buildHolmOak({ scale: 1.05 + rand() * 0.25, leanX: 0, leanZ: 0.35, rand }),
@@ -234,8 +275,8 @@ export function plantTrees(scene: THREE.Scene): void {
 
   // The southern line, between the lake and the Esplanade. More exposed, so
   // they're smaller and pushed over inland by the wind off the Solent.
-  for (let x = -104; x <= 112; x += 12.5) {
-    const z = -70 - rand() * 3;
+  for (let x = -125; x <= 135; x += 13) {
+    const z = -88 - rand() * 4;
     if (!plantable(x, z)) continue;
     place(
       buildHolmOak({ scale: 0.8 + rand() * 0.25, leanX: 0, leanZ: 0.85, rand }),
@@ -245,9 +286,9 @@ export function plantTrees(scene: THREE.Scene): void {
   }
 
   // Oaks wrapping the rounded western end, closing the view up that end.
-  for (let i = 0; i < 9; i++) {
-    const angle = Math.PI * (0.62 + (i / 8) * 0.76);
-    const reach = 132 + rand() * 10;
+  for (let i = 0; i < 11; i++) {
+    const angle = Math.PI * (0.62 + (i / 10) * 0.76);
+    const reach = 158 + rand() * 12;
     const x = Math.cos(angle) * reach;
     const z = Math.sin(angle) * reach * 0.62;
     if (!plantable(x, z)) continue;
@@ -255,23 +296,23 @@ export function plantTrees(scene: THREE.Scene): void {
   }
 
   // Rose garden planting inside the Lumps Fort walls at the eastern end.
-  for (let i = 0; i < 7; i++) {
-    const x = 132 + rand() * 30;
-    const z = (rand() - 0.5) * 96;
+  for (let i = 0; i < 9; i++) {
+    const x = 158 + rand() * 36;
+    const z = (rand() - 0.5) * 115;
     if (!plantable(x, z)) continue;
     place(buildPlane(0.75 + rand() * 0.35, rand), x, z);
   }
 
   // A looser second rank of deciduous trees set back behind the north avenue.
-  for (let x = -110; x <= 110; x += 26) {
-    const z = 88 + rand() * 8;
+  for (let x = -130; x <= 130; x += 28) {
+    const z = 108 + rand() * 10;
     if (!plantable(x, z)) continue;
     place(buildPlane(0.85 + rand() * 0.3, rand), x + (rand() - 0.5) * 8, z);
   }
 
   // Wind-burnt scrub scattered along the seafront edge.
-  for (let x = -110; x <= 110; x += 9) {
-    const z = -84 - rand() * 6;
+  for (let x = -130; x <= 130; x += 10) {
+    const z = -105 - rand() * 7;
     if (!plantable(x, z)) continue;
     place(buildScrub(1.1 + rand() * 0.8, rand), x + (rand() - 0.5) * 4, z, false);
   }

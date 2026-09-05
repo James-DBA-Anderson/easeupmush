@@ -6,11 +6,30 @@ import { TYRE_SEGMENT, type Tread } from './Footprint';
 const JERSEYS = [0xd8452f, 0x2f6fd8, 0x1f1f26, 0xe0b83c, 0x3f9f5f];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
 
-const BELL_LINES = ['DING DING!', 'MIND YOUR BACKS', 'COMING THROUGH', 'ON YOUR RIGHT'];
-const SPLAT_LINES = ['UP MY BACK!', 'ALL OVER MY TYRES', 'OH, LOVELY', 'ARGH!'];
+const BELL_LINES = [
+  "DING DING!",
+  "MIND YOUR BACKS",
+  "COMING THROUGH",
+  "ON YOUR RIGHT",
+];
+const SPLAT_LINES = [
+  "UP MY BACK!",
+  "ALL OVER MY TYRES",
+  "OH, LOVELY",
+  "ARGH!",
+  "I'VE COPPED THAT",
+];
 
 /** The lads on the e-bikes don't ring, and they don't slow down either. */
-const LOUT_LINES = ['OUT THE WAY!', 'WOOOO!', 'GET IN!', 'SAFE, BRUV', 'MOVE!'];
+const LOUT_LINES = [
+  "OUT THE WAY!",
+  "WOOOO!",
+  "GET IN!",
+  "SAFE, BRUV",
+  "MOVE!",
+  "SCUMMER!",
+  "I'LL LAY YOU OUT, MUSH",
+];
 const TRACKSUITS = [0x1f1f26, 0x22303f, 0x2d2438, 0x1c2b1c];
 
 /** How close something ahead has to be before they slow and ring. */

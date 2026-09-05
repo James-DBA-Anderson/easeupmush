@@ -12,7 +12,8 @@ export default defineConfig({
   server: {
     port: 5304,
     strictPort: true,
-    host: "127.0.0.1",
+    // Reachable on the LAN so you can play from a phone on the same Wi‑Fi.
+    host: true,
     open: underSite ? false : true,
   },
   preview: {

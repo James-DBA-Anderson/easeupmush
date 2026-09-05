@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { hitsAny, type Footprint } from "./collision";
 
 /**
  * What you can see from Canoe Lake, roughly where it really is.
@@ -34,6 +35,12 @@ const GROUND = new THREE.MeshStandardMaterial({
   color: 0x51704e,
   roughness: 1,
 });
+
+/** How deep a terrace house runs back from the parade. */
+const HOUSE_DEPTH = 9;
+
+/** Surround footprints — terraces, pier pavilions, and the like. */
+const surrounds: Footprint[] = [];
 
 /** Seeded, so the terraces look the same every time you load the park. */
 function seeded(seed: number): () => number {
@@ -114,7 +121,7 @@ interface HouseOptions {
  */
 function house({ width, storeys, brick, bay, rand }: HouseOptions): Yard {
   const yard = new Yard();
-  const depth = 9;
+  const depth = HOUSE_DEPTH;
   const floor = 3.4;
   const height = storeys * floor;
   const wall = brick ? BRICK : RENDER;
@@ -211,6 +218,14 @@ function terrace(
       .place(at.x, at.y, yaw)
       .drain(into);
 
+    surrounds.push({
+      x: at.x,
+      z: at.y,
+      halfWide: width / 2,
+      halfDeep: HOUSE_DEPTH / 2,
+      yaw,
+    });
+
     walked += width + 0.2;
   }
 }
@@ -226,15 +241,15 @@ function seafront(yard: Yard): void {
 
   // Esplanade, then shingle, then water out to the horizon. Each layer sits a
   // touch higher than the last so it covers the grass underneath.
-  yard.box(STONE, [900, 0.3, 10], [0, 0.09, -101]);
-  yard.box(SAND, [900, 0.3, 30], [0, 0.07, -121]);
-  yard.box(SEA, [1500, 0.3, 560], [0, 0.03, -416]);
+  yard.box(STONE, [1100, 0.3, 12], [0, 0.09, -128]);
+  yard.box(SAND, [1100, 0.3, 34], [0, 0.07, -152]);
+  yard.box(SEA, [1600, 0.3, 580], [0, 0.03, -450]);
 
   // Railings along the top of the sea wall, as a broken white line.
-  for (let x = -220; x <= 220; x += 4) {
-    yard.box(TRIM, [0.18, 1.1, 0.18], [x, 0.85, -96.4]);
+  for (let x = -260; x <= 260; x += 4) {
+    yard.box(TRIM, [0.18, 1.1, 0.18], [x, 0.85, -122]);
   }
-  yard.box(TRIM, [446, 0.16, 0.16], [0, 1.4, -96.4]);
+  yard.box(TRIM, [520, 0.16, 0.16], [0, 1.4, -122]);
 }
 
 /**
@@ -283,6 +298,11 @@ function pier(yard: Yard): void {
   // The smaller pavilion out at the seaward head.
   yard.box(RENDER, [18, 7, 22], [x, 8.3, shore - 175]);
   yard.box(SLATE, [20, 1.4, 24], [x, 12.5, shore - 175]);
+
+  surrounds.push(
+    { x, z: hall, halfWide: 15, halfDeep: 17, yaw: 0 },
+    { x, z: shore - 175, halfWide: 9, halfDeep: 11, yaw: 0 },
+  );
 }
 
 /** The Pyramids, further west along the front: all glass, and unmistakable. */
@@ -298,6 +318,7 @@ function pyramids(yard: Yard): void {
     pyramid.translate(x + dx, 3 + height / 2, -108);
     yard.add(GLASS, pyramid);
   }
+  surrounds.push({ x, z: -108, halfWide: 32, halfDeep: 22, yaw: 0 });
 }
 
 /** The Spinnaker, standing up over the rooftops away to the north-west. */
@@ -353,6 +374,7 @@ export function lightWindows(amount: number): void {
 
 /** Everything beyond the park railings. */
 export function buildSurrounds(scene: THREE.Scene): void {
+  surrounds.length = 0;
   const yard = new Yard();
   const rand = seeded(0x50ea);
 
@@ -364,23 +386,23 @@ export function buildSurrounds(scene: THREE.Scene): void {
 
   // St Helens Parade: the wall of houses along the north side, close enough
   // to the water that the roofs and chimneys stand above the oaks.
-  yard.box(STONE, [460, 0.2, 12], [0, 0.05, 108]);
+  yard.box(STONE, [560, 0.2, 14], [0, 0.05, 138]);
   terrace(
     yard,
-    new THREE.Vector2(-230, 121),
+    new THREE.Vector2(-280, 152),
     new THREE.Vector2(1, 0),
-    440,
+    540,
     0,
     rand,
   );
 
   // Eastern Parade carrying on round the west end, facing back east.
-  yard.box(STONE, [12, 0.2, 210], [-152, 0.05, 15]);
+  yard.box(STONE, [14, 0.2, 260], [-195, 0.05, 20]);
   terrace(
     yard,
-    new THREE.Vector2(-166, -85),
+    new THREE.Vector2(-210, -100),
     new THREE.Vector2(0, 1),
-    195,
+    240,
     Math.PI / 2,
     rand,
   );
@@ -388,12 +410,17 @@ export function buildSurrounds(scene: THREE.Scene): void {
   // Eastney, away behind the fort and facing back west across the park.
   terrace(
     yard,
-    new THREE.Vector2(212, -70),
+    new THREE.Vector2(255, -85),
     new THREE.Vector2(0, 1),
-    180,
+    220,
     -Math.PI / 2,
     rand,
   );
 
   yard.build(scene);
+}
+
+/** Whether a point is inside a surround building (terraces, pier, pyramids). */
+export function atSurroundBuilding(x: number, z: number): boolean {
+  return hitsAny(x, z, surrounds);
 }

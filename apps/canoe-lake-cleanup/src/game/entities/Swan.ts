@@ -8,6 +8,8 @@ import {
   outwardAt,
   waterSpot,
 } from "../world/lake";
+import { addEyes } from "./eyes";
+import { MuckFlecks } from "../effects/MuckFlecks";
 
 type Mode =
   | "swim"
@@ -82,8 +84,8 @@ export class Swan {
   // Stagger the flock so they don't all haul out at the same moment.
   private modeTimer = Math.random() * this.modeLength;
 
-  private dropTimer = Math.random() * 20;
-  private dropInterval = 30 + Math.random() * 24;
+  private dropTimer = Math.random() * 40;
+  private dropInterval = 85 + Math.random() * 55;
   private shouldDropNext = false;
 
   private body!: THREE.Mesh;
@@ -106,6 +108,20 @@ export class Swan {
   private strikeCooldown = 0;
   private strikeReady = false;
   private quarry = new THREE.Vector3();
+
+  /** Wings arched at a passer-by on the bank — the seaside warning shot. */
+  private buskLeft = 0;
+  private buskCool = 0;
+  private buskFace = new THREE.Vector3();
+
+  /**
+   * About a third of them will pick a scrap over bread — wings up, a shove,
+   * then back at the crumbs. Cooldown stops a pile turning into a riot.
+   */
+  private aggressive = Math.random() < 0.35;
+  private scrapLeft = 0;
+  private scrapCool = 0;
+  private scrapFace = new THREE.Vector3();
 
   // Start part-fed so the flock doesn't mob the first bag of chips as one.
   private fedAgo = Math.random() * FULL_FOR;
@@ -143,6 +159,7 @@ export class Swan {
   private guarding = 0;
   /** Stops a dog stood over a bird frightening it every single frame. */
   private spooked = 0;
+  private flecks!: MuckFlecks;
 
   constructor(
     position: THREE.Vector3,
@@ -161,6 +178,7 @@ export class Swan {
     this.target = this.position.clone();
 
     this.mesh = this.createSwanMesh();
+    this.flecks = new MuckFlecks(this.mesh, 36);
     this.mesh.position.copy(this.position);
     this.scene.add(this.mesh);
     this.pickTarget();
@@ -218,6 +236,14 @@ export class Swan {
       this.head.add(knob);
     }
 
+    addEyes(this.head, {
+      spread: young ? 0.12 : 0.14,
+      y: young ? 0.06 : 0.08,
+      z: young ? 0.24 : 0.28,
+      size: young ? 0.04 : 0.048,
+      iris: 0x1c1a16,
+    });
+
     const wingGeometry = new THREE.SphereGeometry(0.4, 6, 6);
     wingGeometry.scale(0.8, 0.6, 1.2);
     const wingMaterial = new THREE.MeshStandardMaterial({ color: 0xf5f5f5 });
@@ -272,6 +298,19 @@ export class Swan {
   private get onLand(): boolean {
     // Roosting counts: a night's sleep on the grass leaves its mark by morning.
     return this.mode === "graze" || this.mode === "roost";
+  }
+
+  /** Actually stood on the bank, whatever mood it's in. */
+  public isAshore(): boolean {
+    return !isInLake(this.position.x, this.position.z);
+  }
+
+  /**
+   * Wings up and looking for trouble — a full charge, the busking display,
+   * or a scrap over bread.
+   */
+  public isWingsOut(): boolean {
+    return this.mode === "charge" || this.buskLeft > 0 || this.scrapLeft > 0;
   }
 
   public isHungry(): boolean {
@@ -698,22 +737,60 @@ export class Swan {
     return this.mode === "roost";
   }
 
-  /** Bread on the path. Worth crossing the park for, hungry or not. */
+  /** Bread on the path or floating. Worth crossing the park for, hungry or not. */
   public goForBread(at: THREE.Vector3): void {
     if (this.mode === "charge" || this.mode === "fly") return;
-    this.quarry.copy(at);
+    if (this.scrapLeft > 0) return;
+    // Keep the aim once they've locked on, or they never settle on a crumb.
+    if (this.mode === "feast" && this.quarry.distanceTo(at) < 3.5) return;
+    this.quarry.set(
+      at.x + (Math.random() - 0.5) * 1.6,
+      at.y,
+      at.z + (Math.random() - 0.5) * 1.6,
+    );
     this.mode = "feast";
   }
 
   public isFeasting(): boolean {
-    return this.mode === "feast";
+    return this.mode === "feast" || this.scrapLeft > 0;
   }
 
   /** True once per peck at the bread. */
   public wantsPeck(): boolean {
-    if (!this.peckReady) return false;
+    if (!this.peckReady || this.scrapLeft > 0) return false;
     this.peckReady = false;
     return true;
+  }
+
+  /**
+   * Square up to another bird at the pile. Returns false if this one isn't
+   * in the mood — only some of them start it, and not while already scraping.
+   */
+  public tryScrap(rival: THREE.Vector3): boolean {
+    if (this.kind === "cygnet") return false;
+    if (this.mode !== "feast" || this.scrapLeft > 0 || this.scrapCool > 0)
+      return false;
+    if (!this.aggressive && Math.random() > 0.25) return false;
+    this.scrapLeft = 1.5 + Math.random() * 1.4;
+    this.scrapCool = 7 + Math.random() * 9;
+    this.scrapFace.copy(rival);
+    this.peckReady = false;
+    return true;
+  }
+
+  /** Get shoved mid-feast — answer in kind if there's any fight in them. */
+  public takeScrap(from: THREE.Vector3): void {
+    if (this.kind === "cygnet" || this.mode === "charge" || this.mode === "fly")
+      return;
+    if (this.scrapLeft > 0) return;
+    this.scrapLeft = 1.1 + Math.random() * 1.0;
+    this.scrapCool = 5 + Math.random() * 6;
+    this.scrapFace.copy(from);
+    this.mode = "feast";
+  }
+
+  public isScrapping(): boolean {
+    return this.scrapLeft > 0;
   }
 
   /**
@@ -722,8 +799,8 @@ export class Swan {
    */
   public gorge(): void {
     this.fedAgo = 0;
-    this.owed = 2 + Math.floor(Math.random() * 3);
-    this.owedTimer = 3 + Math.random() * 6;
+    this.owed = 1 + Math.floor(Math.random() * 2);
+    this.owedTimer = 12 + Math.random() * 18;
 
     this.mode = "graze";
     this.modeTimer = 0;
@@ -731,15 +808,88 @@ export class Swan {
     this.target = this.position.clone();
   }
 
-  /** Hit by the hose. A few of these and it comes for you. */
-  public soak(): void {
+  /** Hit by the hose. A few of these and it comes for you — unless it's
+   * already coming, in which case the jet knocks it back. */
+  public soak(from?: THREE.Vector3): void {
     if (this.kind === "cygnet") {
       // A cygnet won't fight you. It doesn't have to: it has a mother.
       this.mother?.defend();
       return;
     }
+
+    // Mid-charge or mid-busk: the stream has weight. Enough of it and they break.
+    if (this.mode === "charge") {
+      this.takeHose(from);
+      return;
+    }
+    if (this.buskLeft > 0) {
+      this.buskLeft = 0;
+      this.shoveBack(from, 0.7);
+      return;
+    }
+
     this.soakings += 1;
     if (this.soakings >= PATIENCE) this.startCharge();
+  }
+
+  /** Filthy bounce spray — sticks to the plumage. */
+  public splatter(point: THREE.Vector3): void {
+    this.flecks.splat(point);
+  }
+
+  private hoseHits = 0;
+  private hoseCool = 0;
+
+  /** Jet in the face while charging — shove, delay the peck, maybe break off. */
+  private takeHose(from?: THREE.Vector3): void {
+    if (this.hoseCool > 0) return;
+    this.hoseCool = 0.2;
+    this.hoseHits += 1;
+    this.chaseLeft -= 2.2;
+    this.strikeCooldown = Math.max(this.strikeCooldown, 0.75);
+    this.strikeReady = false;
+    this.shoveBack(from, 0.85 + Math.min(0.6, this.hoseHits * 0.12));
+
+    if (this.hoseHits >= 5 || this.chaseLeft <= 0) this.breakCharge(from);
+  }
+
+  private shoveBack(from: THREE.Vector3 | undefined, force: number): void {
+    if (!from) return;
+    const away = new THREE.Vector3()
+      .subVectors(this.position, from)
+      .setY(0);
+    if (away.lengthSq() < 0.01) {
+      away.set(-Math.sin(this.mesh.rotation.y), 0, -Math.cos(this.mesh.rotation.y));
+    }
+    away.normalize();
+    this.position.addScaledVector(away, force);
+    this.velocity.copy(away.multiplyScalar(force * 3.2));
+    this.mesh.position.copy(this.position);
+  }
+
+  /** Had enough of the hose — back to the water, wings still up for a moment. */
+  private breakCharge(from?: THREE.Vector3): void {
+    this.hoseHits = 0;
+    this.soakings = 0;
+    this.chaseLeft = 0;
+    this.strikeReady = false;
+    this.guarding = 0;
+    this.shoveBack(from, 1.4);
+
+    const ashore = !isInLake(this.position.x, this.position.z);
+    this.mode = ashore ? "return" : "swim";
+    this.modeTimer = 0;
+    this.modeLength = 10 + Math.random() * 10;
+    this.pickTarget();
+    if (ashore && from) {
+      // Prefer open water away from whoever was hosing them.
+      const away = new THREE.Vector3()
+        .subVectors(this.position, from)
+        .setY(0)
+        .normalize()
+        .multiplyScalar(14);
+      this.target.add(away);
+    }
   }
 
   /**
@@ -856,6 +1006,7 @@ export class Swan {
     // No picking fights on the way in.
     if (this.mode === "fly") return;
     this.soakings = 0;
+    this.hoseHits = 0;
     this.mode = "charge";
     this.modeTimer = 0;
     this.modeLength = CHARGE_TIME;
@@ -864,6 +1015,26 @@ export class Swan {
 
   public isCharging(): boolean {
     return this.mode === "charge";
+  }
+
+  /**
+   * Anyone wandered too close on the bank gets the wings. Not a charge yet —
+   * just enough to put the wind up the ones who don't like swans.
+   */
+  public noticeCrowd(crowd: readonly THREE.Vector3[]): void {
+    if (this.buskCool > 0 || this.buskLeft > 0) return;
+    if (this.kind === "cygnet") return;
+    // Grazing birds only — a beggar or a bird at the bread isn't threatening.
+    if (this.mode !== "graze") return;
+    if (!this.isAshore()) return;
+
+    for (const at of crowd) {
+      if (this.position.distanceTo(at) > 5.2) continue;
+      this.buskLeft = 2.2 + Math.random() * 1.8;
+      this.buskCool = 11 + Math.random() * 10;
+      this.buskFace.copy(at);
+      return;
+    }
   }
 
   /** True once per landed peck, for the game to turn into a shove. */
@@ -930,13 +1101,17 @@ export class Swan {
   }
 
   public update(delta: number, player?: THREE.Vector3): void {
+    this.flecks.update(delta);
     this.modeTimer += delta;
     // Asleep they tick over far slower, or a night's roosting would bury the
     // grass by morning.
     this.dropTimer += delta * (this.mode === "roost" ? 0.2 : 1);
     this.fedAgo += delta;
     if (this.strikeCooldown > 0) this.strikeCooldown -= delta;
+    if (this.hoseCool > 0) this.hoseCool -= delta;
     if (this.spooked > 0) this.spooked -= delta;
+    if (this.buskCool > 0) this.buskCool -= delta;
+    if (this.scrapCool > 0) this.scrapCool -= delta;
 
     this.mindTheBrood(delta, player);
     this.tagAlong();
@@ -947,7 +1122,23 @@ export class Swan {
     }
 
     if (this.mode === "charge") {
+      this.buskLeft = 0;
+      this.scrapLeft = 0;
       this.runDown(delta, player);
+      return;
+    }
+
+    // Hold the display: wings up, facing the offender, feet planted.
+    if (this.buskLeft > 0) {
+      this.buskLeft = Math.max(0, this.buskLeft - delta);
+      this.holdBusk(delta);
+      return;
+    }
+
+    // Brief scrap over the bread — wings up, a shove, then back pecking.
+    if (this.scrapLeft > 0) {
+      this.scrapLeft = Math.max(0, this.scrapLeft - delta);
+      this.haveItOut(delta);
       return;
     }
 
@@ -1050,7 +1241,7 @@ export class Swan {
     if (this.dropTimer >= this.dropInterval) {
       this.shouldDropNext = true;
       this.dropTimer = 0;
-      this.dropInterval = 30 + Math.random() * 24;
+      this.dropInterval = 85 + Math.random() * 55;
     }
   }
 
@@ -1128,7 +1319,7 @@ export class Swan {
     if (isInLake(this.position.x, this.position.z)) return;
 
     this.owed -= 1;
-    this.owedTimer = 5 + Math.random() * 8;
+    this.owedTimer = 14 + Math.random() * 16;
     this.forcedDrop = true;
   }
 
@@ -1165,7 +1356,7 @@ export class Swan {
     this.feastPose(delta, gap);
   }
 
-  /** Neck down to the ground, stabbing at the path. */
+  /** Neck down to the crumbs — on the path, or dabbling at a floating pile. */
   private feastPose(delta: number, gap: number): void {
     for (const leg of this.legs) leg.visible = !this.wasInWater;
 
@@ -1188,16 +1379,29 @@ export class Swan {
 
     this.mesh.rotation.x = 0;
     this.mesh.rotation.z = moving ? swing * 0.05 : 0;
-    this.body.rotation.x = moving ? 0.1 : 0.24;
 
-    if (moving) {
-      this.neck.rotation.x = 0.5;
-      this.head.rotation.x = -0.2;
+    if (this.wasInWater) {
+      // On the water they tip into it rather than stabbing the paving.
+      this.body.rotation.x = moving ? 0.15 : 0.4;
+      if (moving) {
+        this.neck.rotation.x = 0.55;
+        this.head.rotation.x = -0.15;
+      } else {
+        const peck = (Math.sin(this.stride) + 1) / 2;
+        this.neck.rotation.x = 0.95 + peck * 0.45;
+        this.head.rotation.x = -0.25 - peck * 0.35;
+      }
     } else {
-      // Pecking: the whole neck drops to the path and snaps back up.
-      const peck = (Math.sin(this.stride) + 1) / 2;
-      this.neck.rotation.x = 1.15 + peck * 0.5;
-      this.head.rotation.x = -0.3 - peck * 0.5;
+      this.body.rotation.x = moving ? 0.1 : 0.24;
+      if (moving) {
+        this.neck.rotation.x = 0.5;
+        this.head.rotation.x = -0.2;
+      } else {
+        // Pecking: the whole neck drops to the path and snaps back up.
+        const peck = (Math.sin(this.stride) + 1) / 2;
+        this.neck.rotation.x = 1.15 + peck * 0.5;
+        this.head.rotation.x = -0.3 - peck * 0.5;
+      }
     }
     this.head.rotation.y = 0;
   }
@@ -1328,6 +1532,90 @@ export class Swan {
     // Neck thrown forward and level with the ground, beak first.
     this.neck.rotation.x = 1.35 + Math.sin(this.stride * 2) * 0.12;
     this.head.rotation.x = -0.5;
+    this.head.rotation.y = 0;
+  }
+
+  /** Wings up and lunging at a rival over the crumbs. */
+  private haveItOut(delta: number): void {
+    const flat = new THREE.Vector3(
+      this.scrapFace.x - this.position.x,
+      0,
+      this.scrapFace.z - this.position.z,
+    );
+    const gap = flat.length();
+    if (gap > 0.4) {
+      this.velocity.lerp(
+        flat.normalize().multiplyScalar(gap > 2.5 ? 3.2 : 1.6),
+        5 * delta,
+      );
+    } else {
+      // Barge them a half-metre back rather than sitting inside them.
+      const shove = flat.lengthSq() > 0.01 ? flat.normalize() : new THREE.Vector3(1, 0, 0);
+      this.velocity.lerp(shove.multiplyScalar(2.4), 8 * delta);
+    }
+
+    this.position.addScaledVector(this.velocity, delta);
+    this.trackWaterline(delta, isInLake(this.position.x, this.position.z));
+    this.settleHeight(delta);
+
+    this.mesh.position.copy(this.position);
+    if (gap > 0.15) this.mesh.rotation.y = Math.atan2(flat.x, flat.z);
+
+    for (const leg of this.legs) leg.visible = !this.wasInWater;
+    this.stride += delta * 14;
+    const stamp = Math.sin(this.stride);
+    if (!this.wasInWater) {
+      const [left, right] = this.legs as [THREE.Group, THREE.Group];
+      left.rotation.x = stamp * 0.55;
+      right.rotation.x = -stamp * 0.55;
+    }
+
+    const [leftWing, rightWing] = this.wings as [THREE.Mesh, THREE.Mesh];
+    const arch = 1.1 + Math.sin(this.stride * 2.2) * 0.18;
+    leftWing.rotation.z = arch;
+    rightWing.rotation.z = -arch;
+
+    this.mesh.rotation.x = 0;
+    this.mesh.rotation.z = stamp * 0.08;
+    this.body.rotation.x = 0.1;
+    this.neck.rotation.x = 0.85 + Math.sin(this.stride * 3) * 0.2;
+    this.head.rotation.x = -0.35;
+    this.head.rotation.y = Math.sin(this.stride * 2) * 0.25;
+  }
+
+  /**
+   * Busking on the bank: wings arched high, neck coiled, staring the
+   * passer-by down. They don't give chase unless something else sets them off.
+   */
+  private holdBusk(delta: number): void {
+    this.velocity.multiplyScalar(Math.max(0, 1 - 6 * delta));
+    this.position.addScaledVector(this.velocity, delta);
+    this.trackWaterline(delta, isInLake(this.position.x, this.position.z));
+    this.settleHeight(delta);
+
+    this.mesh.position.copy(this.position);
+    const dx = this.buskFace.x - this.position.x;
+    const dz = this.buskFace.z - this.position.z;
+    if (dx * dx + dz * dz > 0.05) this.mesh.rotation.y = Math.atan2(dx, dz);
+
+    for (const leg of this.legs) leg.visible = !this.wasInWater;
+    this.stride += delta * 5;
+    const stamp = Math.sin(this.stride);
+    const [left, right] = this.legs as [THREE.Group, THREE.Group];
+    left.rotation.x = stamp * 0.12;
+    right.rotation.x = -stamp * 0.12;
+
+    const [leftWing, rightWing] = this.wings as [THREE.Mesh, THREE.Mesh];
+    // Arched right up — the classic mute swan threat display.
+    const arch = 1.05 + Math.sin(this.stride * 1.4) * 0.12;
+    leftWing.rotation.z = arch;
+    rightWing.rotation.z = -arch;
+
+    this.mesh.rotation.x = 0;
+    this.mesh.rotation.z = stamp * 0.03;
+    this.body.rotation.x = -0.08;
+    this.neck.rotation.x = 0.35 + Math.sin(this.stride * 2) * 0.08;
+    this.head.rotation.x = -0.15;
     this.head.rotation.y = 0;
   }
 
@@ -1531,6 +1819,7 @@ export class Swan {
   }
 
   public dispose(): void {
+    this.flecks.dispose();
     this.scene.remove(this.mesh);
   }
 }

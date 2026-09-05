@@ -6,15 +6,26 @@ const COATS = [0x2f4f7f, 0x8b3a3a, 0x3f6b4a, 0x5a4a7a, 0xb06a2c, 0xd8452f];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
 const BUCKETS = [0x3f8fd0, 0xd85a2f, 0xe8c33c, 0x4aa85a];
 
-const HITS = ['GOT ONE!', "IT'S A BIG UN", 'LOOK AT THAT!', 'ANOTHER ONE'];
-const MISSES = ['NOTHING AGAIN', 'HE LET GO', 'AW, MAN'];
+const HITS = [
+  "GOT ONE!",
+  "IT'S A BIG UN",
+  "LOOK AT THAT!",
+  "ANOTHER ONE",
+  "SWEET AS NUT!",
+];
+const MISSES = [
+  "NOTHING AGAIN",
+  "HE LET GO",
+  "AW, MAN",
+  "I'VE COPPED THE NEEDLE WITH THIS",
+];
 
 /** Chance there's something on the line when they pull it up. */
 const CATCH_ODDS = 0.45;
 const HAUL_TIME = 1.3;
 const SHOW_TIME = 1.6;
 
-type Phase = 'waiting' | 'hauling' | 'showing' | 'casting';
+type Phase = "arriving" | "waiting" | "hauling" | "showing" | "casting" | "leaving";
 
 /** A kid crouched at the edge with a hand line and a bucket, crabbing. */
 export class Crabber {
@@ -27,17 +38,22 @@ export class Crabber {
   private crab: THREE.Group;
   private bucketCrabs: THREE.Mesh[] = [];
 
-  private phase: Phase = 'waiting';
+  private phase: Phase = "arriving";
   private timer = 4 + Math.random() * 8;
   private hooked = false;
   private caught = 0;
   private bob = Math.random() * Math.PI * 2;
   private grumble: Grumble | null = null;
   private packUp: number;
+  private stand = new THREE.Vector3();
+  private exitFor = new THREE.Vector3();
+  private step = Math.random() * Math.PI * 2;
+  private gone = false;
 
   /** Depth the line hangs at, and how far out from the wall it goes in. */
   private restY = WATER_Y - 0.55;
   private castPoint = new THREE.Vector3();
+  private faceWater = 0;
 
   constructor(scene: THREE.Scene, at: THREE.Vector2, alongShore = 0) {
     this.scene = scene;
@@ -50,22 +66,35 @@ export class Crabber {
 
     const x = shore.x + out.x * 0.9 + along.x;
     const z = shore.y + out.y * 0.9 + along.y;
-    this.group.position.set(x, 0, z);
-    // Facing the water, which is the opposite way to the outward normal.
-    this.group.rotation.y = Math.atan2(-out.x, -out.y);
+    this.stand.set(x, 0, z);
+    this.faceWater = Math.atan2(-out.x, -out.y);
+    // Start back on the paving and walk over — never just materialise at the wall.
+    this.group.position.set(x + out.x * 14, 0, z + out.y * 14);
+    this.exitFor.set(x + out.x * 22, 0, z + out.y * 22);
+    this.group.rotation.y = Math.atan2(
+      this.stand.x - this.group.position.x,
+      this.stand.z - this.group.position.z,
+    );
 
     this.build();
     scene.add(this.group);
+    // Kit stays packed until they're knelt down.
+    this.line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(),
+        new THREE.Vector3(),
+      ]),
+      new THREE.LineBasicMaterial({
+        color: 0xf0f0e8,
+        transparent: true,
+        opacity: 0.75,
+      }),
+    );
+    this.line.visible = false;
+    scene.add(this.line);
 
-    // The line goes in a little way out from the wall in front of them.
     this.castPoint.set(x - out.x * 1.5, this.restY, z - out.y * 1.5);
     this.lineEnd.copy(this.castPoint);
-
-    this.line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
-      new THREE.LineBasicMaterial({ color: 0xf0f0e8, transparent: true, opacity: 0.75 }),
-    );
-    scene.add(this.line);
 
     this.crab = this.buildCrab();
     this.crab.visible = false;
@@ -181,33 +210,70 @@ export class Crabber {
 
   /** Bucket's full enough and they've wandered off. */
   public isDone(): boolean {
-    return this.packUp <= 0;
+    return this.gone;
   }
 
   public update(delta: number): void {
+    this.grumble =
+      this.grumble?.update(delta, this.group.position) === false
+        ? null
+        : this.grumble;
+
+    if (this.phase === "arriving") {
+      if (this.amble(this.stand, delta, 1.6) < 0.35) {
+        this.phase = "waiting";
+        this.group.position.copy(this.stand);
+        this.group.position.y = 0;
+        this.group.rotation.y = this.faceWater;
+        this.line.visible = true;
+        this.timer = 3 + Math.random() * 5;
+      }
+      return;
+    }
+
+    if (this.phase === "leaving") {
+      this.line.visible = false;
+      this.crab.visible = false;
+      if (this.amble(this.exitFor, delta, 1.8) < 0.5) this.gone = true;
+      return;
+    }
+
     this.packUp -= delta;
+    if (this.packUp <= 0) {
+      this.phase = "leaving";
+      return;
+    }
+
     this.bob += delta * 2;
     this.timer -= delta;
 
     const hand = this.hand.getWorldPosition(new THREE.Vector3());
 
-    if (this.phase === 'waiting') {
+    if (this.phase === "waiting") {
       // Line hanging in the water, twitching just enough to keep them hopeful.
       this.lineEnd.copy(this.castPoint);
       this.lineEnd.y = this.restY + Math.sin(this.bob * 1.7) * 0.04;
       if (this.timer <= 0) this.startHaul();
-    } else if (this.phase === 'hauling') {
+    } else if (this.phase === "hauling") {
       const t = 1 - Math.max(0, this.timer) / HAUL_TIME;
-      this.lineEnd.lerpVectors(this.castPoint, hand.clone().setY(hand.y - 0.28), t);
+      this.lineEnd.lerpVectors(
+        this.castPoint,
+        hand.clone().setY(hand.y - 0.28),
+        t,
+      );
       if (this.timer <= 0) this.reveal();
-    } else if (this.phase === 'showing') {
+    } else if (this.phase === "showing") {
       this.lineEnd.copy(hand).setY(hand.y - 0.28);
       if (this.timer <= 0) this.stow();
     } else {
       const t = 1 - Math.max(0, this.timer) / 0.8;
-      this.lineEnd.lerpVectors(hand.clone().setY(hand.y - 0.28), this.castPoint, t);
+      this.lineEnd.lerpVectors(
+        hand.clone().setY(hand.y - 0.28),
+        this.castPoint,
+        t,
+      );
       if (this.timer <= 0) {
-        this.phase = 'waiting';
+        this.phase = "waiting";
         this.timer = 5 + Math.random() * 9;
       }
     }
@@ -223,8 +289,20 @@ export class Crabber {
       this.crab.rotation.y += delta * 2.2;
       this.crab.rotation.z = Math.sin(this.bob * 3) * 0.25;
     }
+  }
 
-    this.grumble = this.grumble?.update(delta, this.group.position) === false ? null : this.grumble;
+  /** Walk toward a spot with a bit of a shuffle. Returns the gap left. */
+  private amble(to: THREE.Vector3, delta: number, speed: number): number {
+    const here = this.group.position;
+    const gap = Math.hypot(to.x - here.x, to.z - here.z);
+    if (gap < 0.05) return 0;
+    const step = Math.min(gap, speed * delta);
+    here.x += ((to.x - here.x) / gap) * step;
+    here.z += ((to.z - here.z) / gap) * step;
+    this.group.rotation.y = Math.atan2(to.x - here.x, to.z - here.z);
+    this.step += delta * 10;
+    this.group.position.y = Math.abs(Math.sin(this.step)) * 0.04;
+    return gap - step;
   }
 
   private startHaul(): void {

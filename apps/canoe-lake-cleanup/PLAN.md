@@ -6,7 +6,20 @@ A 3D first-person game where you clean up swan droppings around the historic Can
 
 Players patrol the area around Canoe Lake with a high-pressure cleaning gun, removing swan droppings as fast as they appear. Mute swans continuously roam the area, leaving messes behind. The challenge comes from keeping the popular public space clean while the swans — up to 60 of them — refuse to stop being swans.
 
-**Tone:** Light-hearted frustration. You're fighting a losing battle against nature in a beautiful Victorian park. Think PowerWash Simulator meets duck chaos, but it's swans and they're proper menacing.
+**Tone:** Light-hearted frustration. You're fighting a losing battle against nature in a beautiful Victorian park. Think PowerWash Simulator meets duck chaos, but it's swans and they're proper menacing. Speech bubbles and depot texts lean on Pompey phraseology where it fits.
+
+### Pompey phraseology
+| Phrase | Meaning |
+| --- | --- |
+| Hanging | Badly hung over |
+| Sweet as nut | OK; also that something is very good |
+| Cop the needle / copped | Annoyed, had enough; took a hit of something |
+| Grub | Food |
+| Slash | Urinate |
+| Lay out | Threaten to flatten someone — "I'll lay 'im out, mush" |
+| Scummer | Someone from Southampton |
+| Clued up | Knowledgeable |
+| Burn | Cigarette — "let's have a burn on that then, mush" |
 
 ## Setting: Canoe Lake, Southsea
 
@@ -444,8 +457,10 @@ apps/canoe-lake-cleanup/
 What the playable build currently does, and where it lives:
 
 - **`src/game/world/lake.ts`** — the lake outline traced from the real Canoe Lake
-  (roughly 230m by 105m, long axis WSW-ENE, rounded west end, squarer east end,
-  island near the eastern end). One world unit is one metre. The same smoothed
+  (roughly 275m by 125m, long axis WSW-ENE, rounded west end, squarer east end,
+  island near the eastern end). The gardens around it — play park, rose beds,
+  grass down to the esplanade — push the park out toward the real five-hectare
+  footprint of Canoe Lake Gardens. One world unit is one metre. The same smoothed
   shoreline drives the water mesh, the shingle bank, the point-in-lake test used
   for collision, and the offset rings used for the path, benches and trees.
 - **`src/game/world/trees.ts`** — the planting follows the real park rather than
@@ -485,8 +500,8 @@ What the playable build currently does, and where it lives:
   than stood on it.
 - **Shoreline normals** — offsets from the shore (the coping, the path ring and
   everything placed off it) run along a normal worked out from each point's
-  neighbours, not straight out from the middle of the lake. On a shape 230m by
-  105m the two are a long way apart down the sides, and the radial guess left
+  neighbours, not straight out from the middle of the lake. On a shape 275m by
+  125m the two are a long way apart down the sides, and the radial guess left
   the kerb fatter at the ends than along the front.
 - **`src/game/world/bench.ts`** — Victorian park benches with cast-iron ends,
   scrolled armrests and finials, and wooden slats for the seat and raked back.
@@ -496,6 +511,12 @@ What the playable build currently does, and where it lives:
   second is one game minute, so a full day takes 24 minutes. Sky colour, ambient
   and sun colour, intensity and position all interpolate between keyframes
   through dawn, midday, dusk and night. Shown on the clock bottom-left.
+- **`src/game/systems/Sun.ts`** — a visible sun disc on the light's bearing with
+  a soft halo and a multi-element lens flare. Tracks the day cycle and packs
+  away under heavy cloud or after dark.
+- **Reflective lake** — `buildLake` uses Three's `Water` mesh: planar reflections
+  of the park, animated ripples from a procedural normal map, and specular from
+  the sun. Colour and sun direction update with the day cycle.
 - **`src/game/systems/Weather.ts`** — clear, cloudy, overcast, drizzle and
   chucking it down. The weather drifts to a neighbouring state every minute or
   two and crossfades over twelve seconds, pulling the sky, fog and light levels
@@ -544,9 +565,17 @@ What the playable build currently does, and where it lives:
   about and blinks, bares his teeth while spraying, squints in the rain, and
   gets progressively more fed up as cleanliness drops.
 - **`src/game/effects/WaterJet.ts`** — the spray is ballistic. Droplets leave the
-  lance and fall under gravity, so the stream arcs and you lob water at the mess
-  rather than pointing a laser at it. Anything within 1.6m of where a droplet
-  lands gets scrubbed. No crosshair — the visible lance is the aim reference.
+  lance in a tight column and only fan out once they've travelled, so it reads
+  like a high-pressure hose: narrow up close, a soft cone further out, then an
+  arc under gravity. You lob water at the mess rather than pointing a laser at
+  it. Anything within 1.6m of where a droplet lands gets scrubbed. No crosshair
+  — the visible lance is the aim reference. The viewmodel is a chunky gun:
+  orange pistol grip, long lance and nozzle, with a flat-shaded mitten hand
+  and hi-vis sleeve (`effects/Hands.ts`) plus trailing hose.
+- **`src/game/effects/LitterPicker.ts`** — red-handled grabber with a trigger,
+  telescoping shaft and simple claw jaws in the right hand; black bin sack with
+  a yellow tie held in the left. Both hands are green mitten gloves with hi-vis
+  sleeves (Goose-game flat shading).
 - **Swans** — cycle between swimming, hauling out, grazing on the bank and
   returning to the water, always crossing at the nearest stretch of shore. They
   only foul the ground while grazing, which keeps the mess in a band a few
@@ -564,7 +593,10 @@ What the playable build currently does, and where it lives:
   backwards, shakes the camera, flashes the screen red, kills your combo and
   costs 15 points. Any swan within 16m squares up alongside it, so one loses its
   temper and a second soaking sets the whole corner off. They give up after 9
-  seconds, or sooner if you get far enough away.
+  seconds, or sooner if you get far enough away. On the bank they also busk —
+  wings arched at anyone who walks too close — which is enough to put about
+  two in five of the public to flight, and when the wings really go up even
+  the braver ones back off.
 - **Getting pecked to death** — you have 100 health, shown on a bar beside the
   mugshot, and every peck takes 15 of it. Seven of them and that's the shift
   over: the screen tips as you go down on the paving and a game over panel gives
@@ -635,7 +667,26 @@ What the playable build currently does, and where it lives:
   park altogether and heads off into the dark. It shows as an orange dot on the
   minimap, and dawn sees it off whatever it was doing.
 - **`src/game/entities/Person.ts`** — members of the public stroll the perimeter
-  path in both directions at varying speeds, with a walk cycle.
+  path in both directions at varying speeds. Bodies have hips, a hinged torso,
+  neck, upper and lower arms with hands, thighs, shins and shoes, and a proper
+  face — brows, blinking eyes that glance about, a nose and a mouth — driven by
+  mood so you can read them from a few metres: idle on the stroll, pleased when
+  feeding the birds, disgusted scraping a shoe, angry when soaked, shocked in
+  the lake, and shifty when they drop litter. The walk rocks the hips and
+  counter-sways the torso and head rather than just swinging stick limbs. How
+  many of them are out depends on the hour: a handful of dog walkers at six,
+  building through the morning to a lunchtime crowd, peaking after school and
+  after work around five, then thinning through the evening until the park is
+  empty for the foxes after half ten. Fresh faces walk in through the park
+  gates (and the open promenade side) rather than materialising on the path,
+  and when the hour calls for fewer of them a few peel off for the nearest gate
+  early. Crabbing parties, radio-boat kids and branch-wrecking kids likewise
+  walk to their spot and walk off when they're done. Gulls glide in from over
+  the Solent onto their beat; squirrels live in the crown and come down rather
+  than standing under a tree from the off; foxes slip in at the dark edge of
+  the park out of shot.
+- **`src/game/entities/Face.ts`** — the shared face used by adults and the kids
+  walking with them.
 - **`src/game/entities/Crabber.ts`** — crabbing has gone on at Canoe Lake since
   it opened, so parties of one to three kids settle in along a stretch of the
   wall with buckets and hand lines. The line hangs in the water twitching for
@@ -664,38 +715,52 @@ What the playable build currently does, and where it lives:
   each placed by bearing round the lake and pushed far enough back to clear
   the twelve metres of paving, then turned to face the water. The wooden boat
   house sits at the eastern end: a clapboard shed with three bays open to the
-  lake, a painted board over the doors and a veranda on posts, with a planked
-  jetty running out across the paving and over the water on piles. Swan
-  pedalos are moored either side of it, riding the water on a slow bob. Round
+  lake, a painted board over the doors — no jetty or porch. Swan pedalos line
+  up beside the eastern gable in the water, noses out, riding a slow bob. Round
   the rest of the circuit there's the café on the seaward side with its
   serving hatch, striped awning and terrace of parasol tables, a brick toilet
   block, the play park behind its bow-top railing with swings, a slide tower
-  and a springy animal, the rose beds on the parade side, and council bins
-  every forty degrees for all the good they do. The buildings block movement
-  via `atParkBuilding`, checked in `Player.canStand`; the play park doesn't,
-  since it's meant to be walked into.
+  and a springy animal — sized like the real one, not a postage stamp — the
+  rose beds on the parade side, and council bins every forty degrees for all
+  the good they do. The buildings block movement via `atParkBuilding`, checked
+  in `Player.canStand`; the play park doesn't, since it's meant to be walked
+  into. Through the day kids walk in off the promenade to use it
+  (`PlayVisit.ts`): swings, slide, spring animal, tearing about, then off
+  again when they've had enough.
 - **The work phone** — jobs come in as texts in the bottom right corner, from
   the depot, the park warden, the tree officer, 999 control and PCSO Grant.
   Each stacks in, sits there fourteen seconds and fades, four on screen at a
   time, stamped with the park clock. `ui/Messages.ts` is the feed;
   `systems/Callouts.ts` holds the wording and a cooldown per sort of job so
   the same complaint isn't coming through all afternoon, and drops the end of
-  the lake and which side into the text so there's somewhere to go. The shift
-  opens with one from the depot, and if the place is spotless they say so.
+  the lake and which side into the text so there's somewhere to go. Trouble
+  jobs (anything that needs sorting) share a further gap of about thirty-five
+  seconds between them, and the first fifty-five seconds of the shift are
+  quiet so there's time to get the feel of the lance. Mess itself is paced
+  the same way: swans go about a minute and a half between droppings, bread
+  only owes one or two later on, litterbugs are thinner on the ground, bins
+  fill from people putting rubbish in rather than on a timer, and droppings
+  and litter both soft-cap so the path can't bury you while you're already
+  dealing with a pile. The shift opens with one from the depot, and if the
+  place is still spotless after you've been at it a while they say so — not
+  the moment you clock on.
   Jobs raised: swan mess building up, litter building up, a bin gone over,
   a fresh tag, a swan going for a member of the public, e-bikes on the path,
   and kids on the branches.
-- **`src/game/entities/Bin.ts`** — the bins round the circuit fill on their own
-  over about a park day, quicker where the public are stood, and once they're
-  four fifths full a heap of rubbish appears on the lid and the depot rings
-  in. Jab one with the litter picker to swap the sack, which scores like any
-  other cleaned job.
+- **`src/game/entities/Bin.ts`** — the bins round the circuit start empty and
+  only fill when someone deposits. Most visitors walk to the nearest bin with
+  their empty bag; litterbugs leave it on the path instead (and drop more as
+  they go). Once a bin is four fifths full a heap appears on the lid and the
+  depot rings in. Jab one with the litter picker to swap the sack, which
+  scores like any other cleaned job.
 - **`src/game/entities/Graffiti.ts`** — tags go up on the blank walls of the
   toilet block, the boat house and the café, drawn to a canvas as a fat
   outlined scrawl (`POMPEY`, `PFC`, `6.57`, `BAZ`) and hung just proud of the
-  brickwork. The pressure washer lifts them: droplets that land on the panel
-  are absorbed and take a bit of the paint with them, and a fully scrubbed
-  wall scores. `world/park.ts` records which faces are taggable as it builds.
+  brickwork. The pressure washer works them the same way as a pile: the jet
+  carves soft streaks through the paint so the lettering fades under the
+  stream rather than vanishing in one go, and once most of it has lifted the
+  last of it rinses away and scores. `world/park.ts` records which faces are
+  taggable as it builds.
 - **E-bike lads** — `Cyclist` takes a kind now. The e-bikes run at 9–12 m/s on
   fat tyres with a battery in the frame and a phone playing out loud, hood up
   instead of a helmet, feet planted rather than pedalling. They ride wherever
@@ -707,12 +772,20 @@ What the playable build currently does, and where it lives:
   the branch bends further. Walk within seven metres, or catch them with the
   hose, and they leg it. Leave them twenty-six seconds and the branch comes
   off, stays down on the grass, and counts as a complaint against you.
+- **`src/game/entities/BbqParty.ts`** — from late morning through the early
+  evening, one or two disposable barbecues turn up on the grass south of the
+  park between the path and the esplanade. A few people walk in off the
+  promenade, stand round a kettle grill with sausages on and a bit of smoke,
+  chat for a few minutes, then pack up and wander off again. Hose the coals
+  and white steam boils up off the grate; the party square up furious and it
+  counts as a complaint.
 - **`src/game/entities/Duck.ts`** — mallards, drakes with the green head and
   white collar and hens in their browns, about a third the size of a swan.
   Nine are already on the water at six o'clock and more come in through the
   day in twos and threes, wings going as they lose height across the park and
   a long tail-down skid onto the surface. On the water they paddle between
-  spots, upend for weed with their tails in the air, or doze with the bill
+  spots, tip right over to dabble — head and half the body underwater, tail
+  in the air — or doze with the bill
   tucked back. They won't square up to anything: get within six metres, or
   catch one with the hose, and they paddle off or clear the lake altogether.
 - **Which way a bird points** — everything that flies or swims is modelled
@@ -739,12 +812,13 @@ What the playable build currently does, and where it lives:
   they're down on the deck.
 - **`src/game/entities/Plane.ts`** — every couple of minutes something goes
   over. Three times in four it's an airliner on the Gatwick run at about
-  three hundred metres, small and silver with swept wings, dragging a
+  eleven hundred metres, small and silver with swept wings, dragging a
   contrail that spreads and thins for twenty seconds behind it; the rest are
-  lower and slower off the Solent, with no trail. They cross the whole map in
-  a straight line and are purely scenery — nothing to clean, nothing to dodge
-  — but they stop the sky being empty. None are sent up once the cloud closes
-  in, and the trails wash out as the weather greys over.
+  still high but a bit lower and slower off the Solent, around five hundred
+  metres, with no trail. They cross the whole map in a straight line and are
+  purely scenery — nothing to clean, nothing to dodge — but they stop the sky
+  being empty. None are sent up once the cloud closes in, and the trails wash
+  out as the weather greys over.
 
   Once or twice a shift, on a clear afternoon, the Spitfire comes over. It
   always runs the same way — in from the east down the seafront and out over
@@ -824,17 +898,19 @@ What the playable build currently does, and where it lives:
   natter whether you want one or not. Driving through a dropping flattens it,
   counts as a complaint and gets a proper earful. Orange dots on the minimap,
   and off home for their tea after a lap or so.
-- **Bread on the path** — half the people carrying food have a kid with them,
-  and rather than hand-feeding they stop and tip the whole bag out on the path,
-  the pair of them flinging it about while the swans converge. A pile is
-  fourteen crumbs and pulls swans in from 40m whether they're hungry or not,
-  which beats trailing someone who only might share. They shoulder in round it
-  with wings half-open, heads down, and peck it away in about ten seconds.
-  Then comes the bill: every swan that ate owes two to four droppings over the
-  next minute, dropped wherever it happens to be stood, which is the middle of
-  a busy path rather than the usual band along the water's edge. Empty-handed
-  people pick up a fresh bag after a minute or two, standing in for the crowd
-  turning over, so bread events keep happening all session.
+- **Bread in the pond** — half the people carrying food have a kid with them,
+  and rather than hand-feeding they stop at the water's edge and tip the whole
+  bag into the lake, the pair of them flinging it about. Floating crumbs pull
+  swans in from 55m, mallards from across the lake, and gulls dive onto the
+  water for a share. They shoulder in round the pile (wings half-open on the
+  swans, heads down dabbling), and peck it away crumb by crumb. About a third
+  of the swans are aggressive: when a few birds pile onto the same crumbs a
+  brief scrap can break out — wings up, a shove, a couple of seconds — which
+  puts the ducks off and stops some of the public on the bank to gawp and
+  comment. Then comes the bill: every swan that ate owes droppings over the
+  next minute on dry land. Empty-handed people pick up a fresh bag after a
+  minute or two, standing in for the crowd turning over, so bread events keep
+  happening all session.
 - **Feeding the swans** — about a third of the public carry a paper bag with
   four handfuls in it. A swan that hasn't eaten for 40 seconds will spot a
   carrier up to 24m off and trail after them, climbing out of the lake to do it

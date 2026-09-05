@@ -11,10 +11,10 @@ import * as THREE from "three";
 export type PlaneKind = "jet" | "light" | "spitfire";
 
 /** Cruising height, and how far out either side they come from. */
-const CRUISE_Y = 300;
-const LOW_Y = 120;
+const CRUISE_Y = 1100;
+const LOW_Y = 520;
 const FIGHTER_Y = 85;
-const CROSSING = 900;
+const CROSSING = 1400;
 
 /** They look slow from the ground; this is the ground-speed that reads right. */
 const CRUISE_SPEED = 42;

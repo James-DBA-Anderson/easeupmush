@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { PATH_OUTER, distanceToShore, isInLake } from '../world/lake';
+import { addEyes } from './eyes';
 
 const TROT = 3.2;
 const BOLT = 8;
@@ -30,12 +31,20 @@ export class Fox {
   private dropReady = false;
   private leaving = false;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, from?: THREE.Vector2) {
     this.scene = scene;
 
     // Slips in from the dark at the edge of the park.
-    const angle = Math.random() * Math.PI * 2;
-    this.position = new THREE.Vector3(Math.cos(angle) * 190, 0, Math.sin(angle) * 120);
+    if (from) {
+      this.position = new THREE.Vector3(from.x, 0, from.y);
+    } else {
+      const angle = Math.random() * Math.PI * 2;
+      this.position = new THREE.Vector3(
+        Math.cos(angle) * 190,
+        0,
+        Math.sin(angle) * 120,
+      );
+    }
     this.build();
     this.group.position.copy(this.position);
     scene.add(this.group);
@@ -76,6 +85,15 @@ export class Fox {
       ear.position.set(side * 0.07, 0.13, -0.01);
       this.head.add(ear);
     }
+
+    addEyes(this.head, {
+      spread: 0.075,
+      y: 0.03,
+      z: 0.08,
+      size: 0.028,
+      iris: 0xc47a1a,
+      pupil: 0.5,
+    });
 
     // Brush, carried low and level behind it.
     const tail = new THREE.CylinderGeometry(0.04, 0.11, 0.5, 6);
@@ -121,7 +139,7 @@ export class Fox {
   private leave(): void {
     this.leaving = true;
     const away = new THREE.Vector3(this.position.x, 0, this.position.z).normalize();
-    this.target.copy(away.multiplyScalar(230));
+    this.target.copy(away.multiplyScalar(300));
   }
 
   public getPosition(): THREE.Vector3 {

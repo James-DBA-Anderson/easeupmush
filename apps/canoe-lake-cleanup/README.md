@@ -1,6 +1,6 @@
 # Canoe Lake Clean Up
 
-3D FPS game where you clean up swan droppings around Canoe Lake in Southsea, Portsmouth using a high-pressure spray gun.
+3D FPS game where you clean up swan droppings around Canoe Lake in Southsea, Portsmouth using a high-pressure spray gun. The shift starts with two or three overnight dumps on the paving — jet-wash the streaks clear before the public arrives.
 
 **Status:** Planning phase. See `PLAN.md` for full game design document.
 
@@ -28,10 +28,7 @@ npm run dev:canoe-lake  # Runs on http://localhost:5304/
 
 ### Testing Mobile Controls
 
-Mobile controls automatically appear on touch devices. To test on desktop:
-
-- **Desktop browser:** Add `?mobile` to URL: `http://localhost:5304/?mobile`
-- **Browser DevTools:** Use device emulation (Chrome: F12 → Device Toolbar)
+Mobile play requires **landscape**. On a phone, turn it sideways — portrait shows a rotate prompt. In DevTools, pick a phone preset and rotate to landscape.
 
 ### Controls
 
@@ -41,10 +38,10 @@ Mobile controls automatically appear on touch devices. To test on desktop:
 - Click: Spray
 - ESC: Lock/Unlock mouse
 
-**Mobile:**
-- Joystick (bottom-left): Move
-- Touch right side: Look
-- Spray button (bottom-right): Clean
+**Mobile (landscape):**
+- Left stick: Move
+- Spray stick (above look): Aim and fire in any direction / jab
+- Far right stick: Look
 
 ## Links
 

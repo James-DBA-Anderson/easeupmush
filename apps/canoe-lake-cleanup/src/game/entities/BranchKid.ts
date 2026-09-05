@@ -11,6 +11,7 @@ const EGGING_ON = [
   "IT'S NEARLY OFF",
   "GET UP THERE",
   "HARDER!",
+  "SWEET AS NUT!",
 ];
 const CAUGHT = [
   "IT WASN'T ME",
@@ -18,6 +19,7 @@ const CAUGHT = [
   "RUN!",
   "WE WEREN'T DOING NOTHING",
   "MY MUM KNOWS YOU",
+  "DON'T LAY US OUT, MUSH",
 ];
 
 /** How long they'll work at a branch before it goes, and the run-off after. */
@@ -45,21 +47,31 @@ export class BranchKid {
   private cheer = 4 + Math.random() * 6;
   /** Set when the branch comes down, for the game to log it once. */
   private damage = false;
+  private arriving = true;
+  private hangAt = new THREE.Vector3();
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, tree?: THREE.Vector2) {
     this.scene = scene;
 
     const trees = treeSpots();
     this.tree =
-      trees[Math.floor(Math.random() * trees.length)] ?? new THREE.Vector2();
+      tree ??
+      trees[Math.floor(Math.random() * trees.length)] ??
+      new THREE.Vector2();
 
     this.group = new THREE.Group();
     // Stood just off the trunk, on the side the branch reaches out over.
     const angle = Math.random() * Math.PI * 2;
-    this.group.position.set(
+    this.hangAt.set(
       this.tree.x + Math.cos(angle) * 1.8,
       0,
       this.tree.y + Math.sin(angle) * 1.8,
+    );
+    // Start a way off and walk over — never just hanging there.
+    this.group.position.set(
+      this.hangAt.x + Math.cos(angle) * 16,
+      0,
+      this.hangAt.z + Math.sin(angle) * 16,
     );
     this.group.rotation.y = -angle;
 
@@ -72,6 +84,7 @@ export class BranchKid {
     this.branch.rotation.z = Math.PI / 2;
     this.branch.position.set(-1.7, 2.6, 0);
     this.branch.castShadow = true;
+    this.branch.visible = false;
     this.group.add(this.branch);
 
     for (const side of [-0.45, 0.45]) this.kids.push(this.buildKid(side));
@@ -163,6 +176,21 @@ export class BranchKid {
         ? null
         : this.grumble;
 
+    if (this.arriving) {
+      const gap = this.amble(this.hangAt, delta, 2.2);
+      if (gap < 0.4) {
+        this.arriving = false;
+        this.group.position.copy(this.hangAt);
+        this.branch.visible = true;
+        // Arms up once they're under it.
+        for (const kid of this.kids) {
+          kid.children[2]!.rotation.x = Math.PI * 0.9;
+          kid.children[4]!.rotation.x = Math.PI * 0.9;
+        }
+      }
+      return;
+    }
+
     if (this.fleeing > 0) {
       this.runOff(delta);
       return;
@@ -207,6 +235,27 @@ export class BranchKid {
     this.branch.rotation.y = this.group.rotation.y;
     this.scene.add(this.branch);
     this.fleeing = LEG_IT;
+  }
+
+  /** Walk toward the tree. Returns the gap left. */
+  private amble(to: THREE.Vector3, delta: number, speed: number): number {
+    const here = this.group.position;
+    const gap = Math.hypot(to.x - here.x, to.z - here.z);
+    if (gap < 0.05) return 0;
+    const step = Math.min(gap, speed * delta);
+    here.x += ((to.x - here.x) / gap) * step;
+    here.z += ((to.z - here.z) / gap) * step;
+    this.group.rotation.y = Math.atan2(to.x - here.x, to.z - here.z);
+    this.swing += delta * 12;
+    const trot = Math.sin(this.swing);
+    for (const kid of this.kids) {
+      kid.position.y = Math.abs(trot) * 0.04;
+      kid.children[3]!.rotation.x = trot * 0.9;
+      kid.children[5]!.rotation.x = -trot * 0.9;
+      kid.children[2]!.rotation.x = -trot * 0.5;
+      kid.children[4]!.rotation.x = trot * 0.5;
+    }
+    return gap - step;
   }
 
   /** Legging it away from the lake, arms going, until they're off the map. */

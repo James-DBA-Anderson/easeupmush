@@ -18,6 +18,7 @@ const SPLAT_LINES = [
   "OH, FOR HEAVEN'S SAKE",
   "LOOK AT THAT",
   "DISGUSTING!",
+  "I'VE COPPED THAT ALL UP THE SIDE",
 ];
 /** Stopped for a natter with somebody they know, which is most people. */
 const CHAT_LINES = [
@@ -26,6 +27,12 @@ const CHAT_LINES = [
   "TERRIBLE, ALL THIS MESS",
   "I SAID TO HIM, I SAID",
   "THEY WANT SHOOTING, THEM SWANS",
+  "I'M HANGING, MUSH",
+  "SWEET AS NUT TODAY",
+  "YOU CLUED UP ON THE SCORE?",
+  "LET'S HAVE A BURN ON THAT THEN, MUSH",
+  "JUST OFF FOR A SLASH",
+  "FANCY SOME GRUB AFTER?",
 ];
 
 /** They dawdle, and they stop dead for anything in front of them. */

@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { isInLake } from "../world/lake";
 import { treeSpots } from "../world/trees";
 import type { Scrap } from "./Gull";
+import { addEyes } from "./eyes";
+import { MuckFlecks } from "../effects/MuckFlecks";
 
 const FUR = 0x8b8d86;
 const BELLY = 0xd8d5cc;
@@ -52,6 +54,7 @@ export class Squirrel {
   private scrap: Scrap | null = null;
   private carrying: THREE.Mesh | null = null;
   private hidden = false;
+  private flecks!: MuckFlecks;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -66,8 +69,14 @@ export class Squirrel {
     this.body = built.body;
     this.tail = built.tail;
     this.head = built.head;
+    this.flecks = new MuckFlecks(this.group, 14);
 
-    this.group.position.set(this.tree.x, 0, this.tree.y);
+    this.group.position.set(this.tree.x, 4.5, this.tree.y);
+    // Live in the crown and come down — never just standing under a tree.
+    this.mode = "up";
+    this.climbed = 4.5 + Math.random() * 4;
+    this.hidden = true;
+    this.group.visible = false;
     this.pickSpot();
     scene.add(this.group);
   }
@@ -121,13 +130,6 @@ export class Squirrel {
       ear.position.set(side * 0.12, 0.2, 0.02);
       head.add(ear);
 
-      const eye = new THREE.Mesh(
-        new THREE.SphereGeometry(0.045, 6, 5),
-        new THREE.MeshStandardMaterial({ color: 0x14140f, roughness: 0.4 }),
-      );
-      eye.position.set(side * 0.15, 0.03, -0.1);
-      head.add(eye);
-
       // Front paws, held up under the chin when it's eating.
       const paw = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.16, 0.07), fur);
       paw.geometry.translate(0, -0.08, 0);
@@ -140,6 +142,15 @@ export class Squirrel {
       foot.position.set(side * 0.16, 0.22, 0.18);
       this.group.add(foot);
     }
+
+    addEyes(head, {
+      spread: 0.14,
+      y: 0.03,
+      z: -0.12,
+      size: 0.04,
+      face: -1,
+      iris: 0x1a1812,
+    });
 
     // The tail: three segments curving up and over the back, and twice the
     // width of the animal, because that's the half of it you actually see.
@@ -188,6 +199,10 @@ export class Squirrel {
     this.dropWhatItHas();
   }
 
+  public splatter(point: THREE.Vector3): void {
+    this.flecks.splat(point);
+  }
+
   private dropWhatItHas(): void {
     if (!this.carrying) return;
     this.carrying.removeFromParent();
@@ -213,6 +228,7 @@ export class Squirrel {
     player: THREE.Vector3,
     scraps: readonly Scrap[],
   ): void {
+    this.flecks.update(delta);
     this.twitch += delta;
 
     const near = this.group.position.distanceTo(player);
@@ -358,12 +374,14 @@ export class Squirrel {
     if (this.climbed < 4.5) return;
     // Sat up there long enough for whatever spooked it to move on.
     this.hidden = true;
+    this.group.visible = false;
     if (this.climbed < 4.5 + 6 + Math.random()) return;
     this.hidden = false;
+    this.group.visible = true;
     this.dropWhatItHas();
     this.climbed = 0;
     this.group.position.set(this.tree.x, 0, this.tree.y);
-    this.group.rotation.set(0, this.heading, 0);
+    this.group.rotation.set(0, this.heading + Math.PI, 0);
     this.mode = "forage";
     this.pickSpot();
   }
@@ -385,7 +403,8 @@ export class Squirrel {
     const step = Math.min(gap, speed * delta);
     here.x += Math.sin(this.heading) * step;
     here.z += Math.cos(this.heading) * step;
-    this.group.rotation.set(0, this.heading, 0);
+    // Model faces −Z; movement is along the heading, so turn them round.
+    this.group.rotation.set(0, this.heading + Math.PI, 0);
     return gap;
   }
 
@@ -413,6 +432,7 @@ export class Squirrel {
   }
 
   public dispose(): void {
+    this.flecks.dispose();
     this.scene.remove(this.group);
   }
 }

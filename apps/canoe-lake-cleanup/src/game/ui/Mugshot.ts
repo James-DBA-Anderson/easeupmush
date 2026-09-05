@@ -9,11 +9,21 @@ interface FaceState {
   hurt: boolean;
   /** What's left of him, from 1 down to 0. */
   health: number;
+  /**
+   * Where the nearest close swan sits in view: -1 left through 1 right.
+   * Null when nothing's near enough to watch.
+   */
+  swanLook: number | null;
+  /** Bounce spray in the face. */
+  faceWet: boolean;
+  /** That spray came off a pile. */
+  faceDirty: boolean;
 }
 
 /**
  * A Doom-style status face for the council cleaner. He glances about, gurns
- * harder as the park gets filthier, and squints when it's chucking it down.
+ * harder as the park gets filthier, and keeps one eye on any swan that closes
+ * in.
  */
 export class Mugshot {
   private ctx: CanvasRenderingContext2D;
@@ -21,16 +31,17 @@ export class Mugshot {
   private since = 0;
   private glance = 0;
   private glanceFor = 1.2;
-  private look: -1 | 0 | 1 = 0;
+  /** -1 left to 1 right; tracks a swan when one is close. */
+  private look = 0;
   private blink = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     const dpr = Math.min(window.devicePixelRatio, 2);
-    const width = canvas.clientWidth || 96;
-    this.pixel = width / W;
+    // Bit-map size is fixed; CSS width + aspect-ratio handle the on-screen size
+    // so mobile can shrink it without stretching the face.
+    this.pixel = 2;
     canvas.width = W * this.pixel * dpr;
     canvas.height = H * this.pixel * dpr;
-    canvas.style.height = `${H * this.pixel}px`;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("mugshot needs a 2D context");
@@ -45,12 +56,20 @@ export class Mugshot {
   }
 
   public update(delta: number, state: FaceState): void {
-    this.glance += delta;
-    if (this.glance >= this.glanceFor) {
+    if (state.swanLook !== null) {
+      // Snap onto the bird, with a bit of lag so it isn't twitchy.
+      this.look += (state.swanLook - this.look) * Math.min(1, 10 * delta);
       this.glance = 0;
-      this.glanceFor = 0.8 + Math.random() * 2.4;
-      this.look = ([-1, 0, 1] as const)[Math.floor(Math.random() * 3)]!;
-      if (Math.random() < 0.35) this.blink = 0.12;
+      this.glanceFor = 0.4 + Math.random() * 0.6;
+      if (Math.random() < delta * 0.15) this.blink = 0.1;
+    } else {
+      this.glance += delta;
+      if (this.glance >= this.glanceFor) {
+        this.glance = 0;
+        this.glanceFor = 0.8 + Math.random() * 2.4;
+        this.look = ([-1, 0, 1] as const)[Math.floor(Math.random() * 3)]!;
+        if (Math.random() < 0.35) this.blink = 0.12;
+      }
     }
     if (this.blink > 0) this.blink -= delta;
 
@@ -92,8 +111,9 @@ export class Mugshot {
     this.box(34, 9, 5, 5, "#4a3524");
     if (state.raining) this.box(9, 5, 30, 2, "#6b5138");
 
-    // Brow: heavier the worse it gets.
-    const browY = 17 + grim;
+    // Brow: heavier the worse it gets — and raised a touch when a swan is near.
+    const wary = state.swanLook !== null ? 1 : 0;
+    const browY = 17 + grim - wary;
     this.box(13, browY, 9, 2 + (grim > 1 ? 1 : 0), "#4a3524");
     this.box(26, browY, 9, 2 + (grim > 1 ? 1 : 0), "#4a3524");
     if (grim >= 2) {
@@ -114,13 +134,15 @@ export class Mugshot {
       return;
     }
 
-    // Eyes, squinting in the rain, darting about otherwise.
+    // Eyes, squinting in the rain, locked on a swan when one closes in —
+    // screwed tighter still with a faceful of spray.
     const eyeY = 22;
-    const squint = state.raining || grim === 3;
+    const sprayed = state.faceWet;
+    const squint = state.raining || grim === 3 || sprayed;
     this.box(14, eyeY, 8, squint ? 3 : 5, "#f4f0e4");
     this.box(27, eyeY, 8, squint ? 3 : 5, "#f4f0e4");
-    if (this.blink <= 0) {
-      const shift = this.look * 2;
+    if (this.blink <= 0 && !sprayed) {
+      const shift = Math.round(this.look * 2.5);
       this.box(17 + shift, eyeY + 1, 3, squint ? 2 : 3, "#2b3038");
       this.box(30 + shift, eyeY + 1, 3, squint ? 2 : 3, "#2b3038");
     } else {
@@ -133,7 +155,12 @@ export class Mugshot {
     this.box(22, 33, 5, 2, "#a1613c");
 
     // Mouth: a grin when the park's spotless, a proper grimace when it isn't.
-    if (state.spraying) {
+    if (sprayed) {
+      // Spattered — mouth clamped, face dripping.
+      this.box(18, 39, 12, 3, "#3a2018");
+      this.box(16, 38, 2, 2, "#3a2018");
+      this.box(30, 38, 2, 2, "#3a2018");
+    } else if (state.spraying) {
       this.box(17, 38, 14, 5, "#3a2018");
       this.box(18, 38, 12, 2, "#f4f0e4");
       this.box(21, 40, 2, 3, "#f4f0e4");
@@ -160,7 +187,33 @@ export class Mugshot {
       this.box(33, 30, 4, 3, "#c2664c");
     }
 
+    if (sprayed) this.faceSplash(state.faceDirty);
+
     this.damage(state.health);
+  }
+
+  /** Drips and spatters from looking down the lance too close. */
+  private faceSplash(dirty: boolean): void {
+    const drop = dirty ? "#6b5340" : "#9ec8dc";
+    const drip = dirty ? "#4a3a28" : "#7eb0c8";
+    // Spatters across the forehead and cheeks.
+    this.box(12, 14, 2, 2, drop);
+    this.box(16, 12, 2, 3, drop);
+    this.box(28, 13, 2, 2, drop);
+    this.box(33, 15, 2, 2, drop);
+    this.box(11, 28, 3, 2, drop);
+    this.box(34, 27, 3, 2, drop);
+    this.box(20, 18, 2, 2, drop);
+    // Running drips.
+    this.box(15, 24, 1, 5, drip);
+    this.box(32, 23, 1, 6, drip);
+    this.box(24, 34, 1, 4, drip);
+    if (dirty) {
+      // A proper smear of muck.
+      this.box(13, 26, 5, 3, "#5a4834");
+      this.box(30, 30, 6, 2, "#5a4834");
+      this.box(19, 14, 4, 2, "#4a3a28");
+    }
   }
 
   /** What the swans have taken out of him so far: cuts, then a proper mess. */

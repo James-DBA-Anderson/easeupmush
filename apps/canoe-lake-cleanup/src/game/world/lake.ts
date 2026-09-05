@@ -1,38 +1,41 @@
 import * as THREE from 'three';
+import { Water } from 'three/examples/jsm/objects/Water.js';
+import { waterNormalsTexture } from './waterNormals';
 
 /**
  * Canoe Lake traced from the real thing: a long Victorian boating lake running
- * roughly WSW-ENE parallel to the seafront, about 230m by 105m. Rounded at the
- * western end, squarer at the east where the boat jetty sits.
+ * roughly WSW-ENE parallel to the seafront. The water is about 275m by 125m;
+ * the wider gardens (play park, rose beds, grass down to the esplanade) push
+ * the park out toward the 5-hectare footprint of the real grounds.
  *
  * One world unit is one metre. X is the long axis, Z is across the lake.
  */
 const OUTLINE: ReadonlyArray<readonly [number, number]> = [
-  [-114, -6],
-  [-111, -24],
-  [-100, -38],
-  [-82, -46],
-  [-56, -50],
-  [-24, -52],
-  [10, -52],
-  [44, -50],
-  [72, -47],
-  [94, -43],
-  [108, -38],
-  [113, -28],
-  [114, -12],
-  [113, 6],
-  [110, 24],
-  [102, 36],
-  [86, 43],
-  [60, 48],
-  [26, 51],
-  [-10, 52],
-  [-46, 51],
-  [-76, 47],
-  [-97, 39],
-  [-109, 26],
-  [-114, 10],
+  [-137, -7],
+  [-133, -29],
+  [-120, -46],
+  [-98, -55],
+  [-67, -60],
+  [-29, -62],
+  [12, -62],
+  [53, -60],
+  [86, -56],
+  [113, -52],
+  [130, -46],
+  [136, -34],
+  [137, -14],
+  [136, 7],
+  [132, 29],
+  [122, 43],
+  [103, 52],
+  [72, 58],
+  [31, 61],
+  [-12, 62],
+  [-55, 61],
+  [-91, 56],
+  [-116, 47],
+  [-131, 31],
+  [-137, 12],
 ];
 
 /** Smoothed shoreline, sampled once and shared by the mesh and the maths. */
@@ -47,7 +50,7 @@ export const SHORE: ReadonlyArray<THREE.Vector2> = (() => {
 })();
 
 /** The island near the eastern end, where the swans nest out of reach. */
-export const ISLAND = { x: 46, z: 2, radius: 9 } as const;
+export const ISLAND = { x: 55, z: 2, radius: 11 } as const;
 
 export function isInLake(x: number, z: number): boolean {
   if (Math.hypot(x - ISLAND.x, z - ISLAND.z) < ISLAND.radius) return false;
@@ -315,8 +318,13 @@ export function buildGround(scene: THREE.Scene, size: number): THREE.Mesh {
   return ground;
 }
 
+/** Keeps the reflective surface in step with the sun. */
+export interface LakeSurface {
+  update(delta: number, sunDirection: THREE.Vector3, sunColor: THREE.Color): void;
+}
+
 /** Water surface, its retaining wall, the bed beneath and the island. */
-export function buildLake(scene: THREE.Scene): void {
+export function buildLake(scene: THREE.Scene): LakeSurface {
   buildLakeWall(scene);
 
   scene.add(
@@ -327,18 +335,19 @@ export function buildLake(scene: THREE.Scene): void {
     ),
   );
 
-  const water = new THREE.Mesh(
-    new THREE.ShapeGeometry(shapeFrom(SHORE), 12),
-    new THREE.MeshStandardMaterial({
-      color: 0x4f97a2,
-      roughness: 0.35,
-      metalness: 0.1,
-      // A touch of self-lit colour so the water still reads blue at dusk.
-      emissive: 0x123b44,
-      transparent: true,
-      opacity: 0.9,
-    }),
-  );
+  const water = new Water(new THREE.ShapeGeometry(shapeFrom(SHORE), 16), {
+    textureWidth: 512,
+    textureHeight: 512,
+    waterNormals: waterNormalsTexture(),
+    sunDirection: new THREE.Vector3(0.4, 0.8, 0.2).normalize(),
+    sunColor: 0xffffff,
+    waterColor: 0x4a8f9c,
+    distortionScale: 2.8,
+    fog: true,
+    alpha: 0.95,
+  });
+  // The Water shader expects size as a uniform; smaller = finer lake ripples.
+  (water.material as THREE.ShaderMaterial).uniforms["size"]!.value = 2.4;
   water.rotation.x = -Math.PI / 2;
   water.position.y = WATER_Y;
   scene.add(water);
@@ -354,6 +363,15 @@ export function buildLake(scene: THREE.Scene): void {
   island.castShadow = true;
   island.receiveShadow = true;
   scene.add(island);
+
+  return {
+    update(delta, sunDirection, sunColor) {
+      const uniforms = (water.material as THREE.ShaderMaterial).uniforms;
+      uniforms["time"]!.value += delta;
+      uniforms["sunDirection"]!.value.copy(sunDirection).normalize();
+      uniforms["sunColor"]!.value.copy(sunColor);
+    },
+  };
 }
 
 /**
@@ -362,10 +380,39 @@ export function buildLake(scene: THREE.Scene): void {
  */
 /** The paving starts at the waterline itself — no grass verge in between. */
 export const PATH_INNER = 0;
-export const PATH_OUTER = 12;
+export const PATH_OUTER = 14;
 
 /** Centre line of the perimeter path, which the strolling public follow. */
 export const PATH_LOOP: ReadonlyArray<THREE.Vector2> = offsetShore((PATH_INNER + PATH_OUTER) / 2);
+
+/**
+ * Spurs running out from the lake to the park edges. Shared with the fencing
+ * so the gate openings line up with the paving rather than cutting across it.
+ */
+export const PATH_SPURS: ReadonlyArray<readonly [number, number]> = [
+  [0, -1],
+  [0, 1],
+  [-1, -0.35],
+  [1, 0.35],
+];
+
+/** True on the ring path or a spur — anywhere the jet leaves a puddle. */
+export function isOnPath(x: number, z: number): boolean {
+  if (isInLake(x, z)) return false;
+  const d = distanceToShore(x, z);
+  if (d <= PATH_OUTER + 0.35) return true;
+
+  // Spur corridors continue out past the ring.
+  const pos = new THREE.Vector2(x, z);
+  for (const [dx, dz] of PATH_SPURS) {
+    const dir = new THREE.Vector2(dx, dz).normalize();
+    const along = pos.dot(dir);
+    if (along < PATH_OUTER - 2) continue;
+    const sideways = Math.abs(pos.x * -dir.y + pos.y * dir.x);
+    if (sideways < 2.2) return true;
+  }
+  return false;
+}
 
 export function buildPaths(scene: THREE.Scene): void {
   const paving = new THREE.MeshStandardMaterial({ color: 0xa8a294, roughness: 0.95 });
@@ -375,13 +422,7 @@ export function buildPaths(scene: THREE.Scene): void {
   scene.add(flatMesh(ring, paving, PATH_Y));
 
   // Spurs head away from the lake, so none of them can cut across the water.
-  const spurs: ReadonlyArray<readonly [number, number]> = [
-    [0, -1],
-    [0, 1],
-    [-1, -0.35],
-    [1, 0.35],
-  ];
-  for (const [dx, dz] of spurs) {
+  for (const [dx, dz] of PATH_SPURS) {
     const dir = new THREE.Vector2(dx, dz).normalize();
     const start = new THREE.Vector2(dir.x, dir.y).multiplyScalar(1);
     // Walk outwards from the lake centre until clear of the ring, then run on.

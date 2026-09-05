@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { Grumble } from "../effects/Grumble";
 import { isInLake, WATER_Y } from "../world/lake";
+import { addEyes } from "./eyes";
+import { MuckFlecks } from "../effects/MuckFlecks";
 
 const WHITE = 0xf4f2ea;
 const GREY = 0xa8b0b8;
@@ -15,12 +17,14 @@ const CRUISE_SPEED = 11;
 const STOOP_SPEED = 17;
 /** How long they'll stand on the deck working at something. */
 const FEED_TIME = 9;
+/** On the water they don't hang about as long — snatch and go. */
+const WATER_FEED_TIME = 5.5;
 /** How close you can get before they're up and away. */
 const SPOOKED = 5;
 
 const SHRIEKS = ["EEEE-AH!", "AH-AH-AH!", "KYOW!", "EEEE-AH-AH!"];
 
-type Mode = "cruise" | "stoop" | "feed" | "up" | "gone";
+type Mode = "in" | "cruise" | "stoop" | "feed" | "up" | "gone";
 
 /** Something on the ground worth a look. */
 export interface Scrap {
@@ -42,7 +46,7 @@ export class Gull {
   private wings: THREE.Group[] = [];
   private legs: THREE.Mesh[] = [];
 
-  private mode: Mode = "cruise";
+  private mode: Mode = "in";
   private heading = Math.random() * Math.PI * 2;
   private circleAt: THREE.Vector2;
   private circleAngle = Math.random() * Math.PI * 2;
@@ -56,14 +60,40 @@ export class Gull {
   private scrap: Scrap | null = null;
   /** Set when it's had a beakful, which is what makes the mess later. */
   private fed = 0;
+  private joinAt = new THREE.Vector3();
+  /** Feeding on floating bread rather than standing on the path. */
+  private wetFeed = false;
+  private flecks!: MuckFlecks;
 
-  constructor(scene: THREE.Scene, over: THREE.Vector2) {
+  constructor(scene: THREE.Scene, over: THREE.Vector2, already = false) {
     this.scene = scene;
     this.circleAt = over.clone();
 
     this.group = new THREE.Group();
     this.build();
-    this.group.position.set(over.x, CRUISE_HEIGHT, over.y);
+    this.flecks = new MuckFlecks(this.group, 18);
+
+    this.joinAt.set(
+      over.x + Math.cos(this.circleAngle) * this.circleRadius,
+      CRUISE_HEIGHT,
+      over.y + Math.sin(this.circleAngle) * this.circleRadius * 0.7,
+    );
+
+    if (already) {
+      // Already on station when the shift starts.
+      this.mode = "cruise";
+      this.group.position.copy(this.joinAt);
+    } else {
+      // Come in off the sea rather than popping onto the circle mid-air.
+      const bearing = Math.random() * Math.PI * 2;
+      this.group.position.set(
+        this.joinAt.x - Math.sin(bearing) * 160,
+        CRUISE_HEIGHT + 4,
+        this.joinAt.z - Math.cos(bearing) * 160,
+      );
+      this.heading = bearing;
+      this.group.rotation.y = this.heading;
+    }
     scene.add(this.group);
   }
 
@@ -101,6 +131,15 @@ export class Gull {
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 9, 7), white);
     head.position.set(0, 0.66, 0.72);
     this.group.add(head);
+
+    addEyes(this.group, {
+      spread: 0.16,
+      y: 0.72,
+      z: 0.9,
+      size: 0.055,
+      iris: 0xc9a227,
+      pupil: 0.45,
+    });
 
     // That heavy hooked bill with the red spot on it.
     const bill = new THREE.Mesh(
@@ -180,6 +219,10 @@ export class Gull {
     this.shriek();
   }
 
+  public splatter(point: THREE.Vector3): void {
+    this.flecks.splat(point);
+  }
+
   private shriek(): void {
     this.grumble?.dispose();
     this.grumble = new Grumble(
@@ -198,6 +241,7 @@ export class Gull {
     player: THREE.Vector3,
     scraps: readonly Scrap[],
   ): void {
+    this.flecks.update(delta);
     this.grumble =
       this.grumble?.update(delta, this.group.position) === false
         ? null
@@ -208,6 +252,9 @@ export class Gull {
     }
 
     switch (this.mode) {
+      case "in":
+        this.comeIn(delta);
+        break;
       case "cruise":
         this.circle(delta, scraps);
         break;
@@ -221,6 +268,27 @@ export class Gull {
         this.climbAway(delta);
         break;
     }
+  }
+
+  /** Gliding in from out over the Solent onto its beat. */
+  private comeIn(delta: number): void {
+    const here = this.group.position;
+    const to = this.joinAt.clone().sub(here);
+    const gap = to.length();
+    if (gap < 2) {
+      this.mode = "cruise";
+      this.height = CRUISE_HEIGHT;
+      return;
+    }
+    to.normalize();
+    here.addScaledVector(to, CRUISE_SPEED * 1.35 * delta);
+    this.heading = Math.atan2(to.x, to.z);
+    this.group.rotation.set(-0.08, this.heading, 0);
+    this.flap += delta * 8;
+    const stroke = Math.sin(this.flap) * 0.45;
+    this.wings[0]!.rotation.z = stroke;
+    this.wings[1]!.rotation.z = -stroke;
+    this.spreadWings(1);
   }
 
   /** Wheeling over the lake on stiff wings, keeping an eye on the paving. */
@@ -268,11 +336,9 @@ export class Gull {
   private pickScrap(scraps: readonly Scrap[]): Scrap | null {
     const here = this.group.position;
     let best: Scrap | null = null;
-    let closest = 90;
+    let closest = 95;
     for (const scrap of scraps) {
       if (!scrap.going()) continue;
-      // Never off the water: they want it on the paving or the grass.
-      if (isInLake(scrap.at.x, scrap.at.z)) continue;
       const gap = Math.hypot(scrap.at.x - here.x, scrap.at.z - here.z);
       if (gap > closest) continue;
       closest = gap;
@@ -289,13 +355,15 @@ export class Gull {
       return;
     }
 
+    const wet = isInLake(scrap.at.x, scrap.at.z);
+    const deck = wet ? WATER_Y + 0.12 : 0.42;
     const here = this.group.position;
     const to = new THREE.Vector3(scrap.at.x - here.x, 0, scrap.at.z - here.z);
     const gap = to.length();
     to.normalize();
 
     here.addScaledVector(to, STOOP_SPEED * delta);
-    this.height = Math.max(0.42, this.height - delta * 14);
+    this.height = Math.max(deck, this.height - delta * 14);
     here.y = this.height;
     this.heading = Math.atan2(to.x, to.z);
     this.group.rotation.set(0.25, this.heading, 0);
@@ -306,21 +374,23 @@ export class Gull {
     this.wings[1]!.rotation.z = -beat;
     this.spreadWings(0.6);
 
-    if (gap < 0.6 && this.height <= 0.45) {
-      here.set(scrap.at.x, 0.42, scrap.at.z);
+    if (gap < 0.6 && this.height <= deck + 0.05) {
+      here.set(scrap.at.x, deck, scrap.at.z);
       this.mode = "feed";
-      this.hold = FEED_TIME;
-      for (const leg of this.legs) leg.visible = true;
+      this.wetFeed = wet;
+      this.hold = wet ? WATER_FEED_TIME : FEED_TIME;
+      for (const leg of this.legs) leg.visible = !wet;
     }
   }
 
-  /** Stood on the path getting through it, head down, hopping about. */
+  /** Stood on the path — or bobbing on the water — getting through it. */
   private workAtIt(delta: number): void {
     this.hold -= delta;
     this.step += delta * 6;
 
+    const deck = this.wetFeed ? WATER_Y + 0.12 : 0.42;
     this.group.rotation.set(Math.abs(Math.sin(this.step)) * 0.5, this.heading, 0);
-    this.group.position.y = 0.42 + Math.abs(Math.sin(this.step * 0.5)) * 0.04;
+    this.group.position.y = deck + Math.abs(Math.sin(this.step * 0.5)) * 0.04;
     this.fold();
 
     // A beakful every second or so until it's gone or they're disturbed.
@@ -335,6 +405,7 @@ export class Gull {
   /** Straight up off the deck and back round to circling height. */
   private climbAway(delta: number): void {
     for (const leg of this.legs) leg.visible = false;
+    this.wetFeed = false;
     this.height += delta * 9;
     const here = this.group.position;
     here.y = this.height;
@@ -384,6 +455,7 @@ export class Gull {
 
   public dispose(): void {
     this.grumble?.dispose();
+    this.flecks.dispose();
     this.scene.remove(this.group);
   }
 }

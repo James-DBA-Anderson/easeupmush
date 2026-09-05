@@ -3,6 +3,8 @@ import type { Person } from "./Person";
 import type { Swan } from "./Swan";
 import { Grumble } from "../effects/Grumble";
 import { isInLake, nearestShore, outwardAt } from "../world/lake";
+import { addEyes } from "./eyes";
+import { MuckFlecks } from "../effects/MuckFlecks";
 
 /**
  * A temperament, which decides what happens when the lead hits the floor: a
@@ -60,6 +62,10 @@ const RUN_TIME = 9;
 /** Close enough to put a swan up, and to shoulder somebody out of the way. */
 const SPOOK_RANGE = 2.2;
 const BARGE_RANGE = 1.2;
+/** Chase aim stops short of the bird so they don't run straight through it. */
+const STANDOFF = 1.7;
+/** Hard floor — if they somehow overlap, shove them back out. */
+const CLEAR = 1.45;
 /** It won't cross the whole park for a bird; it goes for whatever is near. */
 const HUNT_RANGE = 34;
 
@@ -96,6 +102,7 @@ export class Dog {
   private trouble = 0;
   /** The side of the owner it walks on, and where the lead is held. */
   private side: number;
+  private flecks: MuckFlecks;
 
   constructor(scene: THREE.Scene, owner: Person) {
     this.scene = scene;
@@ -105,6 +112,7 @@ export class Dog {
     this.side = Math.random() < 0.5 ? -1 : 1;
 
     this.build();
+    this.flecks = new MuckFlecks(this.group, 16);
     scene.add(this.group);
 
     const geometry = new THREE.BufferGeometry();
@@ -158,6 +166,14 @@ export class Dog {
       this.head.add(flap);
     }
 
+    addEyes(this.head, {
+      spread: 0.09,
+      y: 0.05,
+      z: 0.12,
+      size: 0.035,
+      iris: 0x3a2a18,
+    });
+
     // A collar, which is all that's left holding it once the lead goes.
     const collar = new THREE.Mesh(
       new THREE.TorusGeometry(0.16, 0.03, 4, 10),
@@ -198,6 +214,19 @@ export class Dog {
     return this.group.position.clone();
   }
 
+  /** Did a droplet catch the dog? */
+  public hitBy(point: THREE.Vector3): boolean {
+    const here = this.group.position;
+    const dx = point.x - here.x;
+    const dz = point.z - here.z;
+    if (dx * dx + dz * dz > 0.45 * 0.45) return false;
+    return point.y > here.y - 0.05 && point.y < here.y + 0.9;
+  }
+
+  public splatter(point: THREE.Vector3): void {
+    this.flecks.splat(point);
+  }
+
   /** Barges the game hasn't logged yet. */
   public claimTrouble(): number {
     const count = this.trouble;
@@ -218,6 +247,7 @@ export class Dog {
   }
 
   public update(delta: number, world: DogWorld): void {
+    this.flecks.update(delta);
     this.grumble =
       this.grumble?.update(delta, this.group.position) === false
         ? null
@@ -290,6 +320,7 @@ export class Dog {
     }
     this.pace(delta, gap > 0.05 ? 1.6 : 0.2);
     this.keepDry();
+    this.unstickFromSwans(world);
     this.causeTrouble(world);
   }
 
@@ -306,11 +337,32 @@ export class Dog {
     here.z = shore.y + out.y * 0.5;
   }
 
+  /** If a chase overshoots, push clear of the bird instead of sitting inside it. */
+  private unstickFromSwans(world: DogWorld): void {
+    const here = this.group.position;
+    for (const swan of world.swans) {
+      const at = swan.getPosition();
+      const push = new THREE.Vector3(here.x - at.x, 0, here.z - at.z);
+      const gap = push.length();
+      if (gap >= CLEAR) continue;
+      if (gap < 0.08) {
+        const shore = nearestShore(at.x, at.z);
+        const out = outwardAt(shore);
+        push.set(out.x, 0, out.y);
+      } else {
+        push.normalize();
+      }
+      here.x = at.x + push.x * CLEAR;
+      here.z = at.z + push.z * CLEAR;
+    }
+    this.keepDry();
+  }
+
   /** The nearest bird worth chasing, kept until it's back on the water. */
   private pickQuarry(world: DogWorld): void {
     const here = this.group.position;
     if (this.quarry && this.worthChasing(this.quarry, here)) {
-      this.target.copy(this.quarry.getPosition());
+      this.target.copy(this.aimAtSwan(this.quarry, here));
       return;
     }
 
@@ -326,11 +378,31 @@ export class Dog {
 
     this.quarry = best;
     if (best) {
-      this.target.copy(best.getPosition());
+      this.target.copy(this.aimAtSwan(best, here));
     } else if (this.group.position.distanceTo(this.target) < 1.2) {
       // Nothing to chase for the moment, so it casts about instead.
       this.target.copy(this.wanderSpot(3, 7));
     }
+  }
+
+  /**
+   * A point short of the bird — close enough to put it up, not inside the
+   * mesh. From dead on top, peel toward the bank.
+   */
+  private aimAtSwan(swan: Swan, here: THREE.Vector3): THREE.Vector3 {
+    const at = swan.getPosition();
+    const away = new THREE.Vector3(here.x - at.x, 0, here.z - at.z);
+    if (away.lengthSq() < 0.04) {
+      const shore = nearestShore(at.x, at.z);
+      const out = outwardAt(shore);
+      away.set(out.x, 0, out.y);
+    }
+    away.normalize();
+    return new THREE.Vector3(
+      at.x + away.x * STANDOFF,
+      0,
+      at.z + away.z * STANDOFF,
+    );
   }
 
   /**
@@ -362,7 +434,18 @@ export class Dog {
     for (const swan of world.swans) {
       if (here.distanceTo(swan.getPosition()) > SPOOK_RANGE) continue;
       swan.spook(here);
-      if (swan === this.quarry) this.quarry = null;
+      if (swan === this.quarry) {
+        this.quarry = null;
+        // Peel off along the bank so the next stride isn't back through it.
+        this.target.copy(this.aimAtSwan(swan, here));
+        const peel = this.target.clone().sub(here).setY(0);
+        if (peel.lengthSq() > 0.01) {
+          peel.normalize();
+          // Sidestep as well so they don't sit nose-to-beak barking forever.
+          this.target.x += -peel.z * 2.2;
+          this.target.z += peel.x * 2.2;
+        }
+      }
     }
 
     // Only the ones that don't look where they're going flatten people.
@@ -419,6 +502,7 @@ export class Dog {
   }
 
   public dispose(): void {
+    this.flecks.dispose();
     this.scene.remove(this.group);
     this.scene.remove(this.lead);
     this.lead.geometry.dispose();

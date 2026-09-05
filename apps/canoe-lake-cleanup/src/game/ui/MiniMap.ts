@@ -41,7 +41,7 @@ export class MiniMap {
     this.ctx = ctx;
 
     // Fit the whole park, path included, with a little breathing room.
-    const extent = 120 + PATH_OUTER + 6;
+    const extent = 165 + PATH_OUTER + 6;
     this.scale = Math.min(
       this.width / (extent * 2),
       this.height / (58 + PATH_OUTER + 8) / 2,

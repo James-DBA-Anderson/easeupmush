@@ -6,10 +6,18 @@ import { LitterPicker } from "./effects/LitterPicker";
 import { KERB_OUT, distanceToShore, isInLake } from "./world/lake";
 import { atRailings } from "./world/fence";
 import { atParkBuilding } from "./world/park";
+import { atSurroundBuilding } from "./world/buildings";
 
 const WALK_SPEED = 9;
 const SPRINT_SPEED = 15;
-const WORLD_LIMIT = 170;
+const WORLD_LIMIT = 280;
+const EYE_HEIGHT = 1.7;
+
+/** Head-bob: steps per metre, and how far the view dips and sways. */
+const BOB_STEP = 1.55;
+const BOB_HEIGHT = 0.032;
+const BOB_SWAY = 0.018;
+const BOB_ROLL = 0.014;
 
 /** How far in front of the boots the spike can reach. */
 const PICKER_REACH = 2;
@@ -53,13 +61,18 @@ export class Player {
   private euler = new THREE.Euler(0, 0, 0, "YXZ");
   private locked = false;
 
-  private sprayIndicator: HTMLElement;
   private mouseSensitivity = 0.002;
 
   /** World-space knockback, and the wobble that goes with taking a peck. */
   private knock = new THREE.Vector3();
   private shake = 0;
   private shakeOffset = new THREE.Vector3();
+
+  /** Walking bob — phase in radians, and the offsets applied this frame. */
+  private bobPhase = 0;
+  private bobAmount = 0;
+  private bobOffset = new THREE.Vector3();
+  private bobRoll = 0;
 
   constructor(
     camera: THREE.PerspectiveCamera,
@@ -71,11 +84,12 @@ export class Player {
     this.domElement = domElement;
     this.game = game;
 
-    this.sprayIndicator = document.getElementById("spray-indicator")!;
     this.mobileControls = new MobileControls();
     this.jet = new WaterJet(scene, camera, {
-      onImpact: (point) => this.game.washAt(point),
-      onBodyHit: (point) => this.game.sprayHitsBody(point),
+      onImpact: (point, direction) => this.game.washAt(point, direction),
+      onBodyHit: (point, dirty, direction) =>
+        this.game.sprayHitsBody(point, dirty, direction),
+      onFaceHit: (dirty) => this.game.splashFace(dirty),
     });
     this.picker = new LitterPicker(camera);
     this.picker.setStowed(true);
@@ -247,21 +261,25 @@ export class Player {
     this.use(true);
   }
 
-  /** Trigger pulled. Empty-handed, it fetches whatever the job in front
-   * of them needs rather than doing nothing. */
+  /** Trigger pulled. Empty-handed, the lance comes out; once it's up, spray
+   * or jab depending on what's in their hands. */
   private use(down: boolean): void {
     if (!down) {
       this.setSpraying(false);
       return;
     }
 
-    if (this.tool === null || !this.ready()) {
-      const forward = this.camera
-        .getWorldDirection(new THREE.Vector3())
-        .setY(0)
-        .normalize();
-      const job = this.game.jobInSight(this.camera.position, forward) ?? "hose";
-      this.pickTool(job);
+    // Put away or mid-stow — fire always draws the lance.
+    if (this.wanted === null || this.tool === null) {
+      this.idle = 0;
+      this.pickTool("hose", true);
+      return;
+    }
+
+    // Still coming up off the belt — hold it there and wait.
+    if (!this.ready()) {
+      this.idle = 0;
+      this.manual = Math.max(this.manual, MANUAL_HOLD);
       return;
     }
 
@@ -275,7 +293,6 @@ export class Player {
 
   private setSpraying(on: boolean): void {
     this.isSpraying = on;
-    this.sprayIndicator.classList.toggle("spraying", on);
   }
 
   private onMouseMove(event: MouseEvent): void {
@@ -288,6 +305,7 @@ export class Player {
     this.euler.y -= movementX * this.mouseSensitivity;
     this.euler.x -= movementY * this.mouseSensitivity;
     this.euler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.euler.x));
+    this.euler.z = this.bobRoll;
     this.camera.quaternion.setFromEuler(this.euler);
   }
 
@@ -304,17 +322,19 @@ export class Player {
   public update(delta: number): void {
     // Undo last frame's wobble before working out where we actually are.
     this.camera.position.sub(this.shakeOffset);
+    this.camera.position.sub(this.bobOffset);
     this.shakeOffset.set(0, 0, 0);
+    this.bobOffset.set(0, 0, 0);
 
     // Stay in step with the camera in case anything else has turned it.
     this.euler.setFromQuaternion(this.camera.quaternion);
+    this.euler.z = 0;
     const usingMobile = this.mobileControls.isEnabled();
     const active = this.locked || usingMobile;
 
     if (active && usingMobile) {
-      const lookDelta = this.mobileControls.getLookDelta();
+      const lookDelta = this.mobileControls.getLookDelta(delta);
       if (lookDelta.x !== 0 || lookDelta.y !== 0) {
-        this.euler.setFromQuaternion(this.camera.quaternion);
         this.euler.y -= lookDelta.x;
         this.euler.x -= lookDelta.y;
         this.euler.x = Math.max(
@@ -323,12 +343,22 @@ export class Player {
         );
         this.camera.quaternion.setFromEuler(this.euler);
       }
-      // The one thumb button does whichever job is in their hands.
-      const pressed = this.mobileControls.getIsSpraying();
+      // Spray stick: hold draws the tool; push past the deadzone to hose (or jab).
+      const held = this.mobileControls.isSprayHeld();
+      const aim = this.mobileControls.getSprayAim();
       if (this.tool === "picker") {
-        if (pressed) this.use(true);
-      } else if (pressed !== this.isSpraying) {
-        this.use(pressed);
+        if (held) this.use(true);
+      } else if (held) {
+        // Empty-handed or still drawing — same as the old fire button.
+        if (this.wanted === null || this.tool === null || !this.ready()) {
+          this.use(true);
+        } else if (aim !== null && !this.isSpraying) {
+          this.setSpraying(true);
+        } else if (aim === null && this.isSpraying) {
+          this.setSpraying(false);
+        }
+      } else if (this.isSpraying) {
+        this.use(false);
       }
     }
 
@@ -359,7 +389,8 @@ export class Player {
     this.knock.multiplyScalar(Math.max(0, 1 - 6 * delta));
     this.moveWithCollision(step);
 
-    this.camera.position.y = 1.7;
+    this.camera.position.y = EYE_HEIGHT;
+    this.applyBob(delta);
 
     if (this.shake > 0) {
       this.shake = Math.max(0, this.shake - delta);
@@ -377,11 +408,39 @@ export class Player {
 
     const hosing = this.isSpraying && this.tool === "hose" && this.ready() && active;
     if (this.isSpraying && !hosing) this.setSpraying(false);
-    this.jet.update(delta, hosing);
+    const sprayAim =
+      usingMobile && hosing ? this.mobileControls.getSprayAim() : null;
+    this.jet.update(delta, hosing, sprayAim);
 
     if (this.picker.update(delta) && this.game.spearLitter(this.reachPoint())) {
       this.picker.stow();
     }
+  }
+
+  /** Soft up-and-down bob with a little side sway while walking. */
+  private applyBob(delta: number): void {
+    const speed = Math.hypot(this.velocity.x, this.velocity.z);
+    const target = THREE.MathUtils.clamp(speed / WALK_SPEED, 0, 1.25);
+    this.bobAmount = THREE.MathUtils.damp(this.bobAmount, target, 8, delta);
+
+    if (this.bobAmount > 0.02) {
+      this.bobPhase += delta * speed * BOB_STEP;
+    }
+
+    const a = this.bobAmount;
+    const lateral = Math.cos(this.bobPhase) * BOB_SWAY * a;
+    const vertical = Math.sin(this.bobPhase * 2) * BOB_HEIGHT * a;
+    const yaw = this.euler.y;
+    this.bobOffset.set(
+      Math.cos(yaw) * lateral,
+      vertical,
+      -Math.sin(yaw) * lateral,
+    );
+    this.camera.position.add(this.bobOffset);
+
+    this.bobRoll = Math.sin(this.bobPhase) * BOB_ROLL * a;
+    this.euler.z = this.bobRoll;
+    this.camera.quaternion.setFromEuler(this.euler);
   }
 
   /** The patch of ground the spike comes down on. */
@@ -423,7 +482,14 @@ export class Player {
   }
 
   private canStand(x: number, z: number): boolean {
-    if (isInLake(x, z) || atRailings(x, z) || atParkBuilding(x, z)) return false;
+    if (
+      isInLake(x, z) ||
+      atRailings(x, z) ||
+      atParkBuilding(x, z) ||
+      atSurroundBuilding(x, z)
+    ) {
+      return false;
+    }
     // Pull up at the kerbstones rather than stood on top of them.
     return distanceToShore(x, z) > KERB_OUT;
   }

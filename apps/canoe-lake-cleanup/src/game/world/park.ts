@@ -1,10 +1,11 @@
 import * as THREE from "three";
-import { SHORE, WATER_Y, PATH_Y } from "./lake";
+import { SHORE, WATER_Y } from "./lake";
 import type { Wall } from "../entities/Graffiti";
+import { hitsAny, type Footprint } from "./collision";
 
 /**
  * The buildings and fittings marked on a map of Canoe Lake: the wooden boat
- * house at the eastern end with the swan pedalos moored off its jetty, the
+ * house at the eastern end with the swan pedalos lined up beside it, the
  * café and its terrace on the seaward side, the toilet block, the play park,
  * the rose beds on the parade side, and bins round the whole circuit.
  *
@@ -50,27 +51,41 @@ const RUBBER = new THREE.MeshStandardMaterial({
 });
 
 /**
- * How far back from the water each thing sits. The paving runs out to 12m,
- * so anything built has to clear that.
+ * How far back from the water each thing sits. The paving runs out to 14m,
+ * so anything built has to clear that — and the play park sits well out on
+ * the green the way the real one does.
  */
-const BOATHOUSE_OUT = 20;
-const CAFE_OUT = 20;
-const TOILETS_OUT = 19;
-const PLAY_OUT = 23;
-const ROSES_OUT = 26;
-const BIN_OUT = 10;
+const BOATHOUSE_OUT = 22;
+const CAFE_OUT = 22;
+const TOILETS_OUT = 21;
+const PLAY_OUT = 34;
+const ROSES_OUT = 30;
+const BIN_OUT = 11;
 
-/** Footprints the player can't walk through, as x/z half-extents and a yaw. */
-interface Solid {
+/** Where the play park sits, filled when it's built — kids walk here to play. */
+export interface PlayParkSite {
   x: number;
   z: number;
-  halfWide: number;
-  halfDeep: number;
   yaw: number;
+  wide: number;
+  deep: number;
+  /** Local-space spots on the rubber: swings, slide foot, spring, open run. */
+  swings: ReadonlyArray<{ x: number; z: number }>;
+  slide: { x: number; z: number };
+  spring: { x: number; z: number };
+  run: ReadonlyArray<{ x: number; z: number }>;
 }
-const solids: Solid[] = [];
 
-/** Pedalos moored off the jetty, kept so they can be made to bob. */
+let playParkSite: PlayParkSite | null = null;
+
+export function getPlayPark(): PlayParkSite | null {
+  return playParkSite;
+}
+
+/** Footprints the player can't walk through, as x/z half-extents and a yaw. */
+const solids: Footprint[] = [];
+
+/** Pedalos tied beside the boat house, kept so they can be made to bob. */
 const moored: { mesh: THREE.Object3D; phase: number; y: number }[] = [];
 
 /** Blank walls round the park, which is where the tags end up. */
@@ -165,11 +180,11 @@ function gable(width: number, depth: number, rise: number): THREE.Group {
 }
 
 /**
- * The boat house: a long timber shed with its bays open to the water, a
- * hand-painted board over the doors and a decked jetty out front.
+ * The boat house: a long timber shed with its bays open to the water and a
+ * hand-painted board over the doors. Swan pedalos sit in a line beside it —
+ * no jetty, no porch.
  */
 function boatHouse(scene: THREE.Scene): void {
-  // Set back off the far edge of the paving, with its jetty reaching over it.
   const at = pitch(14, BOATHOUSE_OUT);
   const group = new THREE.Group();
   group.position.set(at.x, 0, at.z);
@@ -212,16 +227,6 @@ function boatHouse(scene: THREE.Scene): void {
   lettering.position.set(0, 4.1, -DEEP / 2 + 0.05);
   group.add(lettering);
 
-  // Veranda along the water side, on posts, with a rail at the far edge.
-  const canopy = block(WIDE, 0.16, 3, FELT);
-  canopy.position.set(0, 3, -DEEP / 2 - 1.5);
-  group.add(canopy);
-  for (const x of [-6.4, -2.2, 2.2, 6.4]) {
-    const post = block(0.24, 3, 0.24, TIMBER_DARK);
-    post.position.set(x, 1.5, -DEEP / 2 - 2.8);
-    group.add(post);
-  }
-
   scene.add(group);
   solids.push({
     x: at.x,
@@ -235,52 +240,35 @@ function boatHouse(scene: THREE.Scene): void {
   taggable(at, 0, DEEP / 2 + 0.1, 0, WIDE, 1.6);
   taggable(at, WIDE / 2 + 0.1, 0, Math.PI / 2, DEEP, 1.6);
 
-  jetty(scene, at);
+  moorPedalos(scene, at, WIDE);
 }
 
-/** Decking out over the water, with the swan pedalos tied along it. */
-function jetty(scene: THREE.Scene, at: Pitch): void {
+/**
+ * Swan pedalos rafted beside the eastern gable — no jetty, just hire boats
+ * lined up along the side of the shed with noses toward open water.
+ */
+function moorPedalos(scene: THREE.Scene, at: Pitch, shedWide: number): void {
   const group = new THREE.Group();
   group.position.set(at.x, 0, at.z);
   group.rotation.y = at.yaw;
 
-  // Runs from the front of the shed, across the paving and out over the water.
-  const START = -6;
-  const LENGTH = BOATHOUSE_OUT - 6 + 14;
-  const END = START - LENGTH;
+  // Just past the gable, sitting in the water along the bank.
+  const startX = shedWide / 2 + 2.2;
+  const waterZ = -BOATHOUSE_OUT - 2.2;
+  const count = 7;
+  const spacing = 2.9;
 
-  const deck = block(5, 0.2, LENGTH, TIMBER);
-  deck.position.set(0, PATH_Y + 0.25, START - LENGTH / 2);
-  group.add(deck);
-
-  // Planking across the deck, and posts down into the water.
-  for (let z = START; z > END; z -= 0.8) {
-    const plank = block(5.1, 0.06, 0.1, TIMBER_DARK);
-    plank.position.set(0, PATH_Y + 0.36, z);
-    group.add(plank);
-  }
-  for (let z = START - 1; z > END; z -= 3.4) {
-    for (const x of [-2.4, 2.4]) {
-      const post = block(0.3, 1.6, 0.3, TIMBER_DARK);
-      post.position.set(x, PATH_Y - 0.4, z);
-      group.add(post);
-      const cap = block(0.4, 0.16, 0.4, PAINT);
-      cap.position.set(x, PATH_Y + 0.5, z);
-      group.add(cap);
-    }
-  }
-
-  // Swan pedalos moored either side, the way they sit out of season.
-  let slot = 0;
-  for (let z = -BOATHOUSE_OUT - 2; z > END; z -= 3.6) {
-    for (const side of [-1, 1]) {
-      const boat = swanPedalo();
-      boat.position.set(side * 3.6, WATER_Y, z + (side < 0 ? 1.2 : 0));
-      boat.rotation.y = side * 0.12 + (Math.random() - 0.5) * 0.2;
-      group.add(boat);
-      moored.push({ mesh: boat, phase: slot * 1.3, y: WATER_Y });
-      slot += 1;
-    }
+  for (let i = 0; i < count; i++) {
+    const boat = swanPedalo();
+    boat.position.set(
+      startX + i * spacing,
+      WATER_Y,
+      waterZ + (i % 2 === 0 ? 0 : -0.4),
+    );
+    // Nose toward open water, with a bit of natural stagger.
+    boat.rotation.y = Math.PI + (i % 2 === 0 ? -0.05 : 0.07);
+    group.add(boat);
+    moored.push({ mesh: boat, phase: i * 1.3, y: WATER_Y });
   }
 
   scene.add(group);
@@ -466,15 +454,15 @@ function toilets(scene: THREE.Scene): void {
   solids.push({ x: at.x, z: at.z, halfWide: WIDE / 2, halfDeep: DEEP / 2, yaw: at.yaw });
 }
 
-/** The play park on the seafront side: safety surface, swings and a slide. */
+/** The play park on the seafront side: a proper stretch of rubber, swings, slide and a springy animal. */
 function playPark(scene: THREE.Scene): void {
   const at = pitch(-70, PLAY_OUT);
   const group = new THREE.Group();
   group.position.set(at.x, 0, at.z);
   group.rotation.y = at.yaw;
 
-  const WIDE = 18;
-  const DEEP = 14;
+  const WIDE = 36;
+  const DEEP = 28;
 
   const surface = new THREE.Mesh(new THREE.PlaneGeometry(WIDE, DEEP), RUBBER);
   surface.rotation.x = -Math.PI / 2;
@@ -487,62 +475,90 @@ function playPark(scene: THREE.Scene): void {
     [0, -DEEP / 2, WIDE, 0.12],
     [-WIDE / 2, 0, 0.12, DEEP],
     [WIDE / 2, 0, 0.12, DEEP],
-    [-WIDE / 4 - 1, DEEP / 2, WIDE / 2 - 2, 0.12],
-    [WIDE / 4 + 1, DEEP / 2, WIDE / 2 - 2, 0.12],
+    [-WIDE / 4 - 2, DEEP / 2, WIDE / 2 - 4, 0.12],
+    [WIDE / 4 + 2, DEEP / 2, WIDE / 2 - 4, 0.12],
   ] as const) {
     const rail = block(w, 1, d, PAINT);
     rail.position.set(x, 0.5, z);
     group.add(rail);
   }
 
-  // Swing frame with two seats hanging from the beam.
-  const beam = block(6, 0.16, 0.16, STEEL);
-  beam.position.set(-4.5, 2.5, -2);
+  // Swing frame with three seats hanging from the beam.
+  const beam = block(9, 0.16, 0.16, STEEL);
+  beam.position.set(-8, 2.5, -4);
   group.add(beam);
-  for (const x of [-7.4, -1.6]) {
-    for (const z of [-2.9, -1.1]) {
+  for (const x of [-12.2, -3.8]) {
+    for (const z of [-5.1, -2.9]) {
       const leg = block(0.14, 2.6, 0.14, STEEL);
       leg.position.set(x, 1.3, z);
-      leg.rotation.x = z < -2 ? -0.2 : 0.2;
+      leg.rotation.x = z < -4 ? -0.2 : 0.2;
       group.add(leg);
     }
   }
-  for (const x of [-6, -3]) {
+  const swingSeats = [-10.5, -8, -5.5];
+  for (const x of swingSeats) {
     const chain = block(0.05, 1.6, 0.05, STEEL);
-    chain.position.set(x, 1.7, -2);
+    chain.position.set(x, 1.7, -4);
     group.add(chain);
     const seat = block(0.6, 0.08, 0.3, RUBBER);
-    seat.position.set(x, 0.9, -2);
+    seat.position.set(x, 0.9, -4);
     group.add(seat);
   }
 
   // Slide up on a little tower, and a springy animal off to one side.
-  const tower = block(1.6, 1.8, 1.6, TIMBER);
-  tower.position.set(4, 0.9, -1);
+  const tower = block(1.8, 2.1, 1.8, TIMBER);
+  tower.position.set(8, 1.05, -3);
   group.add(tower);
-  const canopy = gable(2, 2, 0.6);
-  canopy.position.set(4, 1.8, -1);
+  const canopy = gable(2.2, 2.2, 0.7);
+  canopy.position.set(8, 2.1, -3);
   group.add(canopy);
-  const slide = block(0.9, 0.12, 4.2, STEEL);
-  slide.position.set(4, 1.1, 1.6);
-  slide.rotation.x = 0.42;
+  const slide = block(1.0, 0.12, 5.2, STEEL);
+  slide.position.set(8, 1.2, 1.2);
+  slide.rotation.x = 0.4;
   group.add(slide);
   for (const side of [-1, 1]) {
-    const kerb = block(0.12, 0.3, 4.2, STEEL);
-    kerb.position.set(4 + side * 0.5, 1.2, 1.6);
-    kerb.rotation.x = 0.42;
+    const kerb = block(0.12, 0.3, 5.2, STEEL);
+    kerb.position.set(8 + side * 0.55, 1.3, 1.2);
+    kerb.rotation.x = 0.4;
     group.add(kerb);
   }
 
   const spring = block(0.2, 0.5, 0.2, STEEL);
-  spring.position.set(-1, 0.28, 3.4);
+  spring.position.set(-2, 0.28, 6);
   group.add(spring);
   const rider = block(0.5, 0.4, 1.3, new THREE.MeshStandardMaterial({
     color: 0xd8452f,
     roughness: 0.9,
   }));
-  rider.position.set(-1, 0.72, 3.4);
+  rider.position.set(-2, 0.72, 6);
   group.add(rider);
+
+  // Climbing frame / zip posts at the far end.
+  for (const x of [4, 12]) {
+    const post = block(0.2, 2.8, 0.2, STEEL);
+    post.position.set(x, 1.4, 8);
+    group.add(post);
+  }
+  const zip = block(8.2, 0.06, 0.06, STEEL);
+  zip.position.set(8, 2.7, 8);
+  group.add(zip);
+
+  playParkSite = {
+    x: at.x,
+    z: at.z,
+    yaw: at.yaw,
+    wide: WIDE,
+    deep: DEEP,
+    swings: swingSeats.map((x) => ({ x, z: -4 })),
+    slide: { x: 8, z: 3.2 },
+    spring: { x: -2, z: 6 },
+    run: [
+      { x: 0, z: 0 },
+      { x: -10, z: 4 },
+      { x: 10, z: 5 },
+      { x: 2, z: -8 },
+    ],
+  };
 
   // Not walled off in the collision sense: kids' gear is meant to be walked in.
   scene.add(group);
@@ -613,6 +629,7 @@ export function buildParkBuildings(scene: THREE.Scene): void {
   moored.length = 0;
   walls.length = 0;
   binSpots.length = 0;
+  playParkSite = null;
 
   boatHouse(scene);
   cafe(scene);
@@ -647,19 +664,5 @@ export function bobPedalos(time: number): void {
 
 /** Whether a point is inside one of the park's buildings. */
 export function atParkBuilding(x: number, z: number): boolean {
-  for (const solid of solids) {
-    const dx = x - solid.x;
-    const dz = z - solid.z;
-    const cos = Math.cos(-solid.yaw);
-    const sin = Math.sin(-solid.yaw);
-    const localX = dx * cos - dz * sin;
-    const localZ = dx * sin + dz * cos;
-    if (
-      Math.abs(localX) < solid.halfWide &&
-      Math.abs(localZ) < solid.halfDeep
-    ) {
-      return true;
-    }
-  }
-  return false;
+  return hitsAny(x, z, solids);
 }
