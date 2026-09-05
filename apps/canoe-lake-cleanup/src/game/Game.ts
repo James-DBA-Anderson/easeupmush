@@ -235,7 +235,9 @@ export class Game {
       0.1,
       1000,
     );
-    this.camera.position.set(0, 1.7, 62);
+    // North path, mid-paving, looking over the water — clear of the kerb after
+    // the grounds grew to the real park size.
+    this.camera.position.set(0, 1.7, 72);
     this.camera.lookAt(0, 1.7, 0);
     this.scene.add(this.camera);
 
