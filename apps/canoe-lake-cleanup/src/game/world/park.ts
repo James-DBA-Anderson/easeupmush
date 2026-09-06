@@ -1,15 +1,17 @@
 import * as THREE from "three";
-import { SHORE, WATER_Y } from "./lake";
+import { SHORE, WATER_Y, outwardAt } from "./lake";
 import type { Wall } from "../entities/Graffiti";
 import { hitsAny, type Footprint } from "./collision";
 
 /**
- * The buildings and fittings marked on a map of Canoe Lake: the wooden boat
- * house at the eastern end with the swan pedalos lined up beside it, the
- * café and its terrace on the seaward side, the toilet block, the play park,
- * the rose beds on the parade side, and bins round the whole circuit.
+ * The buildings and fittings marked on a map of Canoe Lake: the small boat
+ * house on the north-west green with the swan pedalos moored opposite along
+ * the north-east bank, the café out on the east green toward the splash, the
+ * toilet block south of the lake by the esplanade, the play park on the east
+ * green, the rose beds toward St Helens Parade, and bins round the circuit.
  *
- * +Z is St Helens Parade, -Z is the seafront, and the lake runs along X.
+ * +Z is inland (St Helens Parade), −Z is the seafront, and the lake runs
+ * south-west to north-east.
  */
 
 const TIMBER = new THREE.MeshStandardMaterial({
@@ -52,14 +54,14 @@ const RUBBER = new THREE.MeshStandardMaterial({
 
 /**
  * How far back from the water each thing sits. The paving runs out to 14m,
- * so anything built has to clear that — and the play park sits well out on
- * the green the way the real one does.
+ * so anything built has to clear that — and the play / splash sit out on the
+ * east green the way the real ones do.
  */
-const BOATHOUSE_OUT = 22;
-const CAFE_OUT = 22;
-const TOILETS_OUT = 21;
-const PLAY_OUT = 34;
-const ROSES_OUT = 30;
+const BOATHOUSE_OUT = 26;
+const CAFE_OUT = 48;
+const TOILETS_OUT = 18;
+const PLAY_OUT = 58;
+const ROSES_OUT = 28;
 const BIN_OUT = 11;
 
 /** Where the play park sits, filled when it's built — kids walk here to play. */
@@ -180,51 +182,49 @@ function gable(width: number, depth: number, rise: number): THREE.Group {
 }
 
 /**
- * The boat house: a long timber shed with its bays open to the water and a
- * hand-painted board over the doors. Swan pedalos sit in a line beside it —
- * no jetty, no porch.
+ * The boat house: a small timber hire office on the north-west green, just
+ * off the path. Swan pedalos raft opposite it along the north-east bank.
  */
 function boatHouse(scene: THREE.Scene): void {
-  const at = pitch(14, BOATHOUSE_OUT);
+  // North-west of the lake tip, on the grass between the path and the parade.
+  const at = pitch(112, BOATHOUSE_OUT);
   const group = new THREE.Group();
   group.position.set(at.x, 0, at.z);
   group.rotation.y = at.yaw;
 
-  const WIDE = 14;
-  const DEEP = 7;
+  const WIDE = 8;
+  const DEEP = 5;
 
-  const walls = block(WIDE, 3.4, DEEP, TIMBER);
-  walls.position.y = 1.7;
+  const walls = block(WIDE, 2.8, DEEP, TIMBER);
+  walls.position.y = 1.4;
   group.add(walls);
 
   // Boarding, so the timber reads as clapboard rather than a plain box.
-  for (let y = 0.3; y < 3.3; y += 0.5) {
+  for (let y = 0.25; y < 2.7; y += 0.45) {
     const board = block(WIDE + 0.12, 0.1, DEEP + 0.12, TIMBER_DARK);
     board.position.y = y;
     group.add(board);
   }
 
-  // Three bays open onto the water, with the boats kept inside overnight.
-  for (const x of [-4.6, 0, 4.6]) {
-    const bay = block(3.6, 2.6, 0.3, FELT);
-    bay.position.set(x, 1.3, -DEEP / 2 - 0.05);
-    group.add(bay);
+  // Serving hatch facing the path / water.
+  const hatch = block(3.2, 1.4, 0.2, FELT);
+  hatch.position.set(0, 1.2, -DEEP / 2 - 0.05);
+  group.add(hatch);
 
-    const lintel = block(4, 0.35, 0.5, PAINT);
-    lintel.position.set(x, 2.75, -DEEP / 2 - 0.1);
-    group.add(lintel);
-  }
+  const lintel = block(3.6, 0.28, 0.35, PAINT);
+  lintel.position.set(0, 2.05, -DEEP / 2 - 0.08);
+  group.add(lintel);
 
-  const roof = gable(WIDE, DEEP, 1.6);
-  roof.position.y = 3.4;
+  const roof = gable(WIDE, DEEP, 1.2);
+  roof.position.y = 2.8;
   group.add(roof);
 
-  // The board over the doors, facing anyone walking round the lake.
-  const sign = block(9, 1, 0.2, PAINT);
-  sign.position.set(0, 4.1, -DEEP / 2 + 0.2);
+  // The board over the hatch.
+  const sign = block(5.5, 0.7, 0.16, PAINT);
+  sign.position.set(0, 3.35, -DEEP / 2 + 0.15);
   group.add(sign);
-  const lettering = block(7.6, 0.32, 0.1, CREAM);
-  lettering.position.set(0, 4.1, -DEEP / 2 + 0.05);
+  const lettering = block(4.6, 0.24, 0.08, CREAM);
+  lettering.position.set(0, 3.35, -DEEP / 2 + 0.04);
   group.add(lettering);
 
   scene.add(group);
@@ -236,42 +236,40 @@ function boatHouse(scene: THREE.Scene): void {
     yaw: at.yaw,
   });
 
-  // The blank back and gable ends, out of sight of the café.
-  taggable(at, 0, DEEP / 2 + 0.1, 0, WIDE, 1.6);
-  taggable(at, WIDE / 2 + 0.1, 0, Math.PI / 2, DEEP, 1.6);
+  taggable(at, 0, DEEP / 2 + 0.1, 0, WIDE, 1.4);
+  taggable(at, WIDE / 2 + 0.1, 0, Math.PI / 2, DEEP, 1.4);
 
-  moorPedalos(scene, at, WIDE);
+  moorPedalos(scene);
 }
 
 /**
- * Swan pedalos rafted beside the eastern gable — no jetty, just hire boats
- * lined up along the side of the shed with noses toward open water.
+ * Swan pedalos rafted along the north-east bank — opposite the hire office
+ * across the tip of the lake, noses toward open water.
  */
-function moorPedalos(scene: THREE.Scene, at: Pitch, shedWide: number): void {
-  const group = new THREE.Group();
-  group.position.set(at.x, 0, at.z);
-  group.rotation.y = at.yaw;
+function moorPedalos(scene: THREE.Scene): void {
+  // Shore on the NE flank, across from the NW boat house.
+  const band = SHORE.filter((point) => {
+    const deg = (Math.atan2(point.y, point.x) * 180) / Math.PI;
+    return deg >= 18 && deg <= 52;
+  }).sort(
+    (a, b) => Math.atan2(a.y, a.x) - Math.atan2(b.y, b.x),
+  );
+  if (band.length < 2) return;
 
-  // Just past the gable, sitting in the water along the bank.
-  const startX = shedWide / 2 + 2.2;
-  const waterZ = -BOATHOUSE_OUT - 2.2;
-  const count = 7;
-  const spacing = 2.9;
-
+  const count = 8;
   for (let i = 0; i < count; i++) {
+    const t = (i + 0.5) / count;
+    const shore = band[Math.min(band.length - 1, Math.floor(t * (band.length - 1)))]!;
+    const out = outwardAt(shore);
+    const inward = out.clone().negate();
+    const at = shore.clone().addScaledVector(inward, 2.5 + (i % 2) * 0.3);
+
     const boat = swanPedalo();
-    boat.position.set(
-      startX + i * spacing,
-      WATER_Y,
-      waterZ + (i % 2 === 0 ? 0 : -0.4),
-    );
-    // Nose toward open water, with a bit of natural stagger.
-    boat.rotation.y = Math.PI + (i % 2 === 0 ? -0.05 : 0.07);
-    group.add(boat);
+    boat.position.set(at.x, WATER_Y, at.y);
+    boat.rotation.y = Math.atan2(inward.x, inward.y) + Math.PI;
+    scene.add(boat);
     moored.push({ mesh: boat, phase: i * 1.3, y: WATER_Y });
   }
-
-  scene.add(group);
 }
 
 /** One of the white swan pedalos: a moulded hull with the bird up front. */
@@ -325,9 +323,9 @@ function swanPedalo(): THREE.Group {
   return boat;
 }
 
-/** The café on the seaward side, with a terrace of tables under parasols. */
+/** The café out on the east green, toward the splash / Café Fresco end. */
 function cafe(scene: THREE.Scene): void {
-  const at = pitch(-155, CAFE_OUT);
+  const at = pitch(12, CAFE_OUT);
   const group = new THREE.Group();
   group.position.set(at.x, 0, at.z);
   group.rotation.y = at.yaw;
@@ -411,9 +409,9 @@ function cafe(scene: THREE.Scene): void {
   solids.push({ x: at.x, z: at.z, halfWide: WIDE / 2, halfDeep: DEEP / 2, yaw: at.yaw });
 }
 
-/** The toilet block, tucked along the seaward path a little way off. */
+/** The toilet block, south of the lake between the path and the esplanade. */
 function toilets(scene: THREE.Scene): void {
-  const at = pitch(-120, TOILETS_OUT);
+  const at = pitch(-105, TOILETS_OUT);
   const group = new THREE.Group();
   group.position.set(at.x, 0, at.z);
   group.rotation.y = at.yaw;
@@ -454,9 +452,9 @@ function toilets(scene: THREE.Scene): void {
   solids.push({ x: at.x, z: at.z, halfWide: WIDE / 2, halfDeep: DEEP / 2, yaw: at.yaw });
 }
 
-/** The play park on the seafront side: a proper stretch of rubber, swings, slide and a springy animal. */
+/** The play park on the east green (splash / play end): rubber, swings, slide and a springy animal. */
 function playPark(scene: THREE.Scene): void {
-  const at = pitch(-70, PLAY_OUT);
+  const at = pitch(22, PLAY_OUT);
   const group = new THREE.Group();
   group.position.set(at.x, 0, at.z);
   group.rotation.y = at.yaw;
@@ -566,7 +564,7 @@ function playPark(scene: THREE.Scene): void {
 
 /** The rose beds on the parade side, hedged in and full of colour. */
 function roseGarden(scene: THREE.Scene): void {
-  const at = pitch(140, ROSES_OUT);
+  const at = pitch(170, ROSES_OUT);
   const group = new THREE.Group();
   group.position.set(at.x, 0, at.z);
   group.rotation.y = at.yaw;

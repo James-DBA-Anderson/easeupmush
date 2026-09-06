@@ -64,8 +64,9 @@ export class Crabber {
     // Slide along the bank so a pair of them can sit side by side.
     const along = new THREE.Vector2(-out.y, out.x).multiplyScalar(alongShore);
 
-    const x = shore.x + out.x * 0.9 + along.x;
-    const z = shore.y + out.y * 0.9 + along.y;
+    // Kneel on the coping, facing the water — not out on the path or in the lake.
+    const x = shore.x + out.x * 0.45 + along.x;
+    const z = shore.y + out.y * 0.45 + along.y;
     this.stand.set(x, 0, z);
     this.faceWater = Math.atan2(-out.x, -out.y);
     // Start back on the paving and walk over — never just materialise at the wall.
@@ -93,7 +94,7 @@ export class Crabber {
     this.line.visible = false;
     scene.add(this.line);
 
-    this.castPoint.set(x - out.x * 1.5, this.restY, z - out.y * 1.5);
+    this.castPoint.set(shore.x - out.x * 1.2, this.restY, shore.y - out.y * 1.2);
     this.lineEnd.copy(this.castPoint);
 
     this.crab = this.buildCrab();

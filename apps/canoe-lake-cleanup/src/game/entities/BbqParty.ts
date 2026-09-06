@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { distanceToShore, isInLake, PATH_OUTER } from "../world/lake";
+import { insidePark } from "../world/fence";
 import { Face } from "./Face";
 import { Grumble } from "../effects/Grumble";
 
@@ -32,12 +33,11 @@ const DOUSED = [
 /** Grass south of the lake, between the path and the esplanade scrub. */
 export const BBQ_SPOTS: ReadonlyArray<THREE.Vector2> = (() => {
   const candidates: THREE.Vector2[] = [];
-  for (let x = -110; x <= 110; x += 20) {
-    for (let z = -90; z >= -102; z -= 6) {
+  for (let x = -90; x <= 120; x += 18) {
+    for (let z = -95; z >= -108; z -= 5) {
       if (isInLake(x, z)) continue;
+      if (!insidePark(x, z)) continue;
       if (distanceToShore(x, z) < PATH_OUTER + 5) continue;
-      // Keep clear of the café / toilets stretch on the south-west bank.
-      if (x < -45 && z > -94) continue;
       candidates.push(new THREE.Vector2(x, z));
     }
   }

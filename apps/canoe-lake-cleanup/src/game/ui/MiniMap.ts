@@ -12,6 +12,7 @@ import {
   type PlayParkSite,
 } from "../world/park";
 import { surroundFootprints } from "../world/buildings";
+import { PARK_RING } from "../world/fence";
 import type { Footprint } from "../world/collision";
 
 const REFRESH = 1 / 15;
@@ -54,9 +55,9 @@ export class MiniMap {
     ctx.scale(dpr, dpr);
     this.ctx = ctx;
 
-    // Fit the whole grounds: lake, path, play park and the parade walls.
-    const halfX = 195;
-    const halfZ = 140;
+    // Fit the whole grounds inside the railings, with a little breathing room.
+    const halfX = 200;
+    const halfZ = 150;
     this.scale = Math.min(
       this.width / (halfX * 2),
       this.height / (halfZ * 2),
@@ -65,7 +66,8 @@ export class MiniMap {
   }
 
   private toScreen(x: number, z: number): [number, number] {
-    return [this.width / 2 + x * this.scale, this.height / 2 + z * this.scale];
+    // North (+Z) at the top, matching the satellite plan.
+    return [this.width / 2 + x * this.scale, this.height / 2 - z * this.scale];
   }
 
   private trace(points: ReadonlyArray<THREE.Vector2>): void {
@@ -164,6 +166,14 @@ export class MiniMap {
     ctx.fillStyle = "#3c5f40";
     ctx.fillRect(0, 0, this.width, this.height);
 
+    // Iron railings — the walkable grounds.
+    this.trace(PARK_RING);
+    ctx.fillStyle = "#456848";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(20,25,22,0.55)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
     // Path ring, then the spurs out to the gates / esplanade.
     this.trace(offsetShore(PATH_OUTER));
     ctx.fillStyle = "#9a958a";
@@ -203,7 +213,7 @@ export class MiniMap {
     const [px, py] = this.toScreen(data.player.x, data.player.z);
     ctx.save();
     ctx.translate(px, py);
-    ctx.rotate(-data.heading);
+    ctx.rotate(Math.PI - data.heading);
     ctx.fillStyle = "#ffcf3a";
     ctx.beginPath();
     ctx.moveTo(0, -5);

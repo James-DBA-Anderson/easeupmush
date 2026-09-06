@@ -3,15 +3,17 @@ import type { Game } from "./Game";
 import { MobileControls } from "./MobileControls";
 import { WaterJet } from "./effects/WaterJet";
 import { LitterPicker } from "./effects/LitterPicker";
-import { KERB_OUT, distanceToShore, isInLake } from "./world/lake";
-import { atRailings } from "./world/fence";
+import { distanceToShore, isInLake } from "./world/lake";
+import { atRailings, insidePark } from "./world/fence";
 import { atParkBuilding } from "./world/park";
 import { atSurroundBuilding } from "./world/buildings";
 
 const WALK_SPEED = 9;
 const SPRINT_SPEED = 15;
-const WORLD_LIMIT = 280;
+const WORLD_LIMIT = 200;
 const EYE_HEIGHT = 1.7;
+/** How close you can get to the waterline — onto the kerb, not into the lake. */
+const EDGE_CLEARANCE = 0.2;
 
 /** Head-bob: steps per metre, and how far the view dips and sways. */
 const BOB_STEP = 1.55;
@@ -482,6 +484,7 @@ export class Player {
   }
 
   private canStand(x: number, z: number): boolean {
+    if (!insidePark(x, z)) return false;
     if (
       isInLake(x, z) ||
       atRailings(x, z) ||
@@ -490,7 +493,7 @@ export class Player {
     ) {
       return false;
     }
-    // Pull up at the kerbstones rather than stood on top of them.
-    return distanceToShore(x, z) > KERB_OUT;
+    // Onto the kerbstones, right up to the water — but not over the edge.
+    return distanceToShore(x, z) > EDGE_CLEARANCE;
   }
 }

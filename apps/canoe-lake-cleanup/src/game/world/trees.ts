@@ -1,16 +1,16 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PATH_OUTER, PATH_SPURS, distanceToShore, isInLake } from './lake';
+import { insidePark } from './fence';
 
 /**
- * The planting round Canoe Lake, following the real park.
+ * The planting round Canoe Lake, following the real park on the map.
  *
- * The lake runs WSW-ENE with St Helens Parade along the north side (+Z) and
- * the Esplanade and the beach along the south (-Z). The rows of evergreen holm
- * oaks that frame the water were planted in 1910: one line parallel to St
- * Helens Parade, another along the southern boundary, and more wrapping the
- * rounded western end. The seaward side is salt-blasted and leans inland.
- * Nothing is planted at the water's edge itself, which is kept for bedding.
+ * Dense mature trees screen the north boundary (A288). A thinner line follows
+ * the esplanade on the south. The west (St Helens Parade) is more open with
+ * scattered oaks. The big east lawn stays mostly clear — one lone tree out by
+ * the outdoor gym, and a small cluster down by the splash. SW corner by the
+ * toilets / memorial has a tight group.
  */
 
 const BARK = new THREE.MeshStandardMaterial({ color: 0x4a4238, roughness: 1 });
@@ -185,9 +185,25 @@ function onSpur(x: number, z: number): boolean {
 }
 
 function plantable(x: number, z: number): boolean {
+  if (!insidePark(x, z)) return false;
   if (isInLake(x, z)) return false;
   if (distanceToShore(x, z) < PATH_OUTER + 2.5) return false;
   return !onSpur(x, z);
+}
+
+/** Try a few jitters so a planned spot still lands on plantable ground. */
+function findSpot(
+  x: number,
+  z: number,
+  rand: () => number,
+  spread = 4,
+): THREE.Vector2 | null {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const px = x + (rand() - 0.5) * spread;
+    const pz = z + (rand() - 0.5) * spread;
+    if (plantable(px, pz)) return new THREE.Vector2(px, pz);
+  }
+  return plantable(x, z) ? new THREE.Vector2(x, z) : null;
 }
 
 /** Where the big trees ended up, for anything that needs to stand under one. */
@@ -263,59 +279,92 @@ export function plantTrees(scene: THREE.Scene): void {
     });
   };
 
-  // The 1910 avenue along St Helens Parade: a formal, evenly spaced line of
-  // big mature oaks, the ones you see behind the lake in every photograph.
-  for (let x = -140; x <= 145; x += 12) {
-    const z = 95 + (rand() - 0.5) * 3;
-    if (!plantable(x, z)) continue;
+  const tryOak = (
+    x: number,
+    z: number,
+    scale: number,
+    leanX: number,
+    leanZ: number,
+    spread = 3,
+  ): void => {
+    const spot = findSpot(x, z, rand, spread);
+    if (!spot) return;
     place(
-      buildHolmOak({ scale: 1.05 + rand() * 0.25, leanX: 0, leanZ: 0.35, rand }),
-      x + (rand() - 0.5) * 1.5,
-      z,
+      buildHolmOak({ scale, leanX, leanZ, rand }),
+      spot.x,
+      spot.y,
+    );
+  };
+
+  const tryPlane = (x: number, z: number, scale: number, spread = 4): void => {
+    const spot = findSpot(x, z, rand, spread);
+    if (!spot) return;
+    place(buildPlane(scale, rand), spot.x, spot.y);
+  };
+
+  // Dense screen along the north railings (A288) — the thick belt on the map.
+  for (let x = -70; x <= 145; x += 9) {
+    tryOak(x, 118 + (rand() - 0.5) * 4, 1.0 + rand() * 0.3, 0, 0.25, 2.5);
+    if (rand() > 0.35) {
+      tryOak(x + 4, 112 + rand() * 5, 0.85 + rand() * 0.25, 0, 0.2, 3);
+    }
+  }
+
+  // Extra weight at the north-west and north-east corners.
+  for (let i = 0; i < 7; i++) {
+    tryOak(-95 + rand() * 28, 105 + rand() * 18, 0.95 + rand() * 0.3, 0.2, 0.2, 5);
+  }
+  for (let i = 0; i < 8; i++) {
+    tryOak(130 + rand() * 22, 95 + rand() * 25, 0.9 + rand() * 0.35, -0.15, 0.2, 5);
+  }
+
+  // Southern boundary inside the esplanade path — a thinner continuous line.
+  for (let x = -120; x <= 155; x += 11) {
+    tryOak(
+      x,
+      -102 - rand() * 3,
+      0.75 + rand() * 0.25,
+      0,
+      0.85,
+      2.5,
     );
   }
 
-  // The southern line, between the lake and the Esplanade. More exposed, so
-  // they're smaller and pushed over inland by the wind off the Solent.
-  for (let x = -125; x <= 135; x += 13) {
-    const z = -88 - rand() * 4;
-    if (!plantable(x, z)) continue;
-    place(
-      buildHolmOak({ scale: 0.8 + rand() * 0.25, leanX: 0, leanZ: 0.85, rand }),
-      x + (rand() - 0.5) * 2,
-      z,
-    );
-  }
-
-  // Oaks wrapping the rounded western end, closing the view up that end.
-  for (let i = 0; i < 11; i++) {
-    const angle = Math.PI * (0.62 + (i / 10) * 0.76);
-    const reach = 158 + rand() * 12;
-    const x = Math.cos(angle) * reach;
-    const z = Math.sin(angle) * reach * 0.62;
-    if (!plantable(x, z)) continue;
-    place(buildHolmOak({ scale: 0.9 + rand() * 0.3, leanX: 0.5, leanZ: 0, rand }), x, z);
-  }
-
-  // Rose garden planting inside the Lumps Fort walls at the eastern end.
+  // South-west cluster by the toilets / Emmanuel Memorial.
   for (let i = 0; i < 9; i++) {
-    const x = 158 + rand() * 36;
-    const z = (rand() - 0.5) * 115;
-    if (!plantable(x, z)) continue;
-    place(buildPlane(0.75 + rand() * 0.35, rand), x, z);
+    tryOak(
+      -55 + rand() * 45,
+      -98 + rand() * 12,
+      0.8 + rand() * 0.3,
+      0.15,
+      0.7,
+      4,
+    );
   }
 
-  // A looser second rank of deciduous trees set back behind the north avenue.
-  for (let x = -130; x <= 130; x += 28) {
-    const z = 108 + rand() * 10;
-    if (!plantable(x, z)) continue;
-    place(buildPlane(0.85 + rand() * 0.3, rand), x + (rand() - 0.5) * 8, z);
+  // West side (St Helens Parade): scattered, not a solid wall.
+  for (let z = -40; z <= 95; z += 16) {
+    if (rand() < 0.25) continue;
+    tryOak(-132 + rand() * 10, z + (rand() - 0.5) * 6, 0.85 + rand() * 0.3, 0.55, 0.15, 5);
   }
 
-  // Wind-burnt scrub scattered along the seafront edge.
-  for (let x = -130; x <= 130; x += 10) {
-    const z = -105 - rand() * 7;
-    if (!plantable(x, z)) continue;
-    place(buildScrub(1.1 + rand() * 0.8, rand), x + (rand() - 0.5) * 4, z, false);
+  // Lone landmark tree on the east lawn near the outdoor gym.
+  tryOak(95, -42, 1.35, 0.05, 0.35, 6);
+
+  // Small cluster south of the splash / play end on the east green.
+  for (let i = 0; i < 6; i++) {
+    tryPlane(145 + rand() * 18, 25 + rand() * 28, 0.7 + rand() * 0.35, 5);
+  }
+
+  // A few deciduous trees mixed into the north belt, set slightly back.
+  for (let x = -50; x <= 130; x += 32) {
+    tryPlane(x + (rand() - 0.5) * 10, 122 + rand() * 4, 0.85 + rand() * 0.25, 3);
+  }
+
+  // Wind-burnt scrub along the seafront edge, outside the oak line.
+  for (let x = -115; x <= 150; x += 9) {
+    const spot = findSpot(x + (rand() - 0.5) * 4, -107 - rand() * 3, rand, 2);
+    if (!spot) continue;
+    place(buildScrub(1.0 + rand() * 0.8, rand), spot.x, spot.y, false);
   }
 }

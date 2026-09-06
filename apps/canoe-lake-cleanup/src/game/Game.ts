@@ -237,7 +237,12 @@ export class Game {
     );
     // North path, mid-paving, looking over the water — clear of the kerb after
     // the grounds grew to the real park size.
-    this.camera.position.set(0, 1.7, 72);
+    // North path, just inland of the lake — clear of the water after the
+    // grounds were rotated to match the real park.
+    const start = offsetShore(PATH_OUTER - 2).reduce((best, point) =>
+      point.y > best.y ? point : best,
+    );
+    this.camera.position.set(start.x, 1.7, start.y);
     this.camera.lookAt(0, 1.7, 0);
     this.scene.add(this.camera);
 

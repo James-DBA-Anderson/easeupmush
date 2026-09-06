@@ -3,10 +3,11 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { PATH_SPURS } from "./lake";
 
 /**
- * The Victorian iron railings along the road sides of the park: spear-topped
- * bars on a low stone kerb, running the length of St Helens Parade on the
- * north side and round the eastern boundary, with gate openings where the
- * paths come in off the pavement.
+ * The Victorian iron railings around Canoe Lake Gardens: spear-topped bars on
+ * a low stone kerb. They follow the roads — St Helens Parade on the west and
+ * north, the east boundary before the splash park, and Eastney Esplanade on
+ * the south — so the walkable green stops at the ironwork. Gate openings sit
+ * where the path spurs hit the fence.
  */
 
 const IRON = new THREE.MeshStandardMaterial({
@@ -35,6 +36,34 @@ interface Run {
   to: THREE.Vector2;
   /** Gate openings, as a distance along the run and a width. */
   gates?: readonly (readonly [number, number])[];
+}
+
+/**
+ * Closed ring of the park railings (XZ), clockwise looking down. Kept as the
+ * walkable limit — past this is road, beach or someone else's green.
+ */
+export const PARK_RING: ReadonlyArray<THREE.Vector2> = [
+  new THREE.Vector2(-138, -112),
+  new THREE.Vector2(168, -112),
+  new THREE.Vector2(178, 35),
+  new THREE.Vector2(155, 128),
+  new THREE.Vector2(-85, 128),
+  new THREE.Vector2(-148, 45),
+  new THREE.Vector2(-148, -50),
+];
+
+/** True inside the iron railings (the lake and its surrounding green). */
+export function insidePark(x: number, z: number): boolean {
+  let inside = false;
+  for (let i = 0, j = PARK_RING.length - 1; i < PARK_RING.length; j = i++) {
+    const a = PARK_RING[i]!;
+    const b = PARK_RING[j]!;
+    const straddles = a.y > z !== b.y > z;
+    if (straddles && x < ((b.x - a.x) * (z - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
 }
 
 class Ironwork {
@@ -201,70 +230,59 @@ function railing(work: Ironwork, run: Run): void {
 }
 
 /**
- * Railings down the east side and along the north, meeting at the corner.
- * The park is open to the promenade on the south. Gate openings are worked
- * out from where the path spurs hit the railings, so the ironwork never
- * runs across the paving.
+ * Gate openings worked out from where the path spurs hit each stretch, so the
+ * ironwork never runs across the paving.
  */
-const RUNS: readonly Run[] = (() => {
-  // Railings sit well back from the water so the park reads at the real
-  // Canoe Lake Gardens footprint — grass, play park and all — not just a
-  // thin strip round the lake.
-  const northFrom = new THREE.Vector2(-185, 118);
-  const northTo = new THREE.Vector2(190, 118);
-  const eastFrom = new THREE.Vector2(190, 118);
-  const eastTo = new THREE.Vector2(190, -78);
+function gatesOn(from: THREE.Vector2, to: THREE.Vector2): [number, number][] {
+  const span = new THREE.Vector2().subVectors(to, from);
+  const length = span.length();
+  const along = span.clone().normalize();
+  // Outward normal of the run — away from the lake, so a spur hitting the
+  // railing from inside the park has a positive dot with it.
+  const outward = new THREE.Vector2(along.y, -along.x);
+  const mid = from.clone().add(to).multiplyScalar(0.5);
+  if (outward.dot(mid) < 0) outward.negate();
 
-  const gatesOn = (from: THREE.Vector2, to: THREE.Vector2): [number, number][] => {
-    const span = new THREE.Vector2().subVectors(to, from);
-    const length = span.length();
-    const along = span.clone().normalize();
-    // Outward normal of the run — away from the lake, so a spur hitting the
-    // railing from inside the park has a positive dot with it.
-    const outward = new THREE.Vector2(along.y, -along.x);
-    if (outward.dot(from) < 0) outward.negate();
+  const gates: [number, number][] = [];
+  for (const [dx, dz] of PATH_SPURS) {
+    const dir = new THREE.Vector2(dx, dz).normalize();
+    // Spur p = t * dir meets the run from + s * along.
+    const det = along.x * dir.y - dir.x * along.y;
+    if (Math.abs(det) < 1e-6) continue;
+    const t = (along.x * from.y - from.x * along.y) / det;
+    const s = (dir.x * from.y - from.x * dir.y) / det;
+    // Only a hit going out from the lake onto this stretch of railing.
+    if (t < 10 || s < GATE_WIDTH / 2 || s > length - GATE_WIDTH / 2) continue;
+    if (dir.dot(outward) < 0.15) continue;
+    gates.push([s - GATE_WIDTH / 2, GATE_WIDTH]);
+  }
 
-    const gates: [number, number][] = [];
-    for (const [dx, dz] of PATH_SPURS) {
-      const dir = new THREE.Vector2(dx, dz).normalize();
-      // Spur p = t * dir meets the run from + s * along.
-      const det = along.x * dir.y - dir.x * along.y;
-      if (Math.abs(det) < 1e-6) continue;
-      const t = (along.x * from.y - from.x * along.y) / det;
-      const s = (dir.x * from.y - from.x * dir.y) / det;
-      // Only a hit going out from the lake onto this stretch of railing.
-      if (t < 10 || s < GATE_WIDTH / 2 || s > length - GATE_WIDTH / 2) continue;
-      if (dir.dot(outward) < 0.2) continue;
-      gates.push([s - GATE_WIDTH / 2, GATE_WIDTH]);
-    }
+  // A couple of pedestrian openings so the ring isn't only the path ways in.
+  gates.push([length * 0.28, 5], [length * 0.72, 5]);
 
-    // Extra pedestrian openings that aren't on a spur, so the railings
-    // aren't a solid wall with only the path ways in.
-    if (Math.abs(from.y - to.y) < 0.1) {
-      gates.push([54, 5], [length - 54 - 5, 5]);
+  // Merge any that landed on top of each other.
+  gates.sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const gate of gates) {
+    const last = merged[merged.length - 1];
+    if (last && gate[0] < last[0] + last[1] + 2) {
+      const end = Math.max(last[0] + last[1], gate[0] + gate[1]);
+      last[1] = end - last[0];
     } else {
-      gates.push([length * 0.72, 5]);
+      merged.push([gate[0], gate[1]]);
     }
+  }
+  return merged;
+}
 
-    // Merge any that landed on top of each other.
-    gates.sort((a, b) => a[0] - b[0]);
-    const merged: [number, number][] = [];
-    for (const gate of gates) {
-      const last = merged[merged.length - 1];
-      if (last && gate[0] < last[0] + last[1] + 2) {
-        const end = Math.max(last[0] + last[1], gate[0] + gate[1]);
-        last[1] = end - last[0];
-      } else {
-        merged.push([gate[0], gate[1]]);
-      }
-    }
-    return merged;
-  };
-
-  return [
-    { from: northFrom, to: northTo, gates: gatesOn(northFrom, northTo) },
-    { from: eastFrom, to: eastTo, gates: gatesOn(eastFrom, eastTo) },
-  ];
+const RUNS: readonly Run[] = (() => {
+  const runs: Run[] = [];
+  for (let i = 0; i < PARK_RING.length; i++) {
+    const from = PARK_RING[i]!;
+    const to = PARK_RING[(i + 1) % PARK_RING.length]!;
+    runs.push({ from, to, gates: gatesOn(from, to) });
+  }
+  return runs;
 })();
 
 export function buildFencing(scene: THREE.Scene): void {
@@ -274,9 +292,8 @@ export function buildFencing(scene: THREE.Scene): void {
 }
 
 /**
- * Midpoints of every gateway, plus a couple of open spots on the promenade
- * side. People and animals come in and leave by these, rather than
- * materialising on the path.
+ * Midpoints of every gateway. People and animals come in and leave by these,
+ * rather than materialising on the path.
  */
 export function parkGates(): THREE.Vector2[] {
   const gates: THREE.Vector2[] = [];
@@ -293,8 +310,6 @@ export function parkGates(): THREE.Vector2[] {
       );
     }
   }
-  // The south side is open to the seafront — no railings to come through.
-  gates.push(new THREE.Vector2(-50, -95), new THREE.Vector2(50, -95));
   return gates;
 }
 

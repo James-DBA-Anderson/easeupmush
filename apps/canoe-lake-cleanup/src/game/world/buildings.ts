@@ -5,14 +5,13 @@ import { hitsAny, type Footprint } from "./collision";
 /**
  * What you can see from Canoe Lake, roughly where it really is.
  *
- * St Helens Parade runs along the north side (+Z): a long wall of tall
+ * St Helens Parade wraps the west and north (+Z / −X): a long wall of tall
  * Victorian and Edwardian terraces and seafront hotels looking out over the
- * water. Eastern Parade carries on round the west end (-X). South (-Z) is
- * Clarence Esplanade, the beach and the Solent, with South Parade Pier out
- * over the water to the south-west and the glass of the Pyramids beyond it.
- * Lumps Fort holds the eastern edge, and on a clear day the Spinnaker Tower
- * stands up over the rooftops away to the north-west, with the Isle of Wight
- * a grey line across the water.
+ * water. South (−Z) is Eastney Esplanade, the beach and the Solent, with
+ * South Parade Pier out over the water to the west and the glass of the
+ * Pyramids beyond it. On a clear day the Spinnaker Tower stands up over the
+ * rooftops away to the north-west, with the Isle of Wight a grey line across
+ * the water.
  */
 
 const RENDER = new THREE.MeshStandardMaterial({
