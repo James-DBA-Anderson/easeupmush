@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Canoe Lake — Level Editor</title>
+  <style>
+    :root {
+      --bg: #1a221c;
+      --panel: #243028;
+      --ink: #e8efe6;
+      --muted: #9aaf9e;
+      --accent: #ffd23a;
+      --shore: #3aa0b8;
+      --path: #c4bda8;
+      --ring: #c9a0ff;
+      --place: #ff8a4c;
+      --bin: #7dcea0;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--ink);
+      font: 13px/1.4 "Segoe UI", system-ui, sans-serif;
+      overflow: hidden;
+    }
+    #app {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      height: 100%;
+    }
+    header, footer {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 12px;
+      background: var(--panel);
+      border-bottom: 1px solid #0006;
+    }
+    footer { border-bottom: none; border-top: 1px solid #0006; }
+    h1 {
+      font-size: 14px;
+      letter-spacing: 0.04em;
+      margin-right: 8px;
+    }
+    .tools, .actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    button, label.btn {
+      appearance: none;
+      border: 1px solid #ffffff22;
+      background: #2f3c34;
+      color: var(--ink);
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+    }
+    button:hover, label.btn:hover { background: #3a4a40; }
+    button.active {
+      background: var(--accent);
+      color: #1a1408;
+      border-color: transparent;
+      font-weight: 600;
+    }
+    button.danger { background: #5a2a2a; }
+    label.btn input { display: none; }
+    .spacer { flex: 1; }
+    #workspace {
+      display: grid;
+      grid-template-columns: 1fr;
+      min-height: 0;
+      overflow: hidden;
+    }
+    #workspace.place-open {
+      grid-template-columns: 280px 1fr;
+    }
+    #place-panel {
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+      padding: 10px;
+      background: var(--panel);
+      border-right: 1px solid #0006;
+      min-height: 0;
+      overflow: auto;
+    }
+    #workspace.place-open #place-panel { display: flex; }
+    #place-panel h2 {
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    #place-catalog {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    #place-catalog button {
+      text-align: left;
+      width: 100%;
+    }
+    #place-catalog button.active {
+      background: var(--place);
+      color: #1a1408;
+    }
+    .preview-wrap {
+      position: relative;
+      flex: 1;
+      min-height: 200px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #ffffff18;
+      background: #152018;
+    }
+    #place-preview {
+      width: 100%;
+      height: 100%;
+      min-height: 220px;
+      cursor: grab;
+      display: block;
+    }
+    #place-preview:active { cursor: grabbing; }
+    .place-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .place-controls label.hint {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .place-controls input[type="range"] { flex: 1; width: auto; }
+    .place-controls .val {
+      min-width: 3em;
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+    #stage {
+      position: relative;
+      overflow: hidden;
+      background: #152018;
+      min-width: 0;
+    }
+    .zoom-dock {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      z-index: 2;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      background: #243028ee;
+      border: 1px solid #ffffff22;
+      color: var(--muted);
+      font-size: 12px;
+      pointer-events: auto;
+    }
+    .zoom-dock input[type="range"] { width: 140px; vertical-align: middle; }
+    .zoom-dock .val {
+      min-width: 3.2em;
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      cursor: crosshair;
+    }
+    .hint { color: var(--muted); font-size: 12px; }
+    .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+    input[type="range"] { width: 88px; vertical-align: middle; }
+    .ref-panel {
+      display: none;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      width: 100%;
+      padding-top: 6px;
+      border-top: 1px solid #ffffff12;
+      margin-top: 4px;
+    }
+    .ref-panel.on { display: flex; }
+    .ref-panel label.hint { display: inline-flex; align-items: center; gap: 6px; }
+    .ref-panel .val { min-width: 2.5em; color: var(--ink); font-variant-numeric: tabular-nums; }
+    select {
+      background: #2f3c34;
+      color: var(--ink);
+      border: 1px solid #ffffff22;
+      border-radius: 6px;
+      padding: 5px 8px;
+      font: inherit;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>LEVEL EDITOR</h1>
+      <div class="tools" id="tools">
+        <button type="button" data-tool="pan">Pan</button>
+        <button type="button" data-tool="bg">Background</button>
+        <button type="button" data-tool="shore" class="active">Shore</button>
+        <button type="button" data-tool="paths">Paths</button>
+        <button type="button" data-tool="ring">Park ring</button>
+        <button type="button" data-tool="place">Buildings</button>
+        <button type="button" data-tool="bins">Bins</button>
+      </div>
+      <div class="spacer"></div>
+      <div class="actions">
+        <label class="btn">Add image<input type="file" id="ref-file" accept="image/*" /></label>
+        <button type="button" id="paste-ref">Paste image</button>
+        <button type="button" id="clear-ref" class="danger">Remove image</button>
+      </div>
+      <div class="ref-panel" id="ref-panel">
+        <label class="hint">Image <input type="range" id="ref-opacity" min="0" max="100" value="45" /><span class="val" id="ref-opacity-val">45%</span></label>
+        <label class="hint">Map <input type="range" id="map-opacity" min="0" max="100" value="70" /><span class="val" id="map-opacity-val">70%</span></label>
+        <label class="hint">Size <input type="range" id="ref-size" min="40" max="900" value="420" /><span class="val" id="ref-size-val">420m</span></label>
+        <label class="hint">Rotate <input type="range" id="ref-rot" min="-180" max="180" value="0" /><span class="val" id="ref-rot-val">0°</span></label>
+        <button type="button" id="fit-ref">Fit to park</button>
+        <button type="button" id="ref-rot-reset">Reset rotation</button>
+        <span class="hint">Background tool: drag to move · scroll pans · Zoom slider / Ctrl+scroll zooms</span>
+      </div>
+    </header>
+    <div id="workspace">
+      <aside id="place-panel">
+        <h2>PLACE</h2>
+        <div id="place-catalog"></div>
+        <div class="preview-wrap">
+          <canvas id="place-preview"></canvas>
+        </div>
+        <div class="place-controls">
+          <label class="hint">Yaw
+            <input type="range" id="place-yaw" min="-180" max="180" value="0" />
+            <span class="val" id="place-yaw-val">0°</span>
+          </label>
+          <span class="hint">Drag preview to orbit · scroll to zoom · Shift-drag to set yaw</span>
+        </div>
+      </aside>
+      <div id="stage">
+        <canvas id="view"></canvas>
+        <label class="zoom-dock" title="Zoom (Ctrl/Cmd+scroll also zooms)">
+          Zoom
+          <input type="range" id="zoom" min="0" max="1000" value="500" />
+          <span class="val" id="zoom-val">1.80×</span>
+        </label>
+      </div>
+    </div>
+    <footer>
+      <span class="hint" id="status">Drag points · click path edge to add node · Shift-drag path · arrows nudge · Undo / Ctrl+Z</span>
+      <div class="spacer"></div>
+      <button type="button" id="undo" disabled title="Undo (Ctrl/Cmd+Z)">Undo</button>
+      <select id="path-select" title="Active path"></select>
+      <button type="button" id="add-path">+ Path</button>
+      <button type="button" id="del-path">Delete path</button>
+      <button type="button" id="auto-bins">Auto bins</button>
+      <button type="button" id="save">Save</button>
+      <button type="button" id="download">Download JSON</button>
+      <label class="btn">Import JSON<input type="file" id="import-file" accept="application/json,.json" /></label>
+      <button type="button" id="reset" class="danger">Reset default</button>
+      <a href="./" style="color:var(--accent);margin-left:8px">Play game</a>
+    </footer>
+  </div>
+  <script type="module" src="/src/editor/main.ts"></script>
+</body>
+</html>

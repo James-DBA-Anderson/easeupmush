@@ -3,6 +3,8 @@ import {
   isLandscape,
   isMobilePlay,
 } from "./game/MobileControls";
+import { applyLevel } from "./level/apply";
+import { loadLevel } from "./level/storage";
 
 /**
  * Stop accidental browser zoom (pinch / double-tap). Viewport meta helps,
@@ -43,12 +45,13 @@ function markTouchShell(on: boolean): void {
 disableMobileBrowserZoom();
 
 let game: Game | null = null;
+let booting = false;
 
 /**
  * On phones the world must not exist in portrait — only the rotate prompt.
  * Landscape (or desktop) boots the game once; flipping back freezes it.
  */
-function syncBoot(): void {
+async function syncBoot(): Promise<void> {
   const mobile = isMobilePlay();
   const land = isLandscape();
 
@@ -64,9 +67,17 @@ function syncBoot(): void {
   setRotatePrompt(false);
 
   if (!game) {
-    game = new Game();
-    game.start();
-    (window as unknown as { __game: Game }).__game = game;
+    if (booting) return;
+    booting = true;
+    try {
+      const level = await loadLevel();
+      applyLevel(level);
+      game = new Game();
+      game.start();
+      (window as unknown as { __game: Game }).__game = game;
+    } finally {
+      booting = false;
+    }
   } else {
     game.setFrozen(false);
   }
@@ -74,11 +85,17 @@ function syncBoot(): void {
   if (!mobile) markTouchShell(false);
 }
 
-window.addEventListener("resize", () => syncBoot());
+window.addEventListener("resize", () => {
+  void syncBoot();
+});
 window.addEventListener("orientationchange", () => {
   // iOS often reports the old size until the next frame.
-  requestAnimationFrame(() => syncBoot());
+  requestAnimationFrame(() => {
+    void syncBoot();
+  });
 });
-window.visualViewport?.addEventListener("resize", () => syncBoot());
+window.visualViewport?.addEventListener("resize", () => {
+  void syncBoot();
+});
 
-syncBoot();
+void syncBoot();

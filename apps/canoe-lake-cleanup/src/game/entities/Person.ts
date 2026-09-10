@@ -132,6 +132,17 @@ const SCARED = [
   "I'LL LAY IT OUT IF IT COMES NEAR",
 ];
 
+const FIRE_PANIC = [
+  "FIRE!",
+  "THE GRASS IS ALIGHT!",
+  "GET BACK!",
+  "SOMEONE CALL THE BRIGADE!",
+  "RUN!",
+  "IT'S SPREADING!",
+  "LEAVE IT — GET CLEAR!",
+  "BLOODY BARBECUES!",
+];
+
 /** Watching two birds have a go at each other over the bread. */
 const BIRD_FIGHT = [
   "LOOK AT THEM GO!",
@@ -844,6 +855,49 @@ export class Person {
     this.scareAway.normalize();
 
     if (wingsOut || Math.random() < 0.6) this.say(SCARED);
+    this.showMood("shocked");
+  }
+
+  /**
+   * Grass fire on the green — drop everything and clear out inland, shouting.
+   */
+  public panicFromFire(at: THREE.Vector3): void {
+    if (
+      this.dunk > 0 ||
+      this.errand === "arriving" ||
+      this.errand === "leaving"
+    )
+      return;
+
+    const here = this.group.position;
+    const gap = here.distanceTo(at);
+    if (gap > 22) return;
+    // Already scarpering hard enough.
+    if (this.scareLeft > 2.5) return;
+
+    this.feeding = 0;
+    this.scattering = 0;
+    this.strop = 0;
+    this.gawpLeft = 0;
+
+    this.scareLeft = 4.5 + Math.random() * 2.5;
+    this.scareAway.subVectors(here, at).setY(0);
+    if (this.scareAway.lengthSq() < 0.01) {
+      this.scareAway.set(
+        Math.sin(this.group.rotation.y + Math.PI),
+        0,
+        Math.cos(this.group.rotation.y + Math.PI),
+      );
+    }
+    this.scareAway.normalize();
+
+    // Prefer away from the lake if the fire's between them and the water.
+    const shore = nearestShore(here.x, here.z);
+    const out = outwardAt(shore);
+    this.scareAway.addScaledVector(new THREE.Vector3(out.x, 0, out.y), 0.7);
+    this.scareAway.normalize();
+
+    if (Math.random() < 0.7) this.say(FIRE_PANIC);
     this.showMood("shocked");
   }
 

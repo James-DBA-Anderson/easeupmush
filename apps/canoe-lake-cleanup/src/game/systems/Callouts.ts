@@ -3,6 +3,7 @@ import type { Messages } from "../ui/Messages";
 /** Everything the phone might go off about. */
 export type Callout =
   | "shift"
+  | "jobs"
   | "poo"
   | "litter"
   | "bin"
@@ -11,12 +12,14 @@ export type Callout =
   | "ebike"
   | "branches"
   | "gulls"
+  | "fire"
   | "spitfire"
   | "praise";
 
 /** How long before the same sort of job can be reported again. */
 const COOLDOWN: Record<Callout, number> = {
   shift: 9999,
+  jobs: 9999,
   poo: 160,
   litter: 140,
   bin: 120,
@@ -25,6 +28,7 @@ const COOLDOWN: Record<Callout, number> = {
   ebike: 130,
   branches: 150,
   gulls: 180,
+  fire: 9999,
   spitfire: 600,
   praise: 300,
 };
@@ -42,6 +46,7 @@ const TROUBLE: ReadonlySet<Callout> = new Set([
   "ebike",
   "branches",
   "gulls",
+  "fire",
 ]);
 
 /** Breathing room between any two jobs that need sorting. */
@@ -51,6 +56,7 @@ const SHIFT_GRACE = 55;
 
 const SENDERS: Record<Callout, string> = {
   shift: "DEPOT",
+  jobs: "DEPOT",
   poo: "DEPOT",
   litter: "PARK WARDEN",
   bin: "DEPOT",
@@ -59,6 +65,7 @@ const SENDERS: Record<Callout, string> = {
   ebike: "PCSO GRANT",
   branches: "TREE OFFICER",
   gulls: "PARK WARDEN",
+  fire: "999 CONTROL",
   spitfire: "DAVE (DEPOT)",
   praise: "DEPOT",
 };
@@ -69,8 +76,13 @@ const SENDERS: Record<Callout, string> = {
  */
 const LINES: Record<Callout, readonly string[]> = {
   shift: [
-    "Morning. Lake's yours today. Washer's charged, sack's in the van.",
-    "You look hanging, mush. Coffee's in the van if you need it.",
+    "Morning. Overnight tip's right by you — lance that paving first.",
+    "You look hanging, mush. Swans have carpeted the path by the van. Get stuck in.",
+  ],
+  jobs: [
+    "That's the overnight nearly done. Fresh mess further round {where} — keep going.",
+    "Opening tip's sorted. Path's a state {where}. Get the lance on it.",
+    "Good work. More dumps reported {where}. Rest of the park's yours now.",
   ],
   poo: [
     "Complaints piling up about swan mess on the paving. Get the lance on it.",
@@ -115,6 +127,12 @@ const LINES: Record<Callout, readonly string[]> = {
     "Gulls have got at somebody's chips again. Expect a mess after.",
     "Flock of gulls down on the paving {where}. Whatever they're eating, it wasn't theirs.",
     "Caller's lost her grub to a seagull {where}. Nothing we can do, but mind the aftermath.",
+  ],
+  fire: [
+    "BBQ's set the grass off {where}. Get the washer on it before it walks.",
+    "Caller says the green's alight by a barbecue {where}. Hose it. Now.",
+    "Grass fire spreading from a disposable {where}. You're nearest — put it out.",
+    "Fire on the lawn {where}. Lance it before the brigade's got to roll.",
   ],
   spitfire: [
     "Spitfire's coming down the front. Look up, you'll miss it.",
@@ -175,5 +193,15 @@ export class Callouts {
     const where = at ? whereabouts(at.x, at.z) : "round the lake";
     this.messages.send(SENDERS[job], line.replace("{where}", where), clock);
     return true;
+  }
+
+  /** Hold reactive jobs (opening tip still on). */
+  public lockTrouble(): void {
+    this.troubleIn = 1e9;
+  }
+
+  /** Opening tip cleared enough — the rest of the shift can phone in. */
+  public unlockTrouble(): void {
+    this.troubleIn = 0;
   }
 }

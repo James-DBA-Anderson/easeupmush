@@ -1,10 +1,10 @@
 import * as THREE from "three";
 import {
+  PATH_INNER,
   PATH_OUTER,
+  PATH_SPURS,
   SHORE,
   offsetShore,
-  pathSpurs,
-  type PathSpur,
 } from "../world/lake";
 import {
   getPlayPark,
@@ -16,6 +16,8 @@ import { PARK_RING } from "../world/fence";
 import type { Footprint } from "../world/collision";
 
 const REFRESH = 1 / 15;
+const PATH_COLOUR = "#9a958a";
+const PATH_WIDTH = 4;
 
 interface MapData {
   player: THREE.Vector3;
@@ -41,7 +43,6 @@ export class MiniMap {
   private height: number;
   private scale: number;
   private since = 0;
-  private spurs: PathSpur[];
 
   constructor(canvas: HTMLCanvasElement) {
     const dpr = Math.min(window.devicePixelRatio, 2);
@@ -56,13 +57,21 @@ export class MiniMap {
     this.ctx = ctx;
 
     // Fit the whole grounds inside the railings, with a little breathing room.
-    const halfX = 200;
-    const halfZ = 150;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (const p of PARK_RING) {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minZ = Math.min(minZ, p.y);
+      maxZ = Math.max(maxZ, p.y);
+    }
+    const pad = 12;
     this.scale = Math.min(
-      this.width / (halfX * 2),
-      this.height / (halfZ * 2),
+      this.width / (maxX - minX + pad * 2),
+      this.height / (maxZ - minZ + pad * 2),
     );
-    this.spurs = pathSpurs();
   }
 
   private toScreen(x: number, z: number): [number, number] {
@@ -88,7 +97,7 @@ export class MiniMap {
     this.ctx.fill();
   }
 
-  /** Oriented rectangle in world XZ — buildings, spurs, play park. */
+  /** Oriented rectangle in world XZ — buildings, play park. */
   private rect(
     x: number,
     z: number,
@@ -136,10 +145,6 @@ export class MiniMap {
     );
   }
 
-  private spur(s: PathSpur): void {
-    this.rect(s.x, s.z, s.width / 2, s.length / 2, s.yaw, "#9a958a");
-  }
-
   private playPark(site: PlayParkSite): void {
     this.rect(
       site.x,
@@ -150,6 +155,71 @@ export class MiniMap {
       "#5a4a52",
       "rgba(255,255,255,0.2)",
     );
+  }
+
+  /**
+   * Lake ring and the spur network as stroked polylines — same segments as
+   * the 3D paving, so the mini map stays in step when the paths change.
+   */
+  private drawPaths(): void {
+    const ctx = this.ctx;
+    const width = Math.max(1.5, PATH_WIDTH * this.scale);
+
+    // Outer fill of the perimeter path, then punch the water side with grass
+    // so only the ring reads as paving.
+    this.trace(offsetShore(PATH_OUTER));
+    ctx.fillStyle = PATH_COLOUR;
+    ctx.fill();
+    this.trace(offsetShore(PATH_INNER));
+    ctx.fillStyle = "#456848";
+    ctx.fill();
+
+    ctx.strokeStyle = PATH_COLOUR;
+    ctx.lineWidth = width;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (const spur of PATH_SPURS) {
+      const [ax, ay] = this.toScreen(spur.ax, spur.az);
+      const [bx, by] = this.toScreen(spur.bx, spur.bz);
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+    }
+  }
+
+  /**
+   * Player chevron. Tip is drawn pointing up (screen −Y = world +Z); canvas
+   * yaw is clockwise, while world heading is CCW about Y, so we rotate by
+   * π + heading to send the tip along the look direction.
+   */
+  private drawPlayer(x: number, z: number, heading: number): void {
+    const ctx = this.ctx;
+    const [px, py] = this.toScreen(x, z);
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(Math.PI + heading);
+
+    // Dark outline so it stays readable on pale paving.
+    ctx.fillStyle = "#1a1204";
+    ctx.beginPath();
+    ctx.moveTo(0, -8);
+    ctx.lineTo(5.5, 6.5);
+    ctx.lineTo(0, 3.5);
+    ctx.lineTo(-5.5, 6.5);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = "#ffe14a";
+    ctx.beginPath();
+    ctx.moveTo(0, -6.5);
+    ctx.lineTo(4.2, 5);
+    ctx.lineTo(0, 2.5);
+    ctx.lineTo(-4.2, 5);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
   }
 
   public update(delta: number, data: MapData): void {
@@ -174,11 +244,7 @@ export class MiniMap {
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    // Path ring, then the spurs out to the gates / esplanade.
-    this.trace(offsetShore(PATH_OUTER));
-    ctx.fillStyle = "#9a958a";
-    ctx.fill();
-    for (const spur of this.spurs) this.spur(spur);
+    this.drawPaths();
 
     this.trace(SHORE);
     ctx.fillStyle = "#2f6d7c";
@@ -210,18 +276,6 @@ export class MiniMap {
     for (const cygnet of data.cygnets) this.dot(cygnet, 1.3, "#c9bfae");
     if (data.fox) this.dot(data.fox, 1.8, "#e07a2c");
 
-    const [px, py] = this.toScreen(data.player.x, data.player.z);
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(Math.PI - data.heading);
-    ctx.fillStyle = "#ffcf3a";
-    ctx.beginPath();
-    ctx.moveTo(0, -5);
-    ctx.lineTo(3.6, 4);
-    ctx.lineTo(0, 2);
-    ctx.lineTo(-3.6, 4);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
+    this.drawPlayer(data.player.x, data.player.z, data.heading);
   }
 }

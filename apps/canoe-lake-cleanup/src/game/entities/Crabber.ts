@@ -1,6 +1,7 @@
-import * as THREE from 'three';
-import { WATER_Y, nearestShore, outwardAt } from '../world/lake';
-import { Grumble } from '../effects/Grumble';
+import * as THREE from "three";
+import { WATER_Y, nearestShore, outwardAt } from "../world/lake";
+import { Grumble } from "../effects/Grumble";
+import type { GrassFire } from "../effects/GrassFire";
 
 const COATS = [0x2f4f7f, 0x8b3a3a, 0x3f6b4a, 0x5a4a7a, 0xb06a2c, 0xd8452f];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
@@ -19,13 +20,30 @@ const MISSES = [
   "AW, MAN",
   "I'VE COPPED THE NEEDLE WITH THIS",
 ];
+const FIRE_LINES = [
+  "GET SOME WATER ON IT!",
+  "I'VE GOT THE BUCKET!",
+  "CHUCK IT!",
+  "PUT IT OUT!",
+  "QUICK — THE BUCKET!",
+];
 
 /** Chance there's something on the line when they pull it up. */
 const CATCH_ODDS = 0.45;
 const HAUL_TIME = 1.3;
 const SHOW_TIME = 1.6;
+/** How close before they'll fling the bucket. */
+const CHUCK_RANGE = 4.5;
 
-type Phase = "arriving" | "waiting" | "hauling" | "showing" | "casting" | "leaving";
+type Phase =
+  | "arriving"
+  | "waiting"
+  | "hauling"
+  | "showing"
+  | "casting"
+  | "leaving"
+  | "toFire"
+  | "chucking";
 
 /** A kid crouched at the edge with a hand line and a bucket, crabbing. */
 export class Crabber {
@@ -36,6 +54,8 @@ export class Crabber {
   private line: THREE.Line;
   private lineEnd = new THREE.Vector3();
   private crab: THREE.Group;
+  private bucket: THREE.Group;
+  private bucketHome = new THREE.Vector3(-0.46, 0, -0.1);
   private bucketCrabs: THREE.Mesh[] = [];
 
   private phase: Phase = "arriving";
@@ -47,8 +67,17 @@ export class Crabber {
   private packUp: number;
   private stand = new THREE.Vector3();
   private exitFor = new THREE.Vector3();
+  private fireTarget = new THREE.Vector3();
+  private chucksLeft = 0;
   private step = Math.random() * Math.PI * 2;
   private gone = false;
+  private splashes: {
+    mesh: THREE.Mesh;
+    life: number;
+    vx: number;
+    vy: number;
+    vz: number;
+  }[] = [];
 
   /** Depth the line hangs at, and how far out from the wall it goes in. */
   private restY = WATER_Y - 0.55;
@@ -77,6 +106,7 @@ export class Crabber {
       this.stand.z - this.group.position.z,
     );
 
+    this.bucket = new THREE.Group();
     this.build();
     scene.add(this.group);
     // Kit stays packed until they're knelt down.
@@ -103,10 +133,20 @@ export class Crabber {
   }
 
   private build(): void {
-    const pick = <T>(list: readonly T[]): T => list[Math.floor(Math.random() * list.length)]!;
-    const coat = new THREE.MeshStandardMaterial({ color: pick(COATS), roughness: 0.9 });
-    const legMat = new THREE.MeshStandardMaterial({ color: 0x2b3038, roughness: 0.9 });
-    const skin = new THREE.MeshStandardMaterial({ color: pick(SKIN), roughness: 0.8 });
+    const pick = <T>(list: readonly T[]): T =>
+      list[Math.floor(Math.random() * list.length)]!;
+    const coat = new THREE.MeshStandardMaterial({
+      color: pick(COATS),
+      roughness: 0.9,
+    });
+    const legMat = new THREE.MeshStandardMaterial({
+      color: 0x2b3038,
+      roughness: 0.9,
+    });
+    const skin = new THREE.MeshStandardMaterial({
+      color: pick(SKIN),
+      roughness: 0.8,
+    });
 
     // Crouched down over the water: torso low, knees up, leaning forward.
     const torso = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.4, 0.2), coat);
@@ -121,13 +161,19 @@ export class Crabber {
     this.group.add(head);
 
     for (const side of [-1, 1]) {
-      const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.32, 0.13), legMat);
+      const thigh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.12, 0.32, 0.13),
+        legMat,
+      );
       thigh.geometry.translate(0, -0.16, 0);
       thigh.position.set(side * 0.09, 0.38, 0.02);
       thigh.rotation.x = -1.35;
       this.group.add(thigh);
 
-      const shin = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.34, 0.12), legMat);
+      const shin = new THREE.Mesh(
+        new THREE.BoxGeometry(0.11, 0.34, 0.12),
+        legMat,
+      );
       shin.geometry.translate(0, -0.17, 0);
       shin.position.set(side * 0.09, 0.36, 0.3);
       this.group.add(shin);
@@ -150,14 +196,17 @@ export class Crabber {
     this.group.add(this.hand);
 
     // The bucket, sat on the paving beside them with an inch of lake in it.
-    const bucket = new THREE.Group();
     const pail = new THREE.Mesh(
       new THREE.CylinderGeometry(0.17, 0.13, 0.26, 10, 1, true),
-      new THREE.MeshStandardMaterial({ color: pick(BUCKETS), roughness: 0.6, side: THREE.DoubleSide }),
+      new THREE.MeshStandardMaterial({
+        color: pick(BUCKETS),
+        roughness: 0.6,
+        side: THREE.DoubleSide,
+      }),
     );
     pail.position.y = 0.13;
     pail.castShadow = true;
-    bucket.add(pail);
+    this.bucket.add(pail);
 
     const water = new THREE.Mesh(
       new THREE.CircleGeometry(0.15, 12),
@@ -165,26 +214,36 @@ export class Crabber {
     );
     water.rotation.x = -Math.PI / 2;
     water.position.y = 0.19;
-    bucket.add(water);
+    this.bucket.add(water);
 
-    bucket.position.set(-0.46, 0, -0.1);
-    this.group.add(bucket);
+    this.bucket.position.copy(this.bucketHome);
+    this.group.add(this.bucket);
 
     // Their catch so far, shuffling about in the bottom.
-    const shell = new THREE.MeshStandardMaterial({ color: 0x8c4a2f, roughness: 0.8 });
+    const shell = new THREE.MeshStandardMaterial({
+      color: 0x8c4a2f,
+      roughness: 0.8,
+    });
     for (let i = 0; i < 5; i++) {
       const crab = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 4), shell);
       crab.scale.set(1.4, 0.6, 1);
-      crab.position.set((Math.random() - 0.5) * 0.16, 0.2, (Math.random() - 0.5) * 0.16);
+      crab.position.set(
+        (Math.random() - 0.5) * 0.16,
+        0.2,
+        (Math.random() - 0.5) * 0.16,
+      );
       crab.visible = false;
-      bucket.add(crab);
+      this.bucket.add(crab);
       this.bucketCrabs.push(crab);
     }
   }
 
   private buildCrab(): THREE.Group {
     const crab = new THREE.Group();
-    const shell = new THREE.MeshStandardMaterial({ color: 0x8c4a2f, roughness: 0.8 });
+    const shell = new THREE.MeshStandardMaterial({
+      color: 0x8c4a2f,
+      roughness: 0.8,
+    });
 
     const body = new THREE.Mesh(new THREE.SphereGeometry(0.07, 7, 5), shell);
     body.scale.set(1.5, 0.6, 1.1);
@@ -197,7 +256,10 @@ export class Crabber {
       crab.add(claw);
 
       for (let i = 0; i < 3; i++) {
-        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.012, 0.012), shell);
+        const leg = new THREE.Mesh(
+          new THREE.BoxGeometry(0.06, 0.012, 0.012),
+          shell,
+        );
         leg.position.set(side * 0.11, -0.01, -0.02 - i * 0.03);
         crab.add(leg);
       }
@@ -214,11 +276,80 @@ export class Crabber {
     return this.gone;
   }
 
+  /**
+   * Fire on the green — drop the line, grab the bucket, and chuck lake water
+   * at the flames until they're out or they've had enough.
+   */
+  public fightFire(fire: GrassFire, delta: number): void {
+    if (this.gone) return;
+    if (this.phase === "leaving" || this.phase === "arriving") return;
+
+    const flame = fire.nearestFlame(this.group.position);
+    if (!flame) {
+      if (this.phase === "toFire" || this.phase === "chucking") {
+        this.resumeCrabbing();
+      }
+      return;
+    }
+
+    const gap = this.group.position.distanceTo(flame);
+    // Too far away to bother — keep crabbing.
+    if (gap > 48 && this.phase !== "toFire" && this.phase !== "chucking") {
+      return;
+    }
+
+    if (this.phase !== "toFire" && this.phase !== "chucking") {
+      this.phase = "toFire";
+      this.line.visible = false;
+      this.crab.visible = false;
+      this.chucksLeft = 3 + Math.floor(Math.random() * 3);
+      this.liftBucket(true);
+      this.shout(FIRE_LINES);
+    }
+
+    this.fireTarget.copy(flame);
+
+    if (this.phase === "toFire") {
+      if (this.amble(this.fireTarget, delta, 3.4) < CHUCK_RANGE) {
+        this.phase = "chucking";
+        this.timer = 0.35;
+      }
+      this.updateSplashes(delta);
+      return;
+    }
+
+    // Chucking — swing the bucket and tip water at the fire.
+    this.timer -= delta;
+    this.group.rotation.y = Math.atan2(
+      this.fireTarget.x - this.group.position.x,
+      this.fireTarget.z - this.group.position.z,
+    );
+    const swing = Math.sin(Math.max(0, 0.35 - this.timer) * 14) * 0.8;
+    this.bucket.rotation.x = -0.4 - swing;
+    this.bucket.position.set(-0.15, 0.75 + swing * 0.15, 0.35);
+
+    if (this.timer <= 0) {
+      this.flingWater(fire);
+      this.chucksLeft -= 1;
+      if (this.chucksLeft <= 0 || !fire.isBurning()) {
+        this.resumeCrabbing();
+      } else {
+        this.timer = 0.55 + Math.random() * 0.25;
+        if (Math.random() < 0.45) this.shout(FIRE_LINES);
+      }
+    }
+    this.updateSplashes(delta);
+  }
+
   public update(delta: number): void {
     this.grumble =
       this.grumble?.update(delta, this.group.position) === false
         ? null
         : this.grumble;
+
+    if (this.phase === "toFire" || this.phase === "chucking") {
+      return;
+    }
 
     if (this.phase === "arriving") {
       if (this.amble(this.stand, delta, 1.6) < 0.35) {
@@ -279,7 +410,8 @@ export class Crabber {
       }
     }
 
-    const points = this.line.geometry.attributes.position as THREE.BufferAttribute;
+    const points = this.line.geometry.attributes
+      .position as THREE.BufferAttribute;
     points.setXYZ(0, hand.x, hand.y, hand.z);
     points.setXYZ(1, this.lineEnd.x, this.lineEnd.y, this.lineEnd.z);
     points.needsUpdate = true;
@@ -289,6 +421,69 @@ export class Crabber {
       // Dangling and spinning slowly on the end of the line.
       this.crab.rotation.y += delta * 2.2;
       this.crab.rotation.z = Math.sin(this.bob * 3) * 0.25;
+    }
+  }
+
+  private liftBucket(up: boolean): void {
+    if (up) {
+      this.bucket.position.set(-0.15, 0.7, 0.25);
+      this.bucket.rotation.set(-0.5, 0, 0.2);
+    } else {
+      this.bucket.position.copy(this.bucketHome);
+      this.bucket.rotation.set(0, 0, 0);
+    }
+  }
+
+  private resumeCrabbing(): void {
+    this.liftBucket(false);
+    this.phase = "leaving";
+    this.chucksLeft = 0;
+  }
+
+  private flingWater(fire: GrassFire): void {
+    const from = this.bucket.getWorldPosition(new THREE.Vector3());
+    from.y += 0.2;
+    const to = this.fireTarget;
+    fire.douse(to, 0.75);
+    // A few droplets in an arc toward the flames.
+    for (let i = 0; i < 8; i++) {
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.04, 5, 4),
+        new THREE.MeshBasicMaterial({
+          color: 0x8ec8e0,
+          transparent: true,
+          opacity: 0.85,
+          depthWrite: false,
+        }),
+      );
+      mesh.position.copy(from);
+      this.scene.add(mesh);
+      const t = 0.35 + Math.random() * 0.4;
+      this.splashes.push({
+        mesh,
+        life: t,
+        vx: (to.x - from.x) / t + (Math.random() - 0.5) * 1.5,
+        vy: 2.5 + Math.random() * 2,
+        vz: (to.z - from.z) / t + (Math.random() - 0.5) * 1.5,
+      });
+    }
+  }
+
+  private updateSplashes(delta: number): void {
+    for (let i = this.splashes.length - 1; i >= 0; i--) {
+      const drop = this.splashes[i]!;
+      drop.life -= delta;
+      drop.vy -= 14 * delta;
+      drop.mesh.position.x += drop.vx * delta;
+      drop.mesh.position.y += drop.vy * delta;
+      drop.mesh.position.z += drop.vz * delta;
+      const mat = drop.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = Math.max(0, drop.life * 2);
+      if (drop.life > 0 && drop.mesh.position.y > 0.05) continue;
+      this.scene.remove(drop.mesh);
+      drop.mesh.geometry.dispose();
+      mat.dispose();
+      this.splashes.splice(i, 1);
     }
   }
 
@@ -307,13 +502,13 @@ export class Crabber {
   }
 
   private startHaul(): void {
-    this.phase = 'hauling';
+    this.phase = "hauling";
     this.timer = HAUL_TIME;
     this.hooked = Math.random() < CATCH_ODDS;
   }
 
   private reveal(): void {
-    this.phase = 'showing';
+    this.phase = "showing";
     this.timer = SHOW_TIME;
     this.crab.visible = this.hooked;
     this.shout(this.hooked ? HITS : MISSES);
@@ -323,11 +518,12 @@ export class Crabber {
   private stow(): void {
     if (this.hooked) {
       this.caught += 1;
-      const inBucket = this.bucketCrabs[Math.min(this.caught, this.bucketCrabs.length) - 1];
+      const inBucket =
+        this.bucketCrabs[Math.min(this.caught, this.bucketCrabs.length) - 1];
       if (inBucket) inBucket.visible = true;
     }
     this.crab.visible = false;
-    this.phase = 'casting';
+    this.phase = "casting";
     this.timer = 0.8;
   }
 
@@ -342,6 +538,12 @@ export class Crabber {
 
   public dispose(): void {
     this.grumble?.dispose();
+    for (const drop of this.splashes) {
+      this.scene.remove(drop.mesh);
+      drop.mesh.geometry.dispose();
+      (drop.mesh.material as THREE.Material).dispose();
+    }
+    this.splashes = [];
     this.scene.remove(this.group);
     this.scene.remove(this.line);
     this.scene.remove(this.crab);

@@ -19,6 +19,9 @@ const TAPE = matt(0xe8e8e0);
 /**
  * Chunky mitten hand for the viewmodels — palm, one finger pad, stub thumb.
  * Reads as a grip without looking like articulated digits.
+ *
+ * Local space: palm faces −Y (down onto a handle), fingers curl toward −Y/−Z,
+ * wrist cuff sits at −Z. Parent a sleeve at the cuff so the arm stays attached.
  */
 export function buildHand(
   side: 1 | -1,
@@ -27,56 +30,74 @@ export function buildHand(
   const hand = new THREE.Group();
 
   // How hard the mitt curls around the handle.
-  const curl =
-    pose === "sack" ? 0.55 : pose === "picker" ? 0.95 : 1.15;
+  const curl = pose === "sack" ? 0.55 : pose === "picker" ? 0.85 : 0.95;
 
-  const palm = new THREE.Mesh(new THREE.BoxGeometry(0.078, 0.04, 0.095), GLOVE);
-  palm.position.set(0, 0, 0.015);
+  const palm = new THREE.Mesh(new THREE.BoxGeometry(0.078, 0.038, 0.09), GLOVE);
+  palm.position.set(0, 0, 0.01);
   palm.castShadow = true;
   hand.add(palm);
 
   // Single wide finger pad instead of four separate digits.
-  const mitt = new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.036, 0.07), GLOVE);
-  mitt.geometry.translate(0, 0, 0.032);
-  mitt.position.set(0, 0.004, 0.05);
+  const mitt = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.034, 0.065), GLOVE);
+  mitt.geometry.translate(0, 0, 0.03);
+  mitt.position.set(0, -0.002, 0.048);
   mitt.rotation.x = curl;
   mitt.castShadow = true;
   hand.add(mitt);
 
-  // Fat thumb on the inward side.
-  const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.028, 0.05), GLOVE);
-  thumb.geometry.translate(0, 0, 0.022);
-  thumb.position.set(side * -0.048, 0.012, -0.005);
-  thumb.rotation.set(0.35 + curl * 0.15, side * 0.75, side * -0.55);
+  // Fat thumb on the inward side, wrapping the grip.
+  const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.028, 0.048), GLOVE);
+  thumb.geometry.translate(0, 0, 0.02);
+  thumb.position.set(side * -0.045, 0.008, 0.0);
+  thumb.rotation.set(0.45, side * 0.65, side * -0.7);
   hand.add(thumb);
 
-  // Wrist cuff peeking out of the sleeve — boxy, not a smooth cylinder.
-  const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, 0.038), CUFF);
-  cuff.position.set(0, 0, -0.055);
+  // Wrist cuff — sleeve should meet this face.
+  const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.052, 0.04), CUFF);
+  cuff.position.set(0, 0, -0.052);
   hand.add(cuff);
 
   return hand;
 }
 
-/** Hi-vis forearm coming up into frame from below. */
+/**
+ * Hi-vis forearm. Origin is the wrist (matches the hand cuff at local −Z).
+ * The arm runs back toward the camera (+Z) and down out of frame so it reads
+ * as coming from the player's shoulder, not floating next to the tool.
+ */
 export function buildSleeve(side: 1 | -1): THREE.Group {
   const sleeve = new THREE.Group();
 
-  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.42, 0.1), HIVIS);
-  arm.geometry.translate(0, -0.21, 0);
-  arm.rotation.x = 1.15;
-  arm.position.set(side * 0.02, 0.02, 0.08);
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.42), HIVIS);
+  // Pivot at the wrist end; length runs toward the camera and slightly down.
+  arm.geometry.translate(side * 0.015, -0.05, 0.21);
+  arm.rotation.x = 0.42;
+  arm.rotation.z = side * 0.18;
   arm.castShadow = true;
   sleeve.add(arm);
 
-  // Reflective tape band near the cuff — flat white stripe.
-  const tape = new THREE.Mesh(new THREE.BoxGeometry(0.095, 0.04, 0.105), TAPE);
-  tape.geometry.translate(0, -0.02, 0);
-  tape.rotation.x = 1.15;
-  tape.position.set(side * 0.02, 0.02, 0.08);
+  // Reflective tape band just back from the cuff.
+  const tape = new THREE.Mesh(new THREE.BoxGeometry(0.108, 0.125, 0.05), TAPE);
+  tape.geometry.translate(side * 0.015, -0.02, 0.0);
+  tape.position.set(0, 0, 0.055);
+  tape.rotation.x = 0.42;
+  tape.rotation.z = side * 0.18;
   sleeve.add(tape);
 
   return sleeve;
+}
+
+/** Gloved hand with the hi-vis sleeve already snapped to the cuff. */
+export function buildArmedHand(
+  side: 1 | -1,
+  pose: "gun" | "picker" | "sack" = "gun",
+): THREE.Group {
+  const hand = buildHand(side, pose);
+  const sleeve = buildSleeve(side);
+  // Cuff centre is at z = −0.052; seat the sleeve origin on the cuff's back face.
+  sleeve.position.set(0, 0, -0.072);
+  hand.add(sleeve);
+  return hand;
 }
 
 /** Skin tone kept around for anything that isn't gloved. */

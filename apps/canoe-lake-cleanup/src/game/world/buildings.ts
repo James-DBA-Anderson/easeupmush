@@ -8,10 +8,10 @@ import { hitsAny, type Footprint } from "./collision";
  * St Helens Parade wraps the west and north (+Z / −X): a long wall of tall
  * Victorian and Edwardian terraces and seafront hotels looking out over the
  * water. South (−Z) is Eastney Esplanade, the beach and the Solent, with
- * South Parade Pier out over the water to the west and the glass of the
- * Pyramids beyond it. On a clear day the Spinnaker Tower stands up over the
- * rooftops away to the north-west, with the Isle of Wight a grey line across
- * the water.
+ * South Parade Pier well to the south-west along the front and the glass of
+ * the Pyramids beside it. On a clear day the Spinnaker Tower stands up over
+ * the rooftops away to the north-west, with the Isle of Wight a grey line
+ * across the water.
  */
 
 const RENDER = new THREE.MeshStandardMaterial({
@@ -238,36 +238,39 @@ function seafront(yard: Yard): void {
   yard.box(GROUND, [550, 0.2, 400], [-475, -0.03, 0]);
   yard.box(GROUND, [550, 0.2, 400], [475, -0.03, 0]);
 
-  // Esplanade, then shingle, then water out to the horizon. Each layer sits a
-  // touch higher than the last so it covers the grass underneath.
-  yard.box(STONE, [1100, 0.3, 12], [0, 0.09, -128]);
-  yard.box(SAND, [1100, 0.3, 34], [0, 0.07, -152]);
+  // Esplanade, then shingle, then water — kept south of the park railings so
+  // the stone doesn't run through the SW tip.
+  yard.box(STONE, [1100, 0.3, 12], [0, 0.09, -138]);
+  yard.box(SAND, [1100, 0.3, 34], [0, 0.07, -162]);
   yard.box(SEA, [1600, 0.3, 580], [0, 0.03, -450]);
 
   // Railings along the top of the sea wall, as a broken white line.
   for (let x = -260; x <= 260; x += 4) {
-    yard.box(TRIM, [0.18, 1.1, 0.18], [x, 0.85, -122]);
+    yard.box(TRIM, [0.18, 1.1, 0.18], [x, 0.85, -132]);
   }
-  yard.box(TRIM, [520, 0.16, 0.16], [0, 1.4, -122]);
+  yard.box(TRIM, [520, 0.16, 0.16], [0, 1.4, -132]);
 }
 
 /**
  * South Parade Pier: a long timber deck out over the water on iron legs, with
- * the pavilion at the shore end.
+ * the pavilion at the shore end. It sits well south-west of Canoe Lake — past
+ * the Ocean Hotel along Eastney Esplanade — not beside the park railings.
  */
 function pier(yard: Yard): void {
-  const x = -178;
-  const shore = -118;
+  // ~400m west of the lake centre, starting on the esplanade and running south
+  // over the beach into the Solent.
+  const x = -400;
+  const shore = -130;
 
-  yard.box(SLATE, [16, 0.8, 190], [x, 4.4, shore - 95]);
-  for (let z = shore - 12; z > shore - 190; z -= 14) {
+  yard.box(SLATE, [16, 0.8, 200], [x, 4.4, shore - 100]);
+  for (let z = shore - 12; z > shore - 200; z -= 14) {
     for (const side of [-6, 6]) {
       yard.box(STONE, [1, 4.4, 1], [x + side, 2.2, z]);
     }
   }
 
   // Pavilion at the landward end: a big hall with a domed roof and turrets.
-  const hall = shore - 16;
+  const hall = shore - 18;
   yard.box(RENDER, [30, 12, 34], [x, 10.8, hall]);
   yard.box(SLATE, [32, 2, 36], [x, 17.8, hall]);
   const dome = new THREE.SphereGeometry(
@@ -295,29 +298,29 @@ function pier(yard: Yard): void {
   }
 
   // The smaller pavilion out at the seaward head.
-  yard.box(RENDER, [18, 7, 22], [x, 8.3, shore - 175]);
-  yard.box(SLATE, [20, 1.4, 24], [x, 12.5, shore - 175]);
+  yard.box(RENDER, [18, 7, 22], [x, 8.3, shore - 185]);
+  yard.box(SLATE, [20, 1.4, 24], [x, 12.5, shore - 185]);
 
   surrounds.push(
     { x, z: hall, halfWide: 15, halfDeep: 17, yaw: 0 },
-    { x, z: shore - 175, halfWide: 9, halfDeep: 11, yaw: 0 },
+    { x, z: shore - 185, halfWide: 9, halfDeep: 11, yaw: 0 },
   );
 }
 
-/** The Pyramids, further west along the front: all glass, and unmistakable. */
+/** The Pyramids, next to the pier on the seafront: all glass, and unmistakable. */
 function pyramids(yard: Yard): void {
-  const x = -285;
-  yard.box(STONE, [64, 3, 44], [x, 1.5, -108]);
+  const x = -375;
+  yard.box(STONE, [64, 3, 44], [x, 1.5, -118]);
   for (const [dx, size, height] of [
     [-14, 30, 21],
     [14, 26, 17],
   ] as const) {
     const pyramid = new THREE.ConeGeometry(size, height, 4);
     pyramid.rotateY(Math.PI / 4);
-    pyramid.translate(x + dx, 3 + height / 2, -108);
+    pyramid.translate(x + dx, 3 + height / 2, -118);
     yard.add(GLASS, pyramid);
   }
-  surrounds.push({ x, z: -108, halfWide: 32, halfDeep: 22, yaw: 0 });
+  surrounds.push({ x, z: -118, halfWide: 32, halfDeep: 22, yaw: 0 });
 }
 
 /** The Spinnaker, standing up over the rooftops away to the north-west. */
@@ -383,25 +386,26 @@ export function buildSurrounds(scene: THREE.Scene): void {
   pyramids(yard);
   spinnaker(yard);
 
-  // St Helens Parade: the wall of houses along the north side, close enough
-  // to the water that the roofs and chimneys stand above the oaks.
-  yard.box(STONE, [560, 0.2, 14], [0, 0.05, 138]);
+  // St Helens Parade: road and terraces sit outside the iron railings, north
+  // of the park's NE bulge — not cutting across the green.
+  yard.box(STONE, [560, 0.2, 14], [0, 0.05, 158]);
   terrace(
     yard,
-    new THREE.Vector2(-280, 152),
+    new THREE.Vector2(-280, 172),
     new THREE.Vector2(1, 0),
     540,
     0,
     rand,
   );
 
-  // Eastern Parade carrying on round the west end, facing back east.
-  yard.box(STONE, [14, 0.2, 260], [-195, 0.05, 20]);
+  // Eastern Parade / St Helens west end, facing back east — kept west of the
+  // curved railings on that side.
+  yard.box(STONE, [14, 0.2, 280], [-205, 0.05, 10]);
   terrace(
     yard,
-    new THREE.Vector2(-210, -100),
+    new THREE.Vector2(-220, -110),
     new THREE.Vector2(0, 1),
-    240,
+    260,
     Math.PI / 2,
     rand,
   );

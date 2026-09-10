@@ -146,6 +146,31 @@ export class BbqParty {
     return this.spot.clone();
   }
 
+  public isCooking(): boolean {
+    return this.cooking;
+  }
+
+  /**
+   * Grill's set the grass off — they drop everything and clear out toward
+   * the promenade without finishing their tea.
+   */
+  public scarper(): void {
+    if (this.guests.every((g) => g.phase === "leaving")) return;
+    this.cooking = false;
+    this.packUp = 0;
+    for (const guest of this.guests) {
+      if (guest.phase === "leaving") continue;
+      guest.phase = "leaving";
+      this.say(guest, [
+        "FIRE!",
+        "THE GRASS IS ALIGHT!",
+        "GET BACK!",
+        "SOMEONE CALL THE BRIGADE!",
+        "LEAVE IT!",
+      ]);
+    }
+  }
+
   /** Everyone who's turned up so far — for the minimap crowd. */
   public guestPositions(): THREE.Vector3[] {
     return this.guests.map((g) => g.group.position.clone());

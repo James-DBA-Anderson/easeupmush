@@ -425,7 +425,8 @@
       line-height: 1.6;
     }
 
-    #restart {
+    #restart,
+    #resume {
       margin-top: 8px;
       padding: 12px 26px;
       font: inherit;
@@ -438,8 +439,68 @@
       cursor: pointer;
     }
 
-    #restart:hover {
+    #restart:hover,
+    #resume:hover {
       background: #ffe27a;
+    }
+
+    #pause-btn {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      z-index: 45;
+      padding: 8px 14px;
+      font: inherit;
+      font-size: 13px;
+      letter-spacing: 1px;
+      color: #fff;
+      background: rgba(0, 0, 0, 0.55);
+      border: 2px solid rgba(255, 255, 255, 0.35);
+      border-radius: 8px;
+      cursor: pointer;
+      text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.8);
+      pointer-events: auto;
+      touch-action: manipulation;
+    }
+
+    #pause-btn:hover {
+      background: rgba(0, 0, 0, 0.75);
+      border-color: rgba(255, 255, 255, 0.55);
+    }
+
+    body.paused #pause-btn {
+      display: none;
+    }
+
+    #pause-menu {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      background: rgba(12, 28, 22, 0.72);
+      color: #fff;
+      text-align: center;
+      text-shadow: 2px 2px 6px rgba(0, 0, 0, 0.9);
+      z-index: 50;
+      pointer-events: auto;
+    }
+
+    #pause-menu.on {
+      display: flex;
+    }
+
+    #pause-menu h1 {
+      font-size: 46px;
+      letter-spacing: 3px;
+    }
+
+    #pause-menu p {
+      font-size: 15px;
+      opacity: 0.9;
+      line-height: 1.6;
     }
 
     /* Mobile Controls — hidden until JS adds .visible */
@@ -586,6 +647,13 @@
     }
 
     /* touch-ui = phone in landscape with three sticks. Portrait phones get #rotate-prompt. */
+    body.touch-ui #pause-btn {
+      bottom: calc(12px + 88px + 12px + 88px + 14px + env(safe-area-inset-bottom));
+      right: max(4px, env(safe-area-inset-right));
+      padding: 6px 10px;
+      font-size: 11px;
+    }
+
     body.touch-ui #hud {
       top: 4px;
       right: 4px;
@@ -773,6 +841,12 @@
       HEALTH
       <div id="health-bar"><div id="health-fill"></div></div>
     </div>
+    <button type="button" id="pause-btn">PAUSE</button>
+    <div id="pause-menu">
+      <h1>PAUSED</h1>
+      <p>Take five. The park will wait.</p>
+      <button type="button" id="resume">BACK ON SHIFT</button>
+    </div>
     <div id="game-over">
       <h1>PECKED TO DEATH</h1>
       <p id="game-over-detail"></p>
@@ -780,7 +854,7 @@
     </div>
     <div id="messages"></div>
     <div id="instructions">
-      WASD: Move | Shift: Run | Mouse: Look | Click: Spray | ESC: Lock/Unlock mouse
+      WASD: Move | Shift: Run | Mouse: Look | Click: Spray | ESC: Pause
     </div>
     <div id="rotate-prompt">
       <div class="rotate-card">

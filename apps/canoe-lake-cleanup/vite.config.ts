@@ -28,6 +28,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(root, "index.html"),
+        editor: resolve(root, "editor.html"),
       },
       output: {
         manualChunks: {

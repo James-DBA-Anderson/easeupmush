@@ -1,7 +1,9 @@
 import * as THREE from "three";
-import { SHORE, WATER_Y, outwardAt } from "./lake";
+import { SHORE, WATER_Y, outwardAt, PATH_OUTER, offsetShore } from "./lake";
 import type { Wall } from "../entities/Graffiti";
 import { hitsAny, type Footprint } from "./collision";
+import { DEFAULT_LEVEL } from "../../level/defaultLevel";
+import type { Placeable, PlaceableId, XZ } from "../../level/types";
 
 /**
  * The buildings and fittings marked on a map of Canoe Lake: the small boat
@@ -55,14 +57,31 @@ const RUBBER = new THREE.MeshStandardMaterial({
 /**
  * How far back from the water each thing sits. The paving runs out to 14m,
  * so anything built has to clear that — and the play / splash sit out on the
- * east green the way the real ones do.
+ * east green the way the real ones do. Bins sit on the grass hard against the
+ * outer path lip.
  */
 const BOATHOUSE_OUT = 26;
-const CAFE_OUT = 48;
 const TOILETS_OUT = 18;
-const PLAY_OUT = 58;
-const ROSES_OUT = 28;
-const BIN_OUT = 11;
+/** Just clear of the paving edge so the bins aren't mid-path. */
+const BIN_OUT = PATH_OUTER + 0.9;
+
+/** Layout from the level file — placeables + optional explicit bins. */
+let parkPlaceables: Placeable[] = DEFAULT_LEVEL.placeables.map((p) => ({
+  ...p,
+}));
+let parkBins: XZ[] = DEFAULT_LEVEL.bins.map((b) => [b[0], b[1]]);
+
+export function applyParkLayout(
+  placeables: readonly Placeable[],
+  bins: readonly XZ[],
+): void {
+  parkPlaceables = placeables.map((p) => ({ ...p }));
+  parkBins = bins.map((b) => [b[0], b[1]]);
+}
+
+function placeable(id: PlaceableId): Placeable | undefined {
+  return parkPlaceables.find((p) => p.id === id);
+}
 
 /** Where the play park sits, filled when it's built — kids walk here to play. */
 export interface PlayParkSite {
@@ -186,8 +205,10 @@ function gable(width: number, depth: number, rise: number): THREE.Group {
  * off the path. Swan pedalos raft opposite it along the north-east bank.
  */
 function boatHouse(scene: THREE.Scene): void {
-  // North-west of the lake tip, on the grass between the path and the parade.
-  const at = pitch(112, BOATHOUSE_OUT);
+  const placed = placeable("boathouse");
+  const at = placed
+    ? { x: placed.x, z: placed.z, yaw: placed.yaw }
+    : pitch(112, BOATHOUSE_OUT);
   const group = new THREE.Group();
   group.position.set(at.x, 0, at.z);
   group.rotation.y = at.yaw;
@@ -323,9 +344,12 @@ function swanPedalo(): THREE.Group {
   return boat;
 }
 
-/** The café out on the east green, toward the splash / Café Fresco end. */
+/** The café on the east green, on the play-triangle’s south-east path edge. */
 function cafe(scene: THREE.Scene): void {
-  const at = pitch(12, CAFE_OUT);
+  const placed = placeable("cafe");
+  const at = placed
+    ? { x: placed.x, z: placed.z, yaw: placed.yaw }
+    : { x: 148, z: 28, yaw: Math.atan2(148, 28) };
   const group = new THREE.Group();
   group.position.set(at.x, 0, at.z);
   group.rotation.y = at.yaw;
@@ -411,7 +435,10 @@ function cafe(scene: THREE.Scene): void {
 
 /** The toilet block, south of the lake between the path and the esplanade. */
 function toilets(scene: THREE.Scene): void {
-  const at = pitch(-105, TOILETS_OUT);
+  const placed = placeable("toilets");
+  const at = placed
+    ? { x: placed.x, z: placed.z, yaw: placed.yaw }
+    : pitch(-105, TOILETS_OUT);
   const group = new THREE.Group();
   group.position.set(at.x, 0, at.z);
   group.rotation.y = at.yaw;
@@ -452,15 +479,21 @@ function toilets(scene: THREE.Scene): void {
   solids.push({ x: at.x, z: at.z, halfWide: WIDE / 2, halfDeep: DEEP / 2, yaw: at.yaw });
 }
 
-/** The play park on the east green (splash / play end): rubber, swings, slide and a springy animal. */
+/**
+ * The play park in the triangular patch on the east lawn — the one cut out by
+ * the paths on the map, west of the splash and east of the lake.
+ */
 function playPark(scene: THREE.Scene): void {
-  const at = pitch(22, PLAY_OUT);
+  const placed = placeable("playPark");
+  const at = placed
+    ? { x: placed.x, z: placed.z, yaw: placed.yaw }
+    : { x: 152, z: 33, yaw: Math.atan2(152, 33) };
   const group = new THREE.Group();
   group.position.set(at.x, 0, at.z);
   group.rotation.y = at.yaw;
 
-  const WIDE = 36;
-  const DEEP = 28;
+  const WIDE = placed?.wide ?? 34;
+  const DEEP = placed?.deep ?? 26;
 
   const surface = new THREE.Mesh(new THREE.PlaneGeometry(WIDE, DEEP), RUBBER);
   surface.rotation.x = -Math.PI / 2;
@@ -562,9 +595,13 @@ function playPark(scene: THREE.Scene): void {
   scene.add(group);
 }
 
-/** The rose beds on the parade side, hedged in and full of colour. */
+/** The rose beds inside the Lumps Fort walls, east of the lake. */
 function roseGarden(scene: THREE.Scene): void {
-  const at = pitch(170, ROSES_OUT);
+  // Same patch the fort walls enclose in Game.buildLandmarks — north of the play park.
+  const placed = placeable("roseGarden");
+  const at = placed
+    ? { x: placed.x, z: placed.z, yaw: placed.yaw }
+    : { x: 150, z: 101, yaw: Math.atan2(150, 101) };
   const group = new THREE.Group();
   group.position.set(at.x, 0, at.z);
   group.rotation.y = at.yaw;
@@ -635,10 +672,16 @@ export function buildParkBuildings(scene: THREE.Scene): void {
   playPark(scene);
   roseGarden(scene);
 
-  // Bin stations round the circuit; the bins themselves are entities.
-  for (let bearing = 0; bearing < 360; bearing += 40) {
-    const at = pitch(bearing, BIN_OUT);
-    binSpots.push({ x: at.x, z: at.z });
+  // Bin stations: explicit from the level, or auto on the outer path lip.
+  if (parkBins.length > 0) {
+    for (const [x, z] of parkBins) binSpots.push({ x, z });
+  } else {
+    const rim = offsetShore(BIN_OUT);
+    const count = 9;
+    for (let i = 0; i < count; i++) {
+      const point = rim[Math.floor((i / count) * rim.length)]!;
+      binSpots.push({ x: point.x, z: point.y });
+    }
   }
 }
 

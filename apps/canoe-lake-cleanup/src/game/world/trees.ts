@@ -173,13 +173,16 @@ export function buildScrub(scale: number, rand: () => number): THREE.Group {
 
 /** Keeps planting off the paved spurs that run out from the lake. */
 function onSpur(x: number, z: number): boolean {
-  for (const [dx, dz] of PATH_SPURS) {
-    const len = Math.hypot(dx, dz);
-    const ux = dx / len;
-    const uz = dz / len;
-    const along = x * ux + z * uz;
-    if (along <= 0) continue;
-    if (Math.abs(x * -uz + z * ux) < 4.5) return true;
+  for (const spur of PATH_SPURS) {
+    const abx = spur.bx - spur.ax;
+    const abz = spur.bz - spur.az;
+    const len2 = abx * abx + abz * abz;
+    if (len2 < 1e-6) continue;
+    let t = ((x - spur.ax) * abx + (z - spur.az) * abz) / len2;
+    t = Math.min(1, Math.max(0, t));
+    const px = spur.ax + t * abx;
+    const pz = spur.az + t * abz;
+    if (Math.hypot(x - px, z - pz) < 4.5) return true;
   }
   return false;
 }
@@ -303,26 +306,27 @@ export function plantTrees(scene: THREE.Scene): void {
   };
 
   // Dense screen along the north railings (A288) — the thick belt on the map.
-  for (let x = -70; x <= 145; x += 9) {
-    tryOak(x, 118 + (rand() - 0.5) * 4, 1.0 + rand() * 0.3, 0, 0.25, 2.5);
+  for (let x = -20; x <= 150; x += 9) {
+    const zBelt = 128 - Math.max(0, -x) * 0.35;
+    tryOak(x, zBelt + (rand() - 0.5) * 4, 1.0 + rand() * 0.3, 0, 0.25, 2.5);
     if (rand() > 0.35) {
-      tryOak(x + 4, 112 + rand() * 5, 0.85 + rand() * 0.25, 0, 0.2, 3);
+      tryOak(x + 4, zBelt - 6 + rand() * 5, 0.85 + rand() * 0.25, 0, 0.2, 3);
     }
   }
 
-  // Extra weight at the north-west and north-east corners.
-  for (let i = 0; i < 7; i++) {
-    tryOak(-95 + rand() * 28, 105 + rand() * 18, 0.95 + rand() * 0.3, 0.2, 0.2, 5);
+  // Extra weight at the north-west curve and north-east corner.
+  for (let i = 0; i < 8; i++) {
+    tryOak(-90 + rand() * 50, 70 + rand() * 45, 0.95 + rand() * 0.3, 0.25, 0.25, 5);
   }
   for (let i = 0; i < 8; i++) {
-    tryOak(130 + rand() * 22, 95 + rand() * 25, 0.9 + rand() * 0.35, -0.15, 0.2, 5);
+    tryOak(130 + rand() * 28, 95 + rand() * 30, 0.9 + rand() * 0.35, -0.15, 0.2, 5);
   }
 
   // Southern boundary inside the esplanade path — a thinner continuous line.
-  for (let x = -120; x <= 155; x += 11) {
+  for (let x = -110; x <= 160; x += 11) {
     tryOak(
       x,
-      -102 - rand() * 3,
+      -105 - rand() * 3,
       0.75 + rand() * 0.25,
       0,
       0.85,
@@ -333,8 +337,8 @@ export function plantTrees(scene: THREE.Scene): void {
   // South-west cluster by the toilets / Emmanuel Memorial.
   for (let i = 0; i < 9; i++) {
     tryOak(
-      -55 + rand() * 45,
-      -98 + rand() * 12,
+      -70 + rand() * 50,
+      -110 + rand() * 14,
       0.8 + rand() * 0.3,
       0.15,
       0.7,
@@ -342,10 +346,18 @@ export function plantTrees(scene: THREE.Scene): void {
     );
   }
 
-  // West side (St Helens Parade): scattered, not a solid wall.
-  for (let z = -40; z <= 95; z += 16) {
-    if (rand() < 0.25) continue;
-    tryOak(-132 + rand() * 10, z + (rand() - 0.5) * 6, 0.85 + rand() * 0.3, 0.55, 0.15, 5);
+  // St Helens Parade curve: scattered oaks following the railings, not a wall.
+  const stHelens: ReadonlyArray<readonly [number, number]> = [
+    [-30, 115],
+    [-55, 95],
+    [-85, 60],
+    [-110, 20],
+    [-130, -20],
+    [-138, -55],
+  ];
+  for (const [x, z] of stHelens) {
+    if (rand() < 0.2) continue;
+    tryOak(x + (rand() - 0.5) * 8, z + (rand() - 0.5) * 8, 0.85 + rand() * 0.3, 0.55, 0.15, 5);
   }
 
   // Lone landmark tree on the east lawn near the outdoor gym.
@@ -357,13 +369,14 @@ export function plantTrees(scene: THREE.Scene): void {
   }
 
   // A few deciduous trees mixed into the north belt, set slightly back.
-  for (let x = -50; x <= 130; x += 32) {
-    tryPlane(x + (rand() - 0.5) * 10, 122 + rand() * 4, 0.85 + rand() * 0.25, 3);
+  for (let x = -10; x <= 130; x += 32) {
+    const zBelt = 122 - Math.max(0, -x) * 0.3;
+    tryPlane(x + (rand() - 0.5) * 10, zBelt + rand() * 4, 0.85 + rand() * 0.25, 3);
   }
 
   // Wind-burnt scrub along the seafront edge, outside the oak line.
-  for (let x = -115; x <= 150; x += 9) {
-    const spot = findSpot(x + (rand() - 0.5) * 4, -107 - rand() * 3, rand, 2);
+  for (let x = -105; x <= 165; x += 9) {
+    const spot = findSpot(x + (rand() - 0.5) * 4, -110 - rand() * 3, rand, 2);
     if (!spot) continue;
     place(buildScrub(1.0 + rand() * 0.8, rand), spot.x, spot.y, false);
   }

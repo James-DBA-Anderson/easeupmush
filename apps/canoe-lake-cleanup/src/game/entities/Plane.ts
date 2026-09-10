@@ -113,7 +113,8 @@ export class Plane {
       height,
       -Math.cos(this.heading) * (CROSSING / 2) - Math.sin(this.heading) * across,
     );
-    this.group.rotation.y = this.heading;
+    // Mesh nose sits on local −Z; travel is (+sin, +cos), so face the other way.
+    this.group.rotation.y = this.heading + Math.PI;
     // Big enough to read as an aeroplane from three hundred metres down.
     this.group.scale.setScalar(
       this.kind === "jet" ? 3.4 : this.kind === "light" ? 1.6 : 1.5,
@@ -165,30 +166,30 @@ export class Plane {
    */
   private buildFighter(): void {
     const fuselage = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.34, 0.16, 6.4, 8),
+      new THREE.CylinderGeometry(0.34, 0.16, 5.6, 8),
       CAMO_GREEN,
     );
     fuselage.rotation.x = Math.PI / 2;
-    fuselage.position.z = 0.4;
+    fuselage.position.z = 0.35;
     this.group.add(fuselage);
 
-    // The long Merlin nose out front, and the spinner on the end of it.
+    // Merlin cowling just ahead of the wing root — long, but not a barge pole.
     const nose = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.3, 0.36, 1.8, 8),
+      new THREE.CylinderGeometry(0.28, 0.34, 1.35, 8),
       CAMO_EARTH,
     );
     nose.rotation.x = Math.PI / 2;
-    nose.position.z = -3.6;
+    nose.position.z = -2.55;
     this.group.add(nose);
 
-    const spinner = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.8, 8), CAMO_EARTH);
+    const spinner = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.55, 8), CAMO_EARTH);
     spinner.rotation.x = -Math.PI / 2;
-    spinner.position.z = -4.8;
+    spinner.position.z = -3.4;
     this.group.add(spinner);
 
     // The propeller reads as a disc rather than blades at any distance.
     this.prop = new THREE.Mesh(
-      new THREE.CircleGeometry(1.5, 14),
+      new THREE.CircleGeometry(1.35, 14),
       new THREE.MeshBasicMaterial({
         color: 0x2b2b2b,
         transparent: true,
@@ -197,7 +198,7 @@ export class Plane {
         depthWrite: false,
       }),
     );
-    this.prop.position.z = -4.9;
+    this.prop.position.z = -3.5;
     this.group.add(this.prop);
 
     const canopy = new THREE.Mesh(
@@ -208,8 +209,8 @@ export class Plane {
         metalness: 0.2,
       }),
     );
-    canopy.scale.set(0.8, 0.7, 1.7);
-    canopy.position.set(0, 0.3, -0.9);
+    canopy.scale.set(0.8, 0.7, 1.5);
+    canopy.position.set(0, 0.3, -0.15);
     this.group.add(canopy);
 
     // Elliptical wings: a flattened disc squashed front to back.
@@ -220,7 +221,7 @@ export class Plane {
       );
       wing.rotation.y = side > 0 ? 0 : Math.PI;
       wing.scale.set(1, 1, 0.28);
-      wing.position.set(0, -0.08, -0.5);
+      wing.position.set(0, -0.08, 0.05);
       this.group.add(wing);
 
       const under = new THREE.Mesh(
@@ -229,27 +230,27 @@ export class Plane {
       );
       under.rotation.y = wing.rotation.y;
       under.scale.copy(wing.scale);
-      under.position.set(0, -0.16, -0.5);
+      under.position.set(0, -0.16, 0.05);
       this.group.add(under);
 
       // Roundels, under the wings where they'd be seen from down here.
       const ring = new THREE.Mesh(new THREE.CircleGeometry(0.5, 12), ROUNDEL_BLUE);
       ring.rotation.x = Math.PI / 2;
-      ring.position.set(side * 2, -0.2, -0.5);
+      ring.position.set(side * 2, -0.2, 0.05);
       this.group.add(ring);
 
       const middle = new THREE.Mesh(new THREE.CircleGeometry(0.2, 10), ROUNDEL_RED);
       middle.rotation.x = Math.PI / 2;
-      middle.position.set(side * 2, -0.21, -0.5);
+      middle.position.set(side * 2, -0.21, 0.05);
       this.group.add(middle);
     }
 
     const tailplane = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.1, 0.7), CAMO_GREEN);
-    tailplane.position.z = 3.1;
+    tailplane.position.z = 2.85;
     this.group.add(tailplane);
 
     const fin = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.1, 0.9), CAMO_EARTH);
-    fin.position.set(0, 0.5, 3.2);
+    fin.position.set(0, 0.5, 2.95);
     this.group.add(fin);
   }
 
@@ -285,6 +286,8 @@ export class Plane {
   private flyIt(delta: number): void {
     this.prop!.rotation.z += delta * 40;
     const along = this.travelled / 60;
+    // Keep facing the flight path while it banks and pitches a bit.
+    this.group.rotation.y = this.heading + Math.PI;
     this.group.rotation.z = Math.sin(along) * 0.12;
     this.group.rotation.x = Math.sin(along * 0.7) * 0.04;
   }

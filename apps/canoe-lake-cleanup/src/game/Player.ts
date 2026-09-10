@@ -102,9 +102,8 @@ export class Player {
 
   private setupPointerLock(): void {
     this.domElement.addEventListener("click", () => {
-      if (!this.locked) {
-        this.domElement.requestPointerLock();
-      }
+      if (this.game.isPaused() || this.locked) return;
+      this.domElement.requestPointerLock();
     });
 
     document.addEventListener("pointerlockchange", () => {
@@ -156,11 +155,21 @@ export class Player {
         this.pickTool(this.wanted === "hose" ? "picker" : "hose", true);
         break;
       case "Escape":
-        if (this.locked) {
-          document.exitPointerLock();
-        }
+        event.preventDefault();
+        this.game.togglePause();
         break;
     }
+  }
+
+  /** Drop whatever they're doing — used when the shift is paused. */
+  public halt(): void {
+    this.moveForward = false;
+    this.moveBackward = false;
+    this.moveLeft = false;
+    this.moveRight = false;
+    this.sprinting = false;
+    this.setSpraying(false);
+    if (this.locked) document.exitPointerLock();
   }
 
   /**

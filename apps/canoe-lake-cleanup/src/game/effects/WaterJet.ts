@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { WATER_Y, isInLake } from "../world/lake";
-import { buildHand, buildSleeve } from "./Hands";
+import { buildArmedHand } from "./Hands";
 
 const GRAVITY = 26;
 const MUZZLE_SPEED = 24;
@@ -212,20 +212,16 @@ export class WaterJet {
       rubber,
     );
     hose.geometry.translate(0, -0.27, 0);
-    hose.position.set(0.02, -0.08, 0.12);
-    hose.rotation.set(1.1, 0, 0.4);
+    hose.position.set(0.03, -0.1, 0.1);
+    hose.rotation.set(1.05, 0, 0.35);
     gun.add(hose);
 
-    // Hand and hi-vis sleeve on the grip.
-    const hand = buildHand(1, "gun");
-    hand.position.set(0.01, -0.05, 0.04);
-    hand.rotation.set(-0.5, 0.15, 0.35);
+    // Right hand on the grip, sleeve parented so the forearm stays attached.
+    const hand = buildArmedHand(1, "gun");
+    // Sit the palm on the orange grip; mitt curls under, thumb wraps the side.
+    hand.position.set(0.0, -0.07, 0.035);
+    hand.rotation.set(-0.15, 0.08, 0.2);
     gun.add(hand);
-
-    const arm = buildSleeve(1);
-    arm.position.set(0.04, -0.14, 0.18);
-    arm.rotation.set(-0.15, 0, 0.1);
-    gun.add(arm);
 
     group.add(gun);
     // Slight overall cant so it doesn't sit dead centre.
@@ -247,11 +243,21 @@ export class WaterJet {
     this.applyLancePose();
   }
 
+  /** World-space point and direction the water leaves the brass tip. */
+  private muzzlePose(): { origin: THREE.Vector3; forward: THREE.Vector3 } {
+    // Pose may have just tipped the lance — force the whole viewmodel chain.
+    this.lance.updateMatrixWorld(true);
+    const origin = this.muzzle.getWorldPosition(new THREE.Vector3());
+    // Barrel runs along the gun's local −Z (Three's getWorldDirection is +Z).
+    const forward = new THREE.Vector3(0, 0, -1)
+      .applyQuaternion(this.muzzle.getWorldQuaternion(new THREE.Quaternion()))
+      .normalize();
+    return { origin, forward };
+  }
+
   /** World-space point the water leaves from. */
   private nozzle(): THREE.Vector3 {
-    this.camera.updateMatrixWorld();
-    this.muzzle.updateWorldMatrix(true, false);
-    return this.muzzle.getWorldPosition(new THREE.Vector3());
+    return this.muzzlePose().origin;
   }
 
   /**
@@ -303,19 +309,19 @@ export class WaterJet {
   ): void {
     const perSecond = 130;
     this.emitAccumulator += delta * perSecond;
-    const forward = this.camera.getWorldDirection(new THREE.Vector3());
-    const origin = this.nozzle();
+    const { origin, forward: barrel } = this.muzzlePose();
 
-    // Stick deflection steers the stream; full throw is roughly 50°.
+    // Prefer the barrel so the jet leaves the tip; stick aim nudges on top
+    // when the viewmodel hasn't finished tipping to match.
     const side = new THREE.Vector3();
-    if (Math.abs(forward.y) < 0.95) side.crossVectors(forward, new THREE.Vector3(0, 1, 0));
-    else side.crossVectors(forward, new THREE.Vector3(1, 0, 0));
+    if (Math.abs(barrel.y) < 0.95) side.crossVectors(barrel, new THREE.Vector3(0, 1, 0));
+    else side.crossVectors(barrel, new THREE.Vector3(1, 0, 0));
     side.normalize();
-    const up = new THREE.Vector3().crossVectors(side, forward).normalize();
+    const up = new THREE.Vector3().crossVectors(side, barrel).normalize();
 
-    const aimDir = forward.clone();
+    const aimDir = barrel.clone();
     if (aim) {
-      const throwAngle = 0.95;
+      const throwAngle = 0.35;
       aimDir
         .addScaledVector(side, aim.x * throwAngle)
         .addScaledVector(up, -aim.y * throwAngle)
@@ -356,7 +362,8 @@ export class WaterJet {
       );
 
       this.tint(mesh, false);
-      mesh.position.copy(origin);
+      // Sit just proud of the brass tip so the first streak reads as leaving it.
+      mesh.position.copy(origin).addScaledVector(dir, 0.02);
       mesh.visible = true;
       this.droplets.push({
         mesh,

@@ -21,6 +21,7 @@ import { BbqParty, BBQ_SPOTS } from "./entities/BbqParty";
 import { PlayVisit, canVisitPlayPark } from "./entities/PlayVisit";
 import { Fox } from "./entities/Fox";
 import { Puddles } from "./effects/Puddles";
+import { GrassFire } from "./effects/GrassFire";
 import {
   PATH_LOOP,
   PATH_OUTER,
@@ -56,9 +57,15 @@ import { ObjectiveArrow } from "./ui/ObjectiveArrow";
 import { Callouts } from "./systems/Callouts";
 
 const WASH_RADIUS = 0.85;
-/** Overnight dumps — pick two or three spots and stack hard on each. */
-const OVERNIGHT_LUMPS_MIN = 2;
-const OVERNIGHT_LUMPS_MAX = 3;
+/** Overnight dumps clustered by the start — a proper opening wash job. */
+const OVERNIGHT_LUMPS_MIN = 10;
+const OVERNIGHT_LUMPS_MAX = 14;
+/** How far from the start the overnight mess may sit. */
+const OVERNIGHT_RADIUS = 24;
+/** Second wave kicks in once this fraction of overnight piles is washed. */
+const OPENING_CLEAR_FRAC = 0.8;
+/** Extra dumps seeded when the second event fires, further round the path. */
+const WAVE2_LUMPS = 5;
 /** How near the spike has to come down to get a bit of rubbish. */
 const SPEAR_RADIUS = 1.3;
 
@@ -150,6 +157,10 @@ export class Game {
   private nextCrabber = 55 + Math.random() * 50;
   private bbqs: BbqParty[] = [];
   private nextBbq = 90 + Math.random() * 80;
+  /** Late-shift grass fire from a disposable BBQ — one per day at most. */
+  private grassFire: GrassFire | null = null;
+  private fireMissionDone = false;
+  private fireComplaint = false;
   private playVisits: PlayVisit[] = [];
   private nextPlayVisit = 35 + Math.random() * 40;
   private nextArrival = 40 + Math.random() * 60;
@@ -202,11 +213,19 @@ export class Game {
   private faceDirty = false;
   private complaints = 0;
 
+  /** Opening piles seeded at clock-on; clearing them unlocks the second event. */
+  private overnightPiles = new Set<Dropping>();
+  private overnightTotal = 0;
+  private overnightCleared = 0;
+  private secondEventDone = false;
+
   private health = HEALTH_MAX;
   private sincePecked = HEAL_DELAY;
   private dead = false;
   /** Mobile portrait — world must not tick or draw. */
   private frozen = false;
+  /** Player pause — sim stopped, last frame still drawn under the overlay. */
+  private paused = false;
   /** How far through the collapse, once they've had the last one. */
   private collapse = 0;
 
@@ -282,6 +301,18 @@ export class Game {
     document
       .getElementById("restart")!
       .addEventListener("click", () => window.location.reload());
+    document
+      .getElementById("pause-btn")!
+      .addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.setPaused(true);
+      });
+    document
+      .getElementById("resume")!
+      .addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.setPaused(false);
+      });
 
     this.dayCycle = new DayCycle(document.getElementById("clock")!);
     this.weather = new Weather(
@@ -323,6 +354,8 @@ export class Game {
       this.bins.push(new Bin(this.scene, spot.x, spot.z));
     }
     this.callouts.raise("shift", this.dayCycle.clockFace());
+    // Hold other jobs until the overnight tip is mostly washed.
+    this.callouts.lockTrouble();
 
     this.onWindowResize();
     window.addEventListener("resize", () => this.onWindowResize());
@@ -343,11 +376,11 @@ export class Game {
   private buildLandmarks(): void {
     const stone = new THREE.MeshStandardMaterial({ color: 0x7a7568 });
 
-    // Lumps Fort wall runs along the eastern edge of the park.
+    // Lumps Fort walls — east green, just north of the play park (not through it).
     for (const [x, z, w, d] of [
-      [168, 0, 3, 120],
-      [140, 62, 60, 3],
-      [140, -62, 60, 3],
+      [165, 101, 3, 24],
+      [150, 113, 33, 3],
+      [150, 89, 33, 3],
     ] as const) {
       const wall = new THREE.Mesh(new THREE.BoxGeometry(w, 3.5, d), stone);
       wall.position.set(x, 1.75, z);
@@ -409,7 +442,7 @@ export class Game {
     this.sunLight.position.copy(sky.sunPosition);
     // Soft shadows look wrong under cloud; fade them out with the sun.
     this.sunLight.castShadow = this.sunLight.intensity > 0.2;
-    this.sun.update(sky, gloom);
+    this.sun.update(sky, gloom, this.camera, delta);
     this.lake.update(delta, sky.sunPosition, sky.sunColor);
     // Lights come on across the seafront as the daylight goes.
     lightWindows(THREE.MathUtils.clamp(1 - sky.sun / 0.45, 0, 1));
@@ -691,7 +724,7 @@ export class Game {
     }
   }
 
-  public addDropping(position: THREE.Vector3, kind: DropKind = "swan"): void {
+  public addDropping(position: THREE.Vector3, kind: DropKind = "swan"): Dropping | null {
     // Stack onto an existing pile rather than peppering the same square.
     let nearest: Dropping | null = null;
     let best = MERGE_RADIUS * MERGE_RADIUS;
@@ -707,16 +740,18 @@ export class Game {
     }
     if (nearest) {
       nearest.addLayer(kind);
-      return;
+      return nearest;
     }
 
-    if (this.droppings.length >= MAX_PILES) return;
-    this.droppings.push(new Dropping(position, this.scene, kind));
+    if (this.droppings.length >= MAX_PILES) return null;
+    const pile = new Dropping(position, this.scene, kind);
+    this.droppings.push(pile);
+    return pile;
   }
 
   /**
-   * First-thing mess: swans have been busy overnight and left two or three
-   * proper dumps on the paving — a clear opening power-wash job.
+   * First-thing mess: swans have been busy overnight and left a load of dumps
+   * on the paving by the start — a clear opening power-wash job.
    */
   private seedOvernightMess(): void {
     const lumps =
@@ -724,28 +759,40 @@ export class Game {
       Math.floor(
         Math.random() * (OVERNIGHT_LUMPS_MAX - OVERNIGHT_LUMPS_MIN + 1),
       );
-    const start = Math.random() * PATH_LOOP.length;
+    const origin = new THREE.Vector2(
+      this.camera.position.x,
+      this.camera.position.z,
+    );
+
+    // Prefer path spots within reach of the start; fall back to the nearest.
+    const near = PATH_LOOP.filter(
+      (point) => point.distanceTo(origin) <= OVERNIGHT_RADIUS,
+    );
+    const pool =
+      near.length > 0
+        ? near
+        : [...PATH_LOOP].sort(
+            (a, b) => a.distanceToSquared(origin) - b.distanceToSquared(origin),
+          );
 
     for (let i = 0; i < lumps; i++) {
-      const along =
-        start + (i / lumps) * PATH_LOOP.length + (Math.random() - 0.5) * 6;
-      const base = loopPoint(along);
-      const out = 2.5 + Math.random() * 4.5;
-      const shore = nearestShore(base.x, base.y);
-      const away = new THREE.Vector2(base.x - shore.x, base.y - shore.y);
-      if (away.lengthSq() < 0.01) away.set(base.x, base.y);
-      away.normalize();
-
-      const x = shore.x + away.x * out;
-      const z = shore.y + away.y * out;
+      const base = pool[Math.floor(Math.random() * pool.length)]!;
+      const jitter = 1.2 + Math.random() * 2.4;
+      const angle = Math.random() * Math.PI * 2;
+      const x = base.x + Math.cos(angle) * jitter;
+      const z = base.y + Math.sin(angle) * jitter;
       if (isInLake(x, z)) continue;
+      if (origin.distanceTo(new THREE.Vector2(x, z)) > OVERNIGHT_RADIUS + 4) {
+        continue;
+      }
 
       const kind: DropKind = Math.random() < 0.1 ? "gull" : "swan";
       const centre = new THREE.Vector3(x, 0, z);
       // One fat pile: many deposits stacked on the same spot.
-      const deposits = 9 + Math.floor(Math.random() * 5);
+      const deposits = 8 + Math.floor(Math.random() * 6);
+      let pile: Dropping | null = null;
       for (let n = 0; n < deposits; n++) {
-        this.addDropping(
+        pile = this.addDropping(
           centre
             .clone()
             .add(
@@ -758,7 +805,70 @@ export class Game {
           kind,
         );
       }
+      if (pile) this.overnightPiles.add(pile);
     }
+
+    this.overnightTotal = this.overnightPiles.size;
+  }
+
+  /** Counts an overnight pile washed clear; at 80% the second event starts. */
+  private noteOvernightCleared(pile: Dropping): void {
+    if (!this.overnightPiles.delete(pile)) return;
+    this.overnightCleared += 1;
+    if (this.secondEventDone || this.overnightTotal === 0) return;
+    if (this.overnightCleared / this.overnightTotal < OPENING_CLEAR_FRAC) {
+      return;
+    }
+    this.startSecondEvent();
+  }
+
+  /**
+   * Opening tip is mostly done — unlock the rest of the shift and put a fresh
+   * batch of mess further round the path.
+   */
+  private startSecondEvent(): void {
+    if (this.secondEventDone) return;
+    this.secondEventDone = true;
+    this.callouts.unlockTrouble();
+
+    const origin = new THREE.Vector2(
+      this.camera.position.x,
+      this.camera.position.z,
+    );
+    // Further round the path, away from where they started.
+    const far = [...PATH_LOOP].sort(
+      (a, b) => b.distanceToSquared(origin) - a.distanceToSquared(origin),
+    );
+    const band = far.slice(0, Math.max(8, Math.floor(PATH_LOOP.length * 0.2)));
+    let marked: { x: number; z: number } | undefined;
+
+    for (let i = 0; i < WAVE2_LUMPS; i++) {
+      const base = band[Math.floor(Math.random() * band.length)]!;
+      const jitter = 1.5 + Math.random() * 3;
+      const angle = Math.random() * Math.PI * 2;
+      const x = base.x + Math.cos(angle) * jitter;
+      const z = base.y + Math.sin(angle) * jitter;
+      if (isInLake(x, z)) continue;
+
+      const centre = new THREE.Vector3(x, 0, z);
+      const deposits = 7 + Math.floor(Math.random() * 5);
+      for (let n = 0; n < deposits; n++) {
+        this.addDropping(
+          centre
+            .clone()
+            .add(
+              new THREE.Vector3(
+                (Math.random() - 0.5) * 0.4,
+                0,
+                (Math.random() - 0.5) * 0.4,
+              ),
+            ),
+        );
+      }
+      marked ??= { x, z };
+    }
+
+    this.callouts.raise("jobs", this.dayCycle.clockFace(), marked);
   }
 
   /**
@@ -791,6 +901,9 @@ export class Game {
       if (party.douse(point, this.camera.position)) this.complain();
       return true;
     }
+
+    // Grass fire from a runaway barbecue — lance it before it walks.
+    if (this.grassFire?.douse(point)) return true;
 
     // Radio boats take on water until they go under.
     for (const boat of this.boats) {
@@ -1028,7 +1141,10 @@ export class Game {
       if (!dropping.covers(point)) continue;
 
       dropping.scrub(point, direction);
-      if (dropping.claimCredit()) this.creditClean();
+      if (dropping.claimCredit()) {
+        this.creditClean();
+        this.noteOvernightCleared(dropping);
+      }
       hitMess = true;
     }
 
@@ -1060,6 +1176,8 @@ export class Game {
         this.complain();
       }
     }
+
+    if (this.grassFire?.douse(point)) hitMess = true;
 
     // Standing water on the paving — grass just soaks it up.
     this.puddles.splash(point);
@@ -1451,7 +1569,11 @@ export class Game {
       this.graffiti.some((tag) => looking(tag.getPosition(), HOSE_SIGHT, 0.92)) ||
       this.footprints.some((print) =>
         looking(print.getPosition(), HOSE_SIGHT * 0.55, 0.95),
-      );
+      ) ||
+      (this.grassFire?.isBurning() === true &&
+        this.grassFire
+          .patchPositions()
+          .some((at) => looking(at, HOSE_SIGHT * 1.2, 0.88)));
 
     // Whatever's already in their hands wins, so they don't stand there
     // swapping back and forth over a bin next to a mess.
@@ -1676,6 +1798,77 @@ export class Game {
         party.dispose();
         this.bbqs.splice(i, 1);
       }
+    }
+  }
+
+  /**
+   * Later in the shift a disposable can set the grass off. One fire a day —
+   * hose it before it walks the green.
+   */
+  private updateGrassFire(delta: number): void {
+    const hour = this.dayCycle.hour;
+
+    if (
+      !this.fireMissionDone &&
+      !this.grassFire &&
+      hour >= 15 &&
+      hour < 19.5
+    ) {
+      const cooking = this.bbqs.filter((party) => party.isCooking());
+      if (cooking.length > 0 && Math.random() < delta * 0.012) {
+        const party = cooking[Math.floor(Math.random() * cooking.length)]!;
+        const at = party.getPosition();
+        this.grassFire = new GrassFire(this.scene, at);
+        party.scarper();
+        this.callouts.raise("fire", this.dayCycle.clockFace(), {
+          x: at.x,
+          z: at.z,
+        });
+      }
+    }
+
+    if (!this.grassFire) return;
+    this.grassFire.update(delta);
+
+    const blaze = this.grassFire.getPosition();
+    for (const person of this.people) {
+      person.panicFromFire(blaze);
+    }
+    for (const crabber of this.crabbers) {
+      crabber.fightFire(this.grassFire, delta);
+    }
+
+    // Litter on the green goes up with the grass.
+    for (let i = this.litter.length - 1; i >= 0; i--) {
+      const piece = this.litter[i]!;
+      if (piece.isTaken()) continue;
+      const at = piece.getPosition();
+      const flame = this.grassFire.nearestFlame(at);
+      if (!flame || flame.distanceTo(at) > 1.8) continue;
+      piece.dispose();
+      this.litter.splice(i, 1);
+    }
+
+    // Let it get away from you and that's a complaint on the record.
+    if (!this.fireComplaint && this.grassFire.burningCount() >= 18) {
+      this.fireComplaint = true;
+      this.complain();
+    }
+
+    if (this.grassFire.claimCleared()) {
+      this.fireMissionDone = true;
+      this.cleaned += 1;
+      this.comboRun = this.comboLeft > 0 ? this.comboRun + 1 : 1;
+      this.comboLeft = COMBO_WINDOW;
+      this.score += 40 * this.multiplier();
+      this.updateHUD();
+      this.callouts.raise("praise", this.dayCycle.clockFace());
+    }
+
+    if (this.grassFire.isDone()) {
+      this.grassFire.dispose();
+      this.grassFire = null;
+      this.fireMissionDone = true;
     }
   }
 
@@ -2013,6 +2206,12 @@ export class Game {
       return;
     }
 
+    if (this.paused) {
+      this.clock.getDelta();
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+
     const delta = Math.min(this.clock.getDelta(), 0.05);
 
     if (this.dead) {
@@ -2030,6 +2229,7 @@ export class Game {
     this.birdScraps(delta);
 
     const crowd = this.people.map((person) => person.getPosition());
+    crowd.push(this.camera.position);
     for (const swan of this.swans) {
       swan.noticeCrowd(crowd);
       swan.update(delta, this.camera.position);
@@ -2077,6 +2277,7 @@ export class Game {
     this.updateBoats(delta);
     this.updateCrabbers(delta);
     this.updateBbqs(delta);
+    this.updateGrassFire(delta);
     this.updatePlayVisits(delta);
     this.updateFlock(delta);
     this.updateNight(delta);
@@ -2139,6 +2340,17 @@ export class Game {
   /** Everything still dirty that the arrow might point at. */
   private objectiveSpots(): { x: number; z: number }[] {
     const spots: { x: number; z: number }[] = [];
+
+    // Opening tip first — don't send them chasing litter until that wave's done.
+    if (!this.secondEventDone && this.overnightPiles.size > 0) {
+      for (const dropping of this.overnightPiles) {
+        if (dropping.isRinsing()) continue;
+        const at = dropping.getPosition();
+        spots.push({ x: at.x, z: at.z });
+      }
+      return spots;
+    }
+
     for (const dropping of this.droppings) {
       if (dropping.isRinsing()) continue;
       const at = dropping.getPosition();
@@ -2213,5 +2425,27 @@ export class Game {
 
   public isFrozen(): boolean {
     return this.frozen;
+  }
+
+  /** Stop the shift mid-flow — overlay up, mouse free, nothing ticks. */
+  public setPaused(on: boolean): void {
+    if (this.dead) return;
+    if (this.paused === on) return;
+    this.paused = on;
+    document.body.classList.toggle("paused", on);
+    document.getElementById("pause-menu")!.classList.toggle("on", on);
+    if (on) {
+      this.player.halt();
+    } else {
+      this.clock.getDelta();
+    }
+  }
+
+  public togglePause(): void {
+    this.setPaused(!this.paused);
+  }
+
+  public isPaused(): boolean {
+    return this.paused;
   }
 }

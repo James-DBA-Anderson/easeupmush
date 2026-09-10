@@ -1,56 +1,32 @@
 import * as THREE from 'three';
 import { Water } from 'three/examples/jsm/objects/Water.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { waterNormalsTexture } from './waterNormals';
+import { DEFAULT_LEVEL } from '../../level/defaultLevel';
+import type { XZ } from '../../level/types';
 
 /**
- * Canoe Lake traced from the real plan: a teardrop boating lake with its long
- * axis running south-west to north-east. The pointed tip sits toward the Ocean
- * Hotel junction; the rounded bulb (where the pedalos moor) faces the north-
- * east. The south-east flank is the straighter run, nearly parallel to Eastney
- * Esplanade and the beach beyond.
- *
- * One world unit is one metre. +Z is inland (St Helens Parade), −Z is the sea.
+ * Canoe Lake: bean / teardrop, SW tip by the Emmanuel Memorial, NE bulb toward
+ * the pedalos. One world unit is one metre. +Z inland (St Helens Parade),
+ * −Z sea. Shore + path spurs come from the level file / editor.
  */
-const OUTLINE: ReadonlyArray<readonly [number, number]> = [
-  // Tip (SW), then the straighter SE flank toward the esplanade…
-  [-93, -75],
-  [-75, -86],
-  [-50, -90],
-  [-23, -84],
-  [8, -67],
-  [41, -44],
-  [70, -16],
-  [93, 11],
-  [102, 39],
-  // …NE bulb where the boats sit, then the bowed NW side back to the tip.
-  [98, 66],
-  [83, 88],
-  [59, 100],
-  [33, 96],
-  [2, 78],
-  [-28, 52],
-  [-56, 23],
-  [-77, -7],
-  [-92, -36],
-  [-96, -59],
-];
 
-/** Smoothed shoreline, sampled once and shared by the mesh and the maths. */
-export const SHORE: ReadonlyArray<THREE.Vector2> = (() => {
+function computeShore(outline: ReadonlyArray<XZ>): THREE.Vector2[] {
   const curve = new THREE.CatmullRomCurve3(
-    OUTLINE.map(([x, z]) => new THREE.Vector3(x, 0, z)),
+    outline.map(([x, z]) => new THREE.Vector3(x, 0, z)),
     true,
     'catmullrom',
     0.5,
   );
   return curve.getSpacedPoints(180).map((p) => new THREE.Vector2(p.x, p.z));
-})();
+}
 
-/** The island in the southern half of the water, where the swans nest out of reach. */
-export const ISLAND = { x: 8, z: -28, radius: 9 } as const;
+/** Smoothed shoreline — rebuilt when a level is applied. */
+export let SHORE: ReadonlyArray<THREE.Vector2> = computeShore(
+  DEFAULT_LEVEL.shoreOutline,
+);
 
 export function isInLake(x: number, z: number): boolean {
-  if (Math.hypot(x - ISLAND.x, z - ISLAND.z) < ISLAND.radius) return false;
   let inside = false;
   for (let i = 0, j = SHORE.length - 1; i < SHORE.length; j = i++) {
     const a = SHORE[i]!;
@@ -87,17 +63,23 @@ export function nearestShore(x: number, z: number): THREE.Vector2 {
  * are well apart down the sides, and a radial guess leaves the kerb wider at
  * the ends than it is along the front.
  */
-const SHORE_NORMALS: ReadonlyArray<THREE.Vector2> = SHORE.map((point, i) => {
-  const n = SHORE.length;
-  const before = SHORE[(i - 1 + n) % n]!;
-  const after = SHORE[(i + 1) % n]!;
-  const along = new THREE.Vector2().subVectors(after, before);
-  const normal = new THREE.Vector2(along.y, -along.x).normalize();
-  // Probe a step along the normal — if that land is still water, flip it.
-  const probe = point.clone().addScaledVector(normal, 1.5);
-  if (isInLake(probe.x, probe.y)) normal.negate();
-  return normal;
-});
+function computeShoreNormals(
+  shore: ReadonlyArray<THREE.Vector2>,
+): THREE.Vector2[] {
+  return shore.map((point, i) => {
+    const n = shore.length;
+    const before = shore[(i - 1 + n) % n]!;
+    const after = shore[(i + 1) % n]!;
+    const along = new THREE.Vector2().subVectors(after, before);
+    const normal = new THREE.Vector2(along.y, -along.x).normalize();
+    const probe = point.clone().addScaledVector(normal, 1.5);
+    // isInLake reads current SHORE — caller must assign SHORE first.
+    if (isInLake(probe.x, probe.y)) normal.negate();
+    return normal;
+  });
+}
+
+let SHORE_NORMALS: ReadonlyArray<THREE.Vector2> = computeShoreNormals(SHORE);
 
 /** Unit vector pointing away from the water at a given shoreline point. */
 export function outwardAt(shorePoint: THREE.Vector2): THREE.Vector2 {
@@ -125,7 +107,7 @@ export function offsetShore(distance: number): THREE.Vector2[] {
   });
 }
 
-/** A random spot out on open water, kept clear of the bank and the island. */
+/** A random spot out on open water, kept clear of the bank. */
 export function waterSpot(): THREE.Vector2 {
   for (let attempt = 0; attempt < 40; attempt++) {
     const x = -95 + Math.random() * 200;
@@ -237,6 +219,102 @@ function skirt(
   return mesh;
 }
 
+/** Flat strip of quads between two rings — same winding as `ribbon`. */
+function ribbonGeometry(
+  outer: ReadonlyArray<THREE.Vector2>,
+  inner: ReadonlyArray<THREE.Vector2>,
+): THREE.BufferGeometry {
+  const positions: number[] = [];
+  for (let i = 0; i < outer.length; i++) {
+    const j = (i + 1) % outer.length;
+    const a = outer[i]!;
+    const b = outer[j]!;
+    const c = inner[j]!;
+    const d = inner[i]!;
+    positions.push(
+      a.x, 0, a.y,
+      d.x, 0, d.y,
+      c.x, 0, c.y,
+
+      a.x, 0, a.y,
+      c.x, 0, c.y,
+      b.x, 0, b.y,
+    );
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/** Ray-cast point-in-polygon on an XZ ring (y of Vector2 is world Z). */
+function pointInRing(
+  x: number,
+  z: number,
+  ring: ReadonlyArray<THREE.Vector2>,
+): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i]!;
+    const b = ring[j]!;
+    const straddles = a.y > z !== b.y > z;
+    if (straddles && x < ((b.x - a.x) * (z - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * Fill a lake ring without ShapeGeometry/earcut — that leaves holes on the
+ * concave bean. A rim of quads seals the edge; a grid fills the middle.
+ */
+function lakeFillGeometry(edge: ReadonlyArray<THREE.Vector2>): THREE.BufferGeometry {
+  // A few metres in — wide enough that the rim covers earcut's usual failure
+  // band, narrow enough the tip still has a core after the offset.
+  const core = offsetShore(-(KERB_IN + 4));
+  const rim = ribbonGeometry(edge, core);
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const p of core) {
+    minX = Math.min(minX, p.x);
+    maxX = Math.max(maxX, p.x);
+    minZ = Math.min(minZ, p.y);
+    maxZ = Math.max(maxZ, p.y);
+  }
+
+  const step = 1.4;
+  const positions: number[] = [];
+  const inside = (x: number, z: number) => pointInRing(x, z, core);
+
+  for (let x = minX; x < maxX; x += step) {
+    for (let z = minZ; z < maxZ; z += step) {
+      const x1 = x + step;
+      const z1 = z + step;
+      // Keep a triangle when its centroid is in the water — covers the core
+      // without the holes earcut leaves near reflex corners. Winding faces +Y.
+      if (inside((x + 2 * x1) / 3, (2 * z + z1) / 3)) {
+        positions.push(x, 0, z, x1, 0, z1, x1, 0, z);
+      }
+      if (inside((2 * x + x1) / 3, (z + 2 * z1) / 3)) {
+        positions.push(x, 0, z, x, 0, z1, x1, 0, z1);
+      }
+    }
+  }
+
+  const coreGeom = new THREE.BufferGeometry();
+  coreGeom.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(positions, 3),
+  );
+  coreGeom.computeVertexNormals();
+
+  return mergeGeometries([rim, coreGeom], false) ?? rim;
+}
+
 /** A flat ring of ground between two rings of points, at one height. */
 function ribbon(
   outer: ReadonlyArray<THREE.Vector2>,
@@ -246,27 +324,8 @@ function ribbon(
 ): THREE.Mesh {
   // Strip of quads, not a Shape with a hole — earcut on a thin teardrop ring
   // will happily throw triangles across the water and the paving.
-  const positions: number[] = [];
-  for (let i = 0; i < outer.length; i++) {
-    const j = (i + 1) % outer.length;
-    const a = outer[i]!;
-    const b = outer[j]!;
-    const c = inner[j]!;
-    const d = inner[i]!;
-    positions.push(
-      a.x, y, a.y,
-      d.x, y, d.y,
-      c.x, y, c.y,
-
-      a.x, y, a.y,
-      c.x, y, c.y,
-      b.x, y, b.y,
-    );
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.computeVertexNormals();
-  const mesh = new THREE.Mesh(geometry, material);
+  const mesh = new THREE.Mesh(ribbonGeometry(outer, inner), material);
+  mesh.position.y = y;
   mesh.receiveShadow = true;
   return mesh;
 }
@@ -383,23 +442,25 @@ export interface LakeSurface {
   update(delta: number, sunDirection: THREE.Vector3, sunColor: THREE.Color): void;
 }
 
-/** Water surface, its retaining wall, the bed beneath and the island. */
+/** Water surface, its retaining wall and the bed beneath. */
 export function buildLake(scene: THREE.Scene): LakeSurface {
   buildLakeWall(scene);
 
   // Keep the reflective surface inside the wall so it never paints over the
   // paving — the collision shore stays at SHORE, a touch further out.
   const waterEdge = offsetShore(-KERB_IN);
+  // ShapeGeometry/earcut leaves holes on this bean — fill with a rim + grid.
+  const fill = lakeFillGeometry(waterEdge);
 
-  scene.add(
-    flatMesh(
-      shapeFrom(waterEdge),
-      new THREE.MeshStandardMaterial({ color: 0x3d4a3c, roughness: 1 }),
-      BED_Y,
-    ),
+  const bed = new THREE.Mesh(
+    fill.clone(),
+    new THREE.MeshStandardMaterial({ color: 0x3d4a3c, roughness: 1 }),
   );
+  bed.position.y = BED_Y;
+  bed.receiveShadow = true;
+  scene.add(bed);
 
-  const water = new Water(shapeGeometryXZ(shapeFrom(waterEdge), 16), {
+  const water = new Water(fill, {
     textureWidth: 512,
     textureHeight: 512,
     waterNormals: waterNormalsTexture(),
@@ -417,16 +478,6 @@ export function buildLake(scene: THREE.Scene): LakeSurface {
 
   buildMargin(scene);
 
-  const islandTop = WATER_Y + 0.5;
-  const island = new THREE.Mesh(
-    new THREE.CylinderGeometry(ISLAND.radius, ISLAND.radius + 1.2, islandTop - BED_Y, 24),
-    new THREE.MeshStandardMaterial({ color: 0x4e7a44, roughness: 1 }),
-  );
-  island.position.set(ISLAND.x, (islandTop + BED_Y) / 2, ISLAND.z);
-  island.castShadow = true;
-  island.receiveShadow = true;
-  scene.add(island);
-
   return {
     update(delta, sunDirection, sunColor) {
       const uniforms = (water.material as THREE.ShaderMaterial).uniforms;
@@ -439,47 +490,106 @@ export function buildLake(scene: THREE.Scene): LakeSurface {
 
 /**
  * The perimeter path: a closed ring following the shoreline, never crossing the
- * water. Spurs run outwards from it to the park edges.
+ * water. Extra routes match the map — east-lawn triangle (play park), esplanade
+ * run, and the spurs out to the gates.
  */
 /** Paving starts at the kerb — not under the water surface. */
 export const PATH_INNER = KERB_OUT;
 export const PATH_OUTER = 14;
 
 /** Centre line of the perimeter path, which the strolling public follow. */
-export const PATH_LOOP: ReadonlyArray<THREE.Vector2> = offsetShore((PATH_INNER + PATH_OUTER) / 2);
+export let PATH_LOOP: ReadonlyArray<THREE.Vector2> = offsetShore(
+  (PATH_INNER + PATH_OUTER) / 2,
+);
+
+/** A paved spur / path segment from A to B. */
+export interface PathSpurSeg {
+  ax: number;
+  az: number;
+  bx: number;
+  bz: number;
+  length: number;
+  yaw: number;
+  mx: number;
+  mz: number;
+}
+
+function segmentFrom(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): PathSpurSeg {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const length = Math.max(2, Math.hypot(dx, dz));
+  return {
+    ax,
+    az,
+    bx,
+    bz,
+    length,
+    yaw: Math.atan2(dz, dx),
+    mx: (ax + bx) / 2,
+    mz: (az + bz) / 2,
+  };
+}
+
+function computePathSpurs(
+  polylines: ReadonlyArray<ReadonlyArray<XZ>>,
+): PathSpurSeg[] {
+  return polylines.flatMap((line) => {
+    const segs: PathSpurSeg[] = [];
+    for (let i = 0; i < line.length - 1; i++) {
+      const a = line[i]!;
+      const b = line[i + 1]!;
+      segs.push(segmentFrom(a[0], a[1], b[0], b[1]));
+    }
+    return segs;
+  });
+}
 
 /**
- * Spurs running out from the lake to the park edges / gates. Shared with the
- * fencing so the gate openings line up with the paving. Directions follow the
- * real exits: esplanade south, St Helens west, parade north, east green and
- * the diagonal across to the car park / splash.
+ * Spurs and field paths from the level. Shared with fencing (gates), planting,
+ * puddles and the mini map.
  */
-export const PATH_SPURS: ReadonlyArray<readonly [number, number]> = [
-  [0.1, -1],
-  [-1, 0.05],
-  [-0.15, 1],
-  [1, 0.35],
-  [0.85, -0.5],
-  [-0.7, -0.7],
-  [0.45, 0.9],
-];
+export let PATH_SPURS: ReadonlyArray<PathSpurSeg> = computePathSpurs(
+  DEFAULT_LEVEL.pathPolylines,
+);
+
+/** Rebuild shore, path loop and spurs from level data (before the scene builds). */
+export function applyLakeLevel(
+  shoreOutline: ReadonlyArray<XZ>,
+  pathPolylines: ReadonlyArray<ReadonlyArray<XZ>>,
+): void {
+  SHORE = computeShore(shoreOutline);
+  SHORE_NORMALS = computeShoreNormals(SHORE);
+  PATH_LOOP = offsetShore((PATH_INNER + PATH_OUTER) / 2);
+  PATH_SPURS = computePathSpurs(pathPolylines);
+}
+
+/** True if (x,z) lies on a spur corridor. */
+function onSpurPaving(x: number, z: number, halfWidth: number): boolean {
+  for (const spur of PATH_SPURS) {
+    const abx = spur.bx - spur.ax;
+    const abz = spur.bz - spur.az;
+    const len2 = abx * abx + abz * abz;
+    if (len2 < 1e-6) continue;
+    let t = ((x - spur.ax) * abx + (z - spur.az) * abz) / len2;
+    t = THREE.MathUtils.clamp(t, 0, 1);
+    const px = spur.ax + t * abx;
+    const pz = spur.az + t * abz;
+    if (Math.hypot(x - px, z - pz) < halfWidth) return true;
+  }
+  return false;
+}
 
 /** True on the ring path or a spur — anywhere the jet leaves a puddle. */
 export function isOnPath(x: number, z: number): boolean {
   if (isInLake(x, z)) return false;
   const d = distanceToShore(x, z);
   if (d <= PATH_OUTER + 0.35) return true;
-
-  // Spur corridors continue out past the ring.
-  const pos = new THREE.Vector2(x, z);
-  for (const [dx, dz] of PATH_SPURS) {
-    const dir = new THREE.Vector2(dx, dz).normalize();
-    const along = pos.dot(dir);
-    if (along < PATH_OUTER - 2) continue;
-    const sideways = Math.abs(pos.x * -dir.y + pos.y * dir.x);
-    if (sideways < 2.2) return true;
-  }
-  return false;
+  return onSpurPaving(x, z, 2.2);
 }
 
 /** Spur rectangles for the mini map — same layout as `buildPaths`. */
@@ -493,29 +603,13 @@ export interface PathSpur {
 }
 
 export function pathSpurs(): PathSpur[] {
-  const out: PathSpur[] = [];
-  for (const [dx, dz] of PATH_SPURS) {
-    const dir = new THREE.Vector2(dx, dz).normalize();
-    let from = 0;
-    for (let d = 0; d < 200; d += 1) {
-      const p = dir.clone().multiplyScalar(d);
-      if (!isInLake(p.x, p.y) && distanceToShore(p.x, p.y) > PATH_OUTER - 1) {
-        from = d;
-        break;
-      }
-    }
-    // Stop short of the iron railings rather than paving over the roads.
-    const length = Math.max(12, 100 - from);
-    const mid = dir.clone().multiplyScalar(from + length / 2);
-    out.push({
-      x: mid.x,
-      z: mid.y,
-      length,
-      width: 4,
-      yaw: Math.atan2(dir.y, dir.x),
-    });
-  }
-  return out;
+  return PATH_SPURS.map((spur) => ({
+    x: spur.mx,
+    z: spur.mz,
+    length: spur.length,
+    width: 4,
+    yaw: spur.yaw,
+  }));
 }
 
 export function buildPaths(scene: THREE.Scene): void {
@@ -523,31 +617,16 @@ export function buildPaths(scene: THREE.Scene): void {
 
   scene.add(ribbon(offsetShore(PATH_OUTER), offsetShore(PATH_INNER), PATH_Y, paving));
 
-  // Spurs head away from the lake, so none of them can cut across the water.
-  for (const [dx, dz] of PATH_SPURS) {
-    const dir = new THREE.Vector2(dx, dz).normalize();
-    const start = new THREE.Vector2(dir.x, dir.y).multiplyScalar(1);
-    // Walk outwards from the lake centre until clear of the ring, then run on.
-    let from = 0;
-    for (let d = 0; d < 200; d += 1) {
-      const p = start.clone().multiplyScalar(d);
-      if (!isInLake(p.x, p.y) && distanceToShore(p.x, p.y) > PATH_OUTER - 1) {
-        from = d;
-        break;
-      }
-    }
-    const length = Math.max(12, 100 - from);
-    const mid = start.clone().multiplyScalar(from + length / 2);
-    const spur = new THREE.Mesh(new THREE.PlaneGeometry(4, length), paving);
-    spur.rotation.x = -Math.PI / 2;
-    spur.rotation.z = -Math.atan2(dir.y, dir.x) + Math.PI / 2;
-    spur.position.set(mid.x, PATH_Y - 0.004, mid.y);
-    spur.receiveShadow = true;
-    scene.add(spur);
+  for (const spur of PATH_SPURS) {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(4, spur.length), paving);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.rotation.z = -spur.yaw + Math.PI / 2;
+    mesh.position.set(spur.mx, PATH_Y - 0.004, spur.mz);
+    mesh.receiveShadow = true;
+    scene.add(mesh);
   }
 }
 
-/** Position along the perimeter loop, wrapping at the ends. */
 /** Position along the path loop. Fractional indices slide between points. */
 export function loopPoint(index: number): THREE.Vector2 {
   const n = PATH_LOOP.length;

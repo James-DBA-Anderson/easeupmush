@@ -1,6 +1,6 @@
 # Canoe Lake Clean Up
 
-3D FPS game where you clean up swan droppings around Canoe Lake in Southsea, Portsmouth using a high-pressure spray gun. The shift starts with two or three overnight dumps on the paving — jet-wash the streaks clear before the public arrives.
+3D FPS game where you clean up swan droppings around Canoe Lake in Southsea, Portsmouth using a high-pressure spray gun. The shift starts with a heavy overnight tip on the paving by the van — wash most of that clear and the next jobs come in further round the lake.
 
 **Status:** Planning phase. See `PLAN.md` for full game design document.
 
@@ -23,8 +23,21 @@ Authentic recreation of Canoe Lake, Southsea — Victorian boating lake from 188
 
 ```bash
 npm install
-npm run dev:canoe-lake  # Runs on http://localhost:5304/
+npm run dev:canoe-lake  # Game: http://localhost:5304/
+                        # Editor: http://localhost:5304/editor.html
 ```
+
+### Level editor
+
+Trace the park over a Google Maps screenshot instead of guessing coordinates.
+
+1. Open **http://localhost:5304/editor.html**
+2. **Add image** / **Paste image** (or Ctrl/Cmd+V) — load a Maps screenshot. Use **Background** tool to drag it; sliders for image/map opacity, size, and rotation. Image + settings are kept in this browser (IndexedDB) across reloads; **Remove image** clears them
+3. Edit layers: **Shore**, **Paths**, **Park ring**, **Buildings**, **Bins**. **Buildings** opens a left panel — pick an object for a 3D preview (drag to orbit, scroll to zoom, yaw slider / Shift-drag to turn). Paths: click an edge to add a node; **Shift-drag** to move a whole path. **Undo** / Ctrl+Z reverses edits
+4. **Save** — stores in this browser; the game loads it on next boot
+5. **Download JSON** — put the file at `public/levels/canoe-lake.json` to ship with the build
+
+Load order: local editor save → bundled `public/levels/canoe-lake.json` → baked defaults.
 
 ### Testing Mobile Controls
 
@@ -36,12 +49,13 @@ Mobile play requires **landscape**. On a phone, turn it sideways — portrait sh
 - WASD: Move
 - Mouse: Look
 - Click: Spray
-- ESC: Lock/Unlock mouse
+- ESC / Pause button: Pause
 
 **Mobile (landscape):**
 - Left stick: Move
 - Spray stick (above look): Aim and fire in any direction / jab
 - Far right stick: Look
+- Pause button: Pause
 
 ## Links
 

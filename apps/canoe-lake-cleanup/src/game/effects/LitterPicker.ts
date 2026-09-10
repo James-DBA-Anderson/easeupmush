@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { buildHand, buildSleeve } from "./Hands";
+import { buildArmedHand } from "./Hands";
 
 /** How long the jab takes, and how far through it the jaws bite. */
 const JAB_TIME = 0.5;
@@ -110,15 +110,11 @@ export class LitterPicker {
       this.arm.add(jaw);
     }
 
-    // Right hand on the grabber + sleeve.
-    const right = buildHand(1, "picker");
+    // Right hand on the grabber — sleeve stays glued to the cuff.
+    const right = buildArmedHand(1, "picker");
     right.position.set(0.01, -0.02, 0.06);
-    right.rotation.set(-0.35, 0.1, 0.4);
+    right.rotation.set(-0.25, 0.1, 0.35);
     this.arm.add(right);
-
-    const rightSleeve = buildSleeve(1);
-    rightSleeve.position.set(0.05, -0.1, 0.22);
-    this.arm.add(rightSleeve);
 
     this.group.add(this.arm);
 
@@ -126,14 +122,9 @@ export class LitterPicker {
     this.sackHand = new THREE.Group();
     this.sackHand.position.set(-0.42, -0.45, -0.95);
 
-    const left = buildHand(-1, "sack");
-    left.rotation.set(-0.6, -0.4, -0.5);
+    const left = buildArmedHand(-1, "sack");
+    left.rotation.set(-0.55, -0.35, -0.45);
     this.sackHand.add(left);
-
-    const leftSleeve = buildSleeve(-1);
-    leftSleeve.position.set(-0.02, -0.12, 0.2);
-    leftSleeve.rotation.set(0.1, 0, -0.15);
-    this.sackHand.add(leftSleeve);
 
     // Council bin sack — lumpy black plastic with a tied neck.
     this.sack = new THREE.Mesh(

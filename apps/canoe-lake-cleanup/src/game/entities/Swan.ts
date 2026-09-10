@@ -42,6 +42,10 @@ const CYGNET_SIZE = 0.38;
 const BROOD_GAP = 1.1;
 /** Get inside this of one of her cygnets and she comes straight for you. */
 const GUARD_RANGE = 5;
+/** Wings up at anyone this close to a mother or her brood. */
+const BUSK_RANGE = 8;
+/** Ordinary birds on the bank busk inside this. */
+const BANK_BUSK_RANGE = 6;
 /** How long she keeps at you once her brood has been bothered. */
 const GUARD_TIME = 14;
 
@@ -949,9 +953,8 @@ export class Swan {
   }
 
   /**
-   * A mother keeps half an eye on you the whole time. Come inside seven metres
-   * of any of her brood and she's off the water and after you, and she keeps
-   * coming back for as long as you hang about.
+   * A mother keeps half an eye on you the whole time. Come inside the brood
+   * and she puts the wings up; get any closer to a chick and she charges.
    */
   private mindTheBrood(delta: number, player?: THREE.Vector3): void {
     if (this.brood.length === 0) return;
@@ -964,6 +967,18 @@ export class Swan {
         (chick) => chick.getPosition().distanceTo(player) < GUARD_RANGE,
       );
       if (close) this.guarding = GUARD_TIME;
+
+      // Warning display before a charge, and whenever you're near her.
+      if (
+        this.buskLeft <= 0 &&
+        this.buskCool <= 0 &&
+        this.mode !== "charge" &&
+        (close || this.position.distanceTo(player) < BUSK_RANGE)
+      ) {
+        this.buskLeft = 3.5 + Math.random() * 2;
+        this.buskCool = 1.5 + Math.random() * 1.5;
+        this.buskFace.copy(player);
+      }
     }
 
     if (this.guarding > 0 && this.mode !== "charge" && this.mode !== "fly") {
@@ -1018,20 +1033,41 @@ export class Swan {
   }
 
   /**
-   * Anyone wandered too close on the bank gets the wings. Not a charge yet —
-   * just enough to put the wind up the ones who don't like swans.
+   * Anyone wandered too close gets the wings. Mothers do it on the water or
+   * the bank whenever someone hangs about the brood; other adults only busk
+   * ashore while grazing.
    */
   public noticeCrowd(crowd: readonly THREE.Vector3[]): void {
     if (this.buskCool > 0 || this.buskLeft > 0) return;
     if (this.kind === "cygnet") return;
-    // Grazing birds only — a beggar or a bird at the bread isn't threatening.
-    if (this.mode !== "graze") return;
-    if (!this.isAshore()) return;
+    if (
+      this.mode === "charge" ||
+      this.mode === "fly" ||
+      this.mode === "roost"
+    ) {
+      return;
+    }
 
+    const mother = this.brood.length > 0;
+    if (!mother && (this.mode !== "graze" || !this.isAshore())) return;
+
+    const range = mother ? BUSK_RANGE : BANK_BUSK_RANGE;
     for (const at of crowd) {
-      if (this.position.distanceTo(at) > 5.2) continue;
-      this.buskLeft = 2.2 + Math.random() * 1.8;
-      this.buskCool = 11 + Math.random() * 10;
+      let near = this.position.distanceTo(at) < range;
+      if (!near && mother) {
+        near = this.brood.some(
+          (chick) => chick.getPosition().distanceTo(at) < range,
+        );
+      }
+      if (!near) continue;
+
+      // Mothers hold the display longer and will do it again sooner.
+      this.buskLeft = mother
+        ? 3.8 + Math.random() * 2.2
+        : 2.2 + Math.random() * 1.8;
+      this.buskCool = mother
+        ? 2.2 + Math.random() * 1.8
+        : 7 + Math.random() * 6;
       this.buskFace.copy(at);
       return;
     }
@@ -1607,9 +1643,13 @@ export class Swan {
 
     const [leftWing, rightWing] = this.wings as [THREE.Mesh, THREE.Mesh];
     // Arched right up — the classic mute swan threat display.
-    const arch = 1.05 + Math.sin(this.stride * 1.4) * 0.12;
+    const mother = this.brood.length > 0;
+    const arch =
+      (mother ? 1.45 : 1.2) + Math.sin(this.stride * 1.6) * 0.14;
     leftWing.rotation.z = arch;
     rightWing.rotation.z = -arch;
+    leftWing.rotation.x = mother ? -0.25 : -0.12;
+    rightWing.rotation.x = mother ? -0.25 : -0.12;
 
     this.mesh.rotation.x = 0;
     this.mesh.rotation.z = stamp * 0.03;
@@ -1683,6 +1723,8 @@ export class Swan {
     this.mesh.rotation.x = 0;
     leftWing.rotation.z = 0;
     rightWing.rotation.z = 0;
+    leftWing.rotation.x = 0;
+    rightWing.rotation.x = 0;
 
     if (this.wasInWater) {
       this.swimPose(delta, pace);
