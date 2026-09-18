@@ -39,7 +39,7 @@ const HOOP_STEP = 0.52;
 /** Wire thickness. */
 const WIRE_R = 0.012;
 /** Wide enough that a 4m spur of paving clears either side. */
-const GATE_WIDTH = 8;
+const GATE_WIDTH = 6.5;
 
 const BRICK_H = 1.05;
 const BRICK_THICK = 0.32;
@@ -425,11 +425,8 @@ function gatesOn(from: THREE.Vector2, to: THREE.Vector2): [number, number][] {
     gates.push([start, end - start]);
   }
 
-  if (length > 55) {
-    gates.push([length * 0.35, 5], [length * 0.7, 5]);
-  } else if (length > 35) {
-    gates.push([length * 0.5, 5]);
-  }
+  // Only spur / road openings — no mid-edge guesswork that punches holes
+  // where there is no path or van gate.
 
   gates.sort((a, b) => a[0] - b[0]);
   const merged: [number, number][] = [];

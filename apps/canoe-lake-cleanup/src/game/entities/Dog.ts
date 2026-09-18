@@ -3,6 +3,7 @@ import type { Person } from "./Person";
 import type { Swan } from "./Swan";
 import { Grumble } from "../effects/Grumble";
 import { isInLake, nearestShore, outwardAt } from "../world/lake";
+import { groundHeight } from "../world/terrain";
 import { addEyes } from "./eyes";
 import { MuckFlecks } from "../effects/MuckFlecks";
 
@@ -303,7 +304,9 @@ export class Dog {
   public hoseKnock(from: THREE.Vector3): void {
     const here = this.group.position;
     const away = new THREE.Vector3(here.x - from.x, 0, here.z - from.z);
-    if (away.lengthSq() < 0.01) away.set(Math.sin(this.heading), 0, Math.cos(this.heading));
+    if (away.lengthSq() < 0.01) {
+      away.set(Math.sin(this.heading), 0, Math.cos(this.heading));
+    }
     away.normalize();
     here.x += away.x * 0.85;
     here.z += away.z * 0.85;
@@ -311,11 +314,13 @@ export class Dog {
 
     this.mode = "down";
     this.downFor = 1.2 + Math.random() * 1.1;
-    this.tumbleSpin = (Math.random() < 0.5 ? 1 : -1) * (2.5 + Math.random());
+    this.tumbleSpin = (Math.random() < 0.5 ? 1 : -1) * (2.2 + Math.random());
     this.quarry = null;
     this.biteCool = 1.5;
-    this.group.rotation.z = (Math.random() < 0.5 ? 1 : -1) * 1.2;
-    this.group.rotation.x = 0.9;
+    // Roll onto their side — origin is at the feet, so lift or they bury.
+    const side = Math.random() < 0.5 ? 1 : -1;
+    this.group.rotation.set(0.25, this.heading, side * (Math.PI / 2) * 0.92);
+    this.plantDown();
   }
 
   /** Pending snap at the cleaner, once. */
@@ -323,6 +328,21 @@ export class Dog {
     const at = this.biteAt;
     this.biteAt = null;
     return at;
+  }
+
+  /** Feet on the berm / paving while upright. */
+  private plantUp(bob = 0): void {
+    const g = groundHeight(this.group.position.x, this.group.position.z);
+    this.group.position.y = g + bob;
+  }
+
+  /**
+   * On their side the mesh pivots around the feet — raise by roughly shoulder
+   * height so the body rests on the grass instead of through it.
+   */
+  private plantDown(): void {
+    const g = groundHeight(this.group.position.x, this.group.position.z);
+    this.group.position.y = g + this.breed.size * 0.55;
   }
 
   public update(delta: number, world: DogWorld): void {
@@ -356,12 +376,13 @@ export class Dog {
   private updateDown(delta: number): void {
     this.downFor -= delta;
     this.group.rotation.y += this.tumbleSpin * delta;
-    this.group.position.y = 0.08;
     this.keepDry();
+    this.plantDown();
     if (this.downFor > 0) return;
     // Scramble up — fierce ones may come straight back at you.
     this.group.rotation.x = 0;
     this.group.rotation.z = 0;
+    this.plantUp();
     this.looseFor = Math.max(this.looseFor, 4 + Math.random() * 3);
     if (this.breed.temper === "fierce" && Math.random() < 0.45) {
       this.mode = "attack";
@@ -653,7 +674,7 @@ export class Dog {
     this.tail.rotation.z = wag * (0.25 + effort * 0.3);
     this.tail.rotation.x = 0.7 - effort * 0.5;
     this.head.rotation.x = -effort * 0.15;
-    this.group.position.y = Math.abs(Math.sin(this.stride)) * 0.02 * effort;
+    this.plantUp(Math.abs(Math.sin(this.stride)) * 0.02 * effort);
   }
 
   /** Taut to the owner's hand on the lead, trailing on the floor off it. */

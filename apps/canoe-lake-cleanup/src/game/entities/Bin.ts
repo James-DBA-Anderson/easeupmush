@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { groundHeight } from "../world/terrain";
+import { addProp } from "../world/collision";
 
 /** Full enough to be worth a phone call, and full enough to spill. */
 const REPORT_AT = 0.8;
@@ -35,6 +36,9 @@ export class Bin {
   constructor(scene: THREE.Scene, x: number, z: number) {
     this.group = new THREE.Group();
     this.group.position.set(x, groundHeight(x, z), z);
+
+    // Walkers / player slide around the drum.
+    addProp({ x, z, halfWide: 0.4, halfDeep: 0.4, yaw: 0 });
 
     const post = new THREE.Mesh(
       new THREE.CylinderGeometry(0.06, 0.06, 1, 6),

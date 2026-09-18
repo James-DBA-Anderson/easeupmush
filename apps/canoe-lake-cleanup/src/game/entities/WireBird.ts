@@ -2,17 +2,20 @@ import * as THREE from "three";
 import { isInLake, WATER_Y } from "../world/lake";
 import { addEyes } from "./eyes";
 
-type Mode = "in" | "perch" | "swoop" | "feed" | "return" | "flee" | "gone";
+type Mode = "in" | "perch" | "swoop" | "feed" | "return" | "pass" | "flee" | "gone";
 
 const BODY = 0x6a7080;
 const NECK = 0x5a7a6a;
 const BILL = 0xc8a060;
 const WING = 0x5a606c;
+/** Casual circuit height — washer can knock them if you aim up. */
+const LOW_PASS_Y = 5.4;
 
 /**
  * Park pigeon on the fairy lights — lines up on a home perch, swoops down for
- * bread near the feeders, then flies straight back to the same spot and messes
- * under the wire. Hose knocks them off and they clear out.
+ * bread near the feeders, skims low around the park now and then, then flies
+ * straight back to the same spot and messes under the wire. Hose knocks them
+ * off and they clear out.
  */
 export class WireBird {
   private scene: THREE.Scene;
@@ -25,22 +28,33 @@ export class WireBird {
   private swoopIn: number;
   private feedLeft = 0;
   private dropIn: number;
+  /** Countdown until a casual low fly-past off the wire. */
+  private passIn: number;
   private pending: THREE.Vector3 | null = null;
   private fed = false;
   private age = 0;
   private faceYaw = 0;
+  /** Waypoints for a low circuit (outbound then home). */
+  private passRoute: THREE.Vector3[] = [];
+  private passIdx = 0;
 
   constructor(scene: THREE.Scene, perch: THREE.Vector3, stagger = 0) {
     this.scene = scene;
     this.home = perch.clone();
     this.swoopIn = 2 + stagger * 0.35 + Math.random() * 5;
     this.dropIn = 3 + Math.random() * 6;
+    this.passIn = 6 + stagger * 0.5 + Math.random() * 14;
     this.build();
     // Arrive from a short arc so the line fills in along the wire.
     const bearing = Math.PI * 0.6 + (Math.random() - 0.5) * 0.8;
+    // Some glide in low so you can hose them on arrival.
+    const arriveY =
+      Math.random() < 0.4
+        ? LOW_PASS_Y + Math.random() * 2.2
+        : perch.y + 4 + Math.random() * 6;
     this.group.position.set(
       perch.x + Math.cos(bearing) * (18 + Math.random() * 22),
-      perch.y + 4 + Math.random() * 6,
+      arriveY,
       perch.z + Math.sin(bearing) * (18 + Math.random() * 22),
     );
     scene.add(this.group);
@@ -91,8 +105,14 @@ export class WireBird {
     const dx = point.x - here.x;
     const dy = point.y - here.y;
     const dz = point.z - here.z;
-    // Generous — stream thins out by the time it reaches the wire.
-    return dx * dx + dy * dy * 0.55 + dz * dz < 1.6 * 1.6;
+    // Airborne passes need a bit more forgiveness; wire stream thins out.
+    const r =
+      this.mode === "pass" || this.mode === "swoop" || this.mode === "return"
+        ? 2.6
+        : this.mode === "in"
+          ? 2.2
+          : 1.6;
+    return dx * dx + dy * dy * 0.55 + dz * dz < r * r;
   }
 
   /** Hose blast — off the lights and away. */
@@ -125,6 +145,23 @@ export class WireBird {
       return;
     }
 
+    if (this.mode === "pass") {
+      const goal = this.passRoute[this.passIdx];
+      if (!goal) {
+        this.mode = "return";
+        return;
+      }
+      this.flyToward(goal, delta, 12);
+      if (this.group.position.distanceTo(goal) < 0.55) {
+        this.passIdx += 1;
+        if (this.passIdx >= this.passRoute.length) {
+          this.mode = "return";
+          this.age = 0;
+        }
+      }
+      return;
+    }
+
     if (this.mode === "in" || this.mode === "return") {
       this.flyToward(this.home, delta, this.mode === "return" ? 11 : 13);
       if (this.group.position.distanceTo(this.home) < 0.3) {
@@ -135,6 +172,7 @@ export class WireBird {
         this.faceYaw = Math.random() * Math.PI * 2;
         this.group.rotation.y = this.faceYaw;
         this.swoopIn = 3 + Math.random() * 7;
+        this.passIn = 5 + Math.random() * 16;
         // Just back from a feed — mess under the wire sooner.
         if (this.fed) {
           this.dropIn = Math.min(this.dropIn, 0.6 + Math.random() * 1.4);
@@ -172,11 +210,39 @@ export class WireBird {
       this.sit();
       this.swoopIn -= delta;
       this.dropIn -= delta;
+      this.passIn -= delta;
       if (this.dropIn <= 0 && !this.pending) {
         this.dropIn = 5 + Math.random() * 9;
         this.pending = this.groundUnder();
       }
+      // Idle low circuit — leave the wire, skim the park, come home.
+      if (this.passIn <= 0 && this.swoopIn > 0.8) {
+        this.beginLowPass();
+      }
     }
+  }
+
+  /** Leave the fairy lights for a short low skim the washer can reach. */
+  private beginLowPass(): void {
+    this.mode = "pass";
+    this.age = 0;
+    this.passIn = 10 + Math.random() * 22;
+    const ang = Math.random() * Math.PI * 2;
+    const dist = 10 + Math.random() * 20;
+    const midY = LOW_PASS_Y + Math.random() * 2.4;
+    const mid = new THREE.Vector3(
+      this.home.x + Math.cos(ang) * dist,
+      midY,
+      this.home.z + Math.sin(ang) * dist,
+    );
+    const side = ang + (Math.random() < 0.5 ? 1.1 : -1.1);
+    const far = new THREE.Vector3(
+      this.home.x + Math.cos(side) * (dist * 0.55),
+      midY + (Math.random() - 0.5) * 1.4,
+      this.home.z + Math.sin(side) * (dist * 0.55),
+    );
+    this.passRoute = [mid, far];
+    this.passIdx = 0;
   }
 
   public dispose(): void {

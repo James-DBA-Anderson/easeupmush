@@ -22,6 +22,7 @@ import { TrafficCar } from "./entities/TrafficCar";
 import { RcBoat } from "./entities/RcBoat";
 import { Crabber } from "./entities/Crabber";
 import { Boatman } from "./entities/Boatman";
+import { Gardener } from "./entities/Gardener";
 import { PedaloHire } from "./entities/PedaloHire";
 import { BbqParty, lawnGatherSpots } from "./entities/BbqParty";
 import { Picnic } from "./entities/Picnic";
@@ -66,7 +67,7 @@ import { GooseFlock } from "./entities/GooseFlock";
 import { parkAudio } from "./audio/ParkAudio";
 import { readDebugBoot, type DebugFrom } from "../level/debugBoot";
 import { placeBench, clearSitterBenches, sitterBenchSeats } from "./world/bench";
-import { plantTrees, updateTrees } from "./world/trees";
+import { plantTrees, updateTrees, updateFlowerBeds, sprayFlowerBed, flowerBeds } from "./world/trees";
 import { buildSurrounds, lightWindows } from "./world/buildings";
 import { buildFairyLights, lightFairyBulbs, fairyLightSections } from "./world/fairyLights";
 import { WireBird, roostPerchesNear } from "./entities/WireBird";
@@ -214,6 +215,7 @@ export class Game {
   private crabbers: Crabber[] = [];
   private nextCrabber = 55 + Math.random() * 50;
   private boatman: Boatman | null = null;
+  private gardener: Gardener | null = null;
   private pedaloHires: PedaloHire[] = [];
   private nextPedaloHire = 25 + Math.random() * 35;
   private bbqs: BbqParty[] = [];
@@ -511,6 +513,7 @@ export class Game {
     // After buildings so south-wind lean can see footprints as shelter.
     plantTrees(this.scene);
     this.boatman = new Boatman(this.scene);
+    this.gardener = flowerBeds().length > 0 ? new Gardener(this.scene) : null;
     this.buildLandmarks();
   }
 
@@ -557,6 +560,7 @@ export class Game {
     const sky = this.dayCycle.skyState();
     this.weather.update(delta, sky);
     updateTrees(this.elapsed, this.weather.getWind());
+    updateFlowerBeds(delta);
 
     const gloom = this.weather.gloom;
     this.ambientLight.intensity = sky.ambient * (1 - gloom * 0.4);
@@ -1554,6 +1558,19 @@ export class Game {
       tag.scrub(point, direction);
       if (tag.claimCredit()) this.creditClean();
       return true;
+    }
+
+    // Ornamental beds — distant mist is welcome; point-blank strips petals.
+    {
+      const bedHit = sprayFlowerBed(point, this.camera.position);
+      if (bedHit === "watered") {
+        this.gardener?.noticeWatered();
+        return true;
+      }
+      if (bedHit === "damaged") {
+        this.gardener?.noticeBlasted();
+        return true;
+      }
     }
 
     // Pigeons on the fairy lights — hose knocks them (and neighbours) off.
@@ -3393,6 +3410,7 @@ export class Game {
     };
     for (const person of this.people) add(person.getPosition());
     if (this.boatman) add(this.boatman.getPosition());
+    if (this.gardener) add(this.gardener.getPosition());
     for (const crabber of this.crabbers) add(crabber.getPosition());
     for (const party of this.bbqs) {
       for (const at of party.guestPositions()) add(at);
@@ -3541,6 +3559,11 @@ export class Game {
     this.boatman?.update(delta, this.camera.position);
     if (this.boatman?.wantsSwing()) {
       this.takeStrike(this.boatman.getPosition());
+    }
+
+    this.gardener?.update(delta, this.camera.position, this.people);
+    if (this.gardener?.wantsSwing()) {
+      this.takeStrike(this.gardener.getPosition());
     }
 
     if (consumePedaloWreck()) {
@@ -4216,6 +4239,7 @@ export class Game {
       people: [
         ...this.people.map((person) => person.getPosition()),
         ...(this.boatman ? [this.boatman.getPosition()] : []),
+        ...(this.gardener ? [this.gardener.getPosition()] : []),
         ...this.pedaloHires.flatMap((hire) => hire.guestPositions()),
         ...this.bbqs.flatMap((party) => party.guestPositions()),
         ...this.picnics.flatMap((party) => party.guestPositions()),

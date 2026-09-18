@@ -5,9 +5,10 @@ import { isInLake } from "./lake";
 import { atParkBuilding } from "./park";
 
 /**
- * Solid ground blockers inside the park: railings, buildings, and furniture
- * (benches). Shared by the player and anyone else on foot. Does not include
- * the lake — players may wade; use {@link isBlockedWalk} for dry feet.
+ * Solid ground blockers inside the park: railings, buildings, and props
+ * (benches, bins, trunks, flower beds). Shared by the player and anyone else
+ * on foot. Does not include the lake — players may wade; use
+ * {@link isBlockedWalk} for dry feet.
  */
 export function isBlocked(x: number, z: number, radius = 0.45): boolean {
   return (
@@ -16,6 +17,69 @@ export function isBlocked(x: number, z: number, radius = 0.45): boolean {
     atSurroundBuilding(x, z) ||
     atProp(x, z, radius)
   );
+}
+
+/**
+ * Nudge a preferred footfall off props / buildings / the lake. Searches
+ * inland first (away from shore), then along a walk direction, so path folk
+ * stay on the paving instead of clipping benches and trunks.
+ */
+export function clearWalkSpot(
+  x: number,
+  z: number,
+  opts: {
+    radius?: number;
+    /** Unit vector away from the lake (inland). */
+    inland?: { x: number; z: number };
+    /** Unit vector along the path. */
+    along?: { x: number; z: number };
+    reach?: number;
+  } = {},
+): { x: number; z: number } {
+  const radius = opts.radius ?? 0.45;
+  if (!isBlocked(x, z, radius) && !isInLake(x, z)) return { x, z };
+
+  const inland = opts.inland ?? { x: 0, z: 0 };
+  const along = opts.along ?? { x: 1, z: 0 };
+  const reach = opts.reach ?? 5;
+  const rings = Math.ceil(reach / 0.35);
+
+  for (let d = 1; d <= rings; d++) {
+    const inDist = d * 0.35;
+    const alongDist = d * 0.4;
+    const tries: [number, number][] = [
+      [inDist, 0],
+      [inDist, alongDist * 0.55],
+      [inDist, -alongDist * 0.55],
+      [0, alongDist],
+      [0, -alongDist],
+      [inDist * 0.65, alongDist],
+      [inDist * 0.65, -alongDist],
+      [inDist * 1.35, 0],
+    ];
+    for (const [iOff, aOff] of tries) {
+      const nx = x + inland.x * iOff + along.x * aOff;
+      const nz = z + inland.z * iOff + along.z * aOff;
+      if (!isBlocked(nx, nz, radius) && !isInLake(nx, nz)) {
+        return { x: nx, z: nz };
+      }
+    }
+  }
+
+  // Last resort: ring search so they don't spawn inside a solid.
+  for (let ring = 1; ring <= rings; ring++) {
+    const dist = ring * 0.4;
+    const samples = 8 + ring * 2;
+    for (let i = 0; i < samples; i++) {
+      const a = (i / samples) * Math.PI * 2;
+      const nx = x + Math.cos(a) * dist;
+      const nz = z + Math.sin(a) * dist;
+      if (!isBlocked(nx, nz, radius) && !isInLake(nx, nz)) {
+        return { x: nx, z: nz };
+      }
+    }
+  }
+  return { x, z };
 }
 
 /** Pedestrian positions for this frame — player, path folk, guests, etc. */

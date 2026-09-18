@@ -447,9 +447,8 @@ export class Dropping {
     this.hoseLumps(lx, lz, dx, dz);
     if (this.scrubs % 2 === 0) this.refreshClumpVisibility();
 
-    // Most of the pad is clear — let the rest soak away rather than popping off.
-    // Don't rinse while solid lumps are still waiting to be broken down.
-    this.tryBeginRinse(0.28, true);
+    // Most of the pad is clear — soak the rest away (lumps fade with it).
+    this.tryBeginRinse(0.15, true);
   }
 
   private nearLoose(lx: number, lz: number): boolean {
@@ -967,9 +966,8 @@ export class Dropping {
   public update(delta: number): boolean {
     this.updateLoose(delta);
     if (!this.rinsing) {
-      // Crumbs finished melting off a washed pad — soak away the empty mark.
-      // Only score if the player worked it; rain-cleared pads stay uncredited.
-      this.tryBeginRinse(0.28, this.scrubs > 0);
+      // Pad mostly gone — soak away whatever's left, including any crumbs.
+      this.tryBeginRinse(0.15, this.scrubs > 0);
       return false;
     }
     this.rinse = Math.min(1, this.rinse + delta / 1.6);
@@ -1002,10 +1000,9 @@ export class Dropping {
     this.refreshClumpVisibility();
   }
 
-  /** Fade out once the pad is thin and no solid lumps are left to work. */
+  /** Fade out once most of the pad is washed clear. */
   private tryBeginRinse(frac: number, award: boolean): void {
     if (this.dirtSum > this.dirtFull * frac) return;
-    if (this.clumpMassLeft() >= 0.12) return;
     this.beginRinse(award);
   }
 

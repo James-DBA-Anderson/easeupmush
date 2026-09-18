@@ -13,7 +13,7 @@ import {
 } from "../world/lake";
 import { parkGates } from "../world/fence";
 import { binStations, cafeQueueSpot } from "../world/park";
-import { isBlocked, stepWalk } from "../world/blocking";
+import { stepWalk, clearWalkSpot } from "../world/blocking";
 import { groundHeight } from "../world/terrain";
 import { Grumble } from "../effects/Grumble";
 import { MuckFlecks } from "../effects/MuckFlecks";
@@ -599,7 +599,19 @@ export class Person {
       }
     }
     this.index = best;
-    this.joinAt.copy(loopPoint(best));
+    // Join on a clear footfall near the loop — not inside a bench / bin / trunk.
+    const join = loopPoint(best);
+    const ahead = loopPoint(best + 1);
+    const along = new THREE.Vector2().subVectors(ahead, join).normalize();
+    const shore = nearestShore(join.x, join.y);
+    const inland = outwardAt(shore);
+    const clear = clearWalkSpot(join.x, join.y, {
+      radius: 0.45,
+      inland: { x: inland.x, z: inland.y },
+      along: { x: along.x, z: along.y },
+      reach: 5,
+    });
+    this.joinAt.set(clear.x, clear.z);
     this.faceToward(this.joinAt.x, this.joinAt.y);
   }
 
@@ -2426,13 +2438,16 @@ export class Person {
       targetZ = shore.y + out.y * bank;
     }
 
-    // Nudge inland off benches / walls that sit on the walk band.
+    // Prefer a clear band off benches / bins / trunks / buildings.
     const inland = lakeward.clone().negate();
-    for (let tries = 0; tries < 10; tries++) {
-      if (!isBlocked(targetX, targetZ, 0.4) && !isInLake(targetX, targetZ)) break;
-      targetX += inland.x * 0.4;
-      targetZ += inland.y * 0.4;
-    }
+    const clear = clearWalkSpot(targetX, targetZ, {
+      radius: 0.45,
+      inland: { x: inland.x, z: inland.y },
+      along: { x: forward.x, z: forward.y },
+      reach: 5.5,
+    });
+    targetX = clear.x;
+    targetZ = clear.z;
 
     const pos = this.group.position;
     if (delta === undefined || delta <= 0) {

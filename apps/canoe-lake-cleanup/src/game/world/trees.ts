@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { TreeSpot } from '../../level/types';
-import { hitsAny, type Footprint } from './collision';
+import { hitsAny, addProp, hitsFootprint, type Footprint } from './collision';
 import { surroundFootprints } from './buildings';
 import { parkBuildingFootprints } from './park';
 import { groundHeight } from './terrain';
@@ -216,10 +216,15 @@ export function buildShrub(scale: number, rand: () => number): THREE.Group {
 }
 
 /** Raised soil bed with kerb and a scatter of blooms. */
-export function buildFlowerBed(scale: number, rand: () => number): THREE.Group {
+export function buildFlowerBed(
+  scale: number,
+  rand: () => number,
+): { group: THREE.Group; petals: THREE.Mesh[]; halfWide: number; halfDeep: number } {
   const bed = new THREE.Group();
   const wide = 4.2 * scale;
   const deep = 2.6 * scale;
+  const halfWide = wide * 0.5;
+  const halfDeep = deep * 0.5;
 
   const soil = new THREE.BoxGeometry(wide, 0.28, deep);
   soil.translate(0, 0.14, 0);
@@ -230,30 +235,184 @@ export function buildFlowerBed(scale: number, rand: () => number): THREE.Group {
   bed.add(new THREE.Mesh(kerb, BED_KERB));
 
   const blooms = [BLOOM_PINK, BLOOM_GOLD, BLOOM_WHITE, BLOOM_LILAC];
+  const petals: THREE.Mesh[] = [];
   const count = 10 + Math.floor(rand() * 8);
   for (let i = 0; i < count; i++) {
     const paint = blooms[Math.floor(rand() * blooms.length)]!;
     const r = 0.1 + rand() * 0.12;
-    const flower = new THREE.SphereGeometry(r, 6, 5);
-    flower.translate(
+    const flower = new THREE.Mesh(new THREE.SphereGeometry(r, 6, 5), paint);
+    flower.position.set(
       (rand() - 0.5) * wide * 0.78,
       0.32 + rand() * 0.18,
       (rand() - 0.5) * deep * 0.78,
     );
-    bed.add(new THREE.Mesh(flower, paint));
+    flower.userData.petal = true;
+    flower.userData.home = flower.position.clone();
+    bed.add(flower);
+    petals.push(flower);
 
     if (rand() > 0.45) {
-      const leaf = new THREE.SphereGeometry(r * 1.4, 5, 4);
-      leaf.scale(1, 0.4, 1);
-      leaf.translate(
+      const leaf = new THREE.Mesh(new THREE.SphereGeometry(r * 1.4, 5, 4), SHRUB_LEAF);
+      leaf.scale.set(1, 0.4, 1);
+      leaf.position.set(
         (rand() - 0.5) * wide * 0.7,
         0.28,
         (rand() - 0.5) * deep * 0.7,
       );
-      bed.add(new THREE.Mesh(leaf, SHRUB_LEAF));
+      bed.add(leaf);
     }
   }
-  return bed;
+  return { group: bed, petals, halfWide, halfDeep };
+}
+
+/** Live ornamental bed the gardener minds — walkable so feet can spoil it. */
+export interface FlowerBed {
+  x: number;
+  z: number;
+  yaw: number;
+  halfWide: number;
+  halfDeep: number;
+  group: THREE.Group;
+  petals: THREE.Mesh[];
+}
+
+interface LoosePetal {
+  mesh: THREE.Mesh;
+  vel: THREE.Vector3;
+  life: number;
+}
+
+const flowerBedsLive: FlowerBed[] = [];
+const loosePetals: LoosePetal[] = [];
+
+export function flowerBeds(): ReadonlyArray<FlowerBed> {
+  return flowerBedsLive;
+}
+
+/** True if a footfall sits inside a bed (oriented footprint). */
+export function inFlowerBed(x: number, z: number, radius = 0.25): boolean {
+  return flowerBedAt(x, z, radius) != null;
+}
+
+export function flowerBedAt(
+  x: number,
+  z: number,
+  radius = 0.25,
+): FlowerBed | null {
+  for (const bed of flowerBedsLive) {
+    if (hitsFootprint(x, z, bed, radius)) return bed;
+  }
+  return null;
+}
+
+/**
+ * Hose on a bed. From afar (≥ ~5m) it's a welcome water — returns `"watered"`.
+ * Up close it blasts petals off — `"damaged"`. Misses return null.
+ */
+export function sprayFlowerBed(
+  point: THREE.Vector3,
+  from: THREE.Vector3,
+): "watered" | "damaged" | null {
+  const bed = flowerBedAt(point.x, point.z, 0.35);
+  if (!bed) return null;
+  // Must actually hit the blooms, not just the kerb lip underfoot.
+  if (point.y > 1.4 || point.y < -0.1) return null;
+
+  const gap = Math.hypot(from.x - bed.x, from.z - bed.z);
+  if (gap >= 5.2) return "watered";
+
+  const now = performance.now();
+  const last = (bed.group.userData.dmgAt as number) ?? 0;
+  if (now - last > 200) {
+    bed.group.userData.dmgAt = now;
+    knockPetals(bed, point, 2 + Math.floor(Math.random() * 3));
+  }
+  return "damaged";
+}
+
+/** Feet through the blooms — knocks a couple of heads off. */
+export function trampleFlowerBed(x: number, z: number): boolean {
+  const bed = flowerBedAt(x, z, 0.35);
+  if (!bed) return false;
+  const at = new THREE.Vector3(x, 0.4, z);
+  knockPetals(bed, at, 1 + (Math.random() < 0.45 ? 1 : 0));
+  return true;
+}
+
+/** Put a bloom back while the gardener kneels over the bed. */
+export function restoreFlowerPetal(bed: FlowerBed): boolean {
+  for (const petal of bed.petals) {
+    if (petal.parent === bed.group && petal.visible) continue;
+    const home = petal.userData.home as THREE.Vector3 | undefined;
+    if (!home) continue;
+    petal.visible = true;
+    petal.position.copy(home);
+    petal.rotation.set(0, 0, 0);
+    petal.scale.setScalar(1);
+    if (petal.parent !== bed.group) bed.group.add(petal);
+    return true;
+  }
+  return false;
+}
+
+export function updateFlowerBeds(delta: number): void {
+  for (let i = loosePetals.length - 1; i >= 0; i--) {
+    const p = loosePetals[i]!;
+    p.life -= delta;
+    p.vel.y -= 18 * delta;
+    p.mesh.position.addScaledVector(p.vel, delta);
+    p.mesh.rotation.x += delta * 6;
+    p.mesh.rotation.z += delta * 4;
+    if (p.mesh.position.y < 0.05) {
+      p.mesh.position.y = 0.05;
+      p.vel.set(p.vel.x * 0.4, 0, p.vel.z * 0.4);
+    }
+    if (p.life <= 0) {
+      p.mesh.removeFromParent();
+      loosePetals.splice(i, 1);
+    } else if (p.life < 0.6) {
+      p.mesh.scale.setScalar(Math.max(0.05, p.life / 0.6));
+    }
+  }
+}
+
+function knockPetals(bed: FlowerBed, at: THREE.Vector3, count: number): void {
+  const local = bed.group.worldToLocal(at.clone());
+  const ranked = bed.petals
+    .filter((p) => p.parent === bed.group && p.visible)
+    .map((p) => ({
+      petal: p,
+      d: p.position.distanceToSquared(local),
+    }))
+    .sort((a, b) => a.d - b.d);
+
+  for (let i = 0; i < count && i < ranked.length; i++) {
+    const petal = ranked[i]!.petal;
+    const world = new THREE.Vector3();
+    petal.getWorldPosition(world);
+    const scene = bed.group.parent;
+    if (!scene) return;
+    bed.group.remove(petal);
+    petal.position.copy(world);
+    petal.scale.setScalar(1);
+    scene.add(petal);
+    const away = new THREE.Vector3(
+      world.x - at.x + (Math.random() - 0.5),
+      0,
+      world.z - at.z + (Math.random() - 0.5),
+    );
+    if (away.lengthSq() < 0.01) away.set(Math.random() - 0.5, 0, Math.random() - 0.5);
+    away.normalize();
+    loosePetals.push({
+      mesh: petal,
+      vel: new THREE.Vector3(
+        away.x * (2.5 + Math.random() * 3),
+        2.2 + Math.random() * 2.5,
+        away.z * (2.5 + Math.random() * 3),
+      ),
+      life: 2.4 + Math.random() * 1.4,
+    });
+  }
 }
 
 /** Where the big trees ended up, for anything that needs to stand under one. */
@@ -329,6 +488,9 @@ export function plantTrees(scene: THREE.Scene): void {
   grown.length = 0;
   liveCanopy.length = 0;
   swaying.length = 0;
+  flowerBedsLive.length = 0;
+  for (const loose of loosePetals) loose.mesh.removeFromParent();
+  loosePetals.length = 0;
 
   const place = (
     tree: THREE.Group,
@@ -339,6 +501,8 @@ export function plantTrees(scene: THREE.Scene): void {
       yaw?: number;
       sway?: boolean;
       canopy?: boolean;
+      /** Trunk / bed collision radius (metres). */
+      trunk?: number;
     } = {},
   ): void => {
     const hasBranches = opts.hasBranches !== false;
@@ -350,6 +514,14 @@ export function plantTrees(scene: THREE.Scene): void {
     if (opts.canopy ?? hasBranches) {
       liveCanopy.push({ x, z, group: tree });
     }
+    const trunk = opts.trunk ?? (hasBranches ? 0.48 : 0.3);
+    addProp({
+      x,
+      z,
+      halfWide: trunk,
+      halfDeep: trunk,
+      yaw: opts.yaw ?? 0,
+    });
     if (opts.sway === false) return;
     // Scrub bends more; mature oaks only nod. Slight per-tree rate so rows ripple.
     swaying.push({
@@ -367,35 +539,51 @@ export function plantTrees(scene: THREE.Scene): void {
 
   for (const spot of parkTrees) {
     const lean = resolveLean(spot, parkTrees, shields, rand);
+    const scale = spot.scale ?? 1;
     if (spot.kind === "holm") {
       place(
         buildHolmOak({
-          scale: spot.scale ?? 1,
+          scale,
           leanX: lean.x,
           leanZ: lean.z,
           rand,
         }),
         spot.x,
         spot.z,
+        { trunk: 0.42 * scale },
       );
     } else if (spot.kind === "plane") {
       const tree = buildPlane(spot.scale ?? 0.9, rand);
       tipForWind(tree, lean.x * 0.75, lean.z * 0.75);
-      place(tree, spot.x, spot.z);
+      place(tree, spot.x, spot.z, { trunk: 0.38 * scale });
     } else if (spot.kind === "shrub") {
       place(buildShrub(spot.scale ?? 1.1, rand), spot.x, spot.z, {
         hasBranches: false,
+        trunk: 0.45 * scale,
       });
     } else if (spot.kind === "flowerBed") {
-      place(buildFlowerBed(spot.scale ?? 1, rand), spot.x, spot.z, {
-        hasBranches: false,
-        yaw: spot.yaw ?? 0,
-        sway: false,
+      // Walkable on purpose — trampling is a gardener offence.
+      const yaw = spot.yaw ?? 0;
+      const built = buildFlowerBed(spot.scale ?? 1, rand);
+      built.group.position.set(spot.x, groundHeight(spot.x, spot.z), spot.z);
+      built.group.rotation.y = yaw;
+      scene.add(built.group);
+      flowerBedsLive.push({
+        x: spot.x,
+        z: spot.z,
+        yaw,
+        halfWide: built.halfWide,
+        halfDeep: built.halfDeep,
+        group: built.group,
+        petals: built.petals,
       });
     } else {
       const tree = buildScrub(spot.scale ?? 1.2, rand);
       tipForWind(tree, lean.x * 0.55, lean.z * 0.55);
-      place(tree, spot.x, spot.z, { hasBranches: false });
+      place(tree, spot.x, spot.z, {
+        hasBranches: false,
+        trunk: 0.32 * scale,
+      });
     }
   }
 }

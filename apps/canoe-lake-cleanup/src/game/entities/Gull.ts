@@ -16,6 +16,8 @@ const SIZE = 0.55;
 const CRUISE_HEIGHT = 26;
 /** Picnic-raid circle — low enough the lance can reach. */
 const RAID_CRUISE_HEIGHT = 9.5;
+/** Occasional low beat over the park — in washer range if you aim up. */
+const LOW_PASS_HEIGHT = 7.0;
 const CRUISE_SPEED = 11;
 const STOOP_SPEED = 17;
 /** How long they'll stand on the deck working at something. */
@@ -79,6 +81,10 @@ export class Gull {
   private raidFeed = false;
   /** Keep the circle low while the picnic mission is pulling them in. */
   private raidCircle = false;
+  /** Seconds left on a casual low pass (hoseable height). */
+  private lowPass = 0;
+  /** Countdown until they may drop into a low beat. */
+  private nextLowPass = 8 + Math.random() * 28;
   private flecks!: MuckFlecks;
   private leavingPark = false;
 
@@ -99,6 +105,12 @@ export class Gull {
     if (already) {
       // Already on station when the shift starts.
       this.mode = "cruise";
+      // A few start on a low beat so the washer has something to aim at early.
+      if (Math.random() < 0.35) {
+        this.lowPass = 10 + Math.random() * 12;
+        this.height = LOW_PASS_HEIGHT;
+        this.joinAt.y = this.height;
+      }
       this.group.position.copy(this.joinAt);
     } else {
       // Come in off the sea rather than popping onto the circle mid-air.
@@ -228,8 +240,9 @@ export class Gull {
   }
 
   /**
-   * Hose hit — stooping birds are generous; high cruise needs a real aim so
-   * spraying the blanket doesn't wipe the whole flock through a tall column.
+   * Hose hit — stooping / low-pass birds are generous; high cruise needs a
+   * real aim so spraying the blanket doesn't wipe the whole flock through a
+   * tall column.
    */
   public hitBy(point: THREE.Vector3, heavy = false): boolean {
     const here = this.group.position;
@@ -241,8 +254,9 @@ export class Gull {
       return dx * dx + dy * dy * 0.55 + dz * dz < r * r;
     }
     if (this.mode === "cruise" || this.mode === "in") {
-      // Must actually reach them in the air — no ground-spray cheat.
-      return here.distanceTo(point) < (heavy ? 4.8 : 3.6);
+      const low = here.y < 12;
+      const r = heavy ? (low ? 5.4 : 4.8) : low ? 4.2 : 3.6;
+      return here.distanceTo(point) < r;
     }
     return here.distanceTo(point) < (heavy ? 3.6 : 2.4);
   }
@@ -258,6 +272,8 @@ export class Gull {
   public flush(): void {
     if (this.mode === "gone" || this.mode === "up") return;
     this.scrap = null;
+    this.lowPass = 0;
+    this.nextLowPass = 14 + Math.random() * 30;
     this.mode = "up";
     this.shriek();
     parkAudio.wingFlap(this.wetFeed ? 0.85 : 0.55);
@@ -340,7 +356,12 @@ export class Gull {
   }
 
   private cruiseY(): number {
-    return this.raidCircle ? RAID_CRUISE_HEIGHT : CRUISE_HEIGHT;
+    if (this.raidCircle) return RAID_CRUISE_HEIGHT;
+    if (this.lowPass > 0) {
+      // Gentle bob so the pass doesn't look like a flat shelf.
+      return LOW_PASS_HEIGHT + Math.sin(this.circleAngle * 1.7) * 1.15;
+    }
+    return CRUISE_HEIGHT;
   }
 
   /**
@@ -416,6 +437,25 @@ export class Gull {
   /** Wheeling over the lake on stiff wings, keeping an eye on the paving. */
   private circle(delta: number, scraps: readonly Scrap[]): void {
     this.circleAngle += (delta * CRUISE_SPEED) / this.circleRadius;
+
+    // Sometimes drop into a low beat so the washer can knock them mid-air.
+    if (!this.raidCircle) {
+      if (this.lowPass > 0) {
+        this.lowPass = Math.max(0, this.lowPass - delta);
+      } else {
+        this.nextLowPass -= delta;
+        if (this.nextLowPass <= 0) {
+          if (Math.random() < 0.62) {
+            this.lowPass = 8 + Math.random() * 14;
+          }
+          this.nextLowPass = 16 + Math.random() * 40;
+        }
+      }
+    }
+
+    // Ease toward the current cruise band (high, raid, or low pass).
+    this.height += (this.cruiseY() - this.height) * Math.min(1, delta * 1.6);
+
     const here = this.group.position;
     here.set(
       this.circleAt.x + Math.cos(this.circleAngle) * this.circleRadius,
