@@ -1,17 +1,26 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { PATH_OUTER, PATH_SPURS, distanceToShore, isInLake } from './lake';
-import { insidePark } from './fence';
+import type { TreeSpot } from '../../level/types';
+import { hitsAny, type Footprint } from './collision';
+import { surroundFootprints } from './buildings';
+import { parkBuildingFootprints } from './park';
+import { groundHeight } from './terrain';
 
 /**
- * The planting round Canoe Lake, following the real park on the map.
- *
- * Dense mature trees screen the north boundary (A288). A thinner line follows
- * the esplanade on the south. The west (St Helens Parade) is more open with
- * scattered oaks. The big east lawn stays mostly clear — one lone tree out by
- * the outdoor gym, and a small cluster down by the splash. SW corner by the
- * toilets / memorial has a tight group.
+ * Park foliage comes only from the level editor / level JSON (trees, shrubs,
+ * flower beds). An empty list means an empty park.
  */
+
+/** How far south we look for a windbreak (metres). */
+const WIND_FETCH = 52;
+/** Sample step along the windward ray. */
+const WIND_STEP = 3.2;
+/**
+ * Prevailing breeze off the Solent: from the south, a touch west of south —
+ * trees lean inland (+Z) and slightly east (+X).
+ */
+const PREVAIL_LEAN_X = 0.28;
+const PREVAIL_LEAN_Z = 0.85;
 
 const BARK = new THREE.MeshStandardMaterial({ color: 0x4a4238, roughness: 1 });
 const PLANE_BARK = new THREE.MeshStandardMaterial({ color: 0x9c9481, roughness: 0.95 });
@@ -111,9 +120,12 @@ export function buildHolmOak({ scale, leanX, leanZ, rand }: OakOptions): THREE.G
   }
   tree.add(meshFrom(leaves, HOLM_LEAF));
 
-  // The whole tree leans away from the prevailing weather off the sea.
-  tree.rotation.z = -leanX * 0.22;
-  tree.rotation.x = leanZ * 0.22;
+  // The whole tree leans away from the prevailing weather off the sea
+  // (positive leanZ = inland / +Z; positive leanX = east).
+  // +rotation.x tips the crown toward +Z; +rotation.z tips toward −X, so
+  // east lean uses a negative Z rotation (same convention as updateTrees).
+  tree.rotation.z = -leanX * 0.28;
+  tree.rotation.x = leanZ * 0.28;
   return tree;
 }
 
@@ -171,46 +183,90 @@ export function buildScrub(scale: number, rand: () => number): THREE.Group {
   return bush;
 }
 
-/** Keeps planting off the paved spurs that run out from the lake. */
-function onSpur(x: number, z: number): boolean {
-  for (const spur of PATH_SPURS) {
-    const abx = spur.bx - spur.ax;
-    const abz = spur.bz - spur.az;
-    const len2 = abx * abx + abz * abz;
-    if (len2 < 1e-6) continue;
-    let t = ((x - spur.ax) * abx + (z - spur.az) * abz) / len2;
-    t = Math.min(1, Math.max(0, t));
-    const px = spur.ax + t * abx;
-    const pz = spur.az + t * abz;
-    if (Math.hypot(x - px, z - pz) < 4.5) return true;
+const SHRUB_LEAF = new THREE.MeshStandardMaterial({
+  color: 0x2f5a33,
+  roughness: 1,
+  flatShading: true,
+});
+const BED_SOIL = new THREE.MeshStandardMaterial({ color: 0x5a4433, roughness: 1 });
+const BED_KERB = new THREE.MeshStandardMaterial({ color: 0x6a6e62, roughness: 1 });
+const BLOOM_PINK = new THREE.MeshStandardMaterial({ color: 0xd8446a, roughness: 0.8 });
+const BLOOM_GOLD = new THREE.MeshStandardMaterial({ color: 0xe8c04a, roughness: 0.8 });
+const BLOOM_WHITE = new THREE.MeshStandardMaterial({ color: 0xf2efe6, roughness: 0.85 });
+const BLOOM_LILAC = new THREE.MeshStandardMaterial({ color: 0xa878c4, roughness: 0.8 });
+
+/** Tidy ornamental shrub — denser and greener than seafront scrub. */
+export function buildShrub(scale: number, rand: () => number): THREE.Group {
+  const shrub = new THREE.Group();
+  const leaves: THREE.BufferGeometry[] = [];
+  const blobs = 5 + Math.floor(rand() * 3);
+  for (let i = 0; i < blobs; i++) {
+    const size = scale * (0.55 + rand() * 0.4);
+    const blob = new THREE.SphereGeometry(size, 7, 5);
+    blob.scale(1.15, 0.85, 1.1);
+    blob.translate(
+      (rand() - 0.5) * scale * 1.4,
+      scale * (0.55 + rand() * 0.45),
+      (rand() - 0.5) * scale * 1.4,
+    );
+    leaves.push(blob);
   }
-  return false;
+  shrub.add(meshFrom(leaves, SHRUB_LEAF));
+  return shrub;
 }
 
-function plantable(x: number, z: number): boolean {
-  if (!insidePark(x, z)) return false;
-  if (isInLake(x, z)) return false;
-  if (distanceToShore(x, z) < PATH_OUTER + 2.5) return false;
-  return !onSpur(x, z);
-}
+/** Raised soil bed with kerb and a scatter of blooms. */
+export function buildFlowerBed(scale: number, rand: () => number): THREE.Group {
+  const bed = new THREE.Group();
+  const wide = 4.2 * scale;
+  const deep = 2.6 * scale;
 
-/** Try a few jitters so a planned spot still lands on plantable ground. */
-function findSpot(
-  x: number,
-  z: number,
-  rand: () => number,
-  spread = 4,
-): THREE.Vector2 | null {
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const px = x + (rand() - 0.5) * spread;
-    const pz = z + (rand() - 0.5) * spread;
-    if (plantable(px, pz)) return new THREE.Vector2(px, pz);
+  const soil = new THREE.BoxGeometry(wide, 0.28, deep);
+  soil.translate(0, 0.14, 0);
+  bed.add(new THREE.Mesh(soil, BED_SOIL));
+
+  const kerb = new THREE.BoxGeometry(wide + 0.35, 0.22, deep + 0.35);
+  kerb.translate(0, 0.11, 0);
+  bed.add(new THREE.Mesh(kerb, BED_KERB));
+
+  const blooms = [BLOOM_PINK, BLOOM_GOLD, BLOOM_WHITE, BLOOM_LILAC];
+  const count = 10 + Math.floor(rand() * 8);
+  for (let i = 0; i < count; i++) {
+    const paint = blooms[Math.floor(rand() * blooms.length)]!;
+    const r = 0.1 + rand() * 0.12;
+    const flower = new THREE.SphereGeometry(r, 6, 5);
+    flower.translate(
+      (rand() - 0.5) * wide * 0.78,
+      0.32 + rand() * 0.18,
+      (rand() - 0.5) * deep * 0.78,
+    );
+    bed.add(new THREE.Mesh(flower, paint));
+
+    if (rand() > 0.45) {
+      const leaf = new THREE.SphereGeometry(r * 1.4, 5, 4);
+      leaf.scale(1, 0.4, 1);
+      leaf.translate(
+        (rand() - 0.5) * wide * 0.7,
+        0.28,
+        (rand() - 0.5) * deep * 0.7,
+      );
+      bed.add(new THREE.Mesh(leaf, SHRUB_LEAF));
+    }
   }
-  return plantable(x, z) ? new THREE.Vector2(x, z) : null;
+  return bed;
 }
 
 /** Where the big trees ended up, for anything that needs to stand under one. */
 const grown: THREE.Vector2[] = [];
+
+/** Live canopy trees (holm / plane) — fire can climb these. */
+export interface LiveTree {
+  x: number;
+  z: number;
+  group: THREE.Group;
+}
+
+const liveCanopy: LiveTree[] = [];
 
 /** Live plantings that tip with the breeze. */
 interface SwayPlant {
@@ -226,8 +282,20 @@ interface SwayPlant {
 
 const swaying: SwayPlant[] = [];
 
+/** Level-authored foliage from the editor / JSON. */
+let parkTrees: TreeSpot[] = [];
+
+export function applyTreeLayout(trees: ReadonlyArray<TreeSpot>): void {
+  parkTrees = trees.map((t) => ({ ...t }));
+}
+
 export function treeSpots(): ReadonlyArray<THREE.Vector2> {
   return grown;
+}
+
+/** Holm oaks and planes still standing — grass fire can climb them. */
+export function liveTrees(): ReadonlyArray<LiveTree> {
+  return liveCanopy;
 }
 
 /**
@@ -255,22 +323,34 @@ export function updateTrees(time: number, wind: THREE.Vector2): void {
   }
 }
 
-/** Lays out the park's trees as they stand round the real lake. */
+/** Plant only foliage authored in the level. Empty list → bare park. */
 export function plantTrees(scene: THREE.Scene): void {
   const rand = seeded(1886);
   grown.length = 0;
+  liveCanopy.length = 0;
   swaying.length = 0;
 
   const place = (
     tree: THREE.Group,
     x: number,
     z: number,
-    hasBranches = true,
+    opts: {
+      hasBranches?: boolean;
+      yaw?: number;
+      sway?: boolean;
+      canopy?: boolean;
+    } = {},
   ): void => {
-    tree.position.set(x, 0, z);
-    tree.rotation.y = rand() * Math.PI * 2;
+    const hasBranches = opts.hasBranches !== false;
+    tree.position.set(x, groundHeight(x, z), z);
+    tree.rotation.y =
+      opts.yaw !== undefined ? opts.yaw : rand() * Math.PI * 2;
     scene.add(tree);
     if (hasBranches) grown.push(new THREE.Vector2(x, z));
+    if (opts.canopy ?? hasBranches) {
+      liveCanopy.push({ x, z, group: tree });
+    }
+    if (opts.sway === false) return;
     // Scrub bends more; mature oaks only nod. Slight per-tree rate so rows ripple.
     swaying.push({
       group: tree,
@@ -282,102 +362,119 @@ export function plantTrees(scene: THREE.Scene): void {
     });
   };
 
-  const tryOak = (
-    x: number,
-    z: number,
-    scale: number,
-    leanX: number,
-    leanZ: number,
-    spread = 3,
-  ): void => {
-    const spot = findSpot(x, z, rand, spread);
-    if (!spot) return;
-    place(
-      buildHolmOak({ scale, leanX, leanZ, rand }),
-      spot.x,
-      spot.y,
-    );
-  };
+  // Buildings must already be up so surround / park footprints can shield.
+  const shields = windShields();
 
-  const tryPlane = (x: number, z: number, scale: number, spread = 4): void => {
-    const spot = findSpot(x, z, rand, spread);
-    if (!spot) return;
-    place(buildPlane(scale, rand), spot.x, spot.y);
-  };
-
-  // Dense screen along the north railings (A288) — the thick belt on the map.
-  for (let x = -20; x <= 150; x += 9) {
-    const zBelt = 128 - Math.max(0, -x) * 0.35;
-    tryOak(x, zBelt + (rand() - 0.5) * 4, 1.0 + rand() * 0.3, 0, 0.25, 2.5);
-    if (rand() > 0.35) {
-      tryOak(x + 4, zBelt - 6 + rand() * 5, 0.85 + rand() * 0.25, 0, 0.2, 3);
+  for (const spot of parkTrees) {
+    const lean = resolveLean(spot, parkTrees, shields, rand);
+    if (spot.kind === "holm") {
+      place(
+        buildHolmOak({
+          scale: spot.scale ?? 1,
+          leanX: lean.x,
+          leanZ: lean.z,
+          rand,
+        }),
+        spot.x,
+        spot.z,
+      );
+    } else if (spot.kind === "plane") {
+      const tree = buildPlane(spot.scale ?? 0.9, rand);
+      tipForWind(tree, lean.x * 0.75, lean.z * 0.75);
+      place(tree, spot.x, spot.z);
+    } else if (spot.kind === "shrub") {
+      place(buildShrub(spot.scale ?? 1.1, rand), spot.x, spot.z, {
+        hasBranches: false,
+      });
+    } else if (spot.kind === "flowerBed") {
+      place(buildFlowerBed(spot.scale ?? 1, rand), spot.x, spot.z, {
+        hasBranches: false,
+        yaw: spot.yaw ?? 0,
+        sway: false,
+      });
+    } else {
+      const tree = buildScrub(spot.scale ?? 1.2, rand);
+      tipForWind(tree, lean.x * 0.55, lean.z * 0.55);
+      place(tree, spot.x, spot.z, { hasBranches: false });
     }
   }
-
-  // Extra weight at the north-west curve and north-east corner.
-  for (let i = 0; i < 8; i++) {
-    tryOak(-90 + rand() * 50, 70 + rand() * 45, 0.95 + rand() * 0.3, 0.25, 0.25, 5);
-  }
-  for (let i = 0; i < 8; i++) {
-    tryOak(130 + rand() * 28, 95 + rand() * 30, 0.9 + rand() * 0.35, -0.15, 0.2, 5);
-  }
-
-  // Southern boundary inside the esplanade path — a thinner continuous line.
-  for (let x = -110; x <= 160; x += 11) {
-    tryOak(
-      x,
-      -105 - rand() * 3,
-      0.75 + rand() * 0.25,
-      0,
-      0.85,
-      2.5,
-    );
-  }
-
-  // South-west cluster by the toilets / Emmanuel Memorial.
-  for (let i = 0; i < 9; i++) {
-    tryOak(
-      -70 + rand() * 50,
-      -110 + rand() * 14,
-      0.8 + rand() * 0.3,
-      0.15,
-      0.7,
-      4,
-    );
-  }
-
-  // St Helens Parade curve: scattered oaks following the railings, not a wall.
-  const stHelens: ReadonlyArray<readonly [number, number]> = [
-    [-30, 115],
-    [-55, 95],
-    [-85, 60],
-    [-110, 20],
-    [-130, -20],
-    [-138, -55],
-  ];
-  for (const [x, z] of stHelens) {
-    if (rand() < 0.2) continue;
-    tryOak(x + (rand() - 0.5) * 8, z + (rand() - 0.5) * 8, 0.85 + rand() * 0.3, 0.55, 0.15, 5);
-  }
-
-  // Lone landmark tree on the east lawn near the outdoor gym.
-  tryOak(95, -42, 1.35, 0.05, 0.35, 6);
-
-  // Small cluster south of the splash / play end on the east green.
-  for (let i = 0; i < 6; i++) {
-    tryPlane(145 + rand() * 18, 25 + rand() * 28, 0.7 + rand() * 0.35, 5);
-  }
-
-  // A few deciduous trees mixed into the north belt, set slightly back.
-  for (let x = -10; x <= 130; x += 32) {
-    const zBelt = 122 - Math.max(0, -x) * 0.3;
-    tryPlane(x + (rand() - 0.5) * 10, zBelt + rand() * 4, 0.85 + rand() * 0.25, 3);
-  }
-
-  // Wind-burnt scrub along the seafront edge, outside the oak line.
-  for (let x = -105; x <= 165; x += 9) {
-    const spot = findSpot(x + (rand() - 0.5) * 4, -110 - rand() * 3, rand, 2);
-    if (!spot) continue;
-    place(buildScrub(1.0 + rand() * 0.8, rand), spot.x, spot.y, false);
-  }
 }
+
+/** Apply the same trunk tip holm oaks use for permanent wind lean. */
+function tipForWind(tree: THREE.Group, leanX: number, leanZ: number): void {
+  tree.rotation.z = -leanX * 0.28;
+  tree.rotation.x = leanZ * 0.28;
+}
+
+function windShields(): Footprint[] {
+  return [...surroundFootprints(), ...parkBuildingFootprints()];
+}
+
+/**
+ * Authored lean wins; otherwise bake a south-wind lean scaled by how open the
+ * fetch is toward the sea (−Z).
+ */
+function resolveLean(
+  spot: TreeSpot,
+  peers: ReadonlyArray<TreeSpot>,
+  buildings: readonly Footprint[],
+  rand: () => number,
+): { x: number; z: number } {
+  if (spot.leanX !== undefined || spot.leanZ !== undefined) {
+    return { x: spot.leanX ?? 0, z: spot.leanZ ?? 0 };
+  }
+  if (spot.kind === "flowerBed" || spot.kind === "shrub") {
+    return { x: 0, z: 0 };
+  }
+  const open = southFetchOpen(spot.x, spot.z, spot, peers, buildings);
+  if (open < 0.12) return { x: 0, z: 0 };
+  // A little per-tree scatter so an avenue doesn't all tip the same.
+  const jitter = 0.85 + rand() * 0.3;
+  return {
+    x: PREVAIL_LEAN_X * open * jitter,
+    z: PREVAIL_LEAN_Z * open * jitter,
+  };
+}
+
+/**
+ * 1 = clear fetch to the sea, 0 = fully sheltered by buildings or larger
+ * plantings to the south.
+ */
+function southFetchOpen(
+  x: number,
+  z: number,
+  self: TreeSpot,
+  peers: ReadonlyArray<TreeSpot>,
+  buildings: readonly Footprint[],
+): number {
+  let blocked = 0;
+  let samples = 0;
+  for (let d = WIND_STEP; d <= WIND_FETCH; d += WIND_STEP) {
+    samples += 1;
+    // Slight west-of-south sample so SW buildings count as windward.
+    const sx = x - d * 0.12;
+    const sz = z - d;
+    if (hitsAny(sx, sz, buildings, 1.2)) {
+      // Solid wall — shut the fetch down hard, nearer blocks more.
+      blocked += 1.6 * (1 - d / (WIND_FETCH + 8));
+      break;
+    }
+    for (const peer of peers) {
+      if (peer === self) continue;
+      if (peer.kind === "flowerBed" || peer.kind === "shrub") continue;
+      const gap = Math.hypot(peer.x - sx, peer.z - sz);
+      const canopy =
+        peer.kind === "holm" || peer.kind === "plane"
+          ? 5.2 * (peer.scale ?? 1)
+          : 2.4 * (peer.scale ?? 1);
+      if (gap > canopy) continue;
+      const weight =
+        peer.kind === "holm" || peer.kind === "plane" ? 0.7 : 0.35;
+      blocked += weight * (1 - d / (WIND_FETCH + 8));
+      break;
+    }
+  }
+  if (samples === 0) return 1;
+  return THREE.MathUtils.clamp(1 - blocked / 2.1, 0, 1);
+}
+

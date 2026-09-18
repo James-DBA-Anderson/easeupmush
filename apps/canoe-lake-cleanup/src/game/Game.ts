@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { Player, type Tool } from "./Player";
-import { Swan } from "./entities/Swan";
-import { Person } from "./entities/Person";
+import { Swan, setSwanFeederRush } from "./entities/Swan";
+import { Person, setFeederRush } from "./entities/Person";
 import { Dropping, MAX_PILES, MERGE_RADIUS, type DropKind } from "./entities/Dropping";
 import { Litter } from "./entities/Litter";
 import { Bread } from "./entities/Bread";
@@ -12,33 +12,64 @@ import { Gull, type Scrap } from "./entities/Gull";
 import { Squirrel } from "./entities/Squirrel";
 import { Footprint } from "./entities/Footprint";
 import { Plane } from "./entities/Plane";
+import { Helicopter } from "./entities/Helicopter";
 import { Graffiti } from "./entities/Graffiti";
-import { BranchKid } from "./entities/BranchKid";
+import { Drunks, drunkSpots } from "./entities/Drunks";
+import { RebelRaid } from "./entities/RebelRaid";
+import { BoyRacers } from "./entities/BoyRacers";
 import { Scooter } from "./entities/Scooter";
+import { TrafficCar } from "./entities/TrafficCar";
 import { RcBoat } from "./entities/RcBoat";
 import { Crabber } from "./entities/Crabber";
-import { BbqParty, BBQ_SPOTS } from "./entities/BbqParty";
+import { Boatman } from "./entities/Boatman";
+import { PedaloHire } from "./entities/PedaloHire";
+import { BbqParty, lawnGatherSpots } from "./entities/BbqParty";
+import { Picnic } from "./entities/Picnic";
+import { Gazebo } from "./entities/Gazebo";
+import { BenchSit, type BenchPastime } from "./entities/BenchSit";
 import { PlayVisit, canVisitPlayPark } from "./entities/PlayVisit";
+import { FootballKickabout } from "./entities/FootballKickabout";
 import { Fox } from "./entities/Fox";
 import { Puddles } from "./effects/Puddles";
 import { GrassFire } from "./effects/GrassFire";
 import {
   PATH_LOOP,
+  PATH_INNER,
   PATH_OUTER,
   WATER_Y,
   buildGround,
   buildLake,
   buildPaths,
+  distanceToShore,
   isInLake,
   loopPoint,
   nearestShore,
   offsetShore,
+  clearOfLakeRim,
+  pickNorthwestPathIndex,
   waterSpot,
   type LakeSurface,
 } from "./world/lake";
-import { buildBench } from "./world/bench";
-import { plantTrees, treeSpots, updateTrees } from "./world/trees";
+import { setWalkCrowd } from "./world/blocking";
+import { buildElevation, groundHeight } from "./world/terrain";
+import { ShiftIntro } from "./systems/ShiftIntro";
+import { HeavyHoseIntro } from "./systems/HeavyHoseIntro";
+import {
+  buildCleanerVan,
+  getCleanerVanPose,
+  nearHeavyHosePickup,
+  setRearDoorsOpen,
+  vanSpotWorld,
+} from "./world/cleanerVan";
+import { getMissionSpot, missionWindowOpen } from "./world/missions";
+import { GooseFlock } from "./entities/GooseFlock";
+import { parkAudio } from "./audio/ParkAudio";
+import { readDebugBoot, type DebugFrom } from "../level/debugBoot";
+import { placeBench, clearSitterBenches, sitterBenchSeats } from "./world/bench";
+import { plantTrees, updateTrees } from "./world/trees";
 import { buildSurrounds, lightWindows } from "./world/buildings";
+import { buildFairyLights, lightFairyBulbs, fairyLightSections } from "./world/fairyLights";
+import { WireBird, roostPerchesNear } from "./entities/WireBird";
 import { buildFencing, parkGates } from "./world/fence";
 import {
   buildParkBuildings,
@@ -46,6 +77,13 @@ import {
   binStations,
   taggableWalls,
   atParkBuilding,
+  sprayPedalo,
+  isPedaloHired,
+  hiredPedaloHull,
+  freePedaloCount,
+  hatchQueueSpot,
+  setPedaloChop,
+  consumePedaloWreck,
 } from "./world/park";
 import { DayCycle } from "./systems/DayCycle";
 import { Weather } from "./systems/Weather";
@@ -54,18 +92,30 @@ import { MiniMap } from "./ui/MiniMap";
 import { Mugshot } from "./ui/Mugshot";
 import { Messages } from "./ui/Messages";
 import { ObjectiveArrow } from "./ui/ObjectiveArrow";
+import { Compass } from "./ui/Compass";
 import { Callouts } from "./systems/Callouts";
 
-const WASH_RADIUS = 0.85;
-/** Overnight dumps clustered by the start — a proper opening wash job. */
-const OVERNIGHT_LUMPS_MIN = 10;
-const OVERNIGHT_LUMPS_MAX = 14;
-/** How far from the start the overnight mess may sit. */
-const OVERNIGHT_RADIUS = 24;
+const WASH_RADIUS = 1.28;
+/**
+ * Overnight tip: thick layered heaps spaced along the lake edge by the van —
+ * the first wash job when you clock on.
+ */
+const OVERNIGHT_HEAPS_MIN = 6;
+const OVERNIGHT_HEAPS_MAX = 9;
+/** Deposits stacked into each overnight heap. */
+const OVERNIGHT_LAYERS_MIN = 4;
+const OVERNIGHT_LAYERS_MAX = 8;
+/** Fraction of the shoreline arc (centred on the start) used for the tip. */
+const OVERNIGHT_ARC_FRAC = 0.38;
 /** Second wave kicks in once this fraction of overnight piles is washed. */
 const OPENING_CLEAR_FRAC = 0.8;
-/** Extra dumps seeded when the second event fires, further round the path. */
-const WAVE2_LUMPS = 5;
+/** How long the NW feeder rush runs after the opening tip is cleared. */
+const FEEDER_RUSH_FOR = 150;
+/** Pigeons bunched on the two fairy-light spans nearest the feeders. */
+const PIGEON_FLOCK = 18;
+/** Pedalo bird kills before a revenge V-formation flies in. */
+const BIRD_KILL_REVENGE = 4;
+const REVENGE_FLOCK = 7;
 /** How near the spike has to come down to get a bit of rubbish. */
 const SPEAR_RADIUS = 1.3;
 
@@ -93,10 +143,16 @@ const WAIT_AND_SEE = 3;
 
 const MAX_CYCLISTS = 2;
 const MAX_SCOOTERS = 2;
+const MAX_TRAFFIC = 9;
 const MAX_BOATS = 2;
 const MAX_CRABBERS = 6;
+const MAX_PEDALO_HIRES = 2;
 const MAX_BBQS = 2;
+const MAX_PICNICS = 3;
+const MAX_GAZEBOS = 2;
+const MAX_BENCH_SITS = 5;
 const MAX_PLAY_VISITS = 3;
+const MAX_FOOTBALL = 1;
 /**
  * Peak path traffic on a sunny afternoon. The actual number at any hour is
  * read off the day — early mornings and nights are nearly empty.
@@ -151,18 +207,31 @@ export class Game {
   private nextCyclist = 45 + Math.random() * 40;
   private scooters: Scooter[] = [];
   private nextScooter = 50 + Math.random() * 50;
+  private traffic: TrafficCar[] = [];
+  private nextTraffic = 3 + Math.random() * 6;
   private boats: RcBoat[] = [];
   private nextBoat = 70 + Math.random() * 50;
   private crabbers: Crabber[] = [];
   private nextCrabber = 55 + Math.random() * 50;
+  private boatman: Boatman | null = null;
+  private pedaloHires: PedaloHire[] = [];
+  private nextPedaloHire = 25 + Math.random() * 35;
   private bbqs: BbqParty[] = [];
-  private nextBbq = 90 + Math.random() * 80;
+  private nextBbq = 18 + Math.random() * 28;
+  private picnics: Picnic[] = [];
+  private nextPicnic = 10 + Math.random() * 22;
+  private gazebos: Gazebo[] = [];
+  private nextGazebo = 110 + Math.random() * 100;
+  private benchSits: BenchSit[] = [];
+  private nextBenchSit = 8 + Math.random() * 14;
   /** Late-shift grass fire from a disposable BBQ — one per day at most. */
   private grassFire: GrassFire | null = null;
   private fireMissionDone = false;
   private fireComplaint = false;
   private playVisits: PlayVisit[] = [];
   private nextPlayVisit = 35 + Math.random() * 40;
+  private football: FootballKickabout[] = [];
+  private nextFootball = 40 + Math.random() * 50;
   private nextArrival = 40 + Math.random() * 60;
   private nextDeparture = 50 + Math.random() * 70;
   private fox: Fox | null = null;
@@ -174,12 +243,29 @@ export class Game {
   private squirrels: Squirrel[] = [];
   private planes: Plane[] = [];
   private nextPlane = 40 + Math.random() * 80;
-  private nextSpitfire = 280 + Math.random() * 500;
+  /** First look-up after a bit of morning; later gaps are longer once one's been. */
+  private nextSpitfire = 120 + Math.random() * 180;
+  private helicopters: Helicopter[] = [];
+  private nextHelicopter = 90 + Math.random() * 140;
   private bins: Bin[] = [];
   private graffiti: Graffiti[] = [];
   private nextTag = 120 + Math.random() * 180;
-  private branchKids: BranchKid[] = [];
-  private nextBranchKid = 100 + Math.random() * 160;
+  private drunks: Drunks[] = [];
+  private nextDrunks = 70 + Math.random() * 90;
+
+  /** Final shift job — Gosport lot coming over the esplanade at 01:00. */
+  private rebelRaid: RebelRaid | null = null;
+  private rebelMissionStarted = false;
+  private rebelMissionWon = false;
+  /** Previous frame hour for mission-window edge detection (−1 = unset). */
+  private rebelHourWas = -1;
+
+  /** 10pm — Skylines thrashing the esplanade, then one in the lake. */
+  private boyRacers: BoyRacers | null = null;
+  private racerMissionStarted = false;
+  private racerMissionDone = false;
+  private racerHourWas = -1;
+  private rebelBriefing: { wait: number; from: string; text: string }[] = [];
 
   /** The player's view, worked out afresh each frame. */
   private view = new THREE.Frustum();
@@ -198,8 +284,12 @@ export class Game {
   private miniMap: MiniMap;
   private mugshot: Mugshot;
   private objectiveArrow: ObjectiveArrow;
+  private missionArrow: ObjectiveArrow;
+  private compass: Compass;
   private messages: Messages;
   private callouts: Callouts;
+  private shiftIntro: ShiftIntro | null = null;
+  private heavyHoseIntro: HeavyHoseIntro | null = null;
 
   private ambientLight!: THREE.AmbientLight;
   private sunLight!: THREE.DirectionalLight;
@@ -215,9 +305,30 @@ export class Game {
 
   /** Opening piles seeded at clock-on; clearing them unlocks the second event. */
   private overnightPiles = new Set<Dropping>();
+  /** Alternates left/right boot when the player walks through a mess lump. */
+  private playerFoot = 1;
   private overnightTotal = 0;
   private overnightCleared = 0;
   private secondEventDone = false;
+  /** NW feeders radio mission — birds lay the next mess, nothing teleports in. */
+  private feederRushLeft = 0;
+  private feederTip: { x: number; z: number } | null = null;
+  private wireBirds: WireBird[] = [];
+  private birdKills = 0;
+  private revengeDone = false;
+  private picnicRaidActive = false;
+  private picnicRaidDone = false;
+  private picnicRaidTip: { x: number; z: number } | null = null;
+  private picnicRaidLeft = 0;
+  /** Seconds with no divers — mission clears after a short hold. */
+  private picnicRaidClear = 0;
+  /** Mission 4 — radar geese inbound; heavy hose from the van. */
+  private gooseMissionPending = 0;
+  private gooseMissionStarted = false;
+  private gooseMissionDone = false;
+  private gooseHeavyArmed = false;
+  private gooseFlock: GooseFlock | null = null;
+  private rearDoorOpen = 0;
 
   private health = HEALTH_MAX;
   private sincePecked = HEAL_DELAY;
@@ -228,6 +339,10 @@ export class Game {
   private paused = false;
   /** How far through the collapse, once they've had the last one. */
   private collapse = 0;
+  /**
+   * Shift hasn't started until the van intro hands off to first person.
+   */
+  private onDuty = false;
 
   private cleanlinessElement: HTMLElement;
   private cleanlinessBar: HTMLElement;
@@ -252,17 +367,10 @@ export class Game {
       75,
       window.innerWidth / window.innerHeight,
       0.1,
-      1000,
+      2500,
     );
-    // North path, mid-paving, looking over the water — clear of the kerb after
-    // the grounds grew to the real park size.
-    // North path, just inland of the lake — clear of the water after the
-    // grounds were rotated to match the real park.
-    const start = offsetShore(PATH_OUTER - 2).reduce((best, point) =>
-      point.y > best.y ? point : best,
-    );
-    this.camera.position.set(start.x, 1.7, start.y);
-    this.camera.lookAt(0, 1.7, 0);
+    // Temporary — seated in the van once the scene is built.
+    this.camera.position.set(0, 1.7, 40);
     this.scene.add(this.camera);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -275,6 +383,11 @@ export class Game {
     if (container) {
       container.appendChild(this.renderer.domElement);
     }
+    // Level / editor map are N-up with east on the right. A Three.js camera
+    // looking down −Z puts +X on the viewer's right, which mirrors east/west
+    // when you face north. Flip only the WebGL view so FP matches the map;
+    // simulation coords stay unflipped (minimap, collisions, editor).
+    this.renderer.domElement.style.transform = "scaleX(-1)";
 
     this.clock = new THREE.Clock();
     this.player = new Player(
@@ -297,7 +410,7 @@ export class Game {
     this.gameOverPanel = document.getElementById("game-over")!;
     this.gameOverDetail = document.getElementById("game-over-detail")!;
     this.instructionsElement = document.getElementById("instructions")!;
-    this.showTool("hose");
+    this.showTool(null);
     document
       .getElementById("restart")!
       .addEventListener("click", () => window.location.reload());
@@ -328,7 +441,13 @@ export class Game {
     );
     this.objectiveArrow = new ObjectiveArrow(
       document.getElementById("objective-arrow")!,
+      "mess",
     );
+    this.missionArrow = new ObjectiveArrow(
+      document.getElementById("mission-arrow")!,
+      "mission",
+    );
+    this.compass = new Compass(document.getElementById("compass")!);
 
     this.messages = new Messages(document.getElementById("messages")!);
     this.callouts = new Callouts(this.messages);
@@ -353,9 +472,26 @@ export class Game {
     for (const spot of binStations()) {
       this.bins.push(new Bin(this.scene, spot.x, spot.z));
     }
-    this.callouts.raise("shift", this.dayCycle.clockFace());
-    // Hold other jobs until the overnight tip is mostly washed.
+    // Shift text waits until the intro reaches the path.
     this.callouts.lockTrouble();
+    const debug = readDebugBoot();
+    if (debug) {
+      this.shiftIntro = null;
+      this.applyDebugBoot(debug.from);
+      this.wireIntroAudio();
+      document.body.classList.add("debug-boot");
+    } else {
+      this.shiftIntro = new ShiftIntro(this.scene, this.camera);
+      if (this.shiftIntro.start()) {
+        this.player.beginIntro();
+        this.showTool(null);
+        this.wireIntroAudio();
+      } else {
+        this.shiftIntro = null;
+        this.forceClockOn();
+        this.wireIntroAudio();
+      }
+    }
 
     this.onWindowResize();
     window.addEventListener("resize", () => this.onWindowResize());
@@ -364,32 +500,23 @@ export class Game {
 
   private setupScene(): void {
     buildGround(this.scene, 560);
+    buildElevation(this.scene);
     this.lake = buildLake(this.scene);
     buildPaths(this.scene);
-    plantTrees(this.scene);
     buildSurrounds(this.scene);
+    buildFairyLights(this.scene);
     buildFencing(this.scene);
     buildParkBuildings(this.scene);
+    buildCleanerVan(this.scene);
+    // After buildings so south-wind lean can see footprints as shelter.
+    plantTrees(this.scene);
+    this.boatman = new Boatman(this.scene);
     this.buildLandmarks();
   }
 
   private buildLandmarks(): void {
-    const stone = new THREE.MeshStandardMaterial({ color: 0x7a7568 });
-
-    // Lumps Fort walls — east green, just north of the play park (not through it).
-    for (const [x, z, w, d] of [
-      [165, 101, 3, 24],
-      [150, 113, 33, 3],
-      [150, 89, 33, 3],
-    ] as const) {
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(w, 3.5, d), stone);
-      wall.position.set(x, 1.75, z);
-      wall.castShadow = true;
-      wall.receiveShadow = true;
-      this.scene.add(wall);
-    }
-
     // Benches sit along the outer edge of the path, backs out, facing the water.
+    clearSitterBenches();
     const ring = offsetShore(PATH_OUTER - 1);
     for (let i = 0; i < ring.length; i += 12) {
       const spot = ring[i]!;
@@ -402,10 +529,8 @@ export class Game {
       const facing = new THREE.Vector2(-along.y, along.x);
       if (facing.dot(spot) > 0) facing.negate();
 
-      const bench = buildBench();
-      bench.position.set(spot.x, 0, spot.y);
-      bench.rotation.y = Math.atan2(facing.x, facing.y);
-      this.scene.add(bench);
+      const yaw = Math.atan2(facing.x, facing.y);
+      placeBench(this.scene, spot.x, spot.y, yaw, { sitters: true });
     }
   }
 
@@ -443,9 +568,10 @@ export class Game {
     // Soft shadows look wrong under cloud; fade them out with the sun.
     this.sunLight.castShadow = this.sunLight.intensity > 0.2;
     this.sun.update(sky, gloom, this.camera, delta);
-    this.lake.update(delta, sky.sunPosition, sky.sunColor);
+    this.lake.update(delta, sky.sunPosition, sky.sunColor, this.weather.getWind());
     // Lights come on across the seafront as the daylight goes.
     lightWindows(THREE.MathUtils.clamp(1 - sky.sun / 0.45, 0, 1));
+    lightFairyBulbs(THREE.MathUtils.clamp(1 - sky.sun / 0.45, 0, 1));
   }
 
   private refreshView(): void {
@@ -639,8 +765,9 @@ export class Game {
    * in through a gate when numbers are down on the hour; when it's over-full
    * (closing time, a lull after lunch) a few peel off for the gates early.
    */
-  private updatePeople(delta: number, mess: readonly THREE.Vector3[]): void {
+  private updatePeople(delta: number, piles: readonly Dropping[]): void {
     const { target, gap } = this.crowdWanted();
+    const mess = piles.map((pile) => pile.getPosition());
 
     // Too many for the hour: peel a few off for the gates, a couple at a time,
     // so closing time looks like people drifting home rather than a stampede.
@@ -680,8 +807,21 @@ export class Game {
         if (!swan.isAshore() && !swan.isCharging()) continue;
         person.spook(swan.getPosition(), swan.isWingsOut());
       }
-      const stepped = person.update(delta, mess, this.camera.position);
-      if (stepped >= 0) this.logComplaint(this.droppings[stepped]!);
+      const stepped = person.update(
+        delta,
+        mess,
+        this.camera.position,
+        this.weather.isWet(),
+      );
+      if (stepped >= 0) {
+        const pile = piles[stepped]!;
+        person.soilFromMess(pile.moundHeight());
+        this.logComplaint(
+          pile,
+          person.getPosition(),
+          person.getHeading(),
+        );
+      }
 
       const scattered = person.claimScatter();
       if (scattered) this.bread.push(new Bread(this.scene, scattered));
@@ -689,6 +829,11 @@ export class Game {
       const dropped = person.claimLitter();
       if (dropped && this.litter.length < 14) {
         this.litter.push(new Litter(this.scene, dropped));
+      }
+
+      const cone = person.claimConeDrop();
+      if (cone && this.litter.length < 14) {
+        this.litter.push(new Litter(this.scene, cone, "cone"));
       }
 
       const binned = person.claimDeposit();
@@ -709,12 +854,24 @@ export class Game {
       if (print) this.footprints.push(new Footprint(this.scene, print));
 
       const splash = person.claimSplash();
-      if (splash) this.bigSplash(splash);
+      if (splash) {
+        this.bigSplash(splash);
+        this.callouts.raise("dunk", this.dayCycle.clockFace(), {
+          x: splash.x,
+          z: splash.z,
+        });
+      }
 
       const dog = person.getDog();
       if (dog) {
-        dog.update(delta, { swans: this.swans, people: this.people });
+        dog.update(delta, {
+          swans: this.swans,
+          people: this.people,
+          player: this.camera.position,
+        });
         for (let n = dog.claimTrouble(); n > 0; n--) this.complain();
+        const bite = dog.claimBite();
+        if (bite) this.takeStrike(bite);
       }
 
       if (person.isGone()) {
@@ -725,13 +882,17 @@ export class Game {
   }
 
   public addDropping(position: THREE.Vector3, kind: DropKind = "swan"): Dropping | null {
+    // Keep piles off the coping — under the kerb they vanish into the rim.
+    const safe = clearOfLakeRim(position.x, position.z);
+    const at = position.clone().set(safe.x, position.y, safe.y);
+
     // Stack onto an existing pile rather than peppering the same square.
     let nearest: Dropping | null = null;
     let best = MERGE_RADIUS * MERGE_RADIUS;
     for (const pile of this.droppings) {
-      const at = pile.getPosition();
-      const dx = at.x - position.x;
-      const dz = at.z - position.z;
+      const here = pile.getPosition();
+      const dx = here.x - at.x;
+      const dz = here.z - at.z;
       const d2 = dx * dx + dz * dz;
       if (d2 < best) {
         best = d2;
@@ -744,71 +905,131 @@ export class Game {
     }
 
     if (this.droppings.length >= MAX_PILES) return null;
-    const pile = new Dropping(position, this.scene, kind);
+    const pile = new Dropping(at, this.scene, kind);
     this.droppings.push(pile);
     return pile;
   }
 
   /**
-   * First-thing mess: swans have been busy overnight and left a load of dumps
-   * on the paving by the start — a clear opening power-wash job.
+   * First-thing mess: thick layered heaps spaced along the lake rim near the
+   * van / clock-on — ring the nearby edge, not a NW carpet.
    */
   private seedOvernightMess(): void {
-    const lumps =
-      OVERNIGHT_LUMPS_MIN +
+    const rim = offsetShore((PATH_INNER + PATH_OUTER) / 2);
+    if (rim.length === 0) {
+      this.overnightTotal = 0;
+      return;
+    }
+
+    const heaps =
+      OVERNIGHT_HEAPS_MIN +
       Math.floor(
-        Math.random() * (OVERNIGHT_LUMPS_MAX - OVERNIGHT_LUMPS_MIN + 1),
+        Math.random() * (OVERNIGHT_HEAPS_MAX - OVERNIGHT_HEAPS_MIN + 1),
       );
-    const origin = new THREE.Vector2(
-      this.camera.position.x,
-      this.camera.position.z,
+
+    const start = this.openingStartXZ();
+    let closest = 0;
+    let best = Infinity;
+    for (let i = 0; i < rim.length; i++) {
+      const p = rim[i]!;
+      const d = (p.x - start.x) ** 2 + (p.y - start.z) ** 2;
+      if (d >= best) continue;
+      best = d;
+      closest = i;
+    }
+
+    // Even spacing along an arc of the shoreline centred on the start.
+    const arc = Math.max(
+      heaps * 3,
+      Math.floor(rim.length * OVERNIGHT_ARC_FRAC),
     );
 
-    // Prefer path spots within reach of the start; fall back to the nearest.
-    const near = PATH_LOOP.filter(
-      (point) => point.distanceTo(origin) <= OVERNIGHT_RADIUS,
-    );
-    const pool =
-      near.length > 0
-        ? near
-        : [...PATH_LOOP].sort(
-            (a, b) => a.distanceToSquared(origin) - b.distanceToSquared(origin),
-          );
-
-    for (let i = 0; i < lumps; i++) {
-      const base = pool[Math.floor(Math.random() * pool.length)]!;
-      const jitter = 1.2 + Math.random() * 2.4;
-      const angle = Math.random() * Math.PI * 2;
-      const x = base.x + Math.cos(angle) * jitter;
-      const z = base.y + Math.sin(angle) * jitter;
+    for (let i = 0; i < heaps; i++) {
+      const t = (i + 0.5) / heaps;
+      const along = Math.floor((t - 0.5) * arc);
+      const idx = (closest + along + rim.length * 4) % rim.length;
+      const centre = rim[idx]!;
+      // Nudge onto the paving and jitter along the rim so heaps don't line up.
+      const jitter = (Math.random() - 0.5) * 1.4;
+      const neighbour = rim[(idx + 1) % rim.length]!;
+      const tx = neighbour.x - centre.x;
+      const tz = neighbour.y - centre.y;
+      const len = Math.hypot(tx, tz) || 1;
+      let x = centre.x + (tx / len) * jitter;
+      let z = centre.y + (tz / len) * jitter;
+      const safe = clearOfLakeRim(x, z, 1.5);
+      x = safe.x;
+      z = safe.y;
       if (isInLake(x, z)) continue;
-      if (origin.distanceTo(new THREE.Vector2(x, z)) > OVERNIGHT_RADIUS + 4) {
-        continue;
-      }
 
-      const kind: DropKind = Math.random() < 0.1 ? "gull" : "swan";
-      const centre = new THREE.Vector3(x, 0, z);
-      // One fat pile: many deposits stacked on the same spot.
-      const deposits = 8 + Math.floor(Math.random() * 6);
-      let pile: Dropping | null = null;
-      for (let n = 0; n < deposits; n++) {
-        pile = this.addDropping(
-          centre
-            .clone()
-            .add(
-              new THREE.Vector3(
-                (Math.random() - 0.5) * 0.45,
-                0,
-                (Math.random() - 0.5) * 0.45,
-              ),
-            ),
-          kind,
+      const layers =
+        OVERNIGHT_LAYERS_MIN +
+        Math.floor(
+          Math.random() * (OVERNIGHT_LAYERS_MAX - OVERNIGHT_LAYERS_MIN + 1),
         );
+      const kind: DropKind = Math.random() < 0.1 ? "gull" : "swan";
+      const pile = this.seedHeap(x, z, layers, kind);
+      if (pile) {
+        pile.reshape(0.3, 1.3);
+        this.overnightPiles.add(pile);
       }
-      if (pile) this.overnightPiles.add(pile);
     }
 
     this.overnightTotal = this.overnightPiles.size;
+  }
+
+  /** Van / path drop-off — where the shift starts. */
+  private openingStartXZ(): { x: number; z: number } {
+    const pose = getCleanerVanPose();
+    if (pose) return { x: pose.pathX, z: pose.pathZ };
+    const van = vanSpotWorld();
+    if (van) return van;
+    if (PATH_LOOP.length > 0) {
+      const p = PATH_LOOP[0]!;
+      return { x: p.x, z: p.y };
+    }
+    return { x: 0, z: 0 };
+  }
+
+  /**
+   * Lay several deposits on nearly the same spot so they merge into one thick
+   * pile rather than a scatter of thin pads.
+   */
+  private seedHeap(
+    x: number,
+    z: number,
+    layers: number,
+    kind: DropKind = "swan",
+  ): Dropping | null {
+    let pile: Dropping | null = null;
+    for (let i = 0; i < layers; i++) {
+      const jitter = 0.04 + Math.random() * 0.32;
+      const angle = Math.random() * Math.PI * 2;
+      const drop = this.addDropping(
+        new THREE.Vector3(
+          x + Math.cos(angle) * jitter,
+          0,
+          z + Math.sin(angle) * jitter,
+        ),
+        kind,
+      );
+      if (drop) pile = drop;
+    }
+    return pile;
+  }
+
+  /** Rough centre of the opening tip — for the first direction arrow. */
+  private overnightTip(): { x: number; z: number } | undefined {
+    if (this.overnightPiles.size === 0) return undefined;
+    let x = 0;
+    let z = 0;
+    for (const pile of this.overnightPiles) {
+      const at = pile.getPosition();
+      x += at.x;
+      z += at.z;
+    }
+    const n = this.overnightPiles.size;
+    return { x: x / n, z: z / n };
   }
 
   /** Counts an overnight pile washed clear; at 80% the second event starts. */
@@ -823,52 +1044,492 @@ export class Game {
   }
 
   /**
-   * Opening tip is mostly done — unlock the rest of the shift and put a fresh
-   * batch of mess further round the path.
+   * Opening tip is mostly done — unlock the rest of the shift and radio the
+   * NW feeder rush. Mess from here on is laid by birds (path feeders + fairy
+   * light gulls / pigeons), not spawned in.
    */
   private startSecondEvent(): void {
     if (this.secondEventDone) return;
     this.secondEventDone = true;
     this.callouts.unlockTrouble();
 
-    const origin = new THREE.Vector2(
-      this.camera.position.x,
-      this.camera.position.z,
-    );
-    // Further round the path, away from where they started.
-    const far = [...PATH_LOOP].sort(
-      (a, b) => b.distanceToSquared(origin) - a.distanceToSquared(origin),
-    );
-    const band = far.slice(0, Math.max(8, Math.floor(PATH_LOOP.length * 0.2)));
-    let marked: { x: number; z: number } | undefined;
+    const tip =
+      PATH_LOOP.length > 0
+        ? PATH_LOOP[pickNorthwestPathIndex()]!
+        : new THREE.Vector2(-40, 40);
+    const marked = { x: tip.x, z: tip.y };
+    this.feederTip = marked;
 
-    for (let i = 0; i < WAVE2_LUMPS; i++) {
-      const base = band[Math.floor(Math.random() * band.length)]!;
-      const jitter = 1.5 + Math.random() * 3;
-      const angle = Math.random() * Math.PI * 2;
-      const x = base.x + Math.cos(angle) * jitter;
-      const z = base.y + Math.sin(angle) * jitter;
-      if (isInLake(x, z)) continue;
+    this.feederRushLeft = FEEDER_RUSH_FOR;
+    setFeederRush(true);
+    setSwanFeederRush(true);
+    this.spawnWireBirds();
 
-      const centre = new THREE.Vector3(x, 0, z);
-      const deposits = 7 + Math.floor(Math.random() * 5);
-      for (let n = 0; n < deposits; n++) {
-        this.addDropping(
-          centre
-            .clone()
-            .add(
-              new THREE.Vector3(
-                (Math.random() - 0.5) * 0.4,
-                0,
-                (Math.random() - 0.5) * 0.4,
-              ),
-            ),
-        );
-      }
-      marked ??= { x, z };
+    // People already on the stretch get long bags so the pigeons have targets.
+    for (const person of this.people) {
+      if (person.isGone()) continue;
+      const at = person.getPosition();
+      if (Math.hypot(at.x - marked.x, at.z - marked.z) > 55) continue;
+      person.stockForFeederRush();
+    }
+
+    // Pull circling gulls over the feeding stretch and top the flock up.
+    for (const gull of this.gulls) {
+      if (Math.random() < 0.75) gull.watchOver(tip.x, tip.y);
+    }
+    while (this.gulls.length < Math.min(GULL_LIMIT, 5)) {
+      this.gulls.push(new Gull(this.scene, new THREE.Vector2(tip.x, tip.y)));
     }
 
     this.callouts.raise("jobs", this.dayCycle.clockFace(), marked);
+  }
+
+  private spawnWireBirds(): void {
+    const tip = this.feederTip ?? { x: -40, z: 40 };
+    const roost = roostPerchesNear(tip, PIGEON_FLOCK, fairyLightSections());
+    if (roost.length === 0) return;
+    for (let i = 0; i < roost.length; i++) {
+      this.wireBirds.push(new WireBird(this.scene, roost[i]!, i));
+    }
+  }
+
+  private updateFeederRush(delta: number): void {
+    if (this.feederRushLeft <= 0 && this.wireBirds.length === 0) return;
+
+    if (this.feederRushLeft > 0) {
+      this.feederRushLeft -= delta;
+      if (this.feederRushLeft <= 0) {
+        setFeederRush(false);
+        setSwanFeederRush(false);
+        for (const bird of this.wireBirds) bird.flush();
+        if (!this.picnicRaidDone) this.startPicnicRaid();
+      } else {
+        if (this.feederTip && Math.random() < delta * 0.12) {
+          for (const gull of this.gulls) {
+            if (Math.random() < 0.35) {
+              gull.watchOver(this.feederTip.x, this.feederTip.z);
+            }
+          }
+        }
+        this.dispatchPigeonSwoops();
+      }
+    }
+
+    for (let i = this.wireBirds.length - 1; i >= 0; i--) {
+      const bird = this.wireBirds[i]!;
+      bird.update(delta);
+      const drop = bird.claimDrop();
+      if (drop && !isInLake(drop.x, drop.z)) {
+        this.addDropping(drop, "gull");
+      }
+      if (bird.isGone()) {
+        bird.dispose();
+        this.wireBirds.splice(i, 1);
+      }
+    }
+  }
+
+  /** Perched pigeons dive on nearby bread / bag-feeders, then home to the wire. */
+  private dispatchPigeonSwoops(): void {
+    const hungry = this.wireBirds.filter((b) => b.wantsFood());
+    if (hungry.length === 0) return;
+
+    const foods: THREE.Vector3[] = [];
+    for (const pile of this.bread) {
+      foods.push(pile.getPosition());
+    }
+    for (const person of this.people) {
+      if (person.hasFood()) foods.push(person.getPosition());
+    }
+    for (const lot of this.benchSits) {
+      if (lot.hasFood()) foods.push(lot.getFeederPosition());
+    }
+    if (foods.length === 0 && this.feederTip) {
+      // No scrap out yet — still dive the feeding stretch so the flock works.
+      foods.push(
+        new THREE.Vector3(
+          this.feederTip.x + (Math.random() - 0.5) * 6,
+          0,
+          this.feederTip.z + (Math.random() - 0.5) * 6,
+        ),
+      );
+    }
+    if (foods.length === 0) return;
+
+    for (const bird of hungry) {
+      if (Math.random() > 0.35) continue;
+      const home = bird.homePerch();
+      let best = foods[0]!;
+      let bestD = Infinity;
+      for (const food of foods) {
+        const d =
+          (food.x - home.x) * (food.x - home.x) +
+          (food.z - home.z) * (food.z - home.z);
+        if (d < bestD) {
+          bestD = d;
+          best = food;
+        }
+      }
+      // Stay local to the feeder stretch / roost.
+      if (bestD > 55 * 55) continue;
+      bird.swoopTo(best);
+    }
+  }
+
+  /**
+   * Mission 3 — herring gulls diving a picnic on the east green. Hose them
+   * out of the sky before they strip the blanket.
+   */
+  private startPicnicRaid(): void {
+    if (this.picnicRaidDone || this.picnicRaidActive) return;
+    if (!missionWindowOpen("picnic", this.dayCycle.hour)) return;
+    this.picnicRaidActive = true;
+    this.picnicRaidDone = true;
+    this.picnicRaidLeft = 160;
+    this.picnicRaidClear = 0;
+
+    const prefer = getMissionSpot("picnic");
+    const preferAt = new THREE.Vector3(prefer.x, 0, prefer.z);
+    let picnic = this.picnics
+      .filter((p) => p.isRaidable())
+      .sort(
+        (a, b) =>
+          a.getPosition().distanceTo(preferAt) -
+          b.getPosition().distanceTo(preferAt),
+      )[0];
+    if (!picnic) {
+      const spot = this.freeLawnGatherSpotNear(prefer.x, prefer.z, 16);
+      if (spot) {
+        picnic = new Picnic(this.scene, spot);
+        this.picnics.push(picnic);
+      }
+    }
+    const at =
+      picnic?.getPosition() ?? new THREE.Vector3(prefer.x, 0, prefer.z);
+    this.picnicRaidTip = { x: at.x, z: at.z };
+
+    while (this.gulls.length < Math.min(GULL_LIMIT + 4, 10)) {
+      this.gulls.push(new Gull(this.scene, new THREE.Vector2(at.x, at.z)));
+    }
+    for (const gull of this.gulls) {
+      gull.watchOver(at.x, at.z);
+      if (Math.random() < 0.75) {
+        gull.raidPicnic(at, () => picnic?.noticeRaid());
+      }
+    }
+
+    this.callouts.raise("picnic", this.dayCycle.clockFace(), this.picnicRaidTip);
+  }
+
+  private updatePicnicRaid(delta: number): void {
+    // Feeder may finish outside the picnic window — start once the clock opens.
+    if (
+      !this.picnicRaidDone &&
+      !this.picnicRaidActive &&
+      this.secondEventDone &&
+      this.feederRushLeft <= 0 &&
+      missionWindowOpen("picnic", this.dayCycle.hour)
+    ) {
+      this.startPicnicRaid();
+    }
+    if (!this.picnicRaidActive) return;
+    this.picnicRaidLeft -= delta;
+
+    const tip = this.picnicRaidTip;
+    // Prefer a raidable blanket; fall back to nearest picnic on the tip.
+    let picnic = this.picnics.find((p) => p.isRaidable());
+    if (!picnic && tip) {
+      picnic = this.picnics
+        .filter((p) => !p.isDone())
+        .sort(
+          (a, b) =>
+            a.getPosition().distanceTo(new THREE.Vector3(tip.x, 0, tip.z)) -
+            b.getPosition().distanceTo(new THREE.Vector3(tip.x, 0, tip.z)),
+        )[0];
+    }
+    if (tip && picnic) {
+      const at = picnic.getPosition();
+      this.picnicRaidTip = { x: at.x, z: at.z };
+      for (const gull of this.gulls) {
+        if (gull.isGone()) continue;
+        if (Math.random() < delta * 0.45) {
+          gull.raidPicnic(at, () => picnic!.noticeRaid());
+        }
+        // Bomb the blanket while circling / stooping — classic picnic ruin.
+        this.maybePicnicGullDrop(gull, at, delta);
+      }
+    }
+
+    // Cleared once divers stay clear for a beat (or the tip times out) —
+    // don't end the frame you hose one bird while others are still circling.
+    const diving = this.gulls.filter(
+      (g) => !g.isGone() && (g.isAground() || g.isRaiding()),
+    ).length;
+    if (diving === 0) this.picnicRaidClear += delta;
+    else this.picnicRaidClear = 0;
+
+    if (
+      this.picnicRaidLeft <= 0 ||
+      (this.picnicRaidClear > 2.5 && this.picnicRaidLeft < 140)
+    ) {
+      this.picnicRaidActive = false;
+      this.picnicRaidTip = null;
+      this.picnicRaidClear = 0;
+      if (!this.gooseMissionStarted && !this.gooseMissionDone) {
+        this.gooseMissionPending = 12;
+      }
+    }
+  }
+
+  /** Herring gulls empty over the picnic while they work it. */
+  private maybePicnicGullDrop(
+    gull: Gull,
+    picnicAt: THREE.Vector3,
+    delta: number,
+  ): void {
+    const gp = gull.getPosition();
+    const gap = Math.hypot(gp.x - picnicAt.x, gp.z - picnicAt.z);
+    if (gap > 28) return;
+
+    let rate = 0;
+    if (gull.isAground()) rate = 1.1;
+    else if (gull.isRaiding()) rate = 0.55;
+    else if (gap < 16) rate = 0.18;
+    if (rate <= 0 || Math.random() >= delta * rate) return;
+
+    // Land under / toward the blanket so the mess piles on the picnic.
+    const pull = gull.isAground() ? 0.15 : 0.55;
+    const spot = new THREE.Vector3(
+      THREE.MathUtils.lerp(gp.x, picnicAt.x, pull) + (Math.random() - 0.5) * 4.5,
+      0,
+      THREE.MathUtils.lerp(gp.z, picnicAt.z, pull) + (Math.random() - 0.5) * 4.5,
+    );
+    this.addDropping(spot, "gull");
+  }
+
+  /** Mission 4 — geese on radar; van heavy hose before they reach the lake. */
+  private startGooseMission(): void {
+    if (this.gooseMissionStarted || this.gooseMissionDone) return;
+    if (!missionWindowOpen("geese", this.dayCycle.hour)) return;
+    this.gooseMissionStarted = true;
+    // Flock waits until the hose is collected and you're back on the path.
+    const van = vanSpotWorld();
+    this.callouts.raise("geese", this.dayCycle.clockFace(), van ?? undefined);
+    this.messages.send(
+      "999 CONTROL",
+      "Radar contact — flock of Canada geese inbound. Heavy hose is in the van load bay. Get to the van.",
+      this.dayCycle.clockFace(),
+      20,
+    );
+    this.showTool(null);
+  }
+
+  private updateGooseMission(delta: number): void {
+    if (this.gooseMissionPending > 0 && !this.gooseMissionStarted) {
+      this.gooseMissionPending -= delta;
+    }
+    if (
+      !this.gooseMissionStarted &&
+      !this.gooseMissionDone &&
+      this.picnicRaidDone &&
+      !this.picnicRaidActive &&
+      this.gooseMissionPending <= 0 &&
+      missionWindowOpen("geese", this.dayCycle.hour)
+    ) {
+      this.startGooseMission();
+    }
+
+    if (this.heavyHoseIntro?.isActive()) {
+      this.heavyHoseIntro.update(delta);
+      if (!this.heavyHoseIntro.isActive()) this.finishHeavyHoseIntro();
+      return;
+    }
+
+    // On the path by the van (shift start spot) → cinematic grab.
+    if (
+      this.gooseMissionStarted &&
+      !this.gooseHeavyArmed &&
+      !this.gooseMissionDone &&
+      !this.heavyHoseIntro
+    ) {
+      const here = this.camera.position;
+      if (nearHeavyHosePickup(here.x, here.z)) {
+        this.beginHeavyHoseIntro();
+        return;
+      }
+    }
+
+    if (!this.gooseFlock) {
+      if (this.gooseMissionStarted && !this.gooseMissionDone) {
+        this.rearDoorOpen = THREE.MathUtils.damp(this.rearDoorOpen, 0, 6, delta);
+        setRearDoorsOpen(this.rearDoorOpen);
+      }
+      return;
+    }
+
+    this.gooseFlock.update(delta);
+
+    // Keep barn doors ajar while the heavy hose is in play.
+    const doorTarget = this.gooseHeavyArmed ? 0.35 : 0;
+    this.rearDoorOpen = THREE.MathUtils.damp(
+      this.rearDoorOpen,
+      doorTarget,
+      5,
+      delta,
+    );
+    setRearDoorsOpen(this.rearDoorOpen);
+
+    if (this.gooseFlock.isCleared() && !this.gooseMissionDone) {
+      this.gooseMissionDone = true;
+      this.cleaned += 1;
+      this.score += 120 * this.multiplier();
+      this.updateHUD();
+      this.messages.send(
+        "999 CONTROL",
+        "Geese broken up — radar clear. Nice work with the heavy hose.",
+        this.dayCycle.clockFace(),
+        16,
+      );
+      this.callouts.raise("praise", this.dayCycle.clockFace());
+      this.gooseFlock.dispose();
+      this.gooseFlock = null;
+    } else if (this.gooseFlock.isOverrun() && !this.gooseMissionDone) {
+      this.gooseMissionDone = true;
+      this.complain();
+      this.complain();
+      this.messages.send(
+        "999 CONTROL",
+        "Geese on the lake — public's going mad. Where were you with that hose?",
+        this.dayCycle.clockFace(),
+        18,
+      );
+      this.gooseFlock.dispose();
+      this.gooseFlock = null;
+    }
+  }
+
+  /** Walk-up at the van rear — third-person take the heavy hose. */
+  private beginHeavyHoseIntro(): void {
+    if (this.heavyHoseIntro || this.gooseHeavyArmed || this.gooseMissionDone) {
+      return;
+    }
+    const intro = new HeavyHoseIntro(this.scene, this.camera);
+    const here = this.camera.position;
+    if (!intro.start(here.x, here.z)) return;
+    this.heavyHoseIntro = intro;
+    this.player.beginIntro();
+    this.showTool(null);
+  }
+
+  private finishHeavyHoseIntro(): void {
+    const eye = this.heavyHoseIntro?.eyeHandoff() ?? null;
+    this.heavyHoseIntro = null;
+    if (eye) this.player.takeOverFromIntro(eye.x, eye.y, eye.z, eye.yaw);
+    else this.player.endIntro();
+
+    this.gooseHeavyArmed = true;
+    this.rearDoorOpen = 0;
+    setRearDoorsOpen(0);
+    this.player.equipHeavyHose();
+    this.showTool("heavyHose");
+    this.gooseFlock = new GooseFlock(this.scene, getMissionSpot("geese"));
+    this.messages.send(
+      "DEPOT",
+      "Heavy hose online — two minutes on the tank. Knock those geese out of the sky.",
+      this.dayCycle.clockFace(),
+      14,
+    );
+  }
+
+  /**
+   * E at the van during mission 4 — starts the hose pickup scene if you're
+   * on the path by the van (proximity also auto-triggers).
+   */
+  public tryGrabHeavyHose(at: THREE.Vector3): boolean {
+    if (
+      !this.gooseMissionStarted ||
+      this.gooseHeavyArmed ||
+      this.gooseMissionDone ||
+      this.heavyHoseIntro
+    ) {
+      return false;
+    }
+    if (!nearHeavyHosePickup(at.x, at.z)) return false;
+    this.beginHeavyHoseIntro();
+    return true;
+  }
+
+  public onHeavyHoseEmpty(): void {
+    this.messages.send(
+      "DEPOT",
+      "Heavy hose tank empty. You're back on the lance.",
+      this.dayCycle.clockFace(),
+      10,
+    );
+    this.showTool("hose");
+  }
+
+  /** Pedalo into birds — permanent takeout; too many and a V flies in mad. */
+  private updatePedaloBirdHits(): void {
+    if (!this.player.isOnPedalo()) return;
+    const hull = hiredPedaloHull();
+    if (!hull) return;
+    const hitR = 1.85;
+
+    for (const swan of this.swans) {
+      if (swan.isFlying() || swan.hasLeft()) continue;
+      if (swan.getPosition().distanceTo(hull) > hitR) continue;
+      swan.strikeDead();
+      this.noteBirdKill();
+    }
+
+    for (const duck of this.ducks) {
+      if (duck.isGone() || !duck.isOnWater()) continue;
+      if (duck.getPosition().distanceTo(hull) > hitR * 0.85) continue;
+      duck.flush();
+      this.noteBirdKill();
+    }
+  }
+
+  private noteBirdKill(): void {
+    this.birdKills += 1;
+    if (this.revengeDone || this.birdKills < BIRD_KILL_REVENGE) return;
+    this.revengeDone = true;
+    this.spawnRevengeFlock();
+  }
+
+  private spawnRevengeFlock(): void {
+    const aim = this.camera.position.clone();
+    aim.y = 0;
+    for (let i = 0; i < REVENGE_FLOCK; i++) {
+      const swan = new Swan(aim.clone(), this.scene, "adult");
+      swan.flyRevenge(aim, i, REVENGE_FLOCK);
+      this.swans.push(swan);
+    }
+    this.callouts.raise("swan", this.dayCycle.clockFace(), {
+      x: aim.x,
+      z: aim.z,
+    });
+  }
+
+  /** Dusk — mallards and gulls clear off; play-park kids go home. */
+  private updateEveningClearout(delta: number): void {
+    const hour = this.dayCycle.hour;
+    const duskBirds = hour >= 20 || hour < NIGHT_UNTIL;
+    const kidsHome = hour >= 18.5 || hour < 7.5;
+
+    if (duskBirds) {
+      for (const duck of this.ducks) {
+        if (duck.isOnWater() && Math.random() < delta * 0.14) duck.flush();
+      }
+      for (const gull of this.gulls) {
+        if (!gull.isGone() && Math.random() < delta * 0.12) gull.leavePark();
+      }
+    }
+
+    if (kidsHome) {
+      for (const visit of this.playVisits) visit.sendHome();
+    }
   }
 
   /**
@@ -880,6 +1541,13 @@ export class Game {
     dirty = false,
     direction: THREE.Vector3 = new THREE.Vector3(0, 0, 1),
   ): boolean {
+    const heavy = this.player.isHeavyHoseActive();
+    const bodyR = heavy ? 4.5 : 1;
+
+    if (heavy && this.gooseFlock?.heavyHit(point, this.camera.position)) {
+      return true;
+    }
+
     // Water hitting a tagged wall carves fading streaks through the paint.
     for (const tag of this.graffiti) {
       if (!tag.hitBy(point)) continue;
@@ -888,10 +1556,88 @@ export class Game {
       return true;
     }
 
-    // Kids caught in the spray drop off the branch and clear off sharpish.
-    for (const lot of this.branchKids) {
-      if (lot.getPosition().distanceTo(point) > 2.5) continue;
-      lot.scarper();
+    // Pigeons on the fairy lights — hose knocks them (and neighbours) off.
+    for (const bird of this.wireBirds) {
+      if (!bird.soakedBy(point)) continue;
+      const at = bird.getPosition();
+      bird.scare();
+      for (const other of this.wireBirds) {
+        if (other === bird || other.isGone()) continue;
+        if (other.getPosition().distanceTo(at) < 3.8) other.scare();
+      }
+      return true;
+    }
+
+    // Gulls (incl. picnic stoops) — before ground crowds so the lance connects.
+    for (const gull of this.gulls) {
+      if (gull.isGone()) continue;
+      if (!gull.hitBy(point, heavy)) continue;
+      if (dirty) gull.splatter(point);
+      else gull.rinse(point);
+      if (this.picnicRaidActive) gull.hoseOff();
+      else gull.flush();
+      return true;
+    }
+
+    // Hire swan pedalos — dirty bounce sticks on the hull; clean water rinses it.
+    if (sprayPedalo(point, dirty)) return true;
+
+    // Late drinkers — a blast of the washer and they're off.
+    for (const lot of this.drunks) {
+      if (lot.getPosition().distanceTo(point) > 3.2) continue;
+      lot.scarper(true);
+      return true;
+    }
+
+    // Bench sitters — phones and books hate getting wet.
+    for (const lot of this.benchSits) {
+      if (!lot.soakedBy(point)) continue;
+      if (lot.drench(this.camera.position)) this.complain();
+      return true;
+    }
+
+    // Play-park kids — hose them and mum/dad come steaming over.
+    for (const visit of this.playVisits) {
+      if (!visit.soakedBy(point)) continue;
+      if (visit.drench(this.camera.position)) this.complain();
+      return true;
+    }
+
+    // Gosport rebels — only the lance turns them.
+    if (this.rebelRaid?.takeWater(point)) return true;
+
+    // Crabbing kids on the wall — they shout; filthy spray often clears them off.
+    for (const crabber of this.crabbers) {
+      if (!crabber.soakedBy(point)) continue;
+      const dry = !crabber.isSoaked();
+      if (dirty) {
+        crabber.splatter(point);
+        if (crabber.foul() || dry) this.complain();
+      } else {
+        crabber.rinse(point);
+        if (crabber.drench()) this.complain();
+      }
+      return true;
+    }
+
+    // Mobility scooters — stop, shout, and file a complaint.
+    for (const scooter of this.scooters) {
+      if (!scooter.soakedBy(point)) continue;
+      const dry = !scooter.isSoaked();
+      if (dirty) {
+        scooter.splatter(point);
+        if (scooter.foul() || dry) this.complain();
+      } else {
+        scooter.rinse(point);
+        if (scooter.drench()) this.complain();
+      }
+      return true;
+    }
+
+    // Cyclists / e-bikes — hose knocks them off; the bike carries on.
+    for (const rider of this.cyclists) {
+      if (!rider.soakedBy(point)) continue;
+      if (rider.drench(this.camera.position)) this.complain();
       return true;
     }
 
@@ -899,6 +1645,13 @@ export class Game {
     for (const party of this.bbqs) {
       if (!party.hitBy(point)) continue;
       if (party.douse(point, this.camera.position)) this.complain();
+      return true;
+    }
+
+    // Picnic blanket — sarnies and cutlery go flying.
+    for (const picnic of this.picnics) {
+      if (!picnic.hitBy(point)) continue;
+      if (picnic.blast(point, this.camera.position)) this.complain();
       return true;
     }
 
@@ -910,36 +1663,37 @@ export class Game {
       if (boat.takeWater(point)) return true;
     }
 
-    // Ducks and gulls just go up; neither will stand and argue about it.
-    for (const gull of this.gulls) {
-      if (gull.getPosition().distanceTo(point) > 2) continue;
-      if (dirty) gull.splatter(point);
-      gull.flush();
-      return true;
-    }
     for (const duck of this.ducks) {
-      if (duck.getPosition().distanceTo(point) > 1.5) continue;
+      if (duck.getPosition().distanceTo(point) > (heavy ? 3.2 : 1.5)) continue;
       if (dirty) duck.splatter(point);
+      else duck.rinse(point);
       duck.flush();
       return true;
     }
     for (const squirrel of this.squirrels) {
       if (squirrel.getPosition().distanceTo(point) > 1.2) continue;
       if (dirty) squirrel.splatter(point);
+      else squirrel.rinse(point);
       squirrel.flush();
       return true;
     }
 
     for (const swan of this.swans) {
-      if (!swan.soakedBy(point)) continue;
+      const hitR = heavy ? 3.8 : 2.2;
+      if (swan.getPosition().distanceTo(point) > hitR) continue;
       if (dirty) swan.splatter(point);
+      else swan.rinse(point);
 
-      swan.soak(this.camera.position);
-      if (swan.isCharging()) {
-        const at = swan.getPosition();
-        for (const other of this.swans) {
-          if (other !== swan && other.getPosition().distanceTo(at) < 16)
-            other.rile();
+      if (heavy) {
+        swan.heavyBlast(this.camera.position);
+      } else {
+        swan.soak(this.camera.position);
+        if (swan.isCharging()) {
+          const at = swan.getPosition();
+          for (const other of this.swans) {
+            if (other !== swan && other.getPosition().distanceTo(at) < 16)
+              other.rile();
+          }
         }
       }
       return true;
@@ -949,16 +1703,30 @@ export class Game {
       const dog = person.getDog();
       if (dog?.hitBy(point)) {
         if (dirty) dog.splatter(point);
+        else dog.rinse(point);
+        // A solid jet knocks them over — breaks an attack mid-charge.
+        dog.hoseKnock(this.camera.position);
         return true;
       }
 
-      if (!person.soakedBy(point)) continue;
+      const soaked = heavy
+        ? point.distanceTo(person.getPosition()) < bodyR &&
+          point.y > person.getPosition().y - 0.2 &&
+          point.y < person.getPosition().y + 2.2
+        : person.soakedBy(point);
+      if (!soaked) continue;
       const dry = !person.isSoaked();
+      if (heavy) {
+        person.knockDown(this.camera.position);
+        if (dry) this.complain();
+        return true;
+      }
       if (dirty) {
         person.splatter(point);
         const swung = person.foul(this.camera.position);
         if (dry || swung) this.complain();
       } else {
+        person.rinse(point);
         person.drench(this.camera.position);
         // One complaint per soaking, not one per droplet.
         if (dry) this.complain();
@@ -975,6 +1743,7 @@ export class Game {
    */
   private bigSplash(at: THREE.Vector3): void {
     this.splashRings(at);
+    parkAudio.waterSplash(1.15);
 
     for (const person of this.people) {
       const spot = person.getPosition();
@@ -1114,10 +1883,37 @@ export class Game {
     this.dead = true;
     this.collapse = 0;
     document.exitPointerLock?.();
+    const title = this.gameOverPanel.querySelector("h1");
+    if (title) {
+      title.textContent = this.rebelMissionStarted
+        ? "PARK FALLEN"
+        : "PECKED TO DEATH";
+    }
+    this.gameOverDetail.innerHTML = this.rebelMissionStarted
+      ? [
+          `The Gosport lot took Canoe Lake at ${this.dayCycle.clockFace()}.`,
+          `Score <strong>${this.score}</strong> &middot; ${this.cleaned} cleaned &middot; ${this.complaints} complaints`,
+          `Anarchy on the esplanade. Southsea will not forget.`,
+        ].join("<br>")
+      : [
+          `A mute swan has seen you off at ${this.dayCycle.clockFace()}.`,
+          `Score <strong>${this.score}</strong> &middot; ${this.cleaned} cleaned &middot; ${this.complaints} complaints`,
+          `Park left at ${Math.round(this.cleanliness)}% clean.`,
+        ].join("<br>");
+  }
+
+  /** Held the lake — shift ends in glory rather than feathers. */
+  private triumph(): void {
+    this.dead = true;
+    this.rebelMissionWon = true;
+    this.collapse = 0;
+    document.exitPointerLock?.();
+    const title = this.gameOverPanel.querySelector("h1");
+    if (title) title.textContent = "LAKE HELD";
     this.gameOverDetail.innerHTML = [
-      `A mute swan has seen you off at ${this.dayCycle.clockFace()}.`,
+      `You held Canoe Lake against the Gosport separatists at ${this.dayCycle.clockFace()}.`,
       `Score <strong>${this.score}</strong> &middot; ${this.cleaned} cleaned &middot; ${this.complaints} complaints`,
-      `Park left at ${Math.round(this.cleanliness)}% clean.`,
+      `Armed response rolling in. The park stays Pompey tonight.`,
     ].join("<br>");
   }
 
@@ -1130,12 +1926,13 @@ export class Game {
     if (t >= 1) this.gameOverPanel.classList.add("on");
   }
 
-  /** Water landed here — scrub anything close enough to the splash. */
+  /** Water landed here — scrub anything close enough to the splash.
+   * Returns 0 if clean; otherwise a bounce scale (≥1 flat mess, higher on lumps). */
   public washAt(
     point: THREE.Vector3,
     direction: THREE.Vector3 = new THREE.Vector3(0, 0, 1),
-  ): boolean {
-    let hitMess = false;
+  ): number {
+    let bounce = 0;
     for (let i = this.droppings.length - 1; i >= 0; i--) {
       const dropping = this.droppings[i]!;
       if (!dropping.covers(point)) continue;
@@ -1145,7 +1942,7 @@ export class Game {
         this.creditClean();
         this.noteOvernightCleared(dropping);
       }
-      hitMess = true;
+      bounce = Math.max(bounce, dropping.bounceScale(point));
     }
 
     // Shoe prints are only a smear, so they lift under the same spray without
@@ -1177,11 +1974,23 @@ export class Game {
       }
     }
 
-    if (this.grassFire?.douse(point)) hitMess = true;
+    // Same for a picnic on the grass — lunch goes airborne.
+    for (const picnic of this.picnics) {
+      const at = picnic.getPosition();
+      const dx = at.x - point.x;
+      const dz = at.z - point.z;
+      if (dx * dx + dz * dz > 1.8 * 1.8) continue;
+      if (picnic.blast(point.clone().setY(0.2), this.camera.position)) {
+        this.complain();
+      }
+    }
 
-    // Standing water on the paving — grass just soaks it up.
-    this.puddles.splash(point);
-    return hitMess;
+    if (this.grassFire?.douse(point)) bounce = Math.max(bounce, 1);
+
+    // Standing water on the paving — skip while scrubbing a pile so the
+    // wash trail stays readable.
+    if (bounce <= 0) this.puddles.splash(point);
+    return bounce;
   }
 
   /**
@@ -1237,11 +2046,17 @@ export class Game {
     // The Spitfire is a rarer thing, and only on a decent afternoon.
     this.nextSpitfire -= delta;
     if (this.nextSpitfire <= 0) {
-      this.nextSpitfire = 420 + Math.random() * 600;
       const hour = this.dayCycle.hour;
-      if (murk < 0.3 && hour > 10 && hour < 20) {
+      const clearEnough = murk < 0.34;
+      const daytime = hour > 10 && hour < 20;
+      if (clearEnough && daytime) {
         this.planes.push(new Plane(this.scene, murk, "spitfire"));
         this.callouts.raise("spitfire", this.dayCycle.clockFace());
+        // One's been — leave it a good while before the next pass.
+        this.nextSpitfire = 360 + Math.random() * 480;
+      } else {
+        // Weather or time wasn't right — try again soon, don't burn the long wait.
+        this.nextSpitfire = 40 + Math.random() * 70;
       }
     }
 
@@ -1251,6 +2066,32 @@ export class Game {
       if (!plane.isGone()) continue;
       plane.dispose();
       this.planes.splice(i, 1);
+    }
+
+    this.nextHelicopter -= delta;
+    if (this.nextHelicopter <= 0) {
+      const hour = this.dayCycle.hour;
+      const clearEnough = murk < 0.45;
+      const daytime = hour > 8 && hour < 20;
+      if (clearEnough && daytime && this.helicopters.length < 1) {
+        this.helicopters.push(new Helicopter(this.scene));
+        this.nextHelicopter = 180 + Math.random() * 280;
+      } else {
+        this.nextHelicopter = 35 + Math.random() * 50;
+      }
+    }
+
+    for (let i = this.helicopters.length - 1; i >= 0; i--) {
+      const heli = this.helicopters[i]!;
+      heli.update(delta);
+      if (heli.isInFlight()) {
+        const at = heli.getPosition();
+        for (const person of this.people) person.noticeHelicopter(heli.id, at);
+        for (const visit of this.playVisits) visit.noticeHelicopter(heli.id, at);
+      }
+      if (!heli.isGone()) continue;
+      heli.dispose();
+      this.helicopters.splice(i, 1);
     }
   }
 
@@ -1271,7 +2112,12 @@ export class Game {
     for (let i = this.droppings.length - 1; i >= 0; i--) {
       const pile = this.droppings[i]!;
       pile.weather(delta, rain);
-      if (!pile.update(delta)) continue;
+      const done = pile.update(delta);
+      if (pile.claimCredit()) {
+        this.creditClean();
+        this.noteOvernightCleared(pile);
+      }
+      if (!done) continue;
       pile.dispose();
       this.droppings.splice(i, 1);
     }
@@ -1308,8 +2154,9 @@ export class Game {
 
   /**
    * The gulls. They wheel about over the lake watching the paving, and the
-   * moment food is left unattended they're down on it. What goes in comes
-   * out again, usually over the path.
+   * moment food is left unattended they're down on it. Bold ones also dive
+   * picnic blankets on the east green. What goes in comes out again, usually
+   * over the path.
    */
   private updateGulls(delta: number, scraps: readonly Scrap[]): void {
     this.nextGull -= delta;
@@ -1324,13 +2171,28 @@ export class Game {
       this.nextGull = 35 + Math.random() * 80;
     }
 
+    // Pull a couple of birds toward any raidable picnic on the big green.
+    const picnic = this.picnics.find((p) => p.isRaidable());
+    if (picnic) {
+      const at = picnic.getPosition();
+      for (const gull of this.gulls) {
+        if (Math.random() < 0.35) gull.watchOver(at.x, at.z);
+      }
+    }
+
     let mobbing = false;
 
     for (const gull of this.gulls) {
       gull.update(delta, this.camera.position, scraps);
       if (gull.isAground()) mobbing = true;
-      // A third of beakfuls come back out within the minute, near enough.
-      if (gull.claimFeed() && Math.random() < 0.2) {
+      // A third of beakfuls come back out within the minute, near enough —
+      // picnic raids almost always leave a calling card.
+      const dropChance = this.picnicRaidActive
+        ? 0.92
+        : this.feederRushLeft > 0
+          ? 0.55
+          : 0.2;
+      if (gull.claimFeed() && Math.random() < dropChance) {
         const spot = gull.dropSpot();
         if (!isInLake(spot.x, spot.z)) this.addDropping(spot, "gull");
       }
@@ -1379,6 +2241,20 @@ export class Game {
         // A gull doesn't pick at a chip paper; it carries the whole lot off.
         take: () => piece.spear(at.clone().setY(6)),
         going: () => !piece.isTaken() && !attended(at),
+      });
+    }
+
+    // Picnic plates on the east green — gulls raid even with people sat round.
+    for (const party of this.picnics) {
+      if (!party.isRaidable()) continue;
+      const at = party.foodSpot();
+      if (!at) continue;
+      scraps.push({
+        at,
+        raid: true,
+        take: () => party.stealBite(),
+        going: () => party.isRaidable(),
+        onLand: () => party.noticeRaid(),
       });
     }
 
@@ -1432,39 +2308,45 @@ export class Game {
     });
   }
 
-  /** Kids hanging off the low limbs, and the tree officer's opinion of it. */
-  private updateBranchKids(delta: number): void {
-    this.nextBranchKid -= delta;
-    if (this.nextBranchKid <= 0 && this.branchKids.length < 2) {
-      // On a tree round the other side of the park, out of your eyeline.
-      const trees = treeSpots();
-      const spot = this.outOfShot(
-        () => trees[Math.floor(Math.random() * trees.length)] ?? new THREE.Vector2(),
-        2,
-      );
+  /** After dark — drinkers on the grass. Move them on before someone complains. */
+  private updateDrunks(delta: number): void {
+    const dark = this.isDark();
+
+    this.nextDrunks -= delta;
+    if (dark && this.nextDrunks <= 0 && this.drunks.length < 1) {
+      const candidates = drunkSpots();
+      const spot = this.outOfShot(() => {
+        if (candidates.length === 0) return new THREE.Vector2(40, 50);
+        return candidates[Math.floor(Math.random() * candidates.length)]!.clone();
+      }, 2);
       if (!spot) {
-        this.nextBranchKid = WAIT_AND_SEE;
+        this.nextDrunks = WAIT_AND_SEE;
       } else {
-        const lot = new BranchKid(this.scene, spot);
-        this.branchKids.push(lot);
-        this.nextBranchKid = 180 + Math.random() * 240;
-        const tree = lot.getTree();
-        this.callouts.raise("branches", this.dayCycle.clockFace(), {
-          x: tree.x,
-          z: tree.y,
+        const lot = new Drunks(this.scene, spot);
+        this.drunks.push(lot);
+        this.nextDrunks = 200 + Math.random() * 280;
+        this.callouts.raise("drunks", this.dayCycle.clockFace(), {
+          x: spot.x,
+          z: spot.y,
         });
       }
     }
 
-    for (let i = this.branchKids.length - 1; i >= 0; i--) {
-      const lot = this.branchKids[i]!;
+    for (let i = this.drunks.length - 1; i >= 0; i--) {
+      const lot = this.drunks[i]!;
+      // Dawn — send them packing with no credit.
+      if (!dark) lot.scarper(false);
       lot.update(delta, this.camera.position);
-      // A branch off the tree is a complaint against the park, and yours.
-      if (lot.claimDamage()) this.complain();
+      if (lot.claimComplaint()) this.complain();
+      if (lot.claimCredit()) this.creditClean();
       if (lot.isGone()) {
         lot.dispose();
-        this.branchKids.splice(i, 1);
+        this.drunks.splice(i, 1);
       }
+    }
+
+    if (!dark && this.drunks.length === 0) {
+      this.nextDrunks = Math.max(this.nextDrunks, 40);
     }
   }
 
@@ -1523,14 +2405,242 @@ export class Game {
     }
   }
 
-  /** Keeps the on-screen prompt in step with what they're holding. */
   public showTool(tool: Tool | null): void {
     const mobile = document.body.classList.contains("touch-ui");
+    if (this.shiftIntro?.isAwaitingGesture()) {
+      this.instructionsElement.innerHTML = mobile
+        ? "Tap to clock on"
+        : "Click to clock on";
+      return;
+    }
+    if (this.isIntroPlaying()) {
+      this.instructionsElement.innerHTML = this.heavyHoseIntro?.isActive()
+        ? "Collecting the heavy hose…"
+        : "Clocking on…";
+      return;
+    }
+    if (!this.onDuty) {
+      this.instructionsElement.innerHTML = mobile
+        ? "Left stick: Move | Look stick: Look"
+        : "WASD: Move | Mouse: Look | ESC: Unlock mouse";
+      return;
+    }
+    if (isPedaloHired()) {
+      this.instructionsElement.innerHTML = mobile
+        ? "Left stick: Pedal & steer | Look stick: Look | Spray: Aim & fire | Hold spray centred: Climb out"
+        : "WASD: Pedal & steer | Mouse: Look | Click: Spray | E: Climb out onto the bank";
+      return;
+    }
+    if (tool === "heavyHose") {
+      const pct = Math.round(this.player.heavyTankFraction() * 100);
+      this.instructionsElement.innerHTML = mobile
+        ? `Heavy hose — ${pct}% tank | Spray to fire | Knock down the geese`
+        : `HEAVY HOSE — ${pct}% tank left | Click: Spray | WASD: Move | ESC: Unlock mouse`;
+      return;
+    }
+    if (
+      this.gooseMissionStarted &&
+      !this.gooseHeavyArmed &&
+      !this.gooseMissionDone
+    ) {
+      this.instructionsElement.innerHTML = mobile
+        ? "Geese inbound! Follow the red arrow to the van for the heavy hose"
+        : "Geese on radar — follow the red arrow to the van for the heavy hose";
+      return;
+    }
     this.instructionsElement.innerHTML = mobile
-      ? "Left stick: Move | Look stick: Look | Spray (above look): Aim & fire"
+      ? "Left stick: Move | Look stick: Look | Spray (above look): Aim & fire | Near swan boat: tap spray to board"
       : tool === "picker"
-        ? "WASD: Move | Shift: Run | Click: Spear litter | Q: Pressure washer | ESC: Unlock mouse"
-        : "WASD: Move | Shift: Run | Click: Spray | Q: Litter picker | ESC: Unlock mouse";
+        ? "WASD: Move | Shift: Run | Click: Spear litter | Q: Pressure washer | E: Swan boat | ESC: Unlock mouse"
+        : "WASD: Move | Shift: Run | Click: Spray | Q: Litter picker | E: Swan boat | ESC: Unlock mouse";
+  }
+
+  public isIntroPlaying(): boolean {
+    return (
+      this.shiftIntro?.isActive() === true ||
+      this.heavyHoseIntro?.isActive() === true
+    );
+  }
+
+  /** Waiting for the first click / tap before the van arrival rolls. */
+  public isAwaitingIntroGesture(): boolean {
+    return this.shiftIntro?.isAwaitingGesture() === true;
+  }
+
+  /**
+   * First pointer / key — browsers block Web Audio until a gesture, so the
+   * van arrival waits here and park ambience starts with the get-out.
+   */
+  public noteIntroGesture(): void {
+    void parkAudio.unlock().then(() => {
+      this.shiftIntro?.beginArrival();
+      this.showTool(null);
+    });
+  }
+
+  private wireIntroAudio(): void {
+    if (parkAudio.isUnlocked()) {
+      this.shiftIntro?.beginArrival();
+      return;
+    }
+    const onGesture = () => {
+      window.removeEventListener("pointerdown", onGesture);
+      window.removeEventListener("keydown", onGesture);
+      this.noteIntroGesture();
+    };
+    window.addEventListener("pointerdown", onGesture);
+    window.addEventListener("keydown", onGesture);
+  }
+
+  /** Still in the van intro or not yet clocked on — tools and jobs wait. */
+  public hasClockedOn(): boolean {
+    return this.onDuty;
+  }
+
+  /** @deprecated Intro handles getting out — kept for old keybinds. */
+  public exitVan(): void {
+    /* cinematic owns the exit */
+  }
+
+  /**
+   * First step onto the footpath — unused while the intro walks them there.
+   */
+  public tryClockOn(): void {
+    /* intro calls finishIntro → clockOn */
+  }
+
+  /** No van in the level — skip the arrival and start mid-shift. */
+  public forceClockOn(): void {
+    if (this.onDuty) return;
+    const start = offsetShore(PATH_OUTER - 2).reduce((best, point) =>
+      point.y > best.y ? point : best,
+    );
+    this.camera.position.set(
+      start.x,
+      1.7 + groundHeight(start.x, start.y),
+      start.y,
+    );
+    this.camera.lookAt(0, 1.7, 0);
+    this.clockOn();
+  }
+
+  /**
+   * Editor Debug — no van intro, no Maps underlay (that's walk mode only).
+   * Drop onto the path handoff, optionally jump straight into a mission.
+   */
+  private applyDebugBoot(from: DebugFrom): void {
+    const van = getCleanerVanPose();
+    if (van) {
+      this.player.takeOverFromIntro(
+        van.pathX,
+        1.7 + groundHeight(van.pathX, van.pathZ),
+        van.pathZ,
+        van.pathYaw,
+      );
+    } else {
+      const start = offsetShore(PATH_OUTER - 2).reduce((best, point) =>
+        point.y > best.y ? point : best,
+      );
+      this.player.takeOverFromIntro(
+        start.x,
+        1.7 + groundHeight(start.x, start.y),
+        start.y,
+        Math.atan2(-start.x, -start.y),
+      );
+    }
+
+    if (from === "start") {
+      this.dayCycle.setHour(6);
+      this.clockOn();
+      this.applyTimeAndWeather(0);
+      this.messages.send(
+        "DEPOT",
+        "Debug boot — intro skipped. Opening tip as normal.",
+        this.dayCycle.clockFace(),
+        8,
+      );
+      return;
+    }
+
+    // Mission jumps skip the overnight / feeder chain.
+    this.secondEventDone = true;
+    for (const pile of this.overnightPiles) {
+      const i = this.droppings.indexOf(pile);
+      if (i >= 0) {
+        pile.dispose();
+        this.droppings.splice(i, 1);
+      }
+    }
+    this.overnightPiles.clear();
+    this.overnightTotal = 0;
+    this.overnightCleared = 0;
+    this.feederRushLeft = 0;
+    this.callouts.unlockTrouble();
+
+    if (from === "picnic") {
+      this.dayCycle.setHour(10.5);
+      this.clockOn({ quiet: true });
+      this.startPicnicRaid();
+    } else if (from === "geese") {
+      this.dayCycle.setHour(11.5);
+      this.picnicRaidDone = true;
+      this.clockOn({ quiet: true });
+      this.startGooseMission();
+    } else if (from === "fire") {
+      this.dayCycle.setHour(16);
+      this.picnicRaidDone = true;
+      this.gooseMissionDone = true;
+      this.clockOn({ quiet: true });
+      const spot = getMissionSpot("fire");
+      const at = new THREE.Vector3(spot.x, 0, spot.z);
+      this.grassFire = new GrassFire(this.scene, at);
+      this.callouts.raise("fire", this.dayCycle.clockFace(), spot);
+    } else if (from === "racers") {
+      this.dayCycle.setHour(22.2);
+      this.picnicRaidDone = true;
+      this.gooseMissionDone = true;
+      this.fireMissionDone = true;
+      this.racerHourWas = 22;
+      this.clockOn({ quiet: true });
+      this.beginRacerMission();
+    } else if (from === "rebels") {
+      this.dayCycle.setHour(1.1);
+      this.picnicRaidDone = true;
+      this.gooseMissionDone = true;
+      this.fireMissionDone = true;
+      this.racerMissionDone = true;
+      this.rebelHourWas = 1;
+      this.clockOn({ quiet: true });
+      this.beginRebelMission();
+    }
+
+    this.applyTimeAndWeather(0);
+    this.messages.send(
+      "DEPOT",
+      `Debug boot — ${from} (intro skipped).`,
+      this.dayCycle.clockFace(),
+      8,
+    );
+  }
+
+  private finishIntro(): void {
+    const eye = this.shiftIntro?.eyeHandoff() ?? null;
+    this.shiftIntro = null;
+    if (eye) this.player.takeOverFromIntro(eye.x, eye.y, eye.z, eye.yaw);
+    else this.player.endIntro();
+    this.clockOn();
+  }
+
+  private clockOn(opts?: { quiet?: boolean }): void {
+    this.onDuty = true;
+    if (!opts?.quiet) {
+      this.callouts.raise("shift", this.dayCycle.clockFace(), this.overnightTip());
+      this.callouts.lockTrouble();
+    } else {
+      this.callouts.unlockTrouble();
+    }
+    this.showTool("hose");
+    this.player.pickStartingTool();
   }
 
   /**
@@ -1577,6 +2687,7 @@ export class Game {
 
     // Whatever's already in their hands wins, so they don't stand there
     // swapping back and forth over a bin next to a mess.
+    if (holding === "heavyHose") return "heavyHose";
     if (holding === "picker" && spike) return "picker";
     if (holding === "hose" && lance) return "hose";
     if (spike) return "picker";
@@ -1592,7 +2703,7 @@ export class Game {
     this.nextCyclist -= delta;
     if (this.nextCyclist <= 0 && this.cyclists.length < MAX_CYCLISTS) {
       // They ride in from a stretch of path you're not watching.
-      const from = this.outOfShotOnPath();
+        const from = this.outOfShotOnPath();
       if (from === null) {
         this.nextCyclist = WAIT_AND_SEE;
       } else {
@@ -1602,7 +2713,13 @@ export class Game {
           new Cyclist(this.scene, from, lads ? "ebike" : "cyclist"),
         );
         this.nextCyclist = 45 + Math.random() * 70;
-        if (lads) this.callouts.raise("ebike", this.dayCycle.clockFace());
+        if (lads) {
+          const at = loopPoint(from);
+          this.callouts.raise("ebike", this.dayCycle.clockFace(), {
+            x: at.x,
+            z: at.y,
+          });
+        }
       }
     }
 
@@ -1620,13 +2737,56 @@ export class Game {
       const line = rider.claimTrack();
       if (line) this.footprints.push(new Footprint(this.scene, line));
 
-      if (rider.isGone() && this.canSlipAway(rider.getPosition())) {
+      const angry = rider.claimAngryPedestrian();
+      if (angry) {
+        const person = new Person(this.scene, 0);
+        person.bootFromCrash(angry.at, this.camera.position, angry.lout);
+        this.people.push(person);
+      }
+
+      if (
+        rider.isGone() &&
+        (rider.hasCrashed() || this.canSlipAway(rider.getPosition()))
+      ) {
         rider.dispose();
         this.cyclists.splice(i, 1);
       }
     }
 
     this.updateScooters(delta, mess, inTheWay);
+  }
+
+  /**
+   * Parade traffic on the authored roads — some run past, some turn at
+   * junctions onto linked roads, and dead ends just fade them out.
+   */
+  private updateTraffic(delta: number): void {
+    const hour = this.dayCycle.hour;
+    // Quiet overnight; busier through the day.
+    const busy =
+      hour >= 7 && hour < 22
+        ? hour >= 8 && hour < 18
+          ? 1
+          : 0.55
+        : 0.15;
+
+    this.nextTraffic -= delta;
+    if (this.nextTraffic <= 0 && this.traffic.length < MAX_TRAFFIC) {
+      const car = TrafficCar.spawn(this.scene);
+      if (car) this.traffic.push(car);
+      this.nextTraffic = (2 + Math.random() * 6) / Math.max(0.2, busy);
+    } else if (this.nextTraffic <= 0) {
+      this.nextTraffic = 1.5 + Math.random() * 3;
+    }
+
+    for (let i = this.traffic.length - 1; i >= 0; i--) {
+      const car = this.traffic[i]!;
+      car.update(delta);
+      if (car.isGone()) {
+        car.dispose();
+        this.traffic.splice(i, 1);
+      }
+    }
   }
 
   /**
@@ -1652,8 +2812,17 @@ export class Game {
 
     for (let i = this.scooters.length - 1; i >= 0; i--) {
       const scooter = this.scooters[i]!;
-      const splatted = scooter.update(delta, inTheWay, mess);
+      const splatted = scooter.update(
+        delta,
+        inTheWay,
+        mess,
+        this.camera.position,
+      );
       if (splatted >= 0) this.logComplaint(this.droppings[splatted]!);
+      if (scooter.wantsCrash()) this.takeStrike(scooter.getPosition());
+
+      const line = scooter.claimTrack();
+      if (line) this.footprints.push(new Footprint(this.scene, line));
 
       if (scooter.isGone() && this.canSlipAway(scooter.getPosition())) {
         scooter.dispose();
@@ -1726,10 +2895,18 @@ export class Game {
       }
     }
 
+    const chase =
+      this.player.isWading() || this.player.isOnPedalo()
+        ? this.camera.position
+        : null;
+
     for (let i = this.boats.length - 1; i >= 0; i--) {
       const boat = this.boats[i]!;
-      boat.update(delta);
+      boat.update(delta, chase);
       if (boat.claimComplaint()) this.complain();
+      if (chase && boat.claimHit()) {
+        this.takeStrike(boat.getPosition());
+      }
       if (boat.isDone()) {
         boat.dispose();
         this.boats.splice(i, 1);
@@ -1771,24 +2948,24 @@ export class Game {
   }
 
   /**
-   * Disposable barbecues on the green south of the park — lunch through the
-   * early evening, a couple at most, walking in off the promenade.
+   * Disposable barbecues on the east lawn — mid-morning through the early
+   * evening, a couple at most.
    */
   private updateBbqs(delta: number): void {
     const hour = this.dayCycle.hour;
-    const bbqHours = hour >= 11 && hour < 20;
+    const bbqHours = hour >= 9 && hour < 20;
 
     this.nextBbq -= delta;
     if (this.nextBbq <= 0 && bbqHours && this.bbqs.length < MAX_BBQS) {
-      const spot = this.freeBbqSpot();
+      const spot = this.freeLawnGatherSpot(22);
       if (!spot) {
         this.nextBbq = WAIT_AND_SEE;
       } else {
         this.bbqs.push(new BbqParty(this.scene, spot));
-        this.nextBbq = 140 + Math.random() * 200;
+        this.nextBbq = 70 + Math.random() * 110;
       }
     } else if (this.nextBbq <= 0) {
-      this.nextBbq = bbqHours ? 40 + Math.random() * 40 : 90 + Math.random() * 60;
+      this.nextBbq = bbqHours ? 20 + Math.random() * 30 : 90 + Math.random() * 60;
     }
 
     for (let i = this.bbqs.length - 1; i >= 0; i--) {
@@ -1802,6 +2979,162 @@ export class Game {
   }
 
   /**
+   * Blanket picnics on the east lawn in fair weather — mid-morning through
+   * late afternoon.
+   */
+  private updatePicnics(delta: number): void {
+    const hour = this.dayCycle.hour;
+    const picnicHours = hour >= 8.5 && hour < 18.5;
+    const dry = this.weather.rainStrength() < 0.12;
+
+    this.nextPicnic -= delta;
+    if (
+      this.nextPicnic <= 0 &&
+      picnicHours &&
+      dry &&
+      this.picnics.length < MAX_PICNICS
+    ) {
+      const spot = this.freeLawnGatherSpot(16);
+      if (!spot) {
+        this.nextPicnic = WAIT_AND_SEE;
+      } else {
+        this.picnics.push(new Picnic(this.scene, spot));
+        this.nextPicnic = 40 + Math.random() * 70;
+      }
+    } else if (this.nextPicnic <= 0) {
+      this.nextPicnic = picnicHours
+        ? 18 + Math.random() * 28
+        : 80 + Math.random() * 60;
+    }
+
+    for (let i = this.picnics.length - 1; i >= 0; i--) {
+      const party = this.picnics[i]!;
+      party.update(delta);
+      if (party.isDone()) {
+        party.dispose();
+        this.picnics.splice(i, 1);
+      }
+    }
+  }
+
+  /**
+   * Pop-up gazebos on the east lawn — shade for the day, a couple at most.
+   */
+  private updateGazebos(delta: number): void {
+    const hour = this.dayCycle.hour;
+    const gazeboHours = hour >= 10 && hour < 19;
+    const dry = this.weather.rainStrength() < 0.25;
+
+    this.nextGazebo -= delta;
+    if (
+      this.nextGazebo <= 0 &&
+      gazeboHours &&
+      dry &&
+      this.gazebos.length < MAX_GAZEBOS
+    ) {
+      const spot = this.freeLawnGatherSpot(24);
+      if (!spot) {
+        this.nextGazebo = WAIT_AND_SEE;
+      } else {
+        this.gazebos.push(new Gazebo(this.scene, spot));
+        this.nextGazebo = 160 + Math.random() * 220;
+      }
+    } else if (this.nextGazebo <= 0) {
+      this.nextGazebo = gazeboHours
+        ? 50 + Math.random() * 50
+        : 100 + Math.random() * 80;
+    }
+
+    for (let i = this.gazebos.length - 1; i >= 0; i--) {
+      const party = this.gazebos[i]!;
+      party.update(delta);
+      if (party.isDone()) {
+        party.dispose();
+        this.gazebos.splice(i, 1);
+      }
+    }
+  }
+
+  /**
+   * Lakeside benches — chat, phone, book, or chucking bread to the birds.
+   * Feeders favour seats near the water. Daytime mainly.
+   */
+  private updateBenchSits(delta: number): void {
+    const hour = this.dayCycle.hour;
+    const sitHours = hour >= 8.5 && hour < 20.5;
+
+    this.nextBenchSit -= delta;
+    if (
+      this.nextBenchSit <= 0 &&
+      sitHours &&
+      this.benchSits.length < MAX_BENCH_SITS
+    ) {
+      const seat = this.freeBenchSeat();
+      if (!seat) {
+        this.nextBenchSit = WAIT_AND_SEE;
+      } else {
+        this.benchSits.push(
+          new BenchSit(this.scene, seat, this.pickBenchPastime(seat)),
+        );
+        this.nextBenchSit = 18 + Math.random() * 40;
+      }
+    } else if (this.nextBenchSit <= 0) {
+      this.nextBenchSit = sitHours
+        ? 12 + Math.random() * 20
+        : 50 + Math.random() * 40;
+    }
+
+    for (let i = this.benchSits.length - 1; i >= 0; i--) {
+      const lot = this.benchSits[i]!;
+      lot.update(delta);
+      const tossed = lot.claimToss();
+      if (tossed) this.bread.push(new Bread(this.scene, tossed));
+      if (lot.isDone()) {
+        lot.dispose();
+        this.benchSits.splice(i, 1);
+      }
+    }
+  }
+
+  private pickBenchPastime(seat: {
+    x: number;
+    z: number;
+  }): BenchPastime {
+    const nearWater = distanceToShore(seat.x, seat.z) < 12;
+    const roll = Math.random();
+    if (nearWater) {
+      return roll < 0.42
+        ? "feed"
+        : roll < 0.64
+          ? "chat"
+          : roll < 0.84
+            ? "phone"
+            : "book";
+    }
+    return roll < 0.38 ? "chat" : roll < 0.72 ? "phone" : "book";
+  }
+
+  private freeBenchSeat() {
+    const taken = this.benchSits.map((lot) => lot.getSeat());
+    const options = sitterBenchSeats().filter((seat) => {
+      if (this.inShot(seat.x, seat.z, 0)) return false;
+      for (const used of taken) {
+        const dx = used.x - seat.x;
+        const dz = used.z - seat.z;
+        if (dx * dx + dz * dz < 2.5 * 2.5) return false;
+      }
+      return true;
+    });
+    if (options.length === 0) return null;
+    // Prefer lakeside seats so bird-feeding shows up where swans can notice.
+    const lakeside = options.filter(
+      (seat) => distanceToShore(seat.x, seat.z) < 10,
+    );
+    const pool = lakeside.length > 0 && Math.random() < 0.7 ? lakeside : options;
+    return pool[Math.floor(Math.random() * pool.length)]!;
+  }
+
+  /**
    * Later in the shift a disposable can set the grass off. One fire a day —
    * hose it before it walks the green.
    */
@@ -1811,12 +3144,24 @@ export class Game {
     if (
       !this.fireMissionDone &&
       !this.grassFire &&
-      hour >= 15 &&
-      hour < 19.5
+      missionWindowOpen("fire", hour)
     ) {
-      const cooking = this.bbqs.filter((party) => party.isCooking());
+      const prefer = getMissionSpot("fire");
+      const cooking = this.bbqs
+        .filter((party) => party.isCooking())
+        .sort((a, b) => {
+          const ap = a.getPosition();
+          const bp = b.getPosition();
+          const ad =
+            (ap.x - prefer.x) * (ap.x - prefer.x) +
+            (ap.z - prefer.z) * (ap.z - prefer.z);
+          const bd =
+            (bp.x - prefer.x) * (bp.x - prefer.x) +
+            (bp.z - prefer.z) * (bp.z - prefer.z);
+          return ad - bd;
+        });
       if (cooking.length > 0 && Math.random() < delta * 0.012) {
-        const party = cooking[Math.floor(Math.random() * cooking.length)]!;
+        const party = cooking[0]!;
         const at = party.getPosition();
         this.grassFire = new GrassFire(this.scene, at);
         party.scarper();
@@ -1824,6 +3169,11 @@ export class Game {
           x: at.x,
           z: at.z,
         });
+      } else if (cooking.length === 0 && Math.random() < delta * 0.004) {
+        // Authored fire pin — still light even if no BBQ is on.
+        const at = new THREE.Vector3(prefer.x, 0, prefer.z);
+        this.grassFire = new GrassFire(this.scene, at);
+        this.callouts.raise("fire", this.dayCycle.clockFace(), prefer);
       }
     }
 
@@ -1872,30 +3222,383 @@ export class Game {
     }
   }
 
-  /** A free patch of the south green, out of shot and clear of other parties. */
-  private freeBbqSpot(): THREE.Vector2 | null {
-    const options = BBQ_SPOTS.filter((spot) => {
+  /**
+   * Ten o'clock: boy racers thrash the esplanade a few times, then one of them
+   * loses it and ends up steaming in the lake.
+   */
+  private updateRacerMission(delta: number): void {
+    const hour = this.dayCycle.hour;
+    const open = missionWindowOpen("racers", hour);
+    const wasOpen =
+      this.racerHourWas < 0
+        ? false
+        : missionWindowOpen("racers", this.racerHourWas);
+    if (!this.racerMissionStarted && !this.racerMissionDone && open && !wasOpen) {
+      this.beginRacerMission();
+    }
+    this.racerHourWas = hour;
+
+    if (!this.boyRacers) return;
+    this.boyRacers.update(delta);
+
+    if (this.boyRacers.claimRoar()) {
+      parkAudio.engineRoar(1);
+    }
+    if (this.boyRacers.claimWaterHit()) {
+      const at = this.boyRacers.aimSpot();
+      const here = this.camera.position;
+      const pan = at
+        ? Math.max(-1, Math.min(1, (at.x - here.x) / 40))
+        : 0;
+      parkAudio.boatCrash(1);
+      parkAudio.waterSplash(1.35, pan);
+      parkAudio.steamHiss(1.1);
+      this.messages.send(
+        "PCSO GRANT",
+        "One of them's gone in the lake. Steam coming off it like a kettle. Leave it — recovery's coming.",
+        this.dayCycle.clockFace(),
+        14,
+      );
+    }
+    if (this.boyRacers.claimCrash()) {
+      this.cleaned += 1;
+      this.comboRun = this.comboLeft > 0 ? this.comboRun + 1 : 1;
+      this.comboLeft = COMBO_WINDOW;
+      this.score += 70 * this.multiplier();
+      this.updateHUD();
+    }
+
+    if (this.boyRacers.isDone()) {
+      this.boyRacers.dispose();
+      this.boyRacers = null;
+      this.racerMissionDone = true;
+    }
+  }
+
+  private beginRacerMission(): void {
+    this.racerMissionStarted = true;
+    this.boyRacers = new BoyRacers(this.scene);
+    if (this.boyRacers.isDone()) {
+      this.boyRacers.dispose();
+      this.boyRacers = null;
+      this.racerMissionDone = true;
+      return;
+    }
+    const tip = getMissionSpot("racers");
+    this.callouts.raise("racers", this.dayCycle.clockFace(), tip);
+    this.messages.send(
+      "PCSO GRANT",
+      "Skylines on the esplanade — underglow, full chat. They'll do a few passes. Stay off the road.",
+      this.dayCycle.clockFace(),
+      12,
+    );
+  }
+
+  /**
+   * One o'clock: Gosport separatists storm the beach. Phone lights up, then
+   * they come over the esplanade — hose them back or the park falls.
+   */
+  private updateRebelMission(delta: number): void {
+    const hour = this.dayCycle.hour;
+
+    const rebelsOpen = missionWindowOpen("rebels", hour);
+    const rebelsWereOpen =
+      this.rebelHourWas < 0
+        ? false
+        : missionWindowOpen("rebels", this.rebelHourWas);
+    if (!this.rebelMissionStarted && rebelsOpen && !rebelsWereOpen) {
+      this.beginRebelMission();
+    }
+    this.rebelHourWas = hour;
+
+    // Staggered major-incident traffic after the first blast.
+    if (this.rebelBriefing.length > 0) {
+      for (const note of this.rebelBriefing) note.wait -= delta;
+      while (this.rebelBriefing.length > 0 && this.rebelBriefing[0]!.wait <= 0) {
+        const note = this.rebelBriefing.shift()!;
+        this.messages.send(
+          note.from,
+          note.text,
+          this.dayCycle.clockFace(),
+          18,
+        );
+      }
+    }
+
+    if (!this.rebelRaid) return;
+    this.rebelRaid.update(delta, this.camera.position);
+
+    const swing = this.rebelRaid.claimSwing();
+    if (swing) this.takeStrike(swing);
+
+    if (this.rebelRaid.isCleared() && !this.rebelMissionWon) {
+      this.cleaned += 1;
+      this.comboRun = this.comboLeft > 0 ? this.comboRun + 1 : 1;
+      this.comboLeft = COMBO_WINDOW;
+      this.score += 200 * this.multiplier();
+      this.updateHUD();
+      this.messages.send(
+        "999 CONTROL",
+        "Rebels breaking for the beach. Canoe Lake secure. Armed response inbound — stand down, cleaner.",
+        this.dayCycle.clockFace(),
+        16,
+      );
+      this.callouts.raise("praise", this.dayCycle.clockFace());
+      this.triumph();
+    }
+
+    if (this.rebelRaid.isGone()) {
+      this.rebelRaid.dispose();
+      this.rebelRaid = null;
+    }
+  }
+
+  private beginRebelMission(): void {
+    this.rebelMissionStarted = true;
+    this.rebelBriefing = [
+      {
+        wait: 0,
+        from: "999 CONTROL",
+        text: "MAJOR INCIDENT. Gosport separatist rebels are storming Southsea Beach.",
+      },
+      {
+        wait: 3.2,
+        from: "999 CONTROL",
+        text: "Intent: open an insurgency around Canoe Lake. Police and armed forces are mobilising — ETA unknown.",
+      },
+      {
+        wait: 7.0,
+        from: "ARMED RESPONSE",
+        text: "All units held south of the pier. Cleaner on scene is the only asset inside the park. Hold the lake.",
+      },
+      {
+        wait: 11.5,
+        from: "DEPOT",
+        text: "That's you, mush. Defend Canoe Lake at all costs. Hose anything that comes over the esplanade.",
+      },
+    ];
+    this.rebelRaid = new RebelRaid(this.scene, 14, getMissionSpot("rebels"));
+  }
+
+  /**
+   * Positions of everyone on foot this frame — path walkers steer around
+   * walls, benches, the player, and each other.
+   */
+  private refreshWalkCrowd(): void {
+    const pts: { x: number; z: number }[] = [
+      { x: this.camera.position.x, z: this.camera.position.z },
+    ];
+    const add = (at: THREE.Vector3) => {
+      pts.push({ x: at.x, z: at.z });
+    };
+    for (const person of this.people) add(person.getPosition());
+    if (this.boatman) add(this.boatman.getPosition());
+    for (const crabber of this.crabbers) add(crabber.getPosition());
+    for (const party of this.bbqs) {
+      for (const at of party.guestPositions()) add(at);
+    }
+    for (const party of this.picnics) {
+      for (const p of party.crowdBlockers()) pts.push(p);
+    }
+    for (const party of this.gazebos) {
+      for (const at of party.guestPositions()) add(at);
+    }
+    for (const lot of this.benchSits) {
+      for (const at of lot.guestPositions()) add(at);
+    }
+    for (const visit of this.playVisits) {
+      for (const at of visit.guestPositions()) add(at);
+    }
+    for (const match of this.football) {
+      for (const at of match.guestPositions()) add(at);
+    }
+    for (const lot of this.drunks) {
+      for (const at of lot.guestPositions()) add(at);
+    }
+    setWalkCrowd(pts);
+  }
+
+  private freeLawnGatherSpot(spacing: number): THREE.Vector2 | null {
+    return this.freeLawnGatherSpotNear(null, null, spacing);
+  }
+
+  /** Prefer lawn near an authored mission pin when one is given. */
+  private freeLawnGatherSpotNear(
+    nearX: number | null,
+    nearZ: number | null,
+    spacing: number,
+  ): THREE.Vector2 | null {
+    const occupied: THREE.Vector3[] = [
+      ...this.bbqs.map((party) => party.getPosition()),
+      ...this.picnics.map((party) => party.getPosition()),
+      ...this.gazebos.map((party) => party.getPosition()),
+      ...this.football.map((match) => match.getPosition()),
+    ];
+    const options = lawnGatherSpots().filter((spot) => {
       if (this.inShot(spot.x, spot.y, 0)) return false;
       if (atParkBuilding(spot.x, spot.y)) return false;
-      for (const party of this.bbqs) {
-        const at = party.getPosition();
+      for (const at of occupied) {
         const dx = at.x - spot.x;
         const dz = at.z - spot.y;
-        if (dx * dx + dz * dz < 20 * 20) return false;
+        if (dx * dx + dz * dz < spacing * spacing) return false;
       }
       return true;
     });
     if (options.length === 0) return null;
-    return options[Math.floor(Math.random() * options.length)]!.clone();
+
+    if (nearX != null && nearZ != null) {
+      let best = options[0]!;
+      let bestD = Infinity;
+      for (const spot of options) {
+        const dx = spot.x - nearX;
+        const dz = spot.y - nearZ;
+        const d = dx * dx + dz * dz;
+        if (d < bestD) {
+          bestD = d;
+          best = spot;
+        }
+      }
+      return best.clone();
+    }
+
+    // Prefer the middle of the east green (south of the play park), not the
+    // sea-wall fringe or the far fence line.
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (const spot of options) {
+      minX = Math.min(minX, spot.x);
+      maxX = Math.max(maxX, spot.x);
+      minZ = Math.min(minZ, spot.y);
+      maxZ = Math.max(maxZ, spot.y);
+    }
+    const midX = (minX + maxX) * 0.5;
+    const midZ = minZ + (maxZ - minZ) * 0.45;
+    const spanX = Math.max(1, maxX - minX);
+    const spanZ = Math.max(1, maxZ - minZ);
+    let total = 0;
+    const weights = options.map((spot) => {
+      const nx = (spot.x - midX) / (spanX * 0.45);
+      const nz = (spot.y - midZ) / (spanZ * 0.4);
+      const w = Math.exp(-(nx * nx + nz * nz) * 0.7) + 0.12;
+      total += w;
+      return w;
+    });
+    let roll = Math.random() * total;
+    for (let i = 0; i < options.length; i++) {
+      roll -= weights[i]!;
+      if (roll <= 0) return options[i]!.clone();
+    }
+    return options[options.length - 1]!.clone();
+  }
+
+  /**
+   * Kids on the big east green with jumpers for goalposts — daytime, dry
+   * weather, one match at a time.
+   */
+  private updateFootball(delta: number): void {
+    const hour = this.dayCycle.hour;
+    const footyHours = hour >= 10 && hour < 17.5;
+    const dry = this.weather.rainStrength() < 0.1;
+
+    this.nextFootball -= delta;
+    if (
+      this.nextFootball <= 0 &&
+      footyHours &&
+      dry &&
+      this.football.length < MAX_FOOTBALL
+    ) {
+      // Needs a clear stretch of lawn for the pitch.
+      const spot = this.freeLawnGatherSpot(32);
+      if (!spot) {
+        this.nextFootball = WAIT_AND_SEE;
+      } else {
+        this.football.push(new FootballKickabout(this.scene, spot));
+        this.nextFootball = 160 + Math.random() * 220;
+      }
+    } else if (this.nextFootball <= 0) {
+      this.nextFootball = footyHours
+        ? 45 + Math.random() * 50
+        : 100 + Math.random() * 80;
+    }
+
+    for (let i = this.football.length - 1; i >= 0; i--) {
+      const match = this.football[i]!;
+      match.update(delta);
+      if (match.isDone()) {
+        match.dispose();
+        this.football.splice(i, 1);
+      }
+    }
+  }
+
+  /**
+   * Visitors pay at the hire hatch, the boatman helps them into a swan, they
+   * pedal about, then bring it back.
+   */
+  private updatePedaloHires(delta: number): void {
+    this.boatman?.update(delta, this.camera.position);
+    if (this.boatman?.wantsSwing()) {
+      this.takeStrike(this.boatman.getPosition());
+    }
+
+    if (consumePedaloWreck()) {
+      this.boatman?.huntPlayer();
+      this.complaints += 1;
+      this.score = Math.max(0, this.score - 40);
+      this.updateHUD();
+      this.messages.send(
+        "BOAT HIRE",
+        "You've put a swan pedalo on the bottom. The hire bloke is coming for you.",
+        this.dayCycle.clockFace(),
+        16,
+      );
+    }
+
+    const hour = this.dayCycle.hour;
+    const hireHours = hour >= 9 && hour < 18.5;
+
+    this.nextPedaloHire -= delta;
+    if (
+      this.nextPedaloHire <= 0 &&
+      hireHours &&
+      this.pedaloHires.length < MAX_PEDALO_HIRES &&
+      this.boatman &&
+      !this.boatman.isBusy() &&
+      freePedaloCount() > 1
+    ) {
+      const hatch = hatchQueueSpot();
+      if (!hatch || this.inShot(hatch.x, hatch.z, 0.4)) {
+        this.nextPedaloHire = WAIT_AND_SEE;
+      } else {
+        this.pedaloHires.push(new PedaloHire(this.scene, this.boatman));
+        this.nextPedaloHire = 40 + Math.random() * 70;
+      }
+    } else if (this.nextPedaloHire <= 0) {
+      this.nextPedaloHire = hireHours
+        ? 18 + Math.random() * 25
+        : 90 + Math.random() * 80;
+    }
+
+    for (let i = this.pedaloHires.length - 1; i >= 0; i--) {
+      const hire = this.pedaloHires[i]!;
+      hire.update(delta);
+      if (hire.isDone()) {
+        hire.dispose();
+        this.pedaloHires.splice(i, 1);
+      }
+    }
   }
 
   /**
    * Kids walking into the play park through the day — swings, slide, spring
-   * animal, tearing about — then off again when they've had enough.
+   * animal, tearing about — with a parent waiting inside the gate or on a
+   * bench, then off again when they've had enough.
    */
   private updatePlayVisits(delta: number): void {
     const hour = this.dayCycle.hour;
-    const playHours = hour >= 8 && hour < 19.5;
+    const playHours = hour >= 8 && hour < 18.5;
 
     this.nextPlayVisit -= delta;
     if (
@@ -1918,7 +3621,8 @@ export class Game {
 
     for (let i = this.playVisits.length - 1; i >= 0; i--) {
       const visit = this.playVisits[i]!;
-      visit.update(delta);
+      visit.update(delta, this.camera.position);
+      if (visit.wantsSwing()) this.takeStrike(visit.getSwingFrom());
       if (visit.isDone()) {
         visit.dispose();
         this.playVisits.splice(i, 1);
@@ -1965,6 +3669,7 @@ export class Game {
    */
   private temptSwans(): void {
     const carriers = this.people.filter((person) => person.hasFood());
+    const benchFeeders = this.benchSits.filter((lot) => lot.hasFood());
 
     for (const swan of this.swans) {
       // Nothing is worth getting up for once they're bedded down for the night.
@@ -1988,6 +3693,7 @@ export class Game {
       }
 
       let closest: Person | null = null;
+      let closestBench: BenchSit | null = null;
       let best = BEG_DISTANCE;
       if (swan.isHungry()) {
         const at = swan.getPosition();
@@ -1996,18 +3702,31 @@ export class Game {
           if (gap < best) {
             best = gap;
             closest = person;
+            closestBench = null;
+          }
+        }
+        for (const lot of benchFeeders) {
+          const gap = lot.getFeederPosition().distanceTo(at);
+          if (gap < best) {
+            best = gap;
+            closestBench = lot;
+            closest = null;
           }
         }
       }
 
-      if (!closest) {
+      if (!closest && !closestBench) {
         swan.loseInterest();
         continue;
       }
 
-      swan.tempt(closest.getPosition());
+      const bait = closest
+        ? closest.getPosition()
+        : closestBench!.getFeederPosition();
+      swan.tempt(bait);
       if (swan.wantsFeeding()) {
-        closest.feedSwan();
+        if (closest) closest.feedSwan();
+        else closestBench!.feedSwan();
         swan.feed();
         swan.loseInterest();
       }
@@ -2085,10 +3804,102 @@ export class Game {
   /**
    * A member of the public has trodden in one you missed. That's a complaint
    * on your record, and a trodden mess is spread about and worth nothing.
+   * Thick lumps take a footprint bite instead of pancakeing flat.
    */
-  private logComplaint(dropping: Dropping): void {
-    dropping.tread();
+  private logComplaint(
+    dropping: Dropping,
+    at?: THREE.Vector3,
+    yaw = 0,
+  ): void {
+    dropping.tread(at, yaw);
     this.complain();
+  }
+
+  /**
+   * Climb stacked mess lumps and bite deep footprints through them when
+   * walking.
+   */
+  private updatePlayerOnMess(delta: number): void {
+    if (this.player.isWading() || this.player.isOnPedalo()) {
+      this.player.setGroundLift(0);
+      return;
+    }
+    const px = this.camera.position.x;
+    const pz = this.camera.position.z;
+    let lift = 0;
+    let under: Dropping | null = null;
+
+    for (const pile of this.droppings) {
+      if (pile.isRinsing()) continue;
+      pile.tickStep(delta);
+      if (!pile.coversFoot(px, pz)) continue;
+      const h = pile.moundHeight();
+      if (h <= lift) continue;
+      lift = h;
+      under = pile;
+    }
+
+    this.player.setGroundLift(lift);
+
+    if (!under || !under.isMound()) return;
+    if (this.player.moveSpeed() < 1.2) return;
+    if (!under.canStepPrint()) return;
+
+    under.markStepped();
+    const yaw = this.player.getHeading();
+    const across = 0.11 * this.playerFoot;
+    this.playerFoot = -this.playerFoot;
+    under.biteFootprint(
+      px + Math.cos(yaw) * across,
+      pz - Math.sin(yaw) * across,
+      yaw,
+      true,
+    );
+  }
+
+  /** Entry wallop or walking wake from the cleaner in the lake. */
+  private applyPlayerWadeSplash(): void {
+    const splash = this.player.claimWadeSplash();
+    if (!splash) return;
+    if (splash.big) this.bigSplash(splash.at);
+    else this.wadeWake(splash.at);
+  }
+
+  /** Small rings under the boots while trudging through. */
+  private wadeWake(at: THREE.Vector3): void {
+    parkAudio.waterPlop(0.35);
+    for (const [radius, life] of [
+      [0.45, 0.7],
+      [0.85, 1.0],
+    ] as const) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(radius * 0.45, radius, 14),
+        new THREE.MeshBasicMaterial({
+          color: 0xdff2ff,
+          transparent: true,
+          opacity: 0.45,
+          side: THREE.DoubleSide,
+        }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(at.x, WATER_Y + 0.03, at.z);
+      this.scene.add(ring);
+
+      const started = performance.now();
+      const grow = (): void => {
+        const t = (performance.now() - started) / (life * 1000);
+        if (t >= 1) {
+          this.scene.remove(ring);
+          ring.geometry.dispose();
+          (ring.material as THREE.Material).dispose();
+          return;
+        }
+        ring.scale.setScalar(1 + t * 1.4);
+        (ring.material as THREE.MeshBasicMaterial).opacity = 0.45 * (1 - t);
+        requestAnimationFrame(grow);
+      };
+      requestAnimationFrame(grow);
+    }
   }
 
   /** Somebody has had enough of you: costs points and kills the combo. */
@@ -2185,6 +3996,69 @@ export class Game {
     }
   }
 
+  private updateParkAudio(delta: number): void {
+    const here = this.camera.position;
+    let gullsNear = 0;
+    for (const gull of this.gulls) {
+      if (gull.getPosition().distanceTo(here) < 55) gullsNear += 1;
+    }
+    let ducksNear = 0;
+    for (const duck of this.ducks) {
+      if (duck.getPosition().distanceTo(here) < 40) ducksNear += 1;
+    }
+    const swanAngry = this.swans.some(
+      (swan) => swan.isCharging() || swan.isWingsOut(),
+    );
+    const flyovers = [
+      ...this.planes
+        .filter((p) => p.isInFlight())
+        .map((p) => {
+          const at = p.getPosition();
+          return { id: p.id, kind: p.kind, x: at.x, y: at.y, z: at.z };
+        }),
+      ...this.helicopters
+        .filter((h) => h.isInFlight())
+        .map((h) => {
+          const at = h.getPosition();
+          return {
+            id: h.id + 10_000,
+            kind: "heli" as const,
+            x: at.x,
+            y: at.y,
+            z: at.z,
+          };
+        }),
+    ];
+    const pedalling = this.player.getPedalEffort();
+    const traffic = [
+      ...this.traffic
+        .filter((car) => car.isDriving())
+        .map((car) => {
+          const at = car.getPosition();
+          return {
+            id: car.id,
+            x: at.x,
+            y: at.y,
+            z: at.z,
+            speed: car.getSpeed(),
+            music: car.playingMusic,
+          };
+        }),
+      ...(this.boyRacers?.trafficCues() ?? []),
+    ];
+    parkAudio.update(delta, {
+      hosing: this.player.isHosing(),
+      swanAngry,
+      gullsNear,
+      ducksNear,
+      pedalling,
+      flyovers,
+      traffic,
+      listener: { x: here.x, y: here.y, z: here.z },
+      paused: false,
+    });
+  }
+
   private onWindowResize(): void {
     const width = window.visualViewport?.width ?? window.innerWidth;
     const height = window.visualViewport?.height ?? window.innerHeight;
@@ -2208,6 +4082,13 @@ export class Game {
 
     if (this.paused) {
       this.clock.getDelta();
+      parkAudio.update(0, {
+        hosing: false,
+        swanAngry: false,
+        gullsNear: 0,
+        ducksNear: 0,
+        paused: true,
+      });
       this.renderer.render(this.scene, this.camera);
       return;
     }
@@ -2216,11 +4097,25 @@ export class Game {
 
     if (this.dead) {
       this.goDown(delta);
+      parkAudio.update(delta, {
+        hosing: false,
+        swanAngry: false,
+        gullsNear: 0,
+        ducksNear: 0,
+        paused: false,
+      });
       this.renderer.render(this.scene, this.camera);
       return;
     }
 
     this.player.update(delta);
+    if (this.shiftIntro?.isActive()) {
+      this.shiftIntro.update(delta);
+      if (!this.shiftIntro.isActive()) this.finishIntro();
+    }
+    this.updateParkAudio(delta);
+    this.updatePlayerOnMess(delta);
+    this.applyPlayerWadeSplash();
     // Worked out once, up front: everything that spawns this frame checks it.
     this.refreshView();
     this.mendUp(delta);
@@ -2232,7 +4127,7 @@ export class Game {
     crowd.push(this.camera.position);
     for (const swan of this.swans) {
       swan.noticeCrowd(crowd);
-      swan.update(delta, this.camera.position);
+      swan.update(delta, this.camera.position, this.swans);
       if (swan.shouldDrop()) this.addDropping(swan.getPosition().clone());
       if (swan.wantsStrike()) this.takeStrike(swan.getPosition());
     }
@@ -2249,14 +4144,27 @@ export class Game {
       this.faceWetLeft = Math.max(0, this.faceWetLeft - delta);
       if (this.faceWetLeft === 0) this.faceDirty = false;
     }
-    const mess = this.droppings
-      .filter((dropping) => !dropping.isRinsing())
-      .map((dropping) => dropping.getPosition());
-    this.updatePeople(delta, mess);
+    const activeMess = this.droppings.filter(
+      (dropping) => !dropping.isRinsing(),
+    );
+    const mess = activeMess.map((dropping) => dropping.getPosition());
+    this.refreshWalkCrowd();
+    this.updatePeople(delta, activeMess);
 
     this.elapsed += delta;
-    bobPedalos(this.elapsed);
+    const wind = this.weather.getWind();
+    const chop =
+      Math.min(1, wind.length() / 14) * 0.45 +
+      this.weather.rainStrength() * 0.4 +
+      this.weather.gloom * 0.35;
+    setPedaloChop(chop);
+    bobPedalos(this.elapsed, delta);
     this.updateDroppings(delta);
+    this.updateFeederRush(delta);
+    this.updatePicnicRaid(delta);
+    this.updateGooseMission(delta);
+    this.updatePedaloBirdHits();
+    this.updateEveningClearout(delta);
     this.puddles.update(delta, this.dayCycle.skyState().sunPosition);
     this.updateLitter(delta);
     this.updateFootprints(delta);
@@ -2268,16 +4176,26 @@ export class Game {
     this.updateSquirrels(delta, scraps);
     this.updateBins(delta);
     this.updateGraffiti(delta);
-    this.updateBranchKids(delta);
+    this.refreshWalkCrowd();
+    this.updateDrunks(delta);
     this.watchForAttacks();
     this.watchTheState();
     this.callouts.update(delta);
     this.messages.update(delta);
     this.updateCyclists(delta, mess);
+    this.updateTraffic(delta);
     this.updateBoats(delta);
     this.updateCrabbers(delta);
+    this.updatePedaloHires(delta);
+    this.refreshWalkCrowd();
     this.updateBbqs(delta);
+    this.updatePicnics(delta);
+    this.updateGazebos(delta);
+    this.updateBenchSits(delta);
+    this.updateFootball(delta);
     this.updateGrassFire(delta);
+    this.updateRacerMission(delta);
+    this.updateRebelMission(delta);
     this.updatePlayVisits(delta);
     this.updateFlock(delta);
     this.updateNight(delta);
@@ -2297,11 +4215,22 @@ export class Game {
         .map((swan) => swan.getPosition()),
       people: [
         ...this.people.map((person) => person.getPosition()),
+        ...(this.boatman ? [this.boatman.getPosition()] : []),
+        ...this.pedaloHires.flatMap((hire) => hire.guestPositions()),
         ...this.bbqs.flatMap((party) => party.guestPositions()),
+        ...this.picnics.flatMap((party) => party.guestPositions()),
+        ...this.gazebos.flatMap((party) => party.guestPositions()),
+        ...this.benchSits.flatMap((lot) => lot.guestPositions()),
         ...this.playVisits.flatMap((visit) => visit.guestPositions()),
+        ...this.football.flatMap((match) => match.guestPositions()),
+        ...this.drunks.flatMap((lot) => lot.guestPositions()),
       ],
-      cyclists: this.cyclists.map((rider) => rider.getPosition()),
+      cyclists: [
+        ...this.cyclists.map((rider) => rider.getPosition()),
+        ...(this.rebelRaid?.getPositions() ?? []),
+      ],
       scooters: this.scooters.map((scooter) => scooter.getPosition()),
+      traffic: this.traffic.map((car) => car.getPosition()),
       boats: this.boats.map((boat) => boat.getPosition()),
       fox: this.fox?.getPosition() ?? null,
       droppings: this.droppings
@@ -2315,6 +4244,11 @@ export class Game {
       squirrels: this.squirrels
         .filter((squirrel) => !squirrel.isHidden())
         .map((squirrel) => squirrel.getPosition()),
+      radar:
+        this.gooseFlock && !this.gooseMissionDone
+          ? this.gooseFlock.radarBlips()
+          : undefined,
+      missions: this.eventMissionSpots(),
     });
     this.mugshot.update(delta, {
       cleanliness: this.cleanliness,
@@ -2326,35 +4260,112 @@ export class Game {
       faceWet: this.faceWetLeft > 0,
       faceDirty: this.faceDirty && this.faceWetLeft > 0,
     });
+    const heading = this.player.getHeading();
+    this.compass.update(heading);
     this.objectiveArrow.update(
       this.camera,
       this.camera.position,
-      this.player.getHeading(),
+      heading,
       this.objectiveSpots(),
+      delta,
+    );
+    this.missionArrow.update(
+      this.camera,
+      this.camera.position,
+      heading,
+      this.eventMissionSpots(),
       delta,
     );
 
     this.renderer.render(this.scene, this.camera);
   };
 
-  /** Everything still dirty that the arrow might point at. */
+  /**
+   * Red arrow — scripted missions only: picnic dive, geese, grass fire, rebels.
+   * Ambient urgencies (drunks, dunks) use the yellow mess arrow.
+   */
+  private eventMissionSpots(): { x: number; z: number }[] {
+    if (!this.onDuty) return [];
+    const spots: { x: number; z: number }[] = [];
+
+    if (this.picnicRaidActive && this.picnicRaidTip) {
+      spots.push(this.picnicRaidTip);
+    }
+
+    if (
+      this.gooseMissionStarted &&
+      !this.gooseMissionDone &&
+      !this.gooseHeavyArmed
+    ) {
+      const van = vanSpotWorld();
+      if (van) spots.push(van);
+    } else if (this.gooseFlock && !this.gooseMissionDone) {
+      const c = this.gooseFlock.getCentre();
+      spots.push({ x: c.x, z: c.z });
+    }
+
+    if (this.grassFire?.isBurning()) {
+      const at = this.grassFire.getPosition();
+      spots.push({ x: at.x, z: at.z });
+    }
+
+    if (this.rebelRaid?.isActive()) {
+      for (const at of this.rebelRaid.getPositions()) {
+        spots.push({ x: at.x, z: at.z });
+      }
+    }
+
+    if (this.boyRacers?.isActive()) {
+      const aim = this.boyRacers.aimSpot();
+      if (aim) spots.push(aim);
+    }
+
+    return spots;
+  }
+
+  /**
+   * Yellow arrow — dirt, and other jobs that aren't a radio mission
+   * (drunks, someone in the drink).
+   */
   private objectiveSpots(): { x: number; z: number }[] {
+    if (!this.onDuty) return [];
     const spots: { x: number; z: number }[] = [];
 
     // Opening tip first — don't send them chasing litter until that wave's done.
     if (!this.secondEventDone && this.overnightPiles.size > 0) {
       for (const dropping of this.overnightPiles) {
-        if (dropping.isRinsing()) continue;
-        const at = dropping.getPosition();
-        spots.push({ x: at.x, z: at.z });
+        const at = dropping.arrowSpot();
+        if (at) spots.push(at);
       }
-      return spots;
+      if (spots.length > 0) return spots;
+      // Piles look clear but aren't credited yet — fall through to other jobs.
+    }
+
+    // Feeder rush: only tip the empty NW stretch when there's no mess there yet.
+    if (this.feederRushLeft > 0 && this.feederTip) {
+      const tip = this.feederTip;
+      const covered = this.droppings.some((d) => {
+        if (!d.hasVisibleMess()) return false;
+        const at = d.getPosition();
+        return Math.hypot(at.x - tip.x, at.z - tip.z) < 14;
+      });
+      if (!covered) spots.push(tip);
+    }
+
+    for (const lot of this.drunks) {
+      if (lot.isGone()) continue;
+      const at = lot.getPosition();
+      spots.push({ x: at.x, z: at.z });
+    }
+    for (const person of this.people) {
+      if (!person.isInTheDrink()) continue;
+      const at = person.getPosition();
+      spots.push({ x: at.x, z: at.z });
     }
 
     for (const dropping of this.droppings) {
-      if (dropping.isRinsing()) continue;
-      const at = dropping.getPosition();
-      spots.push({ x: at.x, z: at.z });
+      const at = dropping.arrowSpot();
+      if (at) spots.push(at);
     }
     for (const piece of this.litter) {
       if (piece.isTaken()) continue;
@@ -2367,7 +4378,7 @@ export class Game {
       spots.push({ x: at.x, z: at.z });
     }
     for (const print of this.footprints) {
-      if (print.isGone()) continue;
+      if (!print.isWorthArrow()) continue;
       const at = print.getPosition();
       spots.push({ x: at.x, z: at.z });
     }

@@ -8,6 +8,8 @@ export interface RefBackgroundState {
   rotDeg: number;
   imageOpacity: number;
   mapOpacity: number;
+  /** When true, the photo is mirrored on X (common with some screenshots). */
+  flipH?: boolean;
 }
 
 const DB_NAME = "canoe-lake-editor";
@@ -56,6 +58,7 @@ export async function readRefBackground(): Promise<RefBackgroundState | null> {
           imageOpacity:
             typeof v.imageOpacity === "number" ? v.imageOpacity : 0.45,
           mapOpacity: typeof v.mapOpacity === "number" ? v.mapOpacity : 0.7,
+          flipH: !!v.flipH,
         });
       };
       req.onerror = () => reject(req.error ?? new Error("read failed"));

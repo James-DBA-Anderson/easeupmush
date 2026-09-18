@@ -14,12 +14,11 @@ export class Grumble {
       new THREE.SpriteMaterial({
         map: Grumble.draw(text),
         transparent: true,
-        depthTest: false,
+        depthWrite: false,
       }),
     );
     this.sprite.scale.set(2.2, 0.55, 1);
     this.sprite.position.copy(at);
-    this.sprite.renderOrder = 5;
     scene.add(this.sprite);
   }
 
@@ -28,6 +27,10 @@ export class Grumble {
     canvas.width = 512;
     canvas.height = 128;
     const ctx = canvas.getContext('2d')!;
+
+    // Game canvas is CSS-flipped on X; draw mirrored so speech reads forwards.
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';

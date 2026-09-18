@@ -69,12 +69,14 @@ const CLEAR = 1.45;
 /** It won't cross the whole park for a bird; it goes for whatever is near. */
 const HUNT_RANGE = 34;
 
-type Mode = "heel" | "loose" | "hunt" | "coming";
+type Mode = "heel" | "loose" | "hunt" | "attack" | "coming" | "down";
 
 /** The world a loose dog gets to make a mess of. */
 export interface DogWorld {
   swans: readonly Swan[];
   people: readonly Person[];
+  /** Cleaner — fierce dogs may come for them. */
+  player: THREE.Vector3;
 }
 
 /** A dog on a lead, and — if you soak its owner — off one. */
@@ -103,6 +105,12 @@ export class Dog {
   /** The side of the owner it walks on, and where the lead is held. */
   private side: number;
   private flecks: MuckFlecks;
+  /** Knocked flat by the hose — seconds left on its side. */
+  private downFor = 0;
+  private tumbleSpin = 0;
+  /** Pending bite on the cleaner. */
+  private biteAt: THREE.Vector3 | null = null;
+  private biteCool = 0;
 
   constructor(scene: THREE.Scene, owner: Person) {
     this.scene = scene;
@@ -227,6 +235,10 @@ export class Dog {
     this.flecks.splat(point);
   }
 
+  public rinse(point: THREE.Vector3): boolean {
+    return this.flecks.rinseNear(point, 0.45);
+  }
+
   /** Barges the game hasn't logged yet. */
   public claimTrouble(): number {
     const count = this.trouble;
@@ -239,11 +251,78 @@ export class Dog {
    * lead is on the floor — and what the dog does next is down to the breed.
    */
   public slipTheLead(): void {
+    if (this.mode === "down") return;
     if (this.mode !== "heel") return;
     this.looseFor = RUN_TIME + Math.random() * 5;
-    this.mode = this.breed.temper === "steady" ? "loose" : "hunt";
+    // Fierce sorts often turn on the hose; lively ones go after birds.
+    if (this.breed.temper === "fierce" && Math.random() < 0.7) {
+      this.mode = "attack";
+    } else if (this.breed.temper === "steady") {
+      this.mode = "loose";
+    } else {
+      this.mode = "hunt";
+    }
     this.quarry = null;
     this.shout(`${this.name}!`);
+  }
+
+  /**
+   * Owner's gone in the drink — lead's definitely gone, and the dog stays on
+   * the bank (never follows them into the lake).
+   */
+  public releaseOnOwnerDunk(): void {
+    if (this.mode === "heel" || this.mode === "down") {
+      this.looseFor = RUN_TIME + 4 + Math.random() * 4;
+      if (this.breed.temper === "fierce" && Math.random() < 0.55) {
+        this.mode = "attack";
+      } else if (this.breed.temper === "steady") {
+        this.mode = "loose";
+      } else {
+        this.mode = "hunt";
+      }
+      this.quarry = null;
+      this.shout(`${this.name}!`);
+    }
+    // Pin them on the shore if they were already edging toward the water.
+    const here = this.group.position;
+    if (isInLake(here.x, here.z) || this.owner.isInTheDrink()) {
+      const shore = nearestShore(
+        this.owner.getPosition().x,
+        this.owner.getPosition().z,
+      );
+      const out = outwardAt(shore);
+      here.set(shore.x + out.x * 1.2, 0, shore.y + out.y * 1.2);
+    }
+    this.keepDry();
+  }
+
+  /**
+   * Hose blast — tumble them, break off a charge. Needs a solid hit to floor
+   * a fierce one mid-attack.
+   */
+  public hoseKnock(from: THREE.Vector3): void {
+    const here = this.group.position;
+    const away = new THREE.Vector3(here.x - from.x, 0, here.z - from.z);
+    if (away.lengthSq() < 0.01) away.set(Math.sin(this.heading), 0, Math.cos(this.heading));
+    away.normalize();
+    here.x += away.x * 0.85;
+    here.z += away.z * 0.85;
+    this.keepDry();
+
+    this.mode = "down";
+    this.downFor = 1.2 + Math.random() * 1.1;
+    this.tumbleSpin = (Math.random() < 0.5 ? 1 : -1) * (2.5 + Math.random());
+    this.quarry = null;
+    this.biteCool = 1.5;
+    this.group.rotation.z = (Math.random() < 0.5 ? 1 : -1) * 1.2;
+    this.group.rotation.x = 0.9;
+  }
+
+  /** Pending snap at the cleaner, once. */
+  public claimBite(): THREE.Vector3 | null {
+    const at = this.biteAt;
+    this.biteAt = null;
+    return at;
   }
 
   public update(delta: number, world: DogWorld): void {
@@ -252,6 +331,18 @@ export class Dog {
       this.grumble?.update(delta, this.group.position) === false
         ? null
         : this.grumble;
+    if (this.biteCool > 0) this.biteCool = Math.max(0, this.biteCool - delta);
+
+    if (this.mode === "down") {
+      this.updateDown(delta);
+      this.drawLead();
+      return;
+    }
+
+    // Owner in the lake — never heel in after them.
+    if (this.mode === "heel" && this.owner.isInTheDrink()) {
+      this.releaseOnOwnerDunk();
+    }
 
     if (this.mode === "heel") {
       this.walkToHeel(delta);
@@ -262,9 +353,39 @@ export class Dog {
     this.drawLead();
   }
 
+  private updateDown(delta: number): void {
+    this.downFor -= delta;
+    this.group.rotation.y += this.tumbleSpin * delta;
+    this.group.position.y = 0.08;
+    this.keepDry();
+    if (this.downFor > 0) return;
+    // Scramble up — fierce ones may come straight back at you.
+    this.group.rotation.x = 0;
+    this.group.rotation.z = 0;
+    this.looseFor = Math.max(this.looseFor, 4 + Math.random() * 3);
+    if (this.breed.temper === "fierce" && Math.random() < 0.45) {
+      this.mode = "attack";
+    } else if (this.breed.temper === "steady") {
+      this.mode = "coming";
+    } else {
+      this.mode = "hunt";
+    }
+  }
+
   /** Trotting along at the owner's side, matching their pace. */
   private walkToHeel(delta: number): void {
+    if (this.owner.isInTheDrink()) {
+      this.releaseOnOwnerDunk();
+      return;
+    }
+
     const owner = this.owner.getPosition();
+    // Never step into the lake while heeling.
+    if (isInLake(owner.x, owner.z)) {
+      this.releaseOnOwnerDunk();
+      return;
+    }
+
     const face = this.owner.getHeading();
     const spot = new THREE.Vector3(
       owner.x + Math.cos(face) * this.side * 0.55 + Math.sin(face) * 0.3,
@@ -274,6 +395,7 @@ export class Dog {
 
     const step = spot.distanceTo(this.group.position);
     this.group.position.lerp(spot, Math.min(1, 7 * delta));
+    this.keepDry();
     this.heading = face;
     this.group.rotation.y = face;
     this.pace(delta, step > 0.05 ? 1 : 0);
@@ -281,8 +403,7 @@ export class Dog {
 
   /**
    * Off the lead. A lively one puts every swan it can find back in the water,
-   * a fierce one goes through anybody in the way to get to them, and all of
-   * them get collared eventually.
+   * a fierce one goes through anybody in the way — and some come for you.
    */
   private runAbout(delta: number, world: DogWorld): void {
     this.looseFor -= delta;
@@ -292,36 +413,83 @@ export class Dog {
     }
 
     if (this.mode === "coming") {
-      this.target.copy(this.owner.getPosition());
-      if (this.group.position.distanceTo(this.target) < 1) {
-        this.mode = "heel";
-        return;
+      // Don't recall into the lake if the owner's still swimming.
+      if (this.owner.isInTheDrink()) {
+        this.target.copy(this.wanderSpot(2, 5));
+        if (this.group.position.distanceTo(this.target) < 1.2) {
+          this.target.copy(this.wanderSpot(2, 5));
+        }
+      } else {
+        this.target.copy(this.owner.getPosition());
+        if (this.group.position.distanceTo(this.target) < 1) {
+          this.mode = "heel";
+          this.group.rotation.x = 0;
+          this.group.rotation.z = 0;
+          return;
+        }
       }
+    } else if (this.mode === "attack") {
+      this.chasePlayer(delta, world);
     } else if (this.mode === "hunt") {
       this.pickQuarry(world);
+      // Fierce dogs mid-hunt may switch onto the cleaner if they're close.
+      if (
+        this.breed.temper === "fierce" &&
+        world.player.distanceTo(this.group.position) < 11 &&
+        Math.random() < delta * 0.35
+      ) {
+        this.mode = "attack";
+      }
     } else if (this.group.position.distanceTo(this.target) < 1.2) {
-      // A steady dog just potters about within a few metres of its owner.
       this.target.copy(this.wanderSpot(1, 4));
     }
 
+    if (this.mode !== "attack") {
+      const to = new THREE.Vector3()
+        .subVectors(this.target, this.group.position)
+        .setY(0);
+      const gap = to.length();
+      if (gap > 0.05) {
+        const speed =
+          this.mode === "coming" ? this.breed.speed * 0.6 : this.breed.speed;
+        this.group.position.addScaledVector(
+          to.normalize(),
+          Math.min(gap, speed * delta),
+        );
+        this.heading = Math.atan2(to.x, to.z);
+        this.group.rotation.y = this.heading;
+      }
+      this.pace(delta, gap > 0.05 ? 1.6 : 0.2);
+    }
+
+    this.keepDry();
+    this.unstickFromSwans(world);
+    this.causeTrouble(world);
+  }
+
+  /** Straight at the cleaner — a solid hose blast will floor them. */
+  private chasePlayer(delta: number, world: DogWorld): void {
+    this.target.copy(world.player);
     const to = new THREE.Vector3()
       .subVectors(this.target, this.group.position)
       .setY(0);
     const gap = to.length();
-    if (gap > 0.05) {
-      const speed =
-        this.mode === "coming" ? this.breed.speed * 0.6 : this.breed.speed;
+    if (gap > 0.08) {
       this.group.position.addScaledVector(
         to.normalize(),
-        Math.min(gap, speed * delta),
+        Math.min(gap, this.breed.speed * 1.15 * delta),
       );
       this.heading = Math.atan2(to.x, to.z);
       this.group.rotation.y = this.heading;
     }
-    this.pace(delta, gap > 0.05 ? 1.6 : 0.2);
-    this.keepDry();
-    this.unstickFromSwans(world);
-    this.causeTrouble(world);
+    this.pace(delta, 1.8);
+
+    if (gap < 1.35 && this.biteCool <= 0) {
+      this.biteAt = this.group.position.clone();
+      this.biteCool = 1.8 + Math.random() * 0.6;
+      this.shout("GRRR!");
+      this.trouble += 1;
+    }
   }
 
   /**
@@ -415,16 +583,31 @@ export class Dog {
     return !isInLake(at.x, at.z);
   }
 
-  /** Somewhere in the general area of its owner to go and have a look at. */
+  /** Somewhere on dry land near its owner to go and have a look at. */
   private wanderSpot(near: number, far: number): THREE.Vector3 {
     const owner = this.owner.getPosition();
-    const angle = Math.random() * Math.PI * 2;
-    const out = near + Math.random() * (far - near);
-    return new THREE.Vector3(
-      owner.x + Math.cos(angle) * out,
-      0,
-      owner.z + Math.sin(angle) * out,
-    );
+    const anchor = this.owner.isInTheDrink()
+      ? (() => {
+          const shore = nearestShore(owner.x, owner.z);
+          const out = outwardAt(shore);
+          return new THREE.Vector3(
+            shore.x + out.x * 2,
+            0,
+            shore.y + out.y * 2,
+          );
+        })()
+      : owner;
+    for (let tryN = 0; tryN < 6; tryN++) {
+      const angle = Math.random() * Math.PI * 2;
+      const out = near + Math.random() * (far - near);
+      const spot = new THREE.Vector3(
+        anchor.x + Math.cos(angle) * out,
+        0,
+        anchor.z + Math.sin(angle) * out,
+      );
+      if (!isInLake(spot.x, spot.z)) return spot;
+    }
+    return anchor.clone();
   }
 
   /** Swans go up, and anyone in the way gets shouldered aside. */

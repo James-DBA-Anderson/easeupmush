@@ -27,17 +27,22 @@ npm run dev:canoe-lake  # Game: http://localhost:5304/
                         # Editor: http://localhost:5304/editor.html
 ```
 
+On the same Wi‑Fi, open `http://<your-computer-ip>:5304/` on your phone (Vite already listens on the LAN; find the IP in the terminal Network URL, or with `ipconfig getifaddr en0` on a Mac).
+
 ### Level editor
 
 Trace the park over a Google Maps screenshot instead of guessing coordinates.
 
 1. Open **http://localhost:5304/editor.html**
 2. **Add image** / **Paste image** (or Ctrl/Cmd+V) — load a Maps screenshot. Use **Background** tool to drag it; sliders for image/map opacity, size, and rotation. Image + settings are kept in this browser (IndexedDB) across reloads; **Remove image** clears them
-3. Edit layers: **Shore**, **Paths**, **Park ring**, **Buildings**, **Bins**. **Buildings** opens a left panel — pick an object for a 3D preview (drag to orbit, scroll to zoom, yaw slider / Shift-drag to turn). Paths: click an edge to add a node; **Shift-drag** to move a whole path. **Undo** / Ctrl+Z reverses edits
-4. **Save** — stores in this browser; the game loads it on next boot
-5. **Download JSON** — put the file at `public/levels/canoe-lake.json` to ship with the build
+3. Use the **ribbon tabs** (Shore, Paths, Roads, Terraces, Park ring, Play area, Car park, Terrain, Buildings, Bins, Foliage, …). Each tab shows its own settings strip. **Roads** / **Terraces** zone parade stone and house runs like Paths. **Play area** edits the rubber outline. **Car park** draws an asphalt pad (cars fill it in-game). **Terrain** draws raised berms with a height slider. **Buildings** opens a side catalog for hire buildings and play kit. **Foliage**: trees, shrubs, and flower beds you place (only those appear in-game; **Clear foliage** empties the park). **Walk** (title bar) opens a first-person view of the park — same ribbon tools, click under the crosshair to place/select, hold to drag, `[` `]` rotate, Delete remove. **Debug** (next to Walk) opens the real game with the intro skipped — pick start of shift or a mission (picnic / geese / fire / rebels); no Maps underlay. **Undo** / Ctrl+Z reverses edits.
+4. **Save** — stores in this browser **and** writes `public/levels/canoe-lake.json` (Vite dev server). Other devices then get it after **Reset default** (clears their old browser save) or a fresh load with no local save
+5. **Download JSON** — manual copy of the level if you need the file outside the repo
+6. **Reset default** — clears this browser’s save and reloads the shipped `public/levels/canoe-lake.json` (does not write a new save until you hit Save)
 
 Load order: local editor save → bundled `public/levels/canoe-lake.json` → baked defaults.
+
+Each device/browser has its own save. After you Save on your computer, **Reset default** on the phone so it isn’t still overriding with an old phone-side save.
 
 ### Testing Mobile Controls
 

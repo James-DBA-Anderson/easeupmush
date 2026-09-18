@@ -21,7 +21,7 @@ export class Messages {
   }
 
   /** A new text, from whoever, with the time it landed. */
-  public send(from: string, text: string, clock: string): void {
+  public send(from: string, text: string, clock: string, life = LIFE): void {
     const element = document.createElement("div");
     element.className = "message";
     element.innerHTML = `<div class="message-from">${from}<span>${clock}</span></div>${text}`;
@@ -29,7 +29,7 @@ export class Messages {
     // Let the browser see it in its starting state before it slides in.
     requestAnimationFrame(() => element.classList.add("in"));
 
-    this.notes.push({ element, left: LIFE });
+    this.notes.push({ element, left: life });
     while (this.notes.length > MAX_ON_SCREEN) this.drop(0);
   }
 

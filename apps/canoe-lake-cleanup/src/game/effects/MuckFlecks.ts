@@ -179,4 +179,21 @@ export class MuckFlecks {
     (fleck.mesh.material as THREE.Material).dispose();
     this.flecks.splice(i, 1);
   }
+
+  /** Hose off flecks near a wash point — used on hire boats and the like. */
+  public rinseNear(worldPoint: THREE.Vector3, radius = 0.5): boolean {
+    let cleared = false;
+    const at = new THREE.Vector3();
+    for (let i = this.flecks.length - 1; i >= 0; i--) {
+      this.flecks[i]!.mesh.getWorldPosition(at);
+      if (at.distanceTo(worldPoint) > radius) continue;
+      this.dropAt(i);
+      cleared = true;
+    }
+    return cleared;
+  }
+
+  public isEmpty(): boolean {
+    return this.flecks.length === 0;
+  }
 }

@@ -203,6 +203,10 @@ export class Squirrel {
     this.flecks.splat(point);
   }
 
+  public rinse(point: THREE.Vector3): boolean {
+    return this.flecks.rinseNear(point, 0.4);
+  }
+
   private dropWhatItHas(): void {
     if (!this.carrying) return;
     this.carrying.removeFromParent();

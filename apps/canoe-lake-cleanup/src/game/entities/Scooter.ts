@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { PATH_LOOP, loopPoint } from "../world/lake";
 import { Grumble } from "../effects/Grumble";
+import { MuckFlecks } from "../effects/MuckFlecks";
+import { TYRE_SEGMENT, type Tread } from "./Footprint";
 
 const BODYWORK = [0xb03a2e, 0x2f5d8c, 0x7a3f8c, 0x3f7a4a, 0x8c6a2f];
 const COATS = [0x6b5f7a, 0x7a6a58, 0x3f4a5a, 0x8a5a5a, 0x4a4a52];
@@ -19,6 +21,30 @@ const SPLAT_LINES = [
   "LOOK AT THAT",
   "DISGUSTING!",
   "I'VE COPPED THAT ALL UP THE SIDE",
+];
+const SOAKED = [
+  "OI! WATCH THAT LANCE!",
+  "I'M SOAKED!",
+  "DO YOU MIND?",
+  "THAT WAS MY COAT!",
+  "WHAT ARE YOU PLAYING AT?",
+  "YOU'LL SHORT THE BATTERY!",
+];
+const FOULED = [
+  "THAT'S GOT POO ON IT!",
+  "LOOK AT MY SCOOTER!",
+  "YOU FILTHY SOD!",
+  "THAT'S DISGUSTING!",
+  "YOU'VE COVERED ME!",
+  "I WANT THAT WASHED OFF!",
+];
+const RAM_LINES = [
+  "I'LL HAVE YOU!",
+  "COME HERE!",
+  "RIGHT — YOU'RE FOR IT!",
+  "OUT THE WAY!",
+  "I'LL RUN YOU DOWN!",
+  "THAT'S MY BEST COAT!",
 ];
 /** Stopped for a natter with somebody they know, which is most people. */
 const CHAT_LINES = [
@@ -41,6 +67,13 @@ const CRUISE_HIGH = 2.4;
 const CLEAR_AHEAD = 4;
 const HORN_COOLDOWN = 6;
 const TYRE_RANGE = 0.5;
+/** Chunkier tyres hold more of it than a bike — longer smear up the path. */
+const SMEAR_LENGTH = 12;
+const DRYING = 10;
+/** How long they hunt you once they've had enough. */
+const RAM_TIME = 7.5;
+const RAM_SPEED = 7.2;
+const CRASH_RANGE = 1.55;
 
 /** Every so often they pull up and hold court for a bit. */
 const CHAT_EVERY = 22;
@@ -67,8 +100,23 @@ export class Scooter {
   private avoiding: THREE.Vector3 | null = null;
   private chatIn = CHAT_EVERY * Math.random();
   private chatting = 0;
+  private wet = 0;
+  private fouled = 0;
+  private sprayTalkCool = 0;
+  private flinch = 0;
+  /** Builds up under the hose — enough and they come for you. */
+  private anger = 0;
+  private ramLeft = 0;
+  private ramAt = new THREE.Vector3();
+  private crashReady = false;
+  private flecks: MuckFlecks;
   /** Path points left before they've had enough and head home. */
   private ticketLeft: number;
+
+  /** Metres of smear still on the tyres, and the next stripe for the game. */
+  private smear = 0;
+  private laidAt: THREE.Vector3 | null = null;
+  private trackAt: Tread | null = null;
 
   constructor(scene: THREE.Scene, index: number) {
     this.scene = scene;
@@ -80,6 +128,7 @@ export class Scooter {
     this.ticketLeft = PATH_LOOP.length * (0.6 + Math.random() * 0.9);
 
     this.group = this.build();
+    this.flecks = new MuckFlecks(this.group, 22);
     scene.add(this.group);
     this.place();
   }
@@ -232,6 +281,76 @@ export class Scooter {
     return this.ticketLeft <= 0;
   }
 
+  /** Did a droplet catch the rider or the bodywork? */
+  public soakedBy(point: THREE.Vector3): boolean {
+    const here = this.group.position;
+    const dx = point.x - here.x;
+    const dz = point.z - here.z;
+    if (dx * dx + dz * dz > 0.95 * 0.95) return false;
+    return point.y > here.y - 0.05 && point.y < here.y + 1.65;
+  }
+
+  public isSoaked(): boolean {
+    return this.wet > 0;
+  }
+
+  public splatter(point: THREE.Vector3): void {
+    this.flecks.splat(point);
+  }
+
+  public rinse(point: THREE.Vector3): boolean {
+    const cleared = this.flecks.rinseNear(point, 0.7);
+    if (cleared && this.flecks.isEmpty()) this.fouled = 0;
+    return cleared;
+  }
+
+  /** Hose in the face / on the coat — they stop and have a go. */
+  public drench(): boolean {
+    const first = this.wet <= 0;
+    this.wet = DRYING;
+    this.flinch = Math.max(this.flinch, 1.6);
+    this.chatting = 0;
+    this.anger = Math.min(3, this.anger + 0.7);
+    this.reactToSpray(SOAKED, first);
+    if (this.anger >= 1.6) this.startRam();
+    return first;
+  }
+
+  /** Filthy bounce spray — worse. Returns true on a fresh fouling. */
+  public foul(): boolean {
+    const first = this.fouled <= 0;
+    this.wet = DRYING;
+    this.fouled = Math.max(this.fouled, 16);
+    this.flinch = Math.max(this.flinch, 2.4);
+    this.chatting = 0;
+    this.anger = Math.min(3, this.anger + 1.4);
+    this.reactToSpray(FOULED, first);
+    this.startRam();
+    return first;
+  }
+
+  /** True once when an angry scooter ploughs into the cleaner. */
+  public wantsCrash(): boolean {
+    if (!this.crashReady) return false;
+    this.crashReady = false;
+    return true;
+  }
+
+  private startRam(): void {
+    if (this.ramLeft > 0) return;
+    this.ramLeft = RAM_TIME;
+    this.crashReady = false;
+    this.flinch = 0;
+    this.chatting = 0;
+    this.sound(RAM_LINES);
+  }
+
+  private reactToSpray(lines: readonly string[], first: boolean): void {
+    if (!first && this.sprayTalkCool > 0) return;
+    this.sound(lines);
+    this.sprayTalkCool = first ? 2.6 : 3.2;
+  }
+
   /**
    * Trundles on, stopping dead for anything in front. Returns the index of a
    * mess they've driven through, or -1.
@@ -240,12 +359,29 @@ export class Scooter {
     delta: number,
     ahead: readonly THREE.Vector3[],
     mess: readonly THREE.Vector3[],
+    player?: THREE.Vector3,
   ): number {
     this.grumble =
       this.grumble?.update(delta, this.group.position) === false
         ? null
         : this.grumble;
+    this.flecks.update(delta);
     if (this.hornCooldown > 0) this.hornCooldown -= delta;
+    if (this.wet > 0) this.wet = Math.max(0, this.wet - delta);
+    if (this.fouled > 0) this.fouled = Math.max(0, this.fouled - delta);
+    if (this.sprayTalkCool > 0) {
+      this.sprayTalkCool = Math.max(0, this.sprayTalkCool - delta);
+    }
+    if (this.flinch > 0) this.flinch = Math.max(0, this.flinch - delta);
+    if (this.anger > 0 && this.ramLeft <= 0) {
+      this.anger = Math.max(0, this.anger - delta * 0.08);
+    }
+
+    if (this.ramLeft > 0 && player) {
+      this.ramPlayer(delta, player);
+      this.layLine();
+      return this.checkTyres(mess);
+    }
 
     const blocked = this.somethingInTheWay(ahead);
     if (blocked && this.hornCooldown <= 0) this.sound(HORN_LINES);
@@ -253,7 +389,7 @@ export class Scooter {
     // Every so often they pull over for a chat, whether you like it or not.
     if (this.chatting > 0) {
       this.chatting -= delta;
-    } else {
+    } else if (this.flinch <= 0) {
       this.chatIn -= delta;
       if (this.chatIn <= 0) {
         this.chatting = CHAT_FOR;
@@ -262,7 +398,8 @@ export class Scooter {
       }
     }
 
-    const wanted = blocked || this.chatting > 0 ? 0 : this.cruise;
+    const wanted =
+      blocked || this.chatting > 0 || this.flinch > 0 ? 0 : this.cruise;
     // A scooter takes its time getting going and stops on a sixpence.
     this.speed += (wanted - this.speed) * Math.min(1, 1.6 * delta);
 
@@ -273,8 +410,71 @@ export class Scooter {
 
     this.place();
     this.trundle(delta);
+    this.layLine();
 
     return this.checkTyres(mess);
+  }
+
+  /** Off the circuit, flat out at the cleaner. */
+  private ramPlayer(delta: number, player: THREE.Vector3): void {
+    this.ramLeft -= delta;
+    this.ramAt.copy(player);
+    const here = this.group.position;
+    const dx = player.x - here.x;
+    const dz = player.z - here.z;
+    const gap = Math.hypot(dx, dz);
+
+    this.heading = Math.atan2(dx, dz);
+    this.group.rotation.y = this.heading;
+    this.speed = RAM_SPEED;
+    this.group.rotation.x = -0.12;
+    this.group.rotation.z = Math.sin(performance.now() / 80) * 0.08;
+
+    if (gap > 0.2) {
+      const step = Math.min(gap, RAM_SPEED * delta);
+      here.x += (dx / gap) * step;
+      here.z += (dz / gap) * step;
+    }
+
+    for (const wheel of this.wheels) wheel.rotation.x -= delta * 28;
+    this.sway += delta * 10;
+    this.flag.rotation.y = Math.sin(this.sway * 5) * 0.8;
+    this.head.rotation.y = Math.sin(this.sway * 4) * 0.35;
+    this.head.rotation.x = -0.15;
+
+    if (gap < CRASH_RANGE) {
+      this.crashReady = true;
+      this.ramLeft = 0;
+      this.anger = 0;
+      this.flinch = 2.2;
+      this.speed = 0;
+      this.group.rotation.x = 0;
+      this.sound(RAM_LINES);
+      // Snap back onto the nearest path point so they don't sit in a bush.
+      this.rejoinLoop();
+      return;
+    }
+
+    if (this.ramLeft <= 0) {
+      this.anger = Math.max(0, this.anger - 1);
+      this.group.rotation.x = 0;
+      this.rejoinLoop();
+    }
+  }
+
+  private rejoinLoop(): void {
+    const here = new THREE.Vector2(this.group.position.x, this.group.position.z);
+    let best = 0;
+    let closest = Infinity;
+    for (let i = 0; i < PATH_LOOP.length; i++) {
+      const gap = PATH_LOOP[i]!.distanceToSquared(here);
+      if (gap < closest) {
+        closest = gap;
+        best = i;
+      }
+    }
+    this.index = best;
+    this.place();
   }
 
   /** Anything in a wide cone out front. They stop for all of it. */
@@ -323,9 +523,45 @@ export class Scooter {
 
       this.avoiding = spot.clone();
       this.sound(SPLAT_LINES);
+      // Straight through it — the wheels print it up the paving behind them.
+      this.smear = SMEAR_LENGTH;
+      this.laidAt = here.clone();
       return i;
     }
     return -1;
+  }
+
+  /**
+   * Next length of tyre line once they've rolled far enough since the last
+   * one, fading as the wheels run themselves clean.
+   */
+  private layLine(): void {
+    if (this.smear <= 0 || !this.laidAt || this.trackAt) return;
+
+    const here = this.group.position;
+    const rolled = here.distanceTo(this.laidAt);
+    if (rolled < TYRE_SEGMENT) return;
+
+    this.smear -= rolled;
+    this.laidAt = here.clone();
+    // Laid under the back axle rather than under the seat.
+    this.trackAt = {
+      at: new THREE.Vector3(
+        here.x - Math.sin(this.heading) * 0.55,
+        0,
+        here.z - Math.cos(this.heading) * 0.55,
+      ),
+      yaw: this.heading,
+      strength: Math.max(0, Math.min(1, this.smear / SMEAR_LENGTH)) * 0.9 + 0.12,
+      shape: "tyre",
+    };
+  }
+
+  /** The length of line just laid, for the game to put on the floor. */
+  public claimTrack(): Tread | null {
+    const track = this.trackAt;
+    this.trackAt = null;
+    return track;
   }
 
   /** Wheels turning, flag whipping about, and a head that looks round. */
@@ -337,11 +573,19 @@ export class Scooter {
     this.flag.position.y = 1.34 + Math.sin(this.sway * 4) * 0.01;
     this.head.rotation.y = Math.sin(this.sway * 0.5) * 0.5;
     // Stopped for a chat, they lean out of the seat to make their point.
-    this.group.rotation.z = this.chatting > 0 ? Math.sin(this.sway * 2) * 0.03 : 0;
+    // Soaked or fouled, they shake their head at you instead.
+    if (this.flinch > 0) {
+      this.group.rotation.z = Math.sin(this.sway * 8) * 0.04;
+      this.head.rotation.y = Math.sin(this.sway * 6) * 0.7;
+    } else {
+      this.group.rotation.z =
+        this.chatting > 0 ? Math.sin(this.sway * 2) * 0.03 : 0;
+    }
   }
 
   public dispose(): void {
     this.grumble?.dispose();
+    this.flecks.dispose();
     this.scene.remove(this.group);
   }
 }

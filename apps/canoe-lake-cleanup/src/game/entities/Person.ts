@@ -8,16 +8,20 @@ import {
   loopPoint,
   nearestShore,
   outwardAt,
+  northwestScore,
+  pickNorthwestPathIndex,
 } from "../world/lake";
 import { parkGates } from "../world/fence";
-import { binStations } from "../world/park";
+import { binStations, cafeQueueSpot } from "../world/park";
+import { isBlocked, stepWalk } from "../world/blocking";
+import { groundHeight } from "../world/terrain";
 import { Grumble } from "../effects/Grumble";
 import { MuckFlecks } from "../effects/MuckFlecks";
 import { Dog } from "./Dog";
 import { Face, type Mood } from "./Face";
 import type { Tread } from "./Footprint";
 
-type Errand = "arriving" | "strolling" | "binning" | "leaving";
+type Errand = "arriving" | "strolling" | "binning" | "icecream" | "leaving";
 
 /** How they take getting sprayed — most moan, a few throw a punch. */
 type Temper = "meek" | "narky" | "handy";
@@ -39,6 +43,15 @@ const COMPLAINTS = [
   "SWEET AS NUT, THAT ISN'T",
 ];
 
+const FACE_MUCK = [
+  "IT'S ON MY FACE!",
+  "GET IT OFF ME!",
+  "URGH — MY FACE!",
+  "I CAN TASTE IT!",
+  "LOOK AT MY FACE!",
+  "WIPE IT OFF — WIPE IT OFF!",
+];
+
 const SOAKED = [
   "OI! WATCH IT!",
   "I AM SOAKED!",
@@ -56,6 +69,31 @@ const BACK_OFF = [
   "YOU WIN!",
   "PUT IT DOWN!",
   "BLOODY HELL!",
+];
+
+const GOTCHA = [
+  "THAT'LL TEACH YOU!",
+  "AND STAY DOWN!",
+  "HOW'D YOU LIKE THAT?!",
+  "RIGHT — SORTED!",
+  "DON'T YOU COME NEAR ME AGAIN!",
+  "HA!",
+];
+
+const CHASE_BORED = [
+  "NOT WORTH IT",
+  "FORGET IT",
+  "I'VE HAD ENOUGH",
+  "BLOODY WASTE OF TIME",
+  "COME ON — WE'RE GOING",
+];
+
+const DUTY_LINES = [
+  "WHERE'S THE DOG?!",
+  "COME HERE — NOW!",
+  "MY KID!",
+  "LEAVE IT — HEEL!",
+  "OI, STOP RUNNING OFF!",
 ];
 
 const FOULED = [
@@ -76,6 +114,23 @@ const SQUARE_UP = [
   "I'LL HAVE YOUR JOB AND YOUR TEETH!",
 ];
 
+const BIKE_CRASH = [
+  "I'LL HAVE YOU FOR THAT!",
+  "MY BIKE — COME HERE!",
+  "YOU KNOCKED ME OFF!",
+  "RIGHT, YOU'RE HAVING IT!",
+  "I'LL LAY YOU OUT, MUSH!",
+  "LOOK WHAT YOU'VE DONE!",
+];
+
+const HANDBAG_LINES = [
+  "TAKE THAT!",
+  "HOW DARE YOU!",
+  "I'LL GIVE YOU WHAT FOR!",
+  "YOU RUDE LITTLE SOD!",
+  "THAT'S MY BEST COAT!",
+];
+
 const DUNKED = [
   "GET ME OUT!",
   "MY PHONE!",
@@ -89,6 +144,8 @@ const DUNKED = [
 /** How close a foot has to get, and how long the strop lasts. */
 const TREAD_RANGE = 0.5;
 const STROP_TIME = 3.4;
+/** Extra seconds rubbing muck off their face after a deep wade. */
+const FACE_WIPE_EXTRA = 2.6;
 
 /** Close enough to the edge that a good soaking puts them in the water. */
 const EDGE = 3.6;
@@ -96,15 +153,25 @@ const EDGE = 3.6;
 const BED_Y = WATER_Y - 0.85;
 /** Topple, flounder about, then haul themselves back out. */
 const FALL_TIME = 0.7;
-const SWIM_TIME = 3.2;
-const CLIMB_TIME = 1.8;
+const SWIM_TIME = 2.8;
+const CLIMB_TIME = 2.9;
 /** How long they walk round dripping afterwards. */
 const DRYING = 45;
+
+const CLIMBED_OUT = [
+  "I'M SOAKING!",
+  "LOOK AT THE STATE OF ME!",
+  "THAT WAS FREEZING!",
+  "I'LL HAVE YOUR JOB!",
+  "RUINED — THE LOT OF IT!",
+  "NEVER AGAIN!",
+  "I'M DRIPPING!",
+];
 
 /** A fair few of the park's regulars are only here to walk the dog. */
 const DOG_CHANCE = 0.35;
 /** How often a soaking loosens their grip on the lead. */
-const LEAD_SLIPS = 0.7;
+const LEAD_SLIPS = 0.95;
 
 const BARGED = [
   "MIND OUT!",
@@ -157,6 +224,11 @@ const BIRD_FIGHT = [
 /** How long a stroll lasts before they head for a gate. */
 const VISIT_MIN = 90;
 const VISIT_MAX = 220;
+/**
+ * Furthest out across the paving a stroller may walk. Benches sit on the outer
+ * lip (~PATH_OUTER − 1); walking that band gets them stuck against the seats.
+ */
+const STROLL_OUTER = PATH_OUTER - 3.5;
 const SHIFTY = [
   "NOBODY SAW THAT",
   "THE COUNCIL CAN GET IT",
@@ -165,10 +237,21 @@ const SHIFTY = [
   "JUST OFF FOR A SLASH ANYWAY",
 ];
 
-/** Roughly a third of the park is carrying something worth begging for. */
-const FOOD_CHANCE = 0.35;
+/** Most bird food turns up on the NW bank; rare elsewhere. */
+const FOOD_CHANCE = 0.48;
 const HANDFULS = 3;
+/** During the radio feeder rush a bag lasts a couple of minutes of feeding. */
+const HANDFULS_RUSH = 55;
 const FEED_PAUSE = 2.2;
+/** Kid tipped / rolling — local Y so the body clears the paving. */
+const KID_DOWN_Y = 0.48;
+
+/** Depot radio: feeders on the NW stretch — bag odds go up for a while. */
+let feederRush = false;
+
+export function setFeederRush(on: boolean): void {
+  feederRush = on;
+}
 
 const FEEDING_LINES = [
   "HERE YOU GO",
@@ -187,12 +270,41 @@ const SCATTER_LINES = [
   "SWEET AS NUT, THAT",
 ];
 
+const ICE_BUY = [
+  "TWO NINETY PLEASE",
+  "99 WITH A FLAKE",
+  "ONE FOR HIM AS WELL",
+  "VANILLA — NO, BOTH",
+  "ANY SPRINKLES?",
+];
+const ICE_DROPPED = [
+  "YOU'VE DROPPED IT!",
+  "THAT WAS TWO QUID!",
+  "LOOK AT THE STATE OF IT!",
+  "HE JUST BOUGHT THAT!",
+  "YOU'VE RUINED HIS ICE CREAM!",
+  "THAT'S COMING OUT YOUR WAGES!",
+];
+const ICE_OWN = ["MY ICE CREAM!", "OI — THAT WAS MINE!", "LOOK AT IT!"];
+
+const HELI_LINES = [
+  "LOOK — A HELICOPTER!",
+  "LOOK UP!",
+  "IT'S GOING TO THE ISLAND!",
+  "WAVE!",
+  "CHOPPER!",
+];
+
 /** How many prints one bootful of it is good for. */
 const TRACKED_PRINTS = 6;
 
 /** Half of those carrying food have a kid with them, and they scatter it. */
 const KID_CHANCE = 0.5;
 const SCATTER_PAUSE = 4.5;
+
+/** The odd walker brought a brolly — put up when it tips it down. */
+const UMBRELLA_CHANCE = 0.22;
+const UMBRELLA_COLOURS = [0x2c3e6b, 0x6b2c2c, 0x2c5a3a, 0x3a3a42, 0x5a3a1a, 0x6b4a2a];
 
 /** A member of the public strolling the perimeter path. */
 export class Person {
@@ -219,17 +331,39 @@ export class Person {
   private grumble: Grumble | null = null;
   /** meek moan, narky shout, handy might swing. */
   private temper: Temper =
-    Math.random() < 0.12 ? "handy" : Math.random() < 0.4 ? "narky" : "meek";
+    Math.random() < 0.28 ? "handy" : Math.random() < 0.5 ? "narky" : "meek";
   /** Closing in for a dig after being fouled. */
   private lungeLeft = 0;
   private lungeAt = new THREE.Vector3();
+  private readonly lungeFor = 4.6;
   private swingReady = false;
   private swingCool = 0;
+  /** Mid-punch / handbag-swipe animation (seconds left). */
+  private swingAnim = 0;
+  private swingHit = false;
+  /** How long they've been stuck mid-lunge before packing it in. */
+  private lungeStuck = 0;
   /** Hose hits taken while lunging — enough and they back off. */
   private hoseHits = 0;
   private hoseCool = 0;
+  /**
+   * Lasting temper after they're properly riled. Stays angry until they land
+   * a dig, get bored, get hosed off, or have to round up dog / kid.
+   */
+  private madLeft = 0;
+  /** Brief pleased face after they've had their dig. */
+  private pleasedHold = 0;
   /** Holds off the next shout so every droplet doesn't get its own line. */
   private sprayTalkCool = 0;
+  /** Older resident with a handbag — swings it when she loses it. */
+  private handbag: THREE.Group | null = null;
+  /** Brought a brolly — only some of them bother. */
+  private umbrella: THREE.Group | null = null;
+  private umbrellaCanopy: THREE.Object3D | null = null;
+  /** 0 = left arm, 1 = right. */
+  private umbrellaArm = 0;
+  /** 0 furled at the side, 1 open over the head. */
+  private umbrellaOpen = 0;
   /** Brown stain from dirty bounce spray. */
   private fouled = 0;
   private flecks: MuckFlecks;
@@ -242,6 +376,19 @@ export class Person {
   private kid: THREE.Group | null = null;
   private kidLegs: THREE.Object3D[] = [];
   private kidArms: THREE.Object3D[] = [];
+  /** Seconds left on their side after a hose tip. */
+  private kidDown = 0;
+  /** Hose hits taken while already down — enough and they start rolling. */
+  private kidSprayHits = 0;
+  private kidHoseCool = 0;
+  private kidRolling = false;
+  private readonly kidVel = new THREE.Vector3();
+  private kidSpin = 0;
+  private readonly kidHome = new THREE.Vector3(-0.48, 0, -0.1);
+  /** Getting up after a bike dump before they come for you. */
+  private getUpLeft = 0;
+  private getUpTip = 1;
+  private pendingLunge: THREE.Vector3 | null = null;
   private scattering = 0;
   private scatterWait = 25 + Math.random() * 45;
   private scatterAt: THREE.Vector3 | null = null;
@@ -257,6 +404,11 @@ export class Person {
   private printAt: Tread | null = null;
   /** Which way the last footfall was going, for spotting the next one. */
   private lastFoot = 1;
+  /** How much muck is still on their face — wiped during the strop. */
+  private faceFilth = 0;
+  private readonly soilTmp = new THREE.Vector3();
+  /** How long this strop runs (longer when they've got it on their face). */
+  private stropFor = STROP_TIME;
 
   /** Clothes, kept so they can be darkened when someone gets soaked. */
   private cloth: { material: THREE.MeshStandardMaterial; dry: THREE.Color }[] =
@@ -268,6 +420,17 @@ export class Person {
   private cameOut = new THREE.Vector3();
   private splashAt: THREE.Vector3 | null = null;
   private splashed = true;
+  private climbSplashEarly = false;
+  private climbSplashLate = false;
+  /** Water still running off them after a dunk. */
+  private drips: {
+    mesh: THREE.Mesh;
+    life: number;
+    vx: number;
+    vy: number;
+    vz: number;
+  }[] = [];
+  private dripCool = 0;
 
   /** Some of them are only out here to walk this. */
   private dog: Dog | null = null;
@@ -280,6 +443,14 @@ export class Person {
   private depositAt: THREE.Vector3 | null = null;
   private binFor: THREE.Vector2 | null = null;
 
+  /** Ice cream run — peel off to a café hatch, then stroll with a cone. */
+  private iceCreamWait = 25 + Math.random() * 55;
+  private iceBuyLeft = 0;
+  private cafeFor: THREE.Vector2 | null = null;
+  private adultCone: THREE.Object3D | null = null;
+  private kidCone: THREE.Object3D | null = null;
+  private coneDropAt: THREE.Vector3 | null = null;
+
   /** Some of them want nothing to do with a swan on the bank. */
   private swanShy = Math.random() < SWAN_SHY_CHANCE;
   private scareLeft = 0;
@@ -288,6 +459,10 @@ export class Person {
   private gawpLeft = 0;
   private gawpAt = new THREE.Vector3();
   private gawpCool = 0;
+  /** Kid arm-wave while mum/dad gawps at a chopper. */
+  private heliWave = false;
+  private heliWavedId = -1;
+  private heliWavePhase = 0;
 
   /** Coming in through a gate, pottering round, or heading home. */
   private errand: Errand = "strolling";
@@ -309,14 +484,17 @@ export class Person {
     gate?: THREE.Vector2,
   ) {
     this.scene = scene;
-    this.index = index;
+    // Feeders and the public they draw cluster on the NW stretch.
+    this.index =
+      Math.random() < 0.7 ? pickNorthwestPathIndex() : index;
     this.direction = Math.random() < 0.5 ? 1 : -1;
     this.speed = 1.1 + Math.random() * 0.9;
-    // Plenty along the kerb (where a soak puts them in), the rest fill the path.
+    // Plenty along the kerb (where a soak puts them in); the rest fill the
+    // mid-path — not the outer lip where the benches are.
     this.fromShore =
       Math.random() < 0.42
         ? 0.35 + Math.random() * 2.8
-        : 1.5 + Math.random() * (PATH_OUTER - 2);
+        : 1.5 + Math.random() * (STROLL_OUTER - 1.5);
 
     this.group = this.build();
     this.flecks = new MuckFlecks(this.group);
@@ -330,12 +508,82 @@ export class Person {
       this.dog = new Dog(scene, this);
   }
 
+  /**
+   * Stand in where a cyclist / e-bike lad just got hosed off. They haul
+   * themselves up, then come for the cleaner — after that they're just another
+   * stroller on the path.
+   */
+  public bootFromCrash(
+    at: THREE.Vector3,
+    attacker: THREE.Vector3,
+    lout = false,
+  ): void {
+    // Crash victims don't keep the random kid / dog roll from construction.
+    if (this.kid) {
+      this.kid.removeFromParent();
+      this.kid = null;
+      this.kidFace = null;
+      this.kidLegs = [];
+      this.kidArms = [];
+      this.kidCone = null;
+    }
+    if (this.dog) {
+      this.dog.dispose();
+      this.dog = null;
+    }
+    this.handfuls = 0;
+    if (this.bag) {
+      this.bag.removeFromParent();
+      this.bag = null;
+    }
+
+    // Snap onto the nearest stretch of path so they can stroll after the scrap.
+    const here = new THREE.Vector2(at.x, at.z);
+    let best = 0;
+    let closest = Infinity;
+    for (let i = 0; i < PATH_LOOP.length; i++) {
+      const gap = PATH_LOOP[i]!.distanceToSquared(here);
+      if (gap < closest) {
+        closest = gap;
+        best = i;
+      }
+    }
+    this.index = best;
+    this.errand = "strolling";
+    this.fromShore = Math.max(0.6, distanceToShore(at.x, at.z));
+    this.group.position.set(at.x, 0.12, at.z);
+    this.faceToward(attacker.x, attacker.z);
+
+    this.temper = lout ? "handy" : Math.random() < 0.6 ? "handy" : "narky";
+    this.wet = DRYING;
+    this.strop = 0;
+    this.getUpTip = Math.random() < 0.5 ? 1 : -1;
+    this.getUpLeft = 0.9 + Math.random() * 0.35;
+    this.group.rotation.z = this.getUpTip * (Math.PI / 2);
+    this.pendingLunge = attacker.clone();
+    this.enrage(attacker, 1.6);
+    this.showMood("angry");
+    this.say(BIKE_CRASH);
+  }
+
   /** Lined up outside a gate, walking in toward the nearest bit of path. */
   private startArrival(preferred?: THREE.Vector2): void {
     this.errand = "arriving";
     const gates = parkGates();
-    const gate =
-      preferred ?? gates[Math.floor(Math.random() * gates.length)]!;
+    // Prefer openings that land you on the NW feeding stretch.
+    let gate = preferred;
+    if (!gate) {
+      let best = gates[0]!;
+      let bestScore = -1;
+      for (const g of gates) {
+        const score = northwestScore(g.x, g.y) + Math.random() * 0.15;
+        if (score > bestScore) {
+          bestScore = score;
+          best = g;
+        }
+      }
+      gate = Math.random() < 0.75 ? best : gates[Math.floor(Math.random() * gates.length)]!;
+    }
     // A few metres outside the park, so they walk through the opening.
     const out = gate.clone().normalize().multiplyScalar(8);
     this.group.position.set(gate.x + out.x, 0, gate.y + out.y);
@@ -357,7 +605,13 @@ export class Person {
 
   /** Time's up — peel off the loop toward the nearest way out. */
   public headHome(): void {
-    if (this.errand === "leaving" || this.errand === "binning") return;
+    if (
+      this.errand === "leaving" ||
+      this.errand === "binning" ||
+      this.errand === "icecream"
+    ) {
+      return;
+    }
     this.errand = "leaving";
     const here = new THREE.Vector2(this.group.position.x, this.group.position.z);
     const gates = parkGates();
@@ -387,6 +641,12 @@ export class Person {
     this.grumble?.dispose();
     this.dog?.dispose();
     this.flecks.dispose();
+    for (const drop of this.drips) {
+      this.scene.remove(drop.mesh);
+      drop.mesh.geometry.dispose();
+      (drop.mesh.material as THREE.Material).dispose();
+    }
+    this.drips = [];
     this.scene.remove(this.group);
   }
 
@@ -403,13 +663,46 @@ export class Person {
     const gap = Math.hypot(to.x - here.x, to.y - here.z);
     if (gap < 0.05) return 0;
     const step = Math.min(gap, this.speed * delta);
-    here.x += ((to.x - here.x) / gap) * step;
-    here.z += ((to.y - here.z) / gap) * step;
+    const dx = ((to.x - here.x) / gap) * step;
+    const dz = ((to.y - here.z) / gap) * step;
+    const self = { x: here.x, z: here.z };
+    let landed = stepWalk(here.x, here.z, dx, dz, 0.4, self);
+    // Straight line across the water? Skirt the shore instead of wading.
+    if (
+      Math.hypot(landed.x - here.x, landed.z - here.z) < 0.001 &&
+      step > 0
+    ) {
+      const out = outwardAt(nearestShore(here.x, here.z));
+      const tx = -out.y;
+      const tz = out.x;
+      const prefer = dx * tx + dz * tz >= 0 ? 1 : -1;
+      landed = stepWalk(
+        here.x,
+        here.z,
+        tx * prefer * step,
+        tz * prefer * step,
+        0.4,
+        self,
+      );
+      if (Math.hypot(landed.x - here.x, landed.z - here.z) < 0.001) {
+        landed = stepWalk(
+          here.x,
+          here.z,
+          out.x * step,
+          out.y * step,
+          0.4,
+          self,
+        );
+      }
+    }
+    here.x = landed.x;
+    here.z = landed.z;
     this.faceToward(to.x, to.y);
     this.stepPhase += delta * this.speed * 4.5;
     this.stride(this.stepPhase, 1);
     this.showMood("idle");
-    return gap - step;
+    // If a wall stopped them short, treat the remaining gap as whatever's left.
+    return Math.hypot(to.x - here.x, to.y - here.z);
   }
 
   /**
@@ -431,21 +724,157 @@ export class Person {
     this.head.rotation.x = Math.sin(phase * 2) * 0.04;
     this.head.rotation.z = swing * 0.05;
     this.group.rotation.x = 0;
-    this.group.position.y = bob;
+    this.group.position.y =
+      groundHeight(this.group.position.x, this.group.position.z) + bob;
 
     if (this.kid) {
-      const trot = Math.sin(phase * 1.9 * rate) * 0.65;
-      this.kidLegs[0]!.rotation.x = trot;
-      this.kidLegs[1]!.rotation.x = -trot;
-      this.kidArms[0]!.rotation.x = -trot * 0.7;
-      this.kidArms[1]!.rotation.x = trot * 0.7;
-      this.kid.position.y = Math.abs(Math.sin(phase * 1.9)) * 0.05;
+      if (this.kidDown > 0) {
+        // Stay flat — no trotting while they're on the deck.
+        this.kidLegs[0]!.rotation.x = 0.9;
+        this.kidLegs[1]!.rotation.x = 0.9;
+        this.kidArms[0]!.rotation.x = -0.4;
+        this.kidArms[1]!.rotation.x = -0.4;
+      } else {
+        const trot = Math.sin(phase * 1.9 * rate) * 0.65;
+        this.kidLegs[0]!.rotation.x = trot;
+        this.kidLegs[1]!.rotation.x = -trot;
+        this.kidArms[0]!.rotation.x = -trot * 0.7;
+        this.kidArms[1]!.rotation.x = trot * 0.7;
+        this.kid.position.y = Math.abs(Math.sin(phase * 1.9)) * 0.05;
+      }
     }
+    this.poseUmbrella();
   }
 
   private showMood(mood: Mood): void {
+    // Once they're properly angry, keep the face locked until they cool off.
+    if (this.madLeft > 0) {
+      if (mood !== "angry" && !(this.dunk > 0 && mood === "shocked")) {
+        mood = "angry";
+      }
+    } else if (this.pleasedHold > 0 && (mood === "idle" || mood === "disgusted")) {
+      mood = "pleased";
+    }
     this.face.setMood(mood);
     this.kidFace?.setMood(mood === "shifty" ? "pleased" : mood);
+  }
+
+  /** Riled properly — face stays angry and they keep coming until sorted. */
+  private enrage(from: THREE.Vector3 | undefined, heat = 1): void {
+    const boost = 7 + heat * 6 + Math.random() * 4;
+    this.madLeft = Math.max(this.madLeft, boost);
+    this.pleasedHold = 0;
+    this.strop = 0;
+    this.scareLeft = 0;
+    if (from) this.lungeAt.copy(from);
+    this.showMood("angry");
+    if (
+      from &&
+      this.dunk <= 0 &&
+      this.lungeLeft <= 0 &&
+      this.swingCool <= 0
+    ) {
+      const here = this.group.position;
+      const gap = Math.hypot(here.x - from.x, here.z - from.z);
+      if (gap < 11) this.beginLunge(from, false);
+    }
+  }
+
+  private coolOff(reason: "satisfied" | "bored" | "tired" | "duty"): void {
+    this.madLeft = 0;
+    this.lungeLeft = 0;
+    this.swingAnim = 0;
+    this.swingReady = false;
+    this.hoseHits = 0;
+    this.torso.rotation.set(0, 0, 0);
+    this.group.rotation.x = 0;
+
+    if (reason === "satisfied") {
+      this.say(GOTCHA);
+      this.pleasedHold = 2.8;
+      this.showMood("pleased");
+      this.swingCool = Math.max(this.swingCool, 2.5);
+      return;
+    }
+    if (reason === "tired") {
+      this.say(BACK_OFF);
+      this.swingCool = Math.max(this.swingCool, 3.5);
+      this.strop = STROP_TIME * 0.6;
+      this.stropFor = this.strop;
+      this.showMood("shocked");
+      return;
+    }
+    if (reason === "duty") {
+      this.say(DUTY_LINES);
+      this.swingCool = Math.max(this.swingCool, 1.5);
+      if (this.kid) this.resetKidPose();
+      this.showMood("shocked");
+      return;
+    }
+    // Bored of the chase.
+    this.say(CHASE_BORED);
+    this.swingCool = Math.max(this.swingCool, 2);
+    this.showMood("disgusted");
+    this.strop = STROP_TIME * 0.45;
+    this.stropFor = this.strop;
+  }
+
+  /** Dog's done a runner, or the kid's been left on the ground / behind. */
+  private dutyCalls(player: THREE.Vector3 | null): boolean {
+    if (this.dog?.isLoose()) {
+      const dog = this.dog.getPosition();
+      const dogGap = this.group.position.distanceTo(dog);
+      if (dogGap > 7.5) return true;
+      if (
+        player &&
+        dogGap > 4.5 &&
+        this.group.position.distanceTo(player) > 6.5
+      ) {
+        return true;
+      }
+    }
+    if (this.kid) {
+      const kw = new THREE.Vector3();
+      this.kid.getWorldPosition(kw);
+      const kidGap = this.group.position.distanceTo(kw);
+      if (this.kidDown > 0 && kidGap > 1.1) return true;
+      if (kidGap > 3.8) return true;
+    }
+    return false;
+  }
+
+  /** Keep the chase alive between swings until they cool off. */
+  private tickMad(delta: number, player: THREE.Vector3 | null): void {
+    if (this.pleasedHold > 0) {
+      this.pleasedHold = Math.max(0, this.pleasedHold - delta);
+    }
+    if (this.madLeft <= 0) return;
+
+    if (this.dutyCalls(player)) {
+      this.coolOff("duty");
+      return;
+    }
+
+    this.madLeft -= delta;
+    if (this.madLeft <= 0) {
+      this.coolOff("bored");
+      return;
+    }
+
+    this.showMood("angry");
+    if (
+      !player ||
+      this.dunk > 0 ||
+      this.lungeLeft > 0 ||
+      this.swingCool > 0 ||
+      this.getUpLeft > 0
+    ) {
+      return;
+    }
+
+    const gap = this.group.position.distanceTo(player);
+    if (gap < 11) this.beginLunge(player, false);
+    else this.madLeft -= delta * 0.65; // lose interest if you scarper
   }
 
   private build(): THREE.Group {
@@ -563,16 +992,156 @@ export class Person {
       this.legs.push(leg);
     }
 
-    if (Math.random() < FOOD_CHANCE) {
+    if (Math.random() < this.foodOdds()) {
       this.giveBag();
       if (Math.random() < KID_CHANCE) this.addKid(group);
+    } else if (Math.random() < 0.2) {
+      // Grey-haired auntie with a handbag — swings it when she loses it.
+      this.giveHandbag();
     }
+
+    if (Math.random() < UMBRELLA_CHANCE) this.giveUmbrella(group);
 
     return group;
   }
 
+  /** Furled by the hip until the rain starts, then up over the head. */
+  private giveUmbrella(person: THREE.Group): void {
+    // Left hand unless a handbag's already there; food stays in the right.
+    this.umbrellaArm = this.handbag ? 1 : 0;
+    if (this.umbrellaArm === 1 && this.bag) this.umbrellaArm = 0;
+
+    const colour =
+      UMBRELLA_COLOURS[Math.floor(Math.random() * UMBRELLA_COLOURS.length)]!;
+    const brolly = new THREE.Group();
+    const shaft = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.012, 0.015, 1.05, 6),
+      new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.85 }),
+    );
+    shaft.position.y = 0.52;
+    shaft.castShadow = true;
+    brolly.add(shaft);
+
+    const canopy = new THREE.Mesh(
+      new THREE.ConeGeometry(0.58, 0.32, 12, 1, true),
+      new THREE.MeshStandardMaterial({
+        color: colour,
+        roughness: 0.8,
+        side: THREE.DoubleSide,
+      }),
+    );
+    // Tip at the top of the stick; fabric flares down.
+    canopy.position.y = 1.02;
+    canopy.castShadow = true;
+    brolly.add(canopy);
+
+    const tip = new THREE.Mesh(
+      new THREE.SphereGeometry(0.025, 6, 4),
+      new THREE.MeshStandardMaterial({ color: 0x2a2420, roughness: 0.7 }),
+    );
+    tip.position.y = 1.1;
+    brolly.add(tip);
+
+    person.add(brolly);
+    this.umbrella = brolly;
+    this.umbrellaCanopy = canopy;
+    this.poseUmbrella();
+  }
+
+  /** Lerp open/shut from the weather, then seat the mesh and raise an arm. */
+  private tickUmbrella(delta: number, raining: boolean): void {
+    if (!this.umbrella) return;
+    // In the drink or mid-scrap they don't fuss with the brolly.
+    const want =
+      raining && this.dunk <= 0 && this.lungeLeft <= 0 && this.strop <= 0
+        ? 1
+        : 0;
+    this.umbrellaOpen = THREE.MathUtils.damp(
+      this.umbrellaOpen,
+      want,
+      4.5,
+      delta,
+    );
+    this.poseUmbrella();
+  }
+
+  private poseUmbrella(): void {
+    if (!this.umbrella || !this.umbrellaCanopy) return;
+    const t = this.umbrellaOpen;
+    const side = this.umbrellaArm === 0 ? -1 : 1;
+    // Furled by the hip → open above the head.
+    this.umbrella.position.set(
+      THREE.MathUtils.lerp(side * 0.32, side * 0.12, t),
+      THREE.MathUtils.lerp(0.95, 2.05, t),
+      THREE.MathUtils.lerp(0.08, 0.02, t),
+    );
+    this.umbrella.rotation.set(
+      THREE.MathUtils.lerp(0.35, 0.05, t),
+      0,
+      THREE.MathUtils.lerp(side * 0.25, side * 0.08, t),
+    );
+    // Collapsed fabric hugs the stick; open fills out over the head.
+    const flare = 0.08 + t * 0.92;
+    this.umbrellaCanopy.scale.set(flare, 0.35 + t * 0.65, flare);
+    this.umbrellaCanopy.visible = t > 0.04;
+
+    if (t < 0.05) return;
+    const arm = this.arms[this.umbrellaArm]!;
+    arm.rotation.x = THREE.MathUtils.lerp(arm.rotation.x, -2.55, t);
+    arm.rotation.z = THREE.MathUtils.lerp(
+      arm.rotation.z,
+      side * -0.35,
+      t,
+    );
+  }
+
+  /** Patent handbag on the left arm — for a proper seaside swipe. */
+  private giveHandbag(): void {
+    const bag = new THREE.Group();
+    const leather = new THREE.MeshStandardMaterial({
+      color: Math.random() < 0.5 ? 0x2a1a18 : 0x6a3038,
+      roughness: 0.75,
+    });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.18, 0.1), leather);
+    body.castShadow = true;
+    bag.add(body);
+    const flap = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.06, 0.1), leather);
+    flap.position.y = 0.1;
+    bag.add(flap);
+    const clasp = new THREE.Mesh(
+      new THREE.BoxGeometry(0.04, 0.03, 0.02),
+      new THREE.MeshStandardMaterial({
+        color: 0xc9a227,
+        roughness: 0.4,
+        metalness: 0.6,
+      }),
+    );
+    clasp.position.set(0, 0.08, 0.06);
+    bag.add(clasp);
+    const handle = new THREE.Mesh(
+      new THREE.TorusGeometry(0.07, 0.012, 6, 10, Math.PI),
+      leather,
+    );
+    handle.rotation.x = Math.PI / 2;
+    handle.position.y = 0.14;
+    bag.add(handle);
+    // Left forearm — hangs by the side while walking.
+    bag.position.set(-0.02, -0.28, 0.08);
+    bag.rotation.set(0.15, 0.1, 0.2);
+    this.arms[0]!.children[1]!.add(bag);
+    this.handbag = bag;
+  }
+
+  /** Bags of bread are common on the NW stretch, scarce round the rest. */
+  private foodOdds(): number {
+    const at = loopPoint(this.index);
+    const nw = northwestScore(at.x, at.y);
+    const rush = feederRush ? 2.4 : 1;
+    return FOOD_CHANCE * (0.2 + nw * nw * 2.2) * rush;
+  }
+
   private giveBag(): void {
-    this.handfuls = HANDFULS;
+    this.handfuls = feederRush ? HANDFULS_RUSH : HANDFULS;
     this.bag = new THREE.Mesh(
       new THREE.BoxGeometry(0.2, 0.26, 0.14),
       new THREE.MeshStandardMaterial({ color: 0xd8c9a4, roughness: 1 }),
@@ -581,6 +1150,10 @@ export class Person {
     this.bag.position.set(0.02, -0.32, 0.06);
     this.bag.castShadow = true;
     this.arms[1]!.children[1]!.add(this.bag);
+    // Stay on the stretch while the bag lasts — don't clock out mid-feed.
+    if (feederRush) {
+      this.visitLeft = Math.max(this.visitLeft, 160);
+    }
   }
 
   private emptyHanded(): void {
@@ -595,6 +1168,33 @@ export class Person {
       return;
     }
     this.startBinning();
+  }
+
+  /** Washer hits a feeder — bag gone, off home. */
+  private ditchFeederBag(): void {
+    if (!feederRush || this.handfuls <= 0) return;
+    this.handfuls = 0;
+    if (this.bag) {
+      this.bag.removeFromParent();
+      this.bag = null;
+    }
+    this.scattering = 0;
+    this.feeding = 0;
+    this.headHome();
+  }
+
+  /**
+   * Radio feeder rush: top up / hand out a long bag so they linger on the
+   * stretch until sprayed or the food's gone (~couple of minutes).
+   */
+  public stockForFeederRush(): void {
+    if (!feederRush) return;
+    if (this.handfuls > 0) {
+      this.handfuls = HANDFULS_RUSH;
+      this.visitLeft = Math.max(this.visitLeft, 160);
+      return;
+    }
+    this.giveBag();
   }
 
   /** Peel off the path toward the nearest council bin with the empty bag. */
@@ -653,6 +1253,151 @@ export class Person {
     this.place();
   }
 
+  /** Peel off toward the nearest café for a 99. */
+  private startIceCream(): void {
+    if (this.adultCone || this.kidCone) return;
+    if (this.errand !== "strolling") return;
+    const spot = cafeQueueSpot(this.group.position);
+    if (!spot) return;
+    this.errand = "icecream";
+    this.cafeFor = new THREE.Vector2(spot.x, spot.z);
+    this.iceBuyLeft = 0;
+  }
+
+  /** Paid up — cones in hand, back onto the circuit. */
+  private finishIceCream(): void {
+    this.cafeFor = null;
+    this.iceBuyLeft = 0;
+    this.errand = "strolling";
+
+    if (this.kid) {
+      this.kidCone = this.makeCone();
+      // Right hand, dangling out in front where everyone can see it.
+      this.kidArms[1]!.add(this.kidCone);
+      this.kidCone.position.set(0.02, -0.26, 0.08);
+      this.kidCone.rotation.x = 0.35;
+      // Mum or dad often gets one too.
+      if (Math.random() < 0.55) this.giveAdultCone();
+    } else {
+      this.giveAdultCone();
+    }
+    this.say(ICE_BUY);
+    this.showMood("pleased");
+
+    const here = new THREE.Vector2(this.group.position.x, this.group.position.z);
+    let best = 0;
+    let closest = Infinity;
+    for (let i = 0; i < PATH_LOOP.length; i++) {
+      const gap = PATH_LOOP[i]!.distanceToSquared(here);
+      if (gap < closest) {
+        closest = gap;
+        best = i;
+      }
+    }
+    this.index = best;
+    this.place();
+  }
+
+  private giveAdultCone(): void {
+    if (this.adultCone) return;
+    this.adultCone = this.makeCone();
+    // Same hand as the bread bag when they've got one — sits in front of it.
+    const hand = this.arms[1]!.children[1]!;
+    hand.add(this.adultCone);
+    this.adultCone.position.set(0.04, -0.28, 0.1);
+    this.adultCone.rotation.x = 0.4;
+  }
+
+  private makeCone(): THREE.Group {
+    const cone = new THREE.Group();
+    const wafer = new THREE.Mesh(
+      new THREE.ConeGeometry(0.045, 0.14, 6),
+      new THREE.MeshStandardMaterial({ color: 0xc9a06a, roughness: 0.9 }),
+    );
+    wafer.position.y = 0.07;
+    cone.add(wafer);
+
+    const flavours = [0xf2e6d8, 0xe8a0b0, 0xc88a4a, 0xf0d060];
+    const scoop = new THREE.Mesh(
+      new THREE.SphereGeometry(0.055, 8, 6),
+      new THREE.MeshStandardMaterial({
+        color: flavours[Math.floor(Math.random() * flavours.length)]!,
+        roughness: 0.85,
+      }),
+    );
+    scoop.position.y = 0.16;
+    cone.add(scoop);
+
+    if (Math.random() < 0.55) {
+      const flake = new THREE.Mesh(
+        new THREE.BoxGeometry(0.025, 0.09, 0.02),
+        new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.7 }),
+      );
+      flake.position.set(0.01, 0.22, 0);
+      flake.rotation.z = 0.25;
+      cone.add(flake);
+    }
+    return cone;
+  }
+
+  /**
+   * Cone hits the deck. If you caused it (spray) and they've got a kid,
+   * parents can properly lose it.
+   */
+  private spillCone(attacker?: THREE.Vector3): void {
+    const hadKidCone = !!this.kidCone;
+    if (this.kidCone) {
+      this.kidCone.removeFromParent();
+      this.kidCone = null;
+    } else if (this.adultCone) {
+      this.adultCone.removeFromParent();
+      this.adultCone = null;
+    } else {
+      return;
+    }
+
+    // Adult keeps theirs unless the jet got that too.
+    if (attacker && this.adultCone && Math.random() < 0.4) {
+      this.adultCone.removeFromParent();
+      this.adultCone = null;
+    }
+
+    const here = this.group.position;
+    this.coneDropAt = new THREE.Vector3(
+      here.x + (Math.random() - 0.5) * 0.5,
+      0,
+      here.z + (Math.random() - 0.5) * 0.5,
+    );
+
+    if (hadKidCone) {
+      this.say(ICE_DROPPED);
+    } else {
+      this.say(ICE_OWN);
+    }
+
+    if (!attacker || this.dunk > 0 || this.lungeLeft > 0) {
+      if (this.lungeLeft <= 0) {
+        this.strop = Math.max(this.strop, STROP_TIME * 1.2);
+        this.stropFor = Math.max(this.stropFor, this.strop);
+      }
+      this.showMood("angry");
+      return;
+    }
+    // Ruining a kid's 99 is a proper fight-starter — even meek sorts can snap.
+    if (this.tryLunge(attacker, hadKidCone ? 1.6 : 0.85)) {
+      this.enrage(attacker, hadKidCone ? 1.8 : 1);
+      return;
+    }
+    this.enrage(attacker, hadKidCone ? 1.4 : 0.8);
+  }
+
+  /** Dropped cone for the game to spawn as litter. */
+  public claimConeDrop(): THREE.Vector3 | null {
+    const spot = this.coneDropAt;
+    this.coneDropAt = null;
+    return spot;
+  }
+
   /** A small one holding on beside them, walking with shorter, quicker steps. */
   private addKid(parent: THREE.Group): void {
     const pick = <T>(list: readonly T[]): T =>
@@ -675,7 +1420,7 @@ export class Person {
     });
 
     this.kid = new THREE.Group();
-    this.kid.position.set(-0.48, 0, -0.1);
+    this.kid.position.copy(this.kidHome);
 
     const chest = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.34, 0.16), coat);
     chest.position.y = 0.72;
@@ -756,13 +1501,32 @@ export class Person {
     const here = this.group.position;
     const dx = point.x - here.x;
     const dz = point.z - here.z;
-    if (dx * dx + dz * dz > 0.55 * 0.55) return false;
-    return point.y > here.y - 0.1 && point.y < here.y + 1.85;
+    if (dx * dx + dz * dz <= 0.55 * 0.55) {
+      if (point.y > here.y - 0.1 && point.y < here.y + 1.85) return true;
+    }
+    // Kid trails a step behind — count a hit on them too.
+    if (this.kid) {
+      const kw = new THREE.Vector3();
+      this.kid.getWorldPosition(kw);
+      const kx = point.x - kw.x;
+      const kz = point.z - kw.z;
+      if (kx * kx + kz * kz <= 0.38 * 0.38) {
+        if (point.y > kw.y - 0.1 && point.y < kw.y + 1.15) return true;
+      }
+    }
+    return false;
   }
 
   /** Filthy bounce spray sticks to coats and faces. */
   public splatter(point: THREE.Vector3): void {
     this.flecks.splat(point);
+  }
+
+  /** Clean lance on the muck — flecks rinse off; fouling clears when it's gone. */
+  public rinse(point: THREE.Vector3): boolean {
+    const cleared = this.flecks.rinseNear(point, 0.6);
+    if (cleared && this.flecks.isEmpty()) this.fouled = 0;
+    return cleared;
   }
 
   public isInTheDrink(): boolean {
@@ -802,6 +1566,7 @@ export class Person {
     }
 
     this.strop = STROP_TIME;
+    this.stropFor = this.strop;
     this.say(BARGED);
     return true;
   }
@@ -813,6 +1578,8 @@ export class Person {
   public spook(from: THREE.Vector3, wingsOut: boolean): void {
     if (
       this.dunk > 0 ||
+      this.madLeft > 0 ||
+      this.lungeLeft > 0 ||
       this.errand === "arriving" ||
       this.errand === "leaving"
     )
@@ -910,6 +1677,8 @@ export class Person {
       this.dunk > 0 ||
       this.scareLeft > 0 ||
       this.strop > 0 ||
+      this.madLeft > 0 ||
+      this.lungeLeft > 0 ||
       this.scattering > 0 ||
       this.feeding > 0 ||
       this.gawpLeft > 0 ||
@@ -929,8 +1698,46 @@ export class Person {
     this.gawpLeft = 2.2 + Math.random() * 1.8;
     this.gawpCool = 8 + Math.random() * 6;
     this.gawpAt.copy(at);
+    this.heliWave = false;
     this.say(BIRD_FIGHT);
     this.showMood(Math.random() < 0.45 ? "shocked" : "pleased");
+  }
+
+  /**
+   * Chopper on the Island run — kids stop and wave; adults look up with them.
+   */
+  public noticeHelicopter(id: number, at: THREE.Vector3): void {
+    if (!this.kid || this.kidDown > 0) return;
+    if (this.heliWavedId === id) return;
+    if (
+      this.dunk > 0 ||
+      this.scareLeft > 0 ||
+      this.strop > 0 ||
+      this.madLeft > 0 ||
+      this.lungeLeft > 0 ||
+      this.scattering > 0 ||
+      this.feeding > 0 ||
+      this.gawpLeft > 0
+    )
+      return;
+    if (this.errand === "arriving" || this.errand === "leaving") return;
+
+    const here = this.group.position;
+    const gap = Math.hypot(at.x - here.x, at.z - here.z);
+    if (gap > 110) return;
+
+    this.heliWavedId = id;
+    // Not every family looks up — about half do.
+    if (Math.random() > 0.55) return;
+
+    this.gawpLeft = 5.5 + Math.random() * 2.5;
+    this.gawpCool = 10;
+    this.gawpAt.copy(at);
+    this.heliWave = true;
+    this.heliWavePhase = Math.random() * Math.PI * 2;
+    if (Math.random() < 0.7) this.say(HELI_LINES);
+    this.showMood("pleased");
+    this.kidFace?.setMood("pleased");
   }
 
   /** Already wet, so they don't file a fresh complaint for every droplet. */
@@ -954,7 +1761,22 @@ export class Person {
     this.wet = DRYING;
 
     // Hands go up, and more often than not the lead goes with them.
-    if (first && Math.random() < LEAD_SLIPS) this.dog?.slipTheLead();
+    if (this.dog && !this.dog.isLoose() && Math.random() < LEAD_SLIPS) {
+      this.dog.slipTheLead();
+    }
+
+    // Ice cream and a jet don't mix — kids drop theirs straight away.
+    if (this.kidCone && Math.random() < (first ? 0.82 : 0.45)) {
+      this.spillCone(from);
+    } else if (this.adultCone && Math.random() < (first ? 0.4 : 0.18)) {
+      this.spillCone(from);
+    }
+
+    // Hose the feeders off the NW stretch — bag ditched, they're done.
+    if (first) this.ditchFeederBag();
+
+    // Little ones tip over on the jet; they only roll if you keep blasting.
+    if (this.kid) this.tipKid(from);
 
     const here = this.group.position;
     if (distanceToShore(here.x, here.z) < EDGE && !isInLake(here.x, here.z)) {
@@ -962,13 +1784,32 @@ export class Person {
       return;
     }
 
+    // Already squared up over the cone — don't stack another strop on top.
+    if (this.lungeLeft > 0) return;
+
+    if (from) {
+      const heat = first ? 1 : 0.45;
+      if (this.tryLunge(from, heat)) {
+        this.enrage(from, heat);
+        return;
+      }
+      // Already steaming, or narky enough to stay mad without swinging yet.
+      if (this.madLeft > 0 || this.temper !== "meek") {
+        this.enrage(from, heat * 0.7);
+        this.reactToSpray(SOAKED, first);
+        return;
+      }
+    }
+
     this.strop = Math.max(this.strop, STROP_TIME);
+    this.stropFor = Math.max(this.stropFor, this.strop);
     this.reactToSpray(SOAKED, first);
   }
 
   /**
    * Hit by filthy water bouncing off a pile. Worse than a clean soak — and
-   * the handy ones may come for you if you're close enough.
+   * the handy ones may come for you if you're close enough. Keep the dirty
+   * jet on them and narky sorts can still lose it.
    * Returns whether they've started a dig.
    */
   public foul(attacker: THREE.Vector3): boolean {
@@ -982,37 +1823,73 @@ export class Person {
     this.wet = DRYING;
     this.fouled = Math.max(this.fouled, 18);
 
-    if (first && Math.random() < LEAD_SLIPS) this.dog?.slipTheLead();
+    if (this.dog && !this.dog.isLoose() && Math.random() < LEAD_SLIPS) {
+      this.dog.slipTheLead();
+    }
+
+    if (first) this.ditchFeederBag();
+
+    // Filthy jet + ice cream is a red rag — drop it and come for you.
+    if (this.kidCone && Math.random() < (first ? 0.9 : 0.55)) {
+      this.spillCone(attacker);
+    } else if (this.adultCone && Math.random() < (first ? 0.55 : 0.25)) {
+      this.spillCone(attacker);
+    }
+
+    if (this.kid) this.tipKid(attacker);
 
     const here = this.group.position;
     if (distanceToShore(here.x, here.z) < EDGE && !isInLake(here.x, here.z)) {
       this.topple();
-      return false;
+      return this.lungeLeft > 0;
     }
 
     this.strop = 0;
     this.reactToSpray(FOULED, first);
+    if (this.lungeLeft > 0) return true;
 
-    if (!first) {
-      this.strop = STROP_TIME * (this.temper === "meek" ? 1 : 1.35);
-      return false;
-    }
-
-    const gap = here.distanceTo(attacker);
-    const chance =
-      this.temper === "handy" ? 0.5 : this.temper === "narky" ? 0.14 : 0.03;
-    if (gap < 5 && this.swingCool <= 0 && Math.random() < chance) {
-      this.lungeLeft = 2.4;
-      this.lungeAt.copy(attacker);
-      this.swingReady = false;
-      this.hoseHits = 0;
-      this.say(SQUARE_UP);
-      this.showMood("angry");
+    if (this.tryLunge(attacker, first ? 1.35 : 0.55)) {
+      this.enrage(attacker, first ? 1.5 : 0.8);
       return true;
     }
 
-    this.strop = STROP_TIME * (this.temper === "meek" ? 1 : 1.35);
-    return false;
+    // Filthy spray always leaves them steaming, even if they don't charge yet.
+    this.enrage(attacker, first ? 1.2 : 0.6);
+    return this.madLeft > 0;
+  }
+
+  /**
+   * Come for the cleaner if they're in range and this person's in the mood.
+   * `heat` scales the odds — filthy spray and ruined ice cream run hotter.
+   */
+  private tryLunge(attacker: THREE.Vector3, heat = 1): boolean {
+    if (this.dunk > 0 || this.lungeLeft > 0 || this.swingCool > 0) return false;
+    const here = this.group.position;
+    const gap = Math.hypot(here.x - attacker.x, here.z - attacker.z);
+    if (gap > 8.5) return false;
+
+    const base =
+      this.temper === "handy" ? 0.72 : this.temper === "narky" ? 0.38 : 0.1;
+    if (Math.random() >= Math.min(0.95, base * heat)) return false;
+
+    this.beginLunge(attacker);
+    return true;
+  }
+
+  /** Always squares up. `shout` false when re-engaging mid-temper. */
+  private beginLunge(attacker: THREE.Vector3, shout = true): void {
+    this.lungeLeft = this.lungeFor;
+    this.lungeAt.copy(attacker);
+    this.swingReady = false;
+    this.swingAnim = 0;
+    this.swingHit = false;
+    this.hoseHits = 0;
+    this.lungeStuck = 0;
+    this.strop = 0;
+    this.madLeft = Math.max(this.madLeft, this.lungeFor + 5 + Math.random() * 3);
+    this.pleasedHold = 0;
+    if (shout) this.say(this.handbag ? HANDBAG_LINES : SQUARE_UP);
+    this.showMood("angry");
   }
 
   /**
@@ -1056,12 +1933,7 @@ export class Person {
     }
 
     if (this.hoseHits >= 4 || this.lungeLeft <= 0) {
-      this.lungeLeft = 0;
-      this.hoseHits = 0;
-      this.swingCool = 3.5;
-      this.strop = STROP_TIME;
-      this.say(BACK_OFF);
-      this.showMood("shocked");
+      this.coolOff("tired");
     }
   }
 
@@ -1069,18 +1941,151 @@ export class Person {
   public wantsSwing(): boolean {
     if (!this.swingReady) return false;
     this.swingReady = false;
-    this.swingCool = 4;
-    this.lungeLeft = 0;
-    this.strop = STROP_TIME;
+    this.coolOff("satisfied");
+    if (this.handbag) this.handbag.rotation.set(0.15, 0.1, 0.2);
     return true;
+  }
+
+  /**
+   * Hose tips the kid onto their side. One blast = down and staying put;
+   * keep the jet on them and they bowl along like a cygnet.
+   */
+  private tipKid(from?: THREE.Vector3): void {
+    if (!this.kid || this.dunk > 0) return;
+
+    if (this.kidDown > 0) {
+      if (this.kidHoseCool > 0) return;
+      this.kidHoseCool = 0.16;
+      this.kidSprayHits += 1;
+      this.kidDown = Math.max(this.kidDown, 1.6);
+      this.shoveKid(from, this.kidRolling ? 2.8 : 1.1);
+      if (this.kidSprayHits >= 2) this.kidRolling = true;
+      return;
+    }
+
+    this.kidDown = 2.2;
+    this.kidSprayHits = 0;
+    this.kidRolling = false;
+    this.kidVel.set(0, 0, 0);
+    this.kidSpin = 0;
+    this.kidHoseCool = 0.2;
+    this.kid.rotation.set(0, 0, Math.PI / 2);
+    this.kid.position.y = KID_DOWN_Y;
+    this.kidFace?.setMood("shocked");
+    if (this.kidCone) this.spillCone(from);
+    this.shoveKid(from, 0.35);
+  }
+
+  /** Push the kid in parent-local xz away from the lance. */
+  private shoveKid(from: THREE.Vector3 | undefined, force: number): void {
+    if (!this.kid || !from || force <= 0) return;
+    const world = new THREE.Vector3();
+    this.kid.getWorldPosition(world);
+    const away = new THREE.Vector3().subVectors(world, from).setY(0);
+    if (away.lengthSq() < 0.01) {
+      away.set(-Math.sin(this.group.rotation.y), 0, -Math.cos(this.group.rotation.y));
+    }
+    away.normalize();
+    // World push → parent local (yaw only).
+    const yaw = this.group.rotation.y;
+    const lx = away.x * Math.cos(yaw) + away.z * Math.sin(yaw);
+    const lz = -away.x * Math.sin(yaw) + away.z * Math.cos(yaw);
+    this.kidVel.x += lx * force;
+    this.kidVel.z += lz * force;
+    const max = this.kidRolling ? 5.5 : 1.6;
+    if (this.kidVel.length() > max) this.kidVel.setLength(max);
+  }
+
+  private tickKidDown(delta: number): void {
+    if (!this.kid || this.kidDown <= 0) return;
+    if (this.kidHoseCool > 0) this.kidHoseCool = Math.max(0, this.kidHoseCool - delta);
+    this.kidDown -= delta;
+
+    if (this.kidRolling) {
+      this.kidVel.multiplyScalar(Math.max(0, 1 - 1.4 * delta));
+      this.kid.position.x += this.kidVel.x * delta;
+      this.kid.position.z += this.kidVel.z * delta;
+      const speed = this.kidVel.length();
+      if (speed > 0.2) {
+        this.kidSpin += speed * 3.2 * delta;
+        this.kid.rotation.x = this.kidSpin;
+      }
+      this.kid.rotation.z = Math.PI / 2;
+      this.kid.position.y = KID_DOWN_Y;
+      // Cap how far they skid from mum.
+      const homeGap = Math.hypot(
+        this.kid.position.x - this.kidHome.x,
+        this.kid.position.z - this.kidHome.z,
+      );
+      if (homeGap > 2.4) {
+        this.kidVel.multiplyScalar(0.35);
+      }
+    } else {
+      this.kid.rotation.set(0, 0, Math.PI / 2);
+      this.kid.position.y = KID_DOWN_Y;
+      this.kidVel.multiplyScalar(Math.max(0, 1 - 3 * delta));
+      this.kid.position.x += this.kidVel.x * delta;
+      this.kid.position.z += this.kidVel.z * delta;
+    }
+
+    if (this.kidDown > 0) return;
+
+    // Back on their feet beside mum.
+    this.kidRolling = false;
+    this.kidSprayHits = 0;
+    this.kidVel.set(0, 0, 0);
+    this.kidSpin = 0;
+    this.kid.rotation.set(0, 0, 0);
+    this.kid.position.copy(this.kidHome);
+    this.kidFace?.setMood("idle");
+  }
+
+  private resetKidPose(): void {
+    if (!this.kid) return;
+    this.kidDown = 0;
+    this.kidRolling = false;
+    this.kidSprayHits = 0;
+    this.kidHoseCool = 0;
+    this.kidVel.set(0, 0, 0);
+    this.kidSpin = 0;
+    this.kid.rotation.set(0, 0, 0);
+    this.kid.position.copy(this.kidHome);
+  }
+
+  /** Heavy hose — knocked flat or into the lake. */
+  public knockDown(from?: THREE.Vector3): void {
+    if (this.dunk > 0) return;
+    this.wet = DRYING;
+    if (this.dog && !this.dog.isLoose()) this.dog.slipTheLead();
+    this.strop = STROP_TIME * 1.4;
+    this.stropFor = this.strop;
+    if (from) {
+      const here = this.group.position;
+      if (
+        distanceToShore(here.x, here.z) < EDGE + 1.2 &&
+        !isInLake(here.x, here.z)
+      ) {
+        this.topple();
+        return;
+      }
+      this.barge(from);
+    }
+    this.say(BARGED);
+    this.showMood("shocked");
   }
 
   /** Over the edge, arms going, into two feet of cold green water. */
   private topple(): void {
+    // Lead's gone the moment they tip — dog stays on the bank.
+    this.dog?.releaseOnOwnerDunk();
+
     this.dunk = FALL_TIME + SWIM_TIME + CLIMB_TIME;
     this.scattering = 0;
     this.feeding = 0;
     this.strop = 0;
+    // Cone goes in with them.
+    if (this.kidCone || this.adultCone) this.spillCone();
+    this.resetKidPose();
 
     const here = this.group.position;
     const shore = nearestShore(here.x, here.z);
@@ -1088,7 +2093,12 @@ export class Person {
     this.wentIn.set(shore.x - out.x * 1.6, BED_Y, shore.y - out.y * 1.6);
     this.cameOut.set(shore.x + out.x * 1.4, 0, shore.y + out.y * 1.4);
     this.splashed = false;
+    this.climbSplashEarly = false;
+    this.climbSplashLate = false;
+    // Soaked the moment they go in — clothes darken while they thrash.
+    this.wet = DRYING;
     this.say(DUNKED);
+    this.showMood("shocked");
   }
 
   /** Where somebody just went in, once, for the game to make a splash of. */
@@ -1104,10 +2114,10 @@ export class Person {
     const age = FALL_TIME + SWIM_TIME + CLIMB_TIME - this.dunk;
     const [leftArm, rightArm] = this.arms;
     const [left, right] = this.legs;
-    this.showMood("shocked");
 
     if (age < FALL_TIME) {
       // Pitching forward off the edge, arms windmilling.
+      this.showMood("shocked");
       const t = age / FALL_TIME;
       this.group.position.lerp(this.wentIn, Math.min(1, 6 * delta));
       this.group.rotation.x = t * 0.9;
@@ -1117,6 +2127,8 @@ export class Person {
       rightArm!.rotation.z = -0.7 * t;
       left!.rotation.x = 0.5 * t;
       right!.rotation.x = -0.3 * t;
+      this.torso.rotation.set(0, 0, 0);
+      this.head.rotation.set(0.2 * t, 0, 0);
       return;
     }
 
@@ -1125,7 +2137,8 @@ export class Person {
         this.splashed = true;
         this.splashAt = this.wentIn.clone().setY(WATER_Y);
       }
-      // Chest-deep and floundering, going nowhere fast.
+      // Chest-deep and floundering — furious about it already.
+      this.showMood("angry");
       const thrash = Math.sin(age * 11);
       this.group.position.y = BED_Y + Math.sin(age * 5) * 0.06;
       this.group.rotation.x = 0.4 + Math.sin(age * 3) * 0.12;
@@ -1136,33 +2149,195 @@ export class Person {
       rightArm!.rotation.z = -0.5;
       left!.rotation.x = -thrash * 0.5;
       right!.rotation.x = thrash * 0.5;
+      this.torso.rotation.z = thrash * 0.08;
+      this.head.rotation.set(0.15, thrash * 0.2, 0);
+      if (Math.random() < delta * 4) this.shedDrip(0.6);
       return;
     }
 
-    // Up the wall and out, back onto the paving on all fours to start with.
-    const t = (age - FALL_TIME - SWIM_TIME) / CLIMB_TIME;
-    this.group.position.lerp(this.cameOut, Math.min(1, 3.5 * delta));
-    this.group.position.y = THREE.MathUtils.lerp(
-      BED_Y,
-      0,
-      Math.min(1, t * 1.4),
-    );
-    this.group.rotation.x = 0.9 * (1 - t);
-    this.group.rotation.z = 0;
-    const heave = Math.sin(t * Math.PI * 2);
-    leftArm!.rotation.x = -1.2 + heave * 0.6;
-    rightArm!.rotation.x = -1.2 - heave * 0.6;
-    left!.rotation.x = heave * 0.7;
-    right!.rotation.x = -heave * 0.7;
+    this.climbOut(delta, (age - FALL_TIME - SWIM_TIME) / CLIMB_TIME);
 
     if (this.dunk <= 0) {
       // Out, dripping, and with plenty to say about it.
       this.group.position.copy(this.cameOut);
       this.group.rotation.set(0, this.group.rotation.y, 0);
+      this.torso.rotation.set(0, 0, 0);
+      this.head.rotation.set(0, 0, 0);
+      leftArm!.rotation.set(0, 0, 0.08);
+      rightArm!.rotation.set(0, 0, -0.08);
+      left!.rotation.x = 0;
+      right!.rotation.x = 0;
       this.rejoinPath();
-      this.strop = STROP_TIME;
-      this.say(SOAKED);
+      this.wet = DRYING;
+      this.strop = 0;
+      this.say(CLIMBED_OUT);
       this.sprayTalkCool = 2.6;
+      // Still steaming from the dunk — come for whoever shoved them in if close.
+      this.enrage(undefined, 1.3);
+      this.showMood("angry");
+      for (let i = 0; i < 8; i++) this.shedDrip(1.4);
+    }
+  }
+
+  /**
+   * Scramble up the bank: reach, heave, crawl on, then stand up soaking and
+   * steaming. Position is driven by climb progress so it doesn't stall mid-wall.
+   */
+  private climbOut(delta: number, t: number): void {
+    const [leftArm, rightArm] = this.arms;
+    const [left, right] = this.legs;
+    this.showMood("angry");
+    this.faceToward(this.cameOut.x, this.cameOut.z);
+
+    const u = THREE.MathUtils.clamp(t, 0, 1);
+    const along = u * u * (3 - 2 * u);
+    this.group.position.x = THREE.MathUtils.lerp(
+      this.wentIn.x,
+      this.cameOut.x,
+      along,
+    );
+    this.group.position.z = THREE.MathUtils.lerp(
+      this.wentIn.z,
+      this.cameOut.z,
+      along,
+    );
+
+    if (!this.climbSplashEarly && u > 0.18) {
+      this.climbSplashEarly = true;
+      this.splashAt = this.group.position.clone().setY(WATER_Y);
+      for (let i = 0; i < 5; i++) this.shedDrip(1.1);
+    }
+    if (!this.climbSplashLate && u > 0.58) {
+      this.climbSplashLate = true;
+      this.splashAt = this.group.position.clone().setY(WATER_Y * 0.4);
+      for (let i = 0; i < 6; i++) this.shedDrip(1.2);
+    }
+
+    this.dripCool -= delta;
+    if (this.dripCool <= 0) {
+      this.shedDrip(0.9);
+      this.dripCool = 0.07 + Math.random() * 0.06;
+    }
+
+    if (u < 0.28) {
+      // Reach for the coping — still chest-deep, arms hauled up the wall.
+      const p = u / 0.28;
+      this.group.position.y = THREE.MathUtils.lerp(BED_Y, BED_Y + 0.22, p);
+      this.group.rotation.x = 0.55 + p * 0.35;
+      this.group.rotation.z = Math.sin(p * Math.PI) * 0.06;
+      leftArm!.rotation.x = -2.5 + p * 0.3;
+      rightArm!.rotation.x = -2.35 + p * 0.2;
+      leftArm!.rotation.z = 0.35;
+      rightArm!.rotation.z = -0.45;
+      left!.rotation.x = 0.9;
+      right!.rotation.x = 0.4 + Math.sin(p * Math.PI) * 0.5;
+      this.torso.rotation.x = 0.25;
+      this.head.rotation.x = -0.35 - p * 0.25;
+      return;
+    }
+
+    if (u < 0.55) {
+      // Heave — belly over the kerb, one knee clawing up.
+      const p = (u - 0.28) / 0.27;
+      const heave = Math.sin(p * Math.PI);
+      this.group.position.y = THREE.MathUtils.lerp(BED_Y + 0.22, 0.28, p);
+      this.group.rotation.x = 0.9 - p * 0.25;
+      this.group.rotation.z = Math.sin(p * 7) * 0.08;
+      leftArm!.rotation.x = -1.8 + heave * 0.5;
+      rightArm!.rotation.x = -2.1 - heave * 0.35;
+      leftArm!.rotation.z = 0.55;
+      rightArm!.rotation.z = -0.25;
+      left!.rotation.x = 1.35 - p * 0.4;
+      right!.rotation.x = -0.2 + heave * 0.9;
+      this.torso.rotation.x = 0.45;
+      this.head.rotation.x = -0.55;
+      this.head.rotation.y = Math.sin(p * 5) * 0.15;
+      return;
+    }
+
+    if (u < 0.78) {
+      // On all fours on the paving, dripping, crawling clear of the edge.
+      const p = (u - 0.55) / 0.23;
+      const crawl = Math.sin(p * Math.PI * 3);
+      this.group.position.y = THREE.MathUtils.lerp(0.28, 0.18, p);
+      this.group.rotation.x = 0.65 - p * 0.2;
+      this.group.rotation.z = crawl * 0.1;
+      leftArm!.rotation.x = -1.1 + crawl * 0.55;
+      rightArm!.rotation.x = -1.1 - crawl * 0.55;
+      leftArm!.rotation.z = 0.4;
+      rightArm!.rotation.z = -0.4;
+      left!.rotation.x = 1.1 - crawl * 0.45;
+      right!.rotation.x = 1.1 + crawl * 0.45;
+      this.torso.rotation.x = 0.55;
+      this.head.rotation.x = -0.4;
+      this.head.rotation.y = 0;
+      return;
+    }
+
+    // Push up to standing — shake the water off, still raging.
+    const p = (u - 0.78) / 0.22;
+    const shake = Math.sin(p * Math.PI * 8) * (1 - p);
+    this.group.position.y = THREE.MathUtils.lerp(0.18, 0, p);
+    this.group.rotation.x = 0.45 * (1 - p) + shake * 0.08;
+    this.group.rotation.z = shake * 0.18;
+    leftArm!.rotation.x = -0.4 - p * 0.3 + shake * 0.5;
+    rightArm!.rotation.x = -0.4 - p * 0.3 - shake * 0.5;
+    leftArm!.rotation.z = 0.55 * (1 - p) + 0.08;
+    rightArm!.rotation.z = -0.55 * (1 - p) - 0.08;
+    left!.rotation.x = (1 - p) * 0.6;
+    right!.rotation.x = (1 - p) * 0.35;
+    this.torso.rotation.x = 0.35 * (1 - p);
+    this.head.rotation.x = -0.15 * (1 - p) + shake * 0.12;
+    this.head.rotation.y = shake * 0.2;
+  }
+
+  /** A bead of lake water running off coat / hair. */
+  private shedDrip(force = 1): void {
+    if (this.drips.length > 36) return;
+    const here = this.group.position;
+    const yaw = this.group.rotation.y;
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.025 + Math.random() * 0.02, 5, 4),
+      new THREE.MeshBasicMaterial({
+        color: 0x8ec8e0,
+        transparent: true,
+        opacity: 0.8,
+        depthWrite: false,
+      }),
+    );
+    const side = (Math.random() - 0.5) * 0.35;
+    const forward = (Math.random() - 0.5) * 0.2;
+    mesh.position.set(
+      here.x + Math.sin(yaw) * forward + Math.cos(yaw) * side,
+      here.y + 0.55 + Math.random() * 0.75,
+      here.z + Math.cos(yaw) * forward - Math.sin(yaw) * side,
+    );
+    this.scene.add(mesh);
+    this.drips.push({
+      mesh,
+      life: 0.35 + Math.random() * 0.45,
+      vx: (Math.random() - 0.5) * 0.8 * force,
+      vy: -0.4 - Math.random() * 1.2 * force,
+      vz: (Math.random() - 0.5) * 0.8 * force,
+    });
+  }
+
+  private updateDrips(delta: number): void {
+    if (this.dripCool > 0) this.dripCool = Math.max(0, this.dripCool - delta);
+    for (let i = this.drips.length - 1; i >= 0; i--) {
+      const drop = this.drips[i]!;
+      drop.life -= delta;
+      drop.vy -= 16 * delta;
+      drop.mesh.position.x += drop.vx * delta;
+      drop.mesh.position.y += drop.vy * delta;
+      drop.mesh.position.z += drop.vz * delta;
+      const mat = drop.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = Math.max(0, drop.life * 2.2);
+      if (drop.life > 0 && drop.mesh.position.y > 0.04) continue;
+      this.scene.remove(drop.mesh);
+      drop.mesh.geometry.dispose();
+      mat.dispose();
+      this.drips.splice(i, 1);
     }
   }
 
@@ -1188,7 +2363,7 @@ export class Person {
     this.fromShore = THREE.MathUtils.clamp(
       distanceToShore(here.x, here.y),
       0.35,
-      PATH_OUTER - 0.4,
+      STROLL_OUTER,
     );
   }
 
@@ -1206,8 +2381,9 @@ export class Person {
     if (this.fouled > 0) this.fouled = Math.max(0, this.fouled - delta);
     if (this.swingCool > 0) this.swingCool = Math.max(0, this.swingCool - delta);
     if (this.wet <= 0 && this.fouled <= 0) return;
+    // Fresh out of the lake: near-black coats; fade as they drip dry.
     const soak =
-      this.wet > 0 ? THREE.MathUtils.clamp(this.wet / 8, 0, 1) * 0.55 : 0;
+      this.wet > 0 ? THREE.MathUtils.clamp(this.wet / 10, 0, 1) * 0.72 : 0;
     if (this.wet > 0) this.wet -= delta;
     const muck = THREE.MathUtils.clamp(this.fouled / 12, 0, 1) * 0.45;
     const stain = new THREE.Color(0x5a4a32);
@@ -1215,9 +2391,14 @@ export class Person {
       material.color.copy(dry).multiplyScalar(1 - soak);
       if (muck > 0) material.color.lerp(stain, muck);
     }
+    // Keep shedding while they're properly wet.
+    if (this.dunk <= 0 && this.wet > 14 && this.dripCool <= 0) {
+      this.shedDrip(0.55);
+      this.dripCool = 0.18 + Math.random() * 0.22;
+    }
   }
 
-  private place(): void {
+  private place(delta?: number): void {
     const here = loopPoint(this.index);
     const ahead = loopPoint(this.index + this.direction);
     const forward = new THREE.Vector2().subVectors(ahead, here).normalize();
@@ -1227,13 +2408,56 @@ export class Person {
     const dRight = distanceToShore(here.x - left.x * 3, here.y - left.y * 3);
     const lakeward = dLeft < dRight ? left : left.clone().negate();
 
-    const loopDist = Math.max(0.2, distanceToShore(here.x, here.y));
-    const shift = loopDist - this.fromShore;
-    this.group.position.set(
-      here.x + lakeward.x * shift,
-      0,
-      here.y + lakeward.y * shift,
+    // Keep a dry band from the waterline (kids used to sit almost on it),
+    // and stay clear of the outer bench lip.
+    const bank = THREE.MathUtils.clamp(
+      Math.max(this.fromShore, this.kid ? 0.9 : 1.2),
+      0.35,
+      STROLL_OUTER,
     );
+    const loopDist = Math.max(0.2, distanceToShore(here.x, here.y));
+    const shift = loopDist - bank;
+    let targetX = here.x + lakeward.x * shift;
+    let targetZ = here.y + lakeward.y * shift;
+    if (isInLake(targetX, targetZ)) {
+      const shore = nearestShore(here.x, here.y);
+      const out = outwardAt(shore);
+      targetX = shore.x + out.x * bank;
+      targetZ = shore.y + out.y * bank;
+    }
+
+    // Nudge inland off benches / walls that sit on the walk band.
+    const inland = lakeward.clone().negate();
+    for (let tries = 0; tries < 10; tries++) {
+      if (!isBlocked(targetX, targetZ, 0.4) && !isInLake(targetX, targetZ)) break;
+      targetX += inland.x * 0.4;
+      targetZ += inland.y * 0.4;
+    }
+
+    const pos = this.group.position;
+    if (delta === undefined || delta <= 0) {
+      pos.set(targetX, 0, targetZ);
+    } else {
+      const gap = Math.hypot(targetX - pos.x, targetZ - pos.z);
+      if (gap > 8) {
+        // Teleport if they've been dunked / scared far off the circuit.
+        pos.set(targetX, 0, targetZ);
+      } else if (gap > 0.02) {
+        const step = Math.min(gap, this.speed * delta * 1.45);
+        const self = { x: pos.x, z: pos.z };
+        const landed = stepWalk(
+          pos.x,
+          pos.z,
+          ((targetX - pos.x) / gap) * step,
+          ((targetZ - pos.z) / gap) * step,
+          0.4,
+          self,
+        );
+        pos.x = landed.x;
+        pos.z = landed.z;
+        pos.y = 0;
+      }
+    }
     this.group.rotation.y = Math.atan2(forward.x, forward.y);
   }
 
@@ -1245,6 +2469,7 @@ export class Person {
     delta: number,
     mess: readonly THREE.Vector3[] = [],
     player: THREE.Vector3 | null = null,
+    raining = false,
   ): number {
     this.grumble =
       this.grumble?.update(delta, this.group.position) === false
@@ -1252,12 +2477,16 @@ export class Person {
         : this.grumble;
     this.dry(delta);
     this.flecks.update(delta);
+    this.updateDrips(delta);
     if (this.hoseCool > 0) this.hoseCool = Math.max(0, this.hoseCool - delta);
     if (this.sprayTalkCool > 0)
       this.sprayTalkCool = Math.max(0, this.sprayTalkCool - delta);
     this.face.update(delta);
     this.kidFace?.update(delta);
+    this.tickKidDown(delta);
     if (this.gawpCool > 0) this.gawpCool -= delta;
+    this.tickUmbrella(delta, raining);
+    this.tickMad(delta, player);
 
     if (this.errand === "arriving") {
       if (this.walkToward(this.joinAt, delta) < 0.4) {
@@ -1279,6 +2508,23 @@ export class Person {
       return -1;
     }
 
+    if (this.getUpLeft > 0) {
+      this.getUpLeft -= delta;
+      const t = Math.max(0, this.getUpLeft / 1.1);
+      this.group.rotation.z = this.getUpTip * (Math.PI / 2) * t;
+      this.group.position.y = 0.12 * t;
+      this.showMood("angry");
+      if (this.getUpLeft <= 0) {
+        this.group.rotation.z = 0;
+        this.group.position.y = 0;
+        if (this.pendingLunge) {
+          this.beginLunge(this.pendingLunge);
+          this.pendingLunge = null;
+        }
+      }
+      return -1;
+    }
+
     if (this.lungeLeft > 0) {
       if (player) this.lungeAt.copy(player);
       this.squareUp(delta);
@@ -1294,8 +2540,13 @@ export class Person {
       this.gawpLeft -= delta;
       this.faceToward(this.gawpAt.x, this.gawpAt.z);
       this.standAndWatch();
+      if (this.heliWave && this.kid && this.kidDown <= 0) {
+        this.poseKidWave(delta);
+      }
       if (this.gawpLeft <= 0) {
-        this.showMood(this.wet > 0 ? "angry" : "idle");
+        this.heliWave = false;
+        this.head.rotation.x = 0;
+        this.showMood(this.madLeft > 0 ? "angry" : "idle");
       }
       return -1;
     }
@@ -1325,11 +2576,32 @@ export class Person {
       return -1;
     }
 
+    if (this.errand === "icecream") {
+      if (this.iceBuyLeft > 0) {
+        this.iceBuyLeft -= delta;
+        if (this.cafeFor) this.faceToward(this.cafeFor.x, this.cafeFor.y);
+        this.standAndWatch();
+        this.showMood("pleased");
+        if (this.iceBuyLeft <= 0) this.finishIceCream();
+        return -1;
+      }
+      if (!this.cafeFor || this.walkToward(this.cafeFor, delta) < 0.55) {
+        this.iceBuyLeft = 2.2 + Math.random() * 2.4;
+        this.say(ICE_BUY);
+      }
+      return -1;
+    }
+
     if (this.restock > 0) {
       this.restock -= delta;
       if (this.restock <= 0) {
-        this.giveBag();
-        this.scatterWait = 15 + Math.random() * 35;
+        // Fresh bags mostly appear once they're back on the NW corner.
+        if (Math.random() < this.foodOdds() * 1.6) {
+          this.giveBag();
+          this.scatterWait = 15 + Math.random() * 35;
+        } else {
+          this.restock = 25 + Math.random() * 40;
+        }
       }
     }
 
@@ -1340,22 +2612,49 @@ export class Person {
 
     if (this.kid && this.handfuls > 0) {
       this.scatterWait -= delta;
-      if (this.scatterWait <= 0) this.startScatter();
+      if (this.scatterWait <= 0) {
+        if (feederRush) {
+          // One sprinkle at a time — don't tip the whole bag in ten seconds.
+          this.tossRushHandful();
+          this.scatterWait = 9 + Math.random() * 14;
+        } else {
+          this.startScatter();
+        }
+      }
+    }
+
+    // Kids with a cone are accident-prone even without the hose.
+    if (this.kidCone && Math.random() < delta * 0.012) {
+      this.spillCone();
+    }
+
+    // Now and then peel off for a 99 — more often with a kid in tow.
+    this.iceCreamWait -= delta;
+    if (this.iceCreamWait <= 0) {
+      this.iceCreamWait = 55 + Math.random() * 90;
+      if (!this.adultCone && !this.kidCone) {
+        const fancy = this.kid ? 0.58 : 0.2;
+        if (Math.random() < fancy) this.startIceCream();
+      }
     }
 
     // Loop points are evenly spaced, so a fixed step length converts neatly.
     const spacing = PATH_LOOP[0]!.distanceTo(PATH_LOOP[1]!) || 1;
     this.index += (this.direction * this.speed * delta) / spacing;
-    this.place();
+    this.place(delta);
 
     this.visitLeft -= delta;
+    // Bag still full on the feeder stretch — linger until it's empty or sprayed.
+    if (feederRush && this.handfuls > 0) {
+      this.visitLeft = Math.max(this.visitLeft, 45);
+    }
     if (this.visitLeft <= 0) this.headHome();
 
     this.stepPhase += delta * this.speed * 4.5;
     const swing = Math.sin(this.stepPhase) * 0.55;
     this.stride(this.stepPhase, 1);
     this.trackItOut(swing);
-    this.showMood(this.wet > 0 ? "angry" : "idle");
+    this.showMood(this.madLeft > 0 ? "angry" : "idle");
 
     return this.checkUnderfoot(mess);
   }
@@ -1419,7 +2718,8 @@ export class Person {
   }
 
   private treadIn(spot: THREE.Vector3): void {
-    this.strop = STROP_TIME;
+    this.stropFor = STROP_TIME;
+    this.strop = this.stropFor;
     this.avoiding = spot.clone();
     // It comes off the sole over the next few steps, wherever they go next.
     this.mucky = TRACKED_PRINTS;
@@ -1429,6 +2729,75 @@ export class Person {
       COMPLAINTS[Math.floor(Math.random() * COMPLAINTS.length)]!,
       this.group.position,
     );
+  }
+
+  /**
+   * Stain whatever part of them hit the pile. Flat pads foul the shoes;
+   * a raised lump paints higher — and a deep wade can put it on their face,
+   * which they'll try to wipe off during the strop.
+   */
+  public soilFromMess(height: number): void {
+    const here = this.group.position;
+    // Shoes / ankles always take a hit.
+    this.soilAt(here.x - 0.1, 0.05, here.z, 3);
+    this.soilAt(here.x + 0.1, 0.05, here.z, 3);
+    this.soilAt(here.x, 0.08, here.z + 0.05, 2);
+
+    if (height > 0.1) {
+      // Shins / lower trousers.
+      this.soilAt(here.x - 0.08, 0.28, here.z, 3);
+      this.soilAt(here.x + 0.08, 0.32, here.z, 2);
+    }
+    if (height > 0.28) {
+      // Thighs / coat hem.
+      this.soilAt(here.x, 0.55 + Math.min(0.35, height * 0.4), here.z, 4);
+      this.fouled = Math.max(this.fouled, 6 + height * 8);
+    }
+    if (height > 0.55) {
+      // Hands if they flail / coat sleeves brush the heap.
+      this.soilAt(here.x - 0.22, 0.7, here.z, 2);
+      this.soilAt(here.x + 0.22, 0.75, here.z, 2);
+    }
+
+    // Face: tall heaps, or anything a kid walks into at chest height.
+    const faceHit =
+      height > 0.85 || (this.kid !== null && height > 0.42 && Math.random() < 0.55);
+    if (faceHit || (height > 0.65 && Math.random() < 0.35)) {
+      this.head.updateWorldMatrix(true, true);
+      this.head.getWorldPosition(this.soilTmp);
+      this.flecks.splat(this.soilTmp, 5 + Math.floor(Math.random() * 3));
+      this.face.soil(0.45 + Math.random() * 0.4);
+      this.faceFilth = Math.max(this.faceFilth, 0.7 + Math.random() * 0.35);
+      this.stropFor = STROP_TIME + FACE_WIPE_EXTRA;
+      this.strop = this.stropFor;
+      this.grumble?.dispose();
+      this.grumble = new Grumble(
+        this.scene,
+        FACE_MUCK[Math.floor(Math.random() * FACE_MUCK.length)]!,
+        this.group.position,
+      );
+    }
+
+    // Kid is shorter — same pile reaches them higher.
+    if (this.kid && this.kidFace && height > 0.18) {
+      this.kid.updateWorldMatrix(true, true);
+      this.kid.getWorldPosition(this.soilTmp);
+      this.soilTmp.y += 0.35;
+      this.flecks.splat(this.soilTmp, 3);
+      if (height > 0.35) {
+        this.soilTmp.y += 0.35;
+        this.flecks.splat(this.soilTmp, 4);
+        this.kidFace.soil(0.5 + Math.random() * 0.4);
+        this.faceFilth = Math.max(this.faceFilth, 0.85);
+        this.stropFor = STROP_TIME + FACE_WIPE_EXTRA;
+        this.strop = this.stropFor;
+      }
+    }
+  }
+
+  private soilAt(x: number, y: number, z: number, count: number): void {
+    this.soilTmp.set(x, y, z);
+    this.flecks.splat(this.soilTmp, count);
   }
 
   /**
@@ -1447,6 +2816,21 @@ export class Person {
       SCATTER_LINES[Math.floor(Math.random() * SCATTER_LINES.length)]!,
       this.group.position,
     );
+  }
+
+  /** One handful into the water during the rush — bag stays until emptied. */
+  private tossRushHandful(): void {
+    if (this.handfuls <= 0) return;
+    this.handfuls -= 1;
+    this.scattering = SCATTER_PAUSE * 0.55;
+    this.scatterAt = this.tossIntoPond();
+    this.grumble?.dispose();
+    this.grumble = new Grumble(
+      this.scene,
+      SCATTER_LINES[Math.floor(Math.random() * SCATTER_LINES.length)]!,
+      this.group.position,
+    );
+    if (this.handfuls <= 0) this.emptyHanded();
   }
 
   /** A few metres past the shore, where the swans and ducks can get at it. */
@@ -1517,6 +2901,24 @@ export class Person {
     for (const leg of this.legs) leg.rotation.x = 0;
     this.group.rotation.x = 0;
     this.group.position.y = 0;
+    // Chin up at the chopper.
+    this.head.rotation.x = this.heliWave ? -0.45 : 0;
+    this.poseUmbrella();
+  }
+
+  /** One arm high, waggling at the Island-bound chopper. */
+  private poseKidWave(delta: number): void {
+    if (!this.kid || this.kidArms.length < 2) return;
+    this.heliWavePhase += delta * 10;
+    const wag = Math.sin(this.heliWavePhase);
+    this.kid.rotation.set(0, 0, 0);
+    this.kid.position.y = 0;
+    this.kidLegs[0]!.rotation.x = 0.05;
+    this.kidLegs[1]!.rotation.x = -0.05;
+    // Left arm still; right arm overhead waving.
+    this.kidArms[0]!.rotation.set(-0.2, 0, 0.15);
+    this.kidArms[1]!.rotation.set(-2.4 + wag * 0.35, 0, -0.35);
+    this.kidFace?.setMood("pleased");
   }
 
   private sprinkle(): void {
@@ -1545,7 +2947,7 @@ export class Person {
       );
     }
 
-    if (!this.kid) return;
+    if (!this.kid || this.kidDown > 0) return;
     // The kid throws it in fistfuls, and bounces about doing it.
     const kidToss = Math.sin(age * 8.5);
     this.kidArms[0]!.rotation.x = -1.1 - kidToss * 0.8;
@@ -1583,47 +2985,164 @@ export class Person {
     const gap = to.length();
     const [leftArm, rightArm] = this.arms;
     const [left, right] = this.legs;
+    const spent = this.lungeFor - this.lungeLeft;
+    const bagging = this.handbag !== null;
 
-    if (gap > 1.55) {
-      to.multiplyScalar((3.8 * delta) / gap);
-      let nx = here.x + to.x;
-      let nz = here.z + to.z;
-      if (isInLake(nx, nz) || distanceToShore(nx, nz) < 0.6) {
-        this.lungeLeft = 0;
-        this.strop = STROP_TIME;
-        return;
+    if (gap > 1.45) {
+      this.swingAnim = 0;
+      this.swingHit = false;
+      const step = Math.min(gap, 5.2 * delta);
+      const dx = (to.x / gap) * step;
+      const dz = (to.z / gap) * step;
+      // Sidestep walls/benches — don't abort the dig on the first bump.
+      const landed = stepWalk(here.x, here.z, dx, dz, 0.35, {
+        x: here.x,
+        z: here.z,
+      });
+      const moved = Math.hypot(landed.x - here.x, landed.z - here.z);
+      if (moved < 0.01) {
+        this.lungeStuck += delta;
+        if (this.lungeStuck > 0.7) {
+          this.lungeLeft = 0;
+          // Still mad — they'll come again once they're clear, unless duty calls.
+          this.swingCool = Math.max(this.swingCool, 0.6);
+          return;
+        }
+      } else {
+        this.lungeStuck = 0;
+        if (
+          !isInLake(landed.x, landed.z) &&
+          distanceToShore(landed.x, landed.z) >= 0.45
+        ) {
+          here.set(landed.x, 0, landed.z);
+        }
       }
-      here.set(nx, 0, nz);
-      const phase = (2.4 - this.lungeLeft) * 10;
+      const phase = spent * 10;
       left!.rotation.x = Math.sin(phase) * 0.7;
       right!.rotation.x = -Math.sin(phase) * 0.7;
-      leftArm!.rotation.x = -1.1;
-      rightArm!.rotation.x = -1.4;
-      leftArm!.rotation.z = 0.35;
-      rightArm!.rotation.z = -0.55;
+      if (bagging) {
+        // Handbag cocked back over the shoulder while she closes in.
+        leftArm!.rotation.x = -2.1;
+        leftArm!.rotation.z = 0.85;
+        rightArm!.rotation.x = -0.6;
+        rightArm!.rotation.z = -0.25;
+        this.handbag!.rotation.set(-0.4, 0.2, 0.5);
+      } else {
+        leftArm!.rotation.x = -1.15;
+        rightArm!.rotation.x = -1.45;
+        leftArm!.rotation.z = 0.4;
+        rightArm!.rotation.z = -0.55;
+      }
+      this.torso.rotation.z = bagging ? 0.12 : 0.08;
       this.group.position.y = Math.abs(Math.sin(phase)) * 0.06;
       return;
     }
 
-    // In range — wind up and swing.
-    const wind = Math.min(1, (2.4 - this.lungeLeft) * 2);
-    rightArm!.rotation.x = -0.4 - wind * 1.8;
-    rightArm!.rotation.z = -0.2 - wind * 0.9;
-    leftArm!.rotation.x = -0.8;
-    leftArm!.rotation.z = 0.4;
-    left!.rotation.x = 0.2;
-    right!.rotation.x = -0.35;
-    this.group.rotation.x = -0.08;
-    if (!this.swingReady && wind > 0.55) this.swingReady = true;
-    if (this.lungeLeft <= 0) this.strop = STROP_TIME;
+    this.lungeStuck = 0;
+    // In range — throw the punch / handbag swipe.
+    if (this.swingAnim <= 0) {
+      this.swingAnim = bagging ? 0.7 : 0.55;
+      this.swingHit = false;
+    }
+    this.swingAnim = Math.max(0, this.swingAnim - delta);
+    const dur = bagging ? 0.7 : 0.55;
+    const t = 1 - this.swingAnim / dur;
+
+    if (bagging) this.poseHandbagSwing(t, leftArm!, rightArm!, left!, right!);
+    else this.posePunch(t, leftArm!, rightArm!, left!, right!);
+
+    if (!this.swingHit && t >= 0.42) {
+      this.swingHit = true;
+      this.swingReady = true;
+      if (bagging) this.say(HANDBAG_LINES);
+    }
+    if (this.lungeLeft <= 0 && this.madLeft <= 0) {
+      this.strop = STROP_TIME;
+      this.stropFor = this.strop;
+    }
   }
 
-  /** Hops back, then stands there scraping the offending shoe on the ground. */
+  /** Wind → jab → follow-through. */
+  private posePunch(
+    t: number,
+    leftArm: THREE.Object3D,
+    rightArm: THREE.Object3D,
+    left: THREE.Object3D,
+    right: THREE.Object3D,
+  ): void {
+    let wind: number;
+    let snap: number;
+    if (t < 0.35) {
+      wind = t / 0.35;
+      snap = 0;
+    } else if (t < 0.55) {
+      wind = 1;
+      snap = (t - 0.35) / 0.2;
+    } else {
+      wind = 1 - (t - 0.55) / 0.45;
+      snap = 1 - (t - 0.55) / 0.45;
+    }
+    // Right fist loads back, then drives through.
+    rightArm.rotation.x = -0.5 - wind * 1.6 + snap * 2.6;
+    rightArm.rotation.z = -0.15 - wind * 0.85 + snap * 0.5;
+    leftArm.rotation.x = -0.95 - wind * 0.2;
+    leftArm.rotation.z = 0.45;
+    left.rotation.x = 0.25;
+    right.rotation.x = -0.4;
+    this.torso.rotation.y = -wind * 0.35 + snap * 0.55;
+    this.torso.rotation.z = wind * 0.12 - snap * 0.08;
+    this.group.rotation.x = -0.06 - snap * 0.1;
+    this.group.position.y = snap * 0.08;
+  }
+
+  /** Over-the-shoulder handbag swipe — auntie special. */
+  private poseHandbagSwing(
+    t: number,
+    leftArm: THREE.Object3D,
+    rightArm: THREE.Object3D,
+    left: THREE.Object3D,
+    right: THREE.Object3D,
+  ): void {
+    let lift: number;
+    let smash: number;
+    if (t < 0.32) {
+      lift = t / 0.32;
+      smash = 0;
+    } else if (t < 0.5) {
+      lift = 1;
+      smash = (t - 0.32) / 0.18;
+    } else {
+      lift = 1 - (t - 0.5) / 0.5;
+      smash = 1 - (t - 0.5) / 0.5 * 0.7;
+    }
+    // Bag goes up and back, then sweeps down across the face.
+    leftArm.rotation.x = -2.35 * lift + smash * 3.1;
+    leftArm.rotation.z = 0.95 * lift - smash * 1.4;
+    leftArm.rotation.y = smash * 0.55;
+    rightArm.rotation.x = -0.5;
+    rightArm.rotation.z = -0.3;
+    left.rotation.x = 0.15;
+    right.rotation.x = -0.35;
+    this.torso.rotation.y = -lift * 0.4 + smash * 0.7;
+    this.torso.rotation.z = lift * 0.2 - smash * 0.15;
+    this.group.rotation.x = -0.05 - smash * 0.12;
+    this.group.position.y = Math.abs(Math.sin(smash * Math.PI)) * 0.1;
+    if (this.handbag) {
+      this.handbag.rotation.set(
+        -0.5 + smash * 1.2,
+        0.15 + smash * 0.4,
+        0.35 + lift * 0.6 - smash * 0.8,
+      );
+    }
+  }
+
+  /** Hops back, then scrapes the shoe — and wipes their face if it's on them. */
   private throwStrop(): void {
-    const age = STROP_TIME - this.strop;
+    const age = this.stropFor - this.strop;
     const [left, right] = this.legs;
     const [leftArm, rightArm] = this.arms;
-    this.showMood(this.wet > 0 ? "angry" : "disgusted");
+    const faceJob = this.faceFilth > 0.05 || this.face.isFilthy();
+    this.showMood(this.madLeft > 0 ? "angry" : "disgusted");
 
     if (age < 0.55) {
       // The recoil: both arms fly up and they rock back on their heels.
@@ -1638,6 +3157,35 @@ export class Person {
       return;
     }
 
+    // Face wipe phase after they've scraped a bit — rubbing at the cheeks.
+    const wipeFrom = faceJob ? 1.85 : this.stropFor + 1;
+    if (age >= wipeFrom) {
+      const wipe = Math.sin(age * 14);
+      leftArm!.rotation.x = -1.85 + wipe * 0.4;
+      rightArm!.rotation.x = -1.7 - wipe * 0.35;
+      leftArm!.rotation.z = 0.85 + wipe * 0.15;
+      rightArm!.rotation.z = -0.9 - wipe * 0.12;
+      left!.rotation.x = 0.1;
+      right!.rotation.x = -0.15;
+      this.head.rotation.x = -0.12 + wipe * 0.1;
+      this.head.rotation.y = wipe * 0.28;
+      this.torso.rotation.y = wipe * 0.08;
+      this.group.rotation.x = 0.06;
+      this.group.position.y = 0.02;
+
+      // Rubbing clears flecks and face smears over the wipe.
+      this.head.getWorldPosition(this.soilTmp);
+      if (Math.random() < 0.55) this.flecks.rinseNear(this.soilTmp, 0.4);
+      this.face.wipe(0.045 + Math.random() * 0.04);
+      this.kidFace?.wipe(0.05);
+      this.faceFilth = Math.max(0, this.faceFilth - 0.055);
+      if (this.faceFilth < 0.08 && !this.face.isFilthy()) {
+        this.head.rotation.x = 0;
+        this.head.rotation.y = 0;
+      }
+      return;
+    }
+
     // Scraping: dirty foot swings back and forth, the rest of them hopping.
     const scrape = Math.sin(age * 9);
     right!.rotation.x = -0.5 + scrape * 0.55;
@@ -1648,6 +3196,17 @@ export class Person {
     rightArm!.rotation.z = -0.28;
     this.group.rotation.x = 0.08;
     this.group.position.y = Math.abs(Math.sin(age * 4.5)) * 0.05;
+    this.head.rotation.x = 0;
+    this.head.rotation.y = 0;
+
+    // Scrape knocks some of it off the shoes onto the path.
+    if (Math.random() < 0.25) {
+      const here = this.group.position;
+      this.flecks.rinseNear(
+        this.soilTmp.set(here.x, 0.1, here.z),
+        0.45,
+      );
+    }
   }
 
   /** Away from the bird, quicker than a stroll, and not into the lake. */
@@ -1667,8 +3226,16 @@ export class Person {
       nz = here.z + this.scareAway.z * pace * delta;
     }
 
-    here.x = nx;
-    here.z = nz;
+    const landed = stepWalk(
+      here.x,
+      here.z,
+      nx - here.x,
+      nz - here.z,
+      0.4,
+      { x: here.x, z: here.z },
+    );
+    here.x = landed.x;
+    here.z = landed.z;
     this.faceToward(here.x + this.scareAway.x, here.z + this.scareAway.z);
     this.stepPhase += delta * pace * 5.5;
     this.stride(this.stepPhase, 1.15);

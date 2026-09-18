@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { WATER_Y, distanceToShore, isInLake, waterSpot } from "../world/lake";
+import { parkAudio } from "../audio/ParkAudio";
 import { addEyes } from "./eyes";
 import { MuckFlecks } from "../effects/MuckFlecks";
 
@@ -38,7 +39,11 @@ export class Duck {
   private group: THREE.Group;
   private body: THREE.Mesh;
   private head: THREE.Group;
-  private wings: THREE.Mesh[] = [];
+  private wings: THREE.Group[] = [];
+  /** Full flight spans — tucked away while paddling. */
+  private spans: THREE.Mesh[] = [];
+  /** Speculum patches ride on the wing groups so they flap with them. */
+  private patches: THREE.Mesh[] = [];
 
   private mode: Mode;
   private heading = Math.random() * Math.PI * 2;
@@ -62,6 +67,9 @@ export class Duck {
     const plumage: Plumage = Math.random() < 0.55 ? "drake" : "hen";
 
     this.group = new THREE.Group();
+    // Yaw then pitch then roll — tip-ups stay nose-down whatever way the
+    // duck faces (default XYZ pitches around world X and looks wrong).
+    this.group.rotation.order = "YXZ";
     const built = this.build(plumage);
     this.body = built.body;
     this.head = built.head;
@@ -81,10 +89,11 @@ export class Duck {
         FLY_HEIGHT,
         spot.y - Math.cos(this.heading) * 170,
       );
-      this.group.rotation.y = this.heading;
+      this.group.rotation.set(0, this.heading, 0);
     } else {
       this.mode = "swim";
       this.group.position.set(spot.x, SWIM_Y, spot.y);
+      this.group.rotation.set(0, this.heading, 0);
     }
 
     scene.add(this.group);
@@ -167,21 +176,39 @@ export class Duck {
       iris: 0x1a1814,
     });
 
-    for (const side of [-1, 1]) {
-      const wing = new THREE.Mesh(new THREE.SphereGeometry(1, 7, 5), darkMat);
-      wing.scale.set(0.16, 0.34, 0.85);
-      wing.position.set(side * 0.62, 0.18, -0.05);
-      wing.castShadow = true;
+    for (const side of [-1, 1] as const) {
+      // Pivot at the shoulder so a flap lifts the whole wing clear of the body.
+      const wing = new THREE.Group();
+      wing.position.set(side * 0.52, 0.2, -0.02);
       this.group.add(wing);
       this.wings.push(wing);
 
-      // The blue speculum patch on the trailing edge.
+      // Folded pad — what you see while they're paddling.
+      const folded = new THREE.Mesh(new THREE.SphereGeometry(1, 7, 5), darkMat);
+      folded.scale.set(0.14, 0.3, 0.8);
+      folded.position.set(side * 0.12, 0, -0.02);
+      folded.castShadow = true;
+      wing.add(folded);
+
+      // Open span — flat primary that sticks out sideways in flight.
+      const spanGeo = new THREE.SphereGeometry(1, 8, 5);
+      spanGeo.scale(0.72, 0.05, 0.38);
+      spanGeo.translate(side * 0.72, 0, -0.05);
+      const span = new THREE.Mesh(spanGeo, darkMat);
+      span.visible = false;
+      span.castShadow = true;
+      wing.add(span);
+      this.spans.push(span);
+
+      // Blue speculum on the trailing edge of the open wing.
       const patch = new THREE.Mesh(
-        new THREE.BoxGeometry(0.06, 0.16, 0.4),
+        new THREE.BoxGeometry(0.08, 0.04, 0.32),
         new THREE.MeshStandardMaterial({ color: 0x2f4f9c, roughness: 0.6 }),
       );
-      patch.position.set(side * 0.66, 0.12, -0.45);
-      this.group.add(patch);
+      patch.position.set(side * 0.95, 0.02, -0.28);
+      patch.visible = false;
+      wing.add(patch);
+      this.patches.push(patch);
     }
 
     this.group.scale.setScalar(SIZE);
@@ -274,10 +301,16 @@ export class Duck {
     if (this.mode === "in" || this.mode === "out") return;
     this.mode = "out";
     this.hold = 0;
+    parkAudio.wingFlap(0.7);
+    parkAudio.waterPlop(0.4);
   }
 
   public splatter(point: THREE.Vector3): void {
     this.flecks.splat(point);
+  }
+
+  public rinse(point: THREE.Vector3): boolean {
+    return this.flecks.rinseNear(point, 0.5);
   }
 
   public update(delta: number, player: THREE.Vector3): void {
@@ -302,19 +335,28 @@ export class Duck {
         this.potter(delta);
     }
 
-    // Ducks are nervy: get close and they paddle off rather than square up.
-    if (this.isOnWater() && this.group.position.distanceTo(player) < 6) {
-      this.rightItself();
-      this.mode = "swim";
-      const away = new THREE.Vector2(
-        this.group.position.x - player.x,
-        this.group.position.z - player.z,
-      ).normalize();
-      this.target.set(
-        this.group.position.x + away.x * 14,
-        this.group.position.z + away.y * 14,
-      );
-      if (!isInLake(this.target.x, this.target.y)) this.target = waterSpot();
+    // Nervy when the cleaner is in the water with them.
+    if (this.isOnWater()) {
+      const dist = this.group.position.distanceTo(player);
+      if (dist < 2.6) {
+        // Right on top — flush off the lake.
+        this.flush();
+      } else if (dist < 9) {
+        this.rightItself();
+        this.mode = "swim";
+        this.speed = 2.4;
+        const away = new THREE.Vector2(
+          this.group.position.x - player.x,
+          this.group.position.z - player.z,
+        );
+        if (away.lengthSq() < 0.01) away.set(1, 0);
+        away.normalize();
+        this.target.set(
+          this.group.position.x + away.x * 18,
+          this.group.position.z + away.y * 18,
+        );
+        if (!isInLake(this.target.x, this.target.y)) this.target = waterSpot();
+      }
     }
   }
 
@@ -341,20 +383,41 @@ export class Duck {
       this.mode = "swim";
       here.y = SWIM_Y;
       this.group.rotation.x = 0;
+      this.settleWings();
       this.target = waterSpot();
+      parkAudio.waterPlop(0.55);
+      parkAudio.wingFlap(0.35);
     }
   }
 
   /** Pattering across the surface to get up, then away over the trees. */
   private clearOff(delta: number): void {
     const here = this.group.position;
-    this.height += delta * 4.5;
+
+    // First beat: hammer the surface, tip the nose up, then leave the water.
+    if (this.height < 0.55) {
+      this.height += delta * 1.35;
+      const surge = FLY_SPEED * (0.55 + this.height);
+      here.x += Math.sin(this.heading) * surge * delta;
+      here.z += Math.cos(this.heading) * surge * delta;
+      here.y = SWIM_Y + this.height * 0.35;
+      const tip = -0.08 - this.height * 0.55;
+      this.group.rotation.set(tip, this.heading, Math.sin(this.flap) * 0.12);
+      this.beat(delta, 32, 1.45);
+      this.paddle += delta * 28;
+      this.body.rotation.x = Math.sin(this.paddle) * 0.12;
+      return;
+    }
+
+    this.height += delta * 5.2;
     here.y = SWIM_Y + this.height;
     here.x += Math.sin(this.heading) * FLY_SPEED * delta;
     here.z += Math.cos(this.heading) * FLY_SPEED * delta;
-    // Nose up while they're climbing away.
-    this.group.rotation.set(-0.12, this.heading, 0);
-    this.beat(delta, 24, 1.2);
+    // Nose up while climbing away, easing level as they gain height.
+    const climb = Math.min(1, (this.height - 0.55) / 6);
+    this.group.rotation.set(-0.35 + climb * 0.28, this.heading, 0);
+    this.body.rotation.x = 0;
+    this.beat(delta, 26 - climb * 6, 1.25 - climb * 0.2);
 
     if (this.height > FLY_HEIGHT) this.done = true;
   }
@@ -366,13 +429,13 @@ export class Duck {
     const gap = to.length();
 
     if (gap < 1) {
-      // Somewhere new, or a bit of dabbling, or a doze in the sun.
+      // Somewhere new, or tip-up dabbling for weed, or a doze in the sun.
       const roll = Math.random();
-      if (roll < 0.48) {
+      if (roll < 0.72) {
         this.mode = "dabble";
         this.dabbleFor = 2.8 + Math.random() * 3.5;
         this.hold = this.dabbleFor;
-      } else if (roll < 0.6) {
+      } else if (roll < 0.82) {
         this.mode = "doze";
         this.hold = 6 + Math.random() * 10;
       } else {
@@ -393,6 +456,9 @@ export class Duck {
     this.paddle += delta * 7;
     here.y = SWIM_Y + Math.sin(this.paddle) * 0.012;
     this.group.rotation.set(0, this.heading, Math.sin(this.paddle * 0.5) * 0.05);
+    // Surface nibble while paddling — head dips even with no bread about.
+    const nibble = (Math.sin(this.paddle * 1.25) * 0.5 + 0.5) ** 1.6;
+    this.head.rotation.set(0.05 + nibble * 1.15, 0, 0);
     this.settleWings();
   }
 
@@ -451,13 +517,17 @@ export class Duck {
     tip = tip * tip * (3 - 2 * tip);
 
     // Nearly vertical — front half gone, rear sticking up.
-    const peck = Math.sin(this.hold * 5.5) * 0.1;
-    const pitch = tip * (1.25 + peck);
-    this.group.rotation.set(pitch, this.heading, tip * Math.sin(this.hold * 2) * 0.06);
+    const peck = Math.sin(this.hold * 5.5) * 0.12;
+    const pitch = tip * (1.35 + peck);
+    this.group.rotation.set(
+      pitch,
+      this.heading,
+      tip * Math.sin(this.hold * 2) * 0.08,
+    );
     // Sink with the tip so the waterline cuts across the middle of the body.
-    this.group.position.y = SWIM_Y - tip * 0.12;
+    this.group.position.y = SWIM_Y - tip * 0.16;
     // Neck reaches further into the weed than the body alone would.
-    this.head.rotation.set(tip * 0.55, 0, 0);
+    this.head.rotation.set(tip * 0.7, 0, 0);
     this.settleWings();
 
     if (this.hold <= 0) {
@@ -469,8 +539,7 @@ export class Duck {
 
   /** Back upright after a dabble or a fright. */
   private rightItself(): void {
-    this.group.rotation.x = 0;
-    this.group.rotation.z = 0;
+    this.group.rotation.set(0, this.heading, 0);
     this.group.position.y = SWIM_Y;
     this.head.rotation.set(0, 0, 0);
   }
@@ -491,17 +560,29 @@ export class Duck {
 
   private settleWings(): void {
     for (let i = 0; i < this.wings.length; i++) {
-      this.wings[i]!.rotation.z = 0;
-      this.wings[i]!.rotation.x = 0;
+      this.wings[i]!.rotation.set(0, 0, 0);
+      this.spans[i]!.visible = false;
+      this.patches[i]!.visible = false;
     }
     this.body.rotation.z = 0;
   }
 
   private beat(delta: number, rate: number, depth: number): void {
     this.flap += delta * rate;
-    const stroke = Math.sin(this.flap) * depth;
-    this.wings[0]!.rotation.z = stroke;
-    this.wings[1]!.rotation.z = -stroke;
+    const stroke = Math.sin(this.flap);
+    // Hold them out from the body, then hammer up and down.
+    const open = 0.85 + Math.abs(stroke) * 0.55 * depth;
+    const sweep = stroke * depth * 0.95;
+
+    for (let i = 0; i < this.wings.length; i++) {
+      const side = i === 0 ? -1 : 1;
+      this.spans[i]!.visible = true;
+      this.patches[i]!.visible = true;
+      // +Z on the left wing lifts the span; opposite on the right.
+      this.wings[i]!.rotation.z = side * -open + sweep * side * -0.15;
+      this.wings[i]!.rotation.x = -0.12 + Math.abs(stroke) * 0.2 * depth;
+    }
+    this.body.rotation.z = stroke * 0.04 * depth;
   }
 
   private shortestTurn(to: number): number {

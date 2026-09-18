@@ -32,6 +32,52 @@ export interface SkyState {
   sunPosition: THREE.Vector3;
 }
 
+/** Lighting / sky for a fractional hour (0–24), same curve as the live shift. */
+export function skyStateAt(hour: number): SkyState {
+  const h = ((hour % 24) + 24) % 24;
+  let before = KEYFRAMES[KEYFRAMES.length - 1]!;
+  let after = KEYFRAMES[0]!;
+  for (let i = 0; i < KEYFRAMES.length; i++) {
+    const frame = KEYFRAMES[i]!;
+    if (frame.hour <= h) {
+      before = frame;
+      after = KEYFRAMES[i + 1] ?? KEYFRAMES[0]!;
+    }
+  }
+  // Wrapping past midnight means the later keyframe is a day ahead.
+  const span = (after.hour - before.hour + 24) % 24 || 24;
+  const t = THREE.MathUtils.clamp(((h - before.hour + 24) % 24) / span, 0, 1);
+
+  // The sun tracks east to west across the day and sits below the horizon at night.
+  const dayProgress = (h - 6) / 12;
+  const arc = dayProgress * Math.PI;
+  // Kept well above the horizon even at dawn, or the flat ground goes black.
+  const sunPosition = new THREE.Vector3(
+    Math.cos(Math.PI - arc) * 150,
+    Math.max(60, Math.sin(arc) * 150),
+    50,
+  );
+
+  return {
+    sky: new THREE.Color(before.sky).lerp(new THREE.Color(after.sky), t),
+    ambient: THREE.MathUtils.lerp(before.ambient, after.ambient, t),
+    sun: THREE.MathUtils.lerp(before.sun, after.sun, t),
+    sunColor: new THREE.Color(before.sunColor).lerp(
+      new THREE.Color(after.sunColor),
+      t,
+    ),
+    sunPosition,
+  };
+}
+
+/** HH:MM for a fractional hour. */
+export function clockFaceAt(hour: number): string {
+  const h = ((hour % 24) + 24) % 24;
+  const hh = Math.floor(h);
+  const mm = Math.floor((h - hh) * 60);
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
 /** Tracks the time of shift and hands out the lighting that goes with it. */
 export class DayCycle {
   private minutes = START_HOUR * 60;
@@ -51,11 +97,16 @@ export class DayCycle {
     return this.minutes / 60;
   }
 
+  /** Jump the shift clock (editor / debug). */
+  public setHour(hour: number): void {
+    const h = ((hour % 24) + 24) % 24;
+    this.minutes = h * 60;
+    this.render();
+  }
+
   /** The time as it reads on the clock, for anything else that needs it. */
   public clockFace(): string {
-    const h = Math.floor(this.minutes / 60);
-    const m = Math.floor(this.minutes % 60);
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    return clockFaceAt(this.hour);
   }
 
   private render(): void {
@@ -63,39 +114,6 @@ export class DayCycle {
   }
 
   public skyState(): SkyState {
-    const h = this.hour;
-    let before = KEYFRAMES[KEYFRAMES.length - 1]!;
-    let after = KEYFRAMES[0]!;
-    for (let i = 0; i < KEYFRAMES.length; i++) {
-      const frame = KEYFRAMES[i]!;
-      if (frame.hour <= h) {
-        before = frame;
-        after = KEYFRAMES[i + 1] ?? KEYFRAMES[0]!;
-      }
-    }
-    // Wrapping past midnight means the later keyframe is a day ahead.
-    const span = (after.hour - before.hour + 24) % 24 || 24;
-    const t = THREE.MathUtils.clamp(((h - before.hour + 24) % 24) / span, 0, 1);
-
-    // The sun tracks east to west across the day and sits below the horizon at night.
-    const dayProgress = (h - 6) / 12;
-    const arc = dayProgress * Math.PI;
-    // Kept well above the horizon even at dawn, or the flat ground goes black.
-    const sunPosition = new THREE.Vector3(
-      Math.cos(Math.PI - arc) * 150,
-      Math.max(60, Math.sin(arc) * 150),
-      50,
-    );
-
-    return {
-      sky: new THREE.Color(before.sky).lerp(new THREE.Color(after.sky), t),
-      ambient: THREE.MathUtils.lerp(before.ambient, after.ambient, t),
-      sun: THREE.MathUtils.lerp(before.sun, after.sun, t),
-      sunColor: new THREE.Color(before.sunColor).lerp(
-        new THREE.Color(after.sunColor),
-        t,
-      ),
-      sunPosition,
-    };
+    return skyStateAt(this.hour);
   }
 }

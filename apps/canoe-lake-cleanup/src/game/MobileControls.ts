@@ -1,3 +1,5 @@
+import { parkAudio } from "./audio/ParkAudio";
+
 /** Phone-sized, short landscape, or a coarse pointer on a modest screen. */
 export const MOBILE_QUERY =
   "(max-width: 900px), (max-height: 600px) and (orientation: landscape), (pointer: coarse) and (max-width: 1200px)";
@@ -102,6 +104,7 @@ export class MobileControls {
       (e) => {
         e.preventDefault();
         e.stopPropagation();
+        void parkAudio.unlock();
         const t = e.changedTouches[0];
         onStart(t.identifier, t.clientX, t.clientY);
       },

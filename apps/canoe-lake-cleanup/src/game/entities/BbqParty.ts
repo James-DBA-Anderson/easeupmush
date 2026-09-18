@@ -1,8 +1,18 @@
 import * as THREE from "three";
-import { distanceToShore, isInLake, PATH_OUTER } from "../world/lake";
-import { insidePark } from "../world/fence";
+import {
+  PATH_OUTER,
+  SHORE,
+  distanceToShore,
+  isInLake,
+} from "../world/lake";
+import { insidePark, parkGates } from "../world/fence";
+import { getCarParkOutline } from "../world/buildings";
+import { getPlayPark } from "../world/park";
+import { stepWalk } from "../world/blocking";
+import { groundHeight } from "../world/terrain";
 import { Face } from "./Face";
 import { Grumble } from "../effects/Grumble";
+import { PATH_Y } from "../world/lake";
 
 const COATS = [0x2f4f7f, 0x8b3a3a, 0x3f6b4a, 0x5a4a7a, 0x2b2b33, 0xb06a2c, 0xd8c8a0];
 const TROUSERS = [0x2b3038, 0x4a4a52, 0x6b5a44, 0x3a5a6a];
@@ -30,19 +40,85 @@ const DOUSED = [
   "LOOK WHAT YOU'VE DONE!",
 ];
 
-/** Grass south of the lake, between the path and the esplanade scrub. */
-export const BBQ_SPOTS: ReadonlyArray<THREE.Vector2> = (() => {
+/** True if (x,z) sits on the play-park wood chips. */
+function inPlayPark(x: number, z: number): boolean {
+  const play = getPlayPark();
+  if (!play || play.outline.length < 3) return false;
+  return pointInRing(play.outline, x, z);
+}
+
+function inCarPark(x: number, z: number): boolean {
+  const car = getCarParkOutline();
+  if (!car || car.length < 3) return false;
+  return pointInRing(car, x, z);
+}
+
+function pointInRing(
+  ring: ReadonlyArray<{ x: number; z: number }>,
+  x: number,
+  z: number,
+): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i]!;
+    const b = ring[j]!;
+    const straddles = a.z > z !== b.z > z;
+    if (straddles && x < ((b.x - a.x) * (z - a.z)) / (b.z - a.z) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * Open grass on the big east lawn — east of the lake path, south of the play
+ * park. Built from the live shore / fence / play outline so editor levels stay
+ * correct. Shared by BBQs, picnics and gazebos.
+ */
+export function lawnGatherSpots(): THREE.Vector2[] {
+  let lakeEast = -Infinity;
+  for (const p of SHORE) lakeEast = Math.max(lakeEast, p.x);
+
+  const play = getPlayPark();
+  let playSouth = 18;
+  let playEast = lakeEast + PATH_OUTER + 80;
+  if (play && play.outline.length >= 3) {
+    playSouth = Infinity;
+    playEast = -Infinity;
+    for (const p of play.outline) {
+      playSouth = Math.min(playSouth, p.z);
+      playEast = Math.max(playEast, p.x);
+    }
+  }
+
   const candidates: THREE.Vector2[] = [];
-  for (let x = -90; x <= 120; x += 18) {
-    for (let z = -95; z >= -108; z -= 5) {
-      if (isInLake(x, z)) continue;
+  const x0 = lakeEast + PATH_OUTER + 5;
+  const x1 = Math.max(playEast + 28, lakeEast + PATH_OUTER + 105);
+  // Just south of the play chips, stretching toward the sea — not the thin
+  // fringe hard against the promenade wall.
+  const z1 = playSouth - 6;
+  const z0 = z1 - 78;
+
+  for (let x = x0; x <= x1; x += 6) {
+    for (let z = z0; z <= z1; z += 6) {
       if (!insidePark(x, z)) continue;
+      if (isInLake(x, z)) continue;
       if (distanceToShore(x, z) < PATH_OUTER + 5) continue;
+      if (inPlayPark(x, z)) continue;
+      if (inCarPark(x, z)) continue;
+      // Keep a soft margin inside the fence.
+      if (!insidePark(x + 4, z) || !insidePark(x - 4, z)) continue;
+      if (!insidePark(x, z + 4) || !insidePark(x, z - 4)) continue;
       candidates.push(new THREE.Vector2(x, z));
     }
   }
   return candidates;
-})();
+}
+
+/** @deprecated Use {@link lawnGatherSpots}. */
+export function bbqSpots(): THREE.Vector2[] {
+  return lawnGatherSpots();
+}
 
 type Phase = "arriving" | "cooking" | "leaving";
 
@@ -69,9 +145,8 @@ interface SmokePuff {
 }
 
 /**
- * A disposable barbecue on the green south of the park — a few people walk in
- * off the promenade, stand round a kettle grill with a bit of smoke, then
- * pack up and wander off again.
+ * A disposable barbecue on the east lawn — a few people walk in from a nearby
+ * gate, stand round a kettle grill with a bit of smoke, then pack up again.
  */
 export class BbqParty {
   private scene: THREE.Scene;
@@ -96,21 +171,20 @@ export class BbqParty {
 
   constructor(scene: THREE.Scene, at: THREE.Vector2) {
     this.scene = scene;
-    this.spot = new THREE.Vector3(at.x, 0, at.y);
+    const gy = PATH_Y + groundHeight(at.x, at.y);
+    this.spot = new THREE.Vector3(at.x, gy, at.y);
     this.packUp = 200 + Math.random() * 220;
 
     this.root.position.copy(this.spot);
     this.buildGrill();
     this.root.add(this.grill);
-    // Kit arrives with the first person — hide until someone's at the stand.
-    this.grill.visible = false;
+    // Grill's already set up on the grass — folk just walk over to it.
+    this.grill.visible = true;
     scene.add(this.root);
 
     const party = 2 + Math.floor(Math.random() * 3);
-    const southGate =
-      Math.random() < 0.5
-        ? new THREE.Vector3(-50 + (Math.random() - 0.5) * 10, 0, -108)
-        : new THREE.Vector3(50 + (Math.random() - 0.5) * 10, 0, -108);
+    const approach = this.pickApproach();
+    const exit = this.pickGate();
 
     for (let i = 0; i < party; i++) {
       const ang = (i / party) * Math.PI * 2 + Math.random() * 0.4;
@@ -120,26 +194,60 @@ export class BbqParty {
         0,
         this.spot.z + Math.sin(ang) * rad,
       );
-      const start = southGate
+      const start = approach
         .clone()
         .add(
           new THREE.Vector3(
-            (Math.random() - 0.5) * 6,
+            (Math.random() - 0.5) * 5,
             0,
-            -4 - Math.random() * 6,
+            (Math.random() - 0.5) * 5,
           ),
         );
-      const exit = southGate
+      const leave = exit
         .clone()
         .add(
           new THREE.Vector3(
             (Math.random() - 0.5) * 10,
             0,
-            -8 - Math.random() * 8,
+            (Math.random() - 0.5) * 10,
           ),
         );
-      this.guests.push(this.buildGuest(start, stand, exit, i === 0));
+      this.guests.push(this.buildGuest(start, stand, leave, i === 0));
     }
+  }
+
+  /** Walk in from nearby path / lawn, not a distant park gate. */
+  private pickApproach(): THREE.Vector3 {
+    const dist = 14 + Math.random() * 12;
+    // Prefer coming from the lakeside path (west) onto the east green.
+    const yaw = Math.PI * 0.92 + (Math.random() - 0.5) * 0.7;
+    return new THREE.Vector3(
+      this.spot.x + Math.sin(yaw) * dist,
+      0,
+      this.spot.z + Math.cos(yaw) * dist,
+    );
+  }
+
+  /** Nearest park gate, preferring ones south / east of the grill. */
+  private pickGate(): THREE.Vector3 {
+    const gates = parkGates();
+    if (gates.length === 0) {
+      return new THREE.Vector3(this.spot.x + 20, 0, this.spot.z - 30);
+    }
+    let best = gates[0]!;
+    let bestScore = Infinity;
+    for (const g of gates) {
+      const dx = g.x - this.spot.x;
+      const dz = g.y - this.spot.z;
+      // Prefer closer gates that sit a bit south or further east.
+      const score =
+        Math.hypot(dx, dz) + (g.y > this.spot.z ? 18 : 0) + (g.x < this.spot.x ? 8 : 0);
+      if (score < bestScore) {
+        bestScore = score;
+        best = g;
+      }
+    }
+    return new THREE.Vector3(best.x, 0, best.y);
   }
 
   public getPosition(): THREE.Vector3 {
@@ -229,8 +337,8 @@ export class BbqParty {
       if (guest.phase === "arriving") {
         if (this.amble(guest, guest.stand, delta, 1.45) < 0.35) {
           guest.phase = "cooking";
-          guest.group.position.copy(guest.stand);
-          guest.group.position.y = 0;
+          guest.group.position.x = guest.stand.x;
+          guest.group.position.z = guest.stand.z;
           this.faceGrill(guest);
           this.idlePose(guest);
           this.grill.visible = true;
@@ -419,16 +527,21 @@ export class BbqParty {
     for (const side of [-1, 1] as const) {
       const leg = new THREE.Group();
       leg.position.set(side * 0.11, 0.92, 0);
-      const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.46, 0.14), legMat);
-      thigh.geometry.translate(0, -0.23, 0);
+      const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.4, 0.14), legMat);
+      thigh.geometry.translate(0, -0.2, 0);
       thigh.castShadow = true;
       leg.add(thigh);
+      const shin = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.38, 0.13), legMat);
+      shin.geometry.translate(0, -0.19, 0);
+      shin.position.y = -0.4;
+      shin.castShadow = true;
+      leg.add(shin);
       const shoe = new THREE.Mesh(
         new THREE.BoxGeometry(0.12, 0.06, 0.2),
         new THREE.MeshStandardMaterial({ color: 0x2a2420, roughness: 1 }),
       );
-      shoe.position.set(0, -0.48, 0.03);
-      leg.add(shoe);
+      shoe.position.set(0, -0.4, 0.03);
+      shin.add(shoe);
       group.add(leg);
       legs.push(leg);
 
@@ -466,8 +579,16 @@ export class BbqParty {
     const gap = Math.hypot(to.x - here.x, to.z - here.z);
     if (gap < 0.05) return 0;
     const step = Math.min(gap, speed * delta);
-    here.x += ((to.x - here.x) / gap) * step;
-    here.z += ((to.z - here.z) / gap) * step;
+    const landed = stepWalk(
+      here.x,
+      here.z,
+      ((to.x - here.x) / gap) * step,
+      ((to.z - here.z) / gap) * step,
+      0.4,
+      { x: here.x, z: here.z },
+    );
+    here.x = landed.x;
+    here.z = landed.z;
     guest.group.rotation.y = Math.atan2(to.x - here.x, to.z - here.z);
     guest.step += delta * speed * 4.5;
     const swing = Math.sin(guest.step) * 0.55;
@@ -475,7 +596,8 @@ export class BbqParty {
     guest.legs[1]!.rotation.x = -swing;
     guest.arms[0]!.rotation.x = -swing * 0.7;
     guest.arms[1]!.rotation.x = swing * 0.7;
-    guest.group.position.y = Math.abs(Math.sin(guest.step)) * 0.04;
+    guest.group.position.y =
+      this.footY(here.x, here.z) + Math.abs(Math.sin(guest.step)) * 0.04;
     guest.face.setMood("idle");
     return gap - step;
   }
@@ -494,7 +616,7 @@ export class BbqParty {
     guest.arms[1]!.rotation.x = 0.15;
     guest.arms[0]!.rotation.z = 0;
     guest.arms[1]!.rotation.z = 0;
-    guest.group.position.y = 0;
+    this.plantFeet(guest);
   }
 
   private cookPose(guest: Guest, delta: number): void {
@@ -503,6 +625,7 @@ export class BbqParty {
     guest.legs[1]!.rotation.x = -0.06;
     guest.arms[0]!.rotation.z = 0;
     guest.arms[1]!.rotation.z = 0;
+    this.plantFeet(guest);
     if (guest.cook) {
       // Tong arm hovering over the grate.
       guest.arms[1]!.rotation.x = 0.9 + Math.sin(guest.step * 1.4) * 0.15;
@@ -530,7 +653,20 @@ export class BbqParty {
     guest.arms[0]!.rotation.z = 0.35;
     guest.arms[1]!.rotation.z = -0.2;
     guest.face.setMood("angry");
-    guest.group.position.y = Math.abs(Math.sin(guest.step * 2)) * 0.03;
+    guest.group.position.y =
+      this.footY(guest.group.position.x, guest.group.position.z) +
+      Math.abs(Math.sin(guest.step * 2)) * 0.03;
+  }
+
+  private plantFeet(guest: Guest): void {
+    guest.group.position.y = this.footY(
+      guest.group.position.x,
+      guest.group.position.z,
+    );
+  }
+
+  private footY(x: number, z: number): number {
+    return PATH_Y + groundHeight(x, z);
   }
 
   private pulseCoals(delta: number): void {
@@ -570,28 +706,28 @@ export class BbqParty {
 
   private emitSmoke(delta: number): void {
     this.smokeAcc += delta;
-    while (this.smokeAcc >= 0.22) {
-      this.smokeAcc -= 0.22;
-      if (this.smoke.length > 18) break;
+    while (this.smokeAcc >= 0.12) {
+      this.smokeAcc -= 0.12;
+      if (this.smoke.length > 28) break;
 
       const mat = new THREE.MeshBasicMaterial({
-        color: 0xb8b0a4,
+        color: 0xa8a098,
         transparent: true,
-        opacity: 0.35,
+        opacity: 0.42,
         depthWrite: false,
       });
-      const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 5), mat);
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.14, 6, 5), mat);
       mesh.position.set(
-        this.spot.x + (Math.random() - 0.5) * 0.25,
-        0.7,
-        this.spot.z + (Math.random() - 0.5) * 0.25,
+        this.spot.x + (Math.random() - 0.5) * 0.3,
+        0.72,
+        this.spot.z + (Math.random() - 0.5) * 0.3,
       );
       this.scene.add(mesh);
       this.smoke.push({
         mesh,
-        life: 1.8 + Math.random() * 1.4,
-        rise: 0.55 + Math.random() * 0.35,
-        drift: (Math.random() - 0.5) * 0.35,
+        life: 3.2 + Math.random() * 2.2,
+        rise: 0.85 + Math.random() * 0.55,
+        drift: (Math.random() - 0.5) * 0.45,
         steam: false,
       });
     }
@@ -603,13 +739,17 @@ export class BbqParty {
       puff.life -= delta;
       puff.mesh.position.y += puff.rise * delta;
       puff.mesh.position.x += puff.drift * delta;
-      const age = puff.steam ? 1.4 : 1.8;
-      const grow = 1 + (age - Math.max(0, puff.life)) * (puff.steam ? 1.1 : 0.6);
+      puff.mesh.position.z += puff.drift * 0.35 * delta;
+      // Soften and widen as it climbs.
+      puff.rise *= 1 - delta * 0.08;
+      const age = puff.steam ? 1.4 : 3.6;
+      const spent = age - Math.max(0, puff.life);
+      const grow = 1 + spent * (puff.steam ? 1.1 : 0.85);
       puff.mesh.scale.setScalar(grow);
       const mat = puff.mesh.material as THREE.MeshBasicMaterial;
       mat.opacity = Math.max(
         0,
-        puff.life * (puff.steam ? 0.35 : 0.18),
+        Math.min(0.5, puff.life * (puff.steam ? 0.35 : 0.12)),
       );
       if (puff.life > 0) continue;
       this.scene.remove(puff.mesh);

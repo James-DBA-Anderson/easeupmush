@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { PATH_LOOP, loopPoint } from '../world/lake';
+import { isBlocked } from '../world/blocking';
 import { Grumble } from '../effects/Grumble';
+import { TumbleBody } from '../effects/TumbleBody';
 import { TYRE_SEGMENT, type Tread } from './Footprint';
 
 const JERSEYS = [0xd8452f, 0x2f6fd8, 0x1f1f26, 0xe0b83c, 0x3f9f5f];
@@ -18,6 +20,14 @@ const SPLAT_LINES = [
   "OH, LOVELY",
   "ARGH!",
   "I'VE COPPED THAT",
+];
+const EJECT_LINES = [
+  "ARGH!",
+  "I'M OFF!",
+  "WHOA!",
+  "MY BIKE!",
+  "YOU WHAT?!",
+  "OI — MY FACE!",
 ];
 
 /** The lads on the e-bikes don't ring, and they don't slow down either. */
@@ -42,11 +52,14 @@ const SMEAR_LENGTH = 9;
 
 export type RiderKind = 'cyclist' | 'ebike';
 
+type Phase = 'riding' | 'crashed';
+
 /** A rider cutting through the park along the lakeside path. */
 export class Cyclist {
   public readonly kind: RiderKind;
   private scene: THREE.Scene;
   private group: THREE.Group;
+  private rider!: THREE.Group;
   private index: number;
   private direction: 1 | -1;
   private cruise: number;
@@ -70,6 +83,17 @@ export class Cyclist {
   private smear = 0;
   private laidAt: THREE.Vector3 | null = null;
   private trackAt: Tread | null = null;
+
+  private phase: Phase = 'riding';
+  private tumble: TumbleBody | null = null;
+  /** Riderless bike still rolling before it tips. */
+  private coastLeft = 0;
+  private tipped = false;
+  private tipSign = 1;
+  private tipAmount = 0;
+  private linger = 0;
+  private riderOffered = false;
+  private pendingPed: { at: THREE.Vector3; lout: boolean } | null = null;
 
   constructor(scene: THREE.Scene, index: number, kind: RiderKind = 'cyclist') {
     this.scene = scene;
@@ -127,41 +151,6 @@ export class Cyclist {
     bars.position.set(0, 0.95, 0.42);
     group.add(bars);
 
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.5, 0.28), jersey);
-    // Hunched over the bars rather than sat bolt upright.
-    torso.position.set(0, 1.06, -0.06);
-    torso.rotation.x = 0.5;
-    torso.castShadow = true;
-    group.add(torso);
-
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), skin);
-    head.position.set(0, 1.32, 0.2);
-    head.castShadow = true;
-    group.add(head);
-
-    // A helmet on the cyclist; a hood up on the lad, and no helmet in sight.
-    const hat = new THREE.Mesh(
-      new THREE.SphereGeometry(lout ? 0.19 : 0.16, 10, 6, 0, Math.PI * 2, 0, 1.4),
-      jersey,
-    );
-    hat.position.set(0, lout ? 1.32 : 1.34, lout ? 0.16 : 0.2);
-    group.add(hat);
-
-    for (const side of [-1, 1]) {
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.44, 0.1), jersey);
-      arm.geometry.translate(0, -0.22, 0);
-      arm.position.set(side * 0.17, 1.16, 0.1);
-      arm.rotation.x = 0.85;
-      group.add(arm);
-
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.5, 0.13), metal);
-      leg.geometry.translate(0, -0.25, 0);
-      leg.position.set(side * 0.11, 0.82, -0.1);
-      leg.castShadow = true;
-      group.add(leg);
-      this.legs.push(leg);
-    }
-
     if (lout) {
       // Battery slung in the frame, and a phone playing something out loud.
       const battery = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.3, 0.5), metal);
@@ -176,6 +165,45 @@ export class Cyclist {
       group.add(phone);
     }
 
+    // Rider is a separate group so the hose can knock them clean off.
+    this.rider = new THREE.Group();
+
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.5, 0.28), jersey);
+    // Hunched over the bars rather than sat bolt upright.
+    torso.position.set(0, 1.06, -0.06);
+    torso.rotation.x = 0.5;
+    torso.castShadow = true;
+    this.rider.add(torso);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), skin);
+    head.position.set(0, 1.32, 0.2);
+    head.castShadow = true;
+    this.rider.add(head);
+
+    // A helmet on the cyclist; a hood up on the lad, and no helmet in sight.
+    const hat = new THREE.Mesh(
+      new THREE.SphereGeometry(lout ? 0.19 : 0.16, 10, 6, 0, Math.PI * 2, 0, 1.4),
+      jersey,
+    );
+    hat.position.set(0, lout ? 1.32 : 1.34, lout ? 0.16 : 0.2);
+    this.rider.add(hat);
+
+    for (const side of [-1, 1]) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.44, 0.1), jersey);
+      arm.geometry.translate(0, -0.22, 0);
+      arm.position.set(side * 0.17, 1.16, 0.1);
+      arm.rotation.x = 0.85;
+      this.rider.add(arm);
+
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.5, 0.13), metal);
+      leg.geometry.translate(0, -0.25, 0);
+      leg.position.set(side * 0.11, 0.82, -0.1);
+      leg.castShadow = true;
+      this.rider.add(leg);
+      this.legs.push(leg);
+    }
+
+    group.add(this.rider);
     return group;
   }
 
@@ -194,7 +222,79 @@ export class Cyclist {
 
   /** Ridden their route and due to be taken off the map. */
   public isGone(): boolean {
+    if (this.phase === 'crashed') {
+      // Keep the wreck until the rider's been handed off and the bike's tipped.
+      return this.riderOffered && this.tipped && this.linger <= 0;
+    }
     return this.ticketLeft <= 0;
+  }
+
+  /** Hose dump in progress — tidy the empty bike away once linger ends. */
+  public hasCrashed(): boolean {
+    return this.phase === 'crashed';
+  }
+
+  /**
+   * Once they've finished tumbling, hand the Game a spot to spawn an angry
+   * pedestrian who gets up and comes for you.
+   */
+  public claimAngryPedestrian(): { at: THREE.Vector3; lout: boolean } | null {
+    const next = this.pendingPed;
+    this.pendingPed = null;
+    return next;
+  }
+
+  /** Did a droplet catch the rider or the bike? */
+  public soakedBy(point: THREE.Vector3): boolean {
+    if (this.phase !== 'riding') return false;
+    const here = this.group.position;
+    const dx = point.x - here.x;
+    const dz = point.z - here.z;
+    if (dx * dx + dz * dz > 0.85 * 0.85) return false;
+    return point.y > here.y - 0.05 && point.y < here.y + 1.6;
+  }
+
+  /**
+   * Hose knocks them clean off. The bike carries on riderless until it tips.
+   * Returns true the first time they come off.
+   */
+  public drench(from?: THREE.Vector3): boolean {
+    if (this.phase !== 'riding') return false;
+    this.eject(from);
+    return true;
+  }
+
+  private eject(from?: THREE.Vector3): void {
+    this.phase = 'crashed';
+    this.coastLeft = 1.6 + Math.random() * 2.2;
+    this.tipSign = Math.random() < 0.5 ? 1 : -1;
+    this.tipped = false;
+    this.tipAmount = 0;
+    // Linger is for the empty bike / scooter wreck, not the rider.
+    this.linger = 7 + Math.random() * 3;
+    this.riderOffered = false;
+    this.pendingPed = null;
+
+    const forward = new THREE.Vector3(
+      Math.sin(this.heading),
+      0,
+      Math.cos(this.heading),
+    );
+    const world = new THREE.Vector3();
+    this.rider.getWorldPosition(world);
+    const yaw = this.heading;
+    this.group.remove(this.rider);
+    this.scene.add(this.rider);
+    this.rider.position.copy(world);
+    this.rider.rotation.set(0.5, yaw, this.lean);
+
+    const away = new THREE.Vector3();
+    if (from) away.subVectors(world, from).setY(0);
+    if (away.lengthSq() < 0.01) away.copy(forward).negate();
+
+    this.tumble = new TumbleBody(this.rider, 0.58);
+    this.tumble.kick(forward, away, this.speed);
+    this.ring(EJECT_LINES);
   }
 
   /**
@@ -208,6 +308,11 @@ export class Cyclist {
   ): number {
     this.grumble = this.grumble?.update(delta, this.group.position) === false ? null : this.grumble;
     if (this.bellCooldown > 0) this.bellCooldown -= delta;
+
+    if (this.phase === 'crashed') {
+      this.updateCrash(delta);
+      return -1;
+    }
 
     const lout = this.kind === 'ebike';
     const blocked = this.somethingInTheWay(ahead);
@@ -227,6 +332,51 @@ export class Cyclist {
     this.layLine();
 
     return this.checkTyres(mess);
+  }
+
+  private updateCrash(delta: number): void {
+    this.tumble?.update(delta);
+
+    // Once they're lying still, swap the ragdoll for a proper pedestrian.
+    if (!this.riderOffered && this.tumble?.isSettled(1.0)) {
+      this.riderOffered = true;
+      const at = this.rider.position.clone();
+      at.y = 0;
+      this.pendingPed = { at, lout: this.kind === 'ebike' };
+      this.scene.remove(this.rider);
+      this.tumble = null;
+    }
+
+    // Burn wreck linger once the bike is down; rider is already a pedestrian.
+    if (this.tipped) this.linger -= delta;
+
+    if (this.tipped) {
+      this.tipAmount = Math.min(Math.PI / 2, this.tipAmount + delta * 2.8);
+      this.group.rotation.set(0, this.heading, this.tipSign * this.tipAmount);
+      this.group.position.y = Math.sin(this.tipAmount) * 0.22;
+      for (const wheel of this.wheels) wheel.rotation.x -= delta * 2;
+      return;
+    }
+
+    // Riderless bike keeps rolling, then tips when it hits something or coasts out.
+    this.coastLeft -= delta;
+    this.speed = Math.max(0, this.speed * Math.max(0, 1 - 0.55 * delta));
+    const spacing = PATH_LOOP[0]!.distanceTo(PATH_LOOP[1]!) || 1;
+    const steps = (this.speed * delta) / spacing;
+    this.index += this.direction * steps;
+    this.place();
+    this.group.rotation.set(0, this.heading, this.lean * 0.4);
+    for (const wheel of this.wheels) wheel.rotation.x -= delta * this.speed * 3;
+
+    const nose = new THREE.Vector3(
+      this.group.position.x + Math.sin(this.heading) * 1.1,
+      0,
+      this.group.position.z + Math.cos(this.heading) * 1.1,
+    );
+    if (this.coastLeft <= 0 || this.speed < 0.8 || isBlocked(nose.x, nose.z, 0.45)) {
+      this.tipped = true;
+      this.speed = 0;
+    }
   }
 
   /** Anything within a narrow cone out front, which is worth braking for. */
@@ -334,6 +484,8 @@ export class Cyclist {
 
   public dispose(): void {
     this.grumble?.dispose();
+    if (this.rider.parent === this.scene) this.scene.remove(this.rider);
+    this.pendingPed = null;
     this.scene.remove(this.group);
   }
 }

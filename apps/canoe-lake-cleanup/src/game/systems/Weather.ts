@@ -180,9 +180,10 @@ export class Weather {
 
   private roll(): void {
     const at = ORDER.indexOf(this.next);
+    // One step along the British ladder — no leaping from cloudy into drizzle
+    // (that left rain hanging under a still-bright sky).
     const step = Math.random() < 0.5 ? -1 : 1;
-    const drift = Math.random() < 0.3 ? step * 2 : step;
-    const target = THREE.MathUtils.clamp(at + drift, 0, ORDER.length - 1);
+    const target = THREE.MathUtils.clamp(at + step, 0, ORDER.length - 1);
     this.kind = this.next;
     this.next = ORDER[target]!;
     this.blend = 0;
@@ -206,17 +207,28 @@ export class Weather {
   }
 
   /**
-   * Seafront always has a breeze; it picks up under cloud and really leans in
-   * when it's chucking it down. Direction stays roughly off the Solent.
+   * Breeze off the Solent — stronger under cloud and rain, often almost still
+   * on a clear spell. Gusts and lulls so the park isn't locked on one speed.
    */
   private stepWind(delta: number): void {
     this.windAge += delta;
-    const storm = 1 + this.mix("gloom") * 0.7 + this.mix("rain") * 0.9;
-    const pulse = 1 + Math.sin(this.windAge * 0.11) * 0.12 + Math.sin(this.windAge * 0.37) * 0.06;
-    const speed = 3.4 * storm * pulse;
-    // ~ENE inland from a southerly — matches the salt-blasted lean on the oaks.
-    const heading = 0.32 + Math.sin(this.windAge * 0.05) * 0.08;
-    this.wind.set(Math.cos(heading) * speed, Math.sin(heading) * speed * 0.55);
+    const cover = this.mix("cover");
+    const rain = this.mix("rain");
+    const gloom = this.mix("gloom");
+    // Clear → near calm; cloudy → light breeze; wet → proper blow.
+    const base = 0.15 + cover * 2.4 + rain * 3.8 + gloom * 0.8;
+    const gust =
+      0.45 +
+      Math.sin(this.windAge * 0.11) * 0.35 +
+      Math.sin(this.windAge * 0.37) * 0.2;
+    // Slow lulls that can drop a clear day to still water.
+    const lull = 0.2 + 0.8 * (0.5 + 0.5 * Math.sin(this.windAge * 0.055));
+    const speed = Math.max(0, base * gust * lull);
+    // Southerly off the Solent: air moves inland (+Z) with a touch of east (+X).
+    // Vector2.y is world Z in updateTrees / rain.
+    const heading =
+      Math.PI / 2 - 0.28 + Math.sin(this.windAge * 0.05) * 0.08;
+    this.wind.set(Math.cos(heading) * speed, Math.sin(heading) * speed);
   }
 
   /** Current breeze — same vector rain and cloud ride. */
@@ -226,12 +238,24 @@ export class Weather {
 
   /** True once there's enough rain about to make you squint. */
   public isWet(): boolean {
-    return this.mix('rain') > 0.15;
+    return this.rainAmount() > 0.15;
   }
 
   /** 0 dry, 1 chucking it down — used to rinse mess off the paving. */
   public rainStrength(): number {
-    return this.mix('rain');
+    return this.rainAmount();
+  }
+
+  /**
+   * Rain only once the ceiling is in — stops drizzle showing under a blue or
+   * lightly cloudy sky while weather is blending.
+   */
+  private rainAmount(): number {
+    const rain = this.mix("rain");
+    if (rain < 0.01) return 0;
+    const cover = this.mix("cover");
+    const ceiling = THREE.MathUtils.smoothstep(cover, 0.78, 0.98);
+    return rain * ceiling;
   }
 
   /** How much the lights should be knocked back for the current weather. */
@@ -273,7 +297,7 @@ export class Weather {
   }
 
   private stepRain(delta: number): void {
-    const intensity = this.mix("rain");
+    const intensity = this.rainAmount();
     const material = this.rain.material as THREE.LineBasicMaterial;
     material.opacity = intensity * 0.6;
     this.rain.visible = intensity > 0.01;

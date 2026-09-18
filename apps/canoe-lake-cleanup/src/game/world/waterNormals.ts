@@ -45,6 +45,8 @@ export function waterNormalsTexture(): THREE.CanvasTexture {
   ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  // Normals must stay linear — sRGB would flatten the ripples and wash the surface out.
+  tex.colorSpace = THREE.NoColorSpace;
   tex.needsUpdate = true;
   return tex;
 }

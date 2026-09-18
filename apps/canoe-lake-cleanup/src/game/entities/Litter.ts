@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { clearOfLakeRim } from "../world/lake";
 
 export type LitterKind =
   | "can"
@@ -6,7 +7,8 @@ export type LitterKind =
   | "crisps"
   | "paper"
   | "cup"
-  | "chips";
+  | "chips"
+  | "cone";
 
 const KINDS: readonly LitterKind[] = [
   "can",
@@ -25,6 +27,7 @@ const BLOWS: Record<LitterKind, number> = {
   paper: 0.8,
   cup: 0.4,
   chips: 0.5,
+  cone: 0.35,
 };
 
 /** How long it takes to whip a piece onto the spike and into the sack. */
@@ -47,7 +50,8 @@ export class Litter {
     this.kind = kind ?? KINDS[Math.floor(Math.random() * KINDS.length)]!;
 
     this.group = this.build();
-    this.group.position.set(at.x, 0, at.z);
+    const safe = clearOfLakeRim(at.x, at.z);
+    this.group.position.set(safe.x, 0, safe.y);
     this.group.rotation.y = Math.random() * Math.PI * 2;
     scene.add(this.group);
   }
@@ -175,6 +179,38 @@ export class Litter {
         }
         break;
       }
+      case "cone": {
+        // Dropped 99 — wafer on its side, scoop melting into the paving.
+        const wafer = new THREE.Mesh(
+          new THREE.ConeGeometry(0.04, 0.13, 6),
+          matt(0xc9a06a),
+        );
+        wafer.rotation.z = Math.PI / 2 + 0.35;
+        wafer.position.set(0.02, 0.03, 0);
+        group.add(wafer);
+
+        const scoop = new THREE.Mesh(
+          new THREE.SphereGeometry(0.05, 8, 6),
+          matt(Math.random() < 0.5 ? 0xf2e6d8 : 0xe8a0b0),
+        );
+        scoop.position.set(-0.05, 0.035, 0.02);
+        scoop.scale.set(1.1, 0.55, 1.1);
+        group.add(scoop);
+
+        const puddle = new THREE.Mesh(
+          new THREE.CircleGeometry(0.09, 10),
+          new THREE.MeshStandardMaterial({
+            color: 0xf0e4d4,
+            roughness: 0.55,
+            transparent: true,
+            opacity: 0.75,
+          }),
+        );
+        puddle.rotation.x = -Math.PI / 2;
+        puddle.position.y = 0.008;
+        group.add(puddle);
+        break;
+      }
     }
 
     for (const part of group.children) part.castShadow = true;
@@ -187,7 +223,12 @@ export class Litter {
 
   /** Whether there's anything in it a gull would come down for. */
   public isFood(): boolean {
-    return this.kind === "chips" || this.kind === "crisps" || this.kind === "cup";
+    return (
+      this.kind === "chips" ||
+      this.kind === "crisps" ||
+      this.kind === "cup" ||
+      this.kind === "cone"
+    );
   }
 
   public isGone(): boolean {

@@ -31,6 +31,9 @@ export class Face {
   private glance = 0;
   private glanceFor = 1 + Math.random() * 2;
   private look = 0;
+  /** Brown smears from walking into a pile (or filthy spray). */
+  private smears: THREE.Mesh[] = [];
+  private filth = 0;
 
   constructor(skin: THREE.MeshStandardMaterial, scale = 1) {
     const pick = <T>(list: readonly T[]): T =>
@@ -134,6 +137,81 @@ export class Face {
     this.group.add(this.mouth);
 
     this.group.scale.setScalar(scale);
+  }
+
+  public isFilthy(): boolean {
+    return this.filth > 0.05;
+  }
+
+  /** Dab muck on the cheeks / chin / forehead where the pile touched. */
+  public soil(amount = 0.55): void {
+    this.filth = Math.min(1, this.filth + amount);
+    const want = 2 + Math.floor(this.filth * 4);
+    while (this.smears.length < want) this.addSmear();
+    this.tintSmears();
+  }
+
+  /** Rubbing it off — fades stains; returns true while any remain. */
+  public wipe(amount: number): boolean {
+    this.filth = Math.max(0, this.filth - amount);
+    this.tintSmears();
+    if (this.filth > 0.04) return true;
+    this.clearSmears();
+    return false;
+  }
+
+  private addSmear(): void {
+    const spots = [
+      { x: -0.08, y: 0.02, z: 0.13, sx: 1.4, sy: 0.9 },
+      { x: 0.08, y: 0.0, z: 0.13, sx: 1.2, sy: 1.1 },
+      { x: 0.0, y: -0.06, z: 0.14, sx: 1.6, sy: 0.7 },
+      { x: -0.04, y: 0.08, z: 0.12, sx: 1.1, sy: 0.8 },
+      { x: 0.05, y: 0.06, z: 0.12, sx: 1.0, sy: 0.85 },
+      { x: 0.0, y: 0.1, z: 0.1, sx: 1.3, sy: 0.6 },
+    ] as const;
+    const spot = spots[this.smears.length % spots.length]!;
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.028, 6, 4),
+      new THREE.MeshStandardMaterial({
+        color: 0x5a4a32,
+        roughness: 1,
+        flatShading: true,
+        transparent: true,
+        opacity: 0.92,
+      }),
+    );
+    mesh.position.set(
+      spot.x + (Math.random() - 0.5) * 0.03,
+      spot.y + (Math.random() - 0.5) * 0.02,
+      spot.z,
+    );
+    mesh.scale.set(
+      spot.sx * (0.7 + Math.random() * 0.5),
+      0.25,
+      spot.sy * (0.7 + Math.random() * 0.5),
+    );
+    mesh.rotation.y = Math.random() * Math.PI;
+    this.group.add(mesh);
+    this.smears.push(mesh);
+  }
+
+  private tintSmears(): void {
+    for (const mesh of this.smears) {
+      const mat = mesh.material as THREE.MeshStandardMaterial;
+      mat.opacity = 0.35 + this.filth * 0.6;
+      mat.transparent = true;
+      mesh.visible = this.filth > 0.04;
+    }
+  }
+
+  private clearSmears(): void {
+    for (const mesh of this.smears) {
+      this.group.remove(mesh);
+      mesh.geometry.dispose();
+      (mesh.material as THREE.Material).dispose();
+    }
+    this.smears = [];
+    this.filth = 0;
   }
 
   public setMood(mood: Mood): void {

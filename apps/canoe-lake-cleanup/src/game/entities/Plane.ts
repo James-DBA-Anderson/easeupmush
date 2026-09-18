@@ -2,17 +2,22 @@ import * as THREE from "three";
 
 /**
  * Airliners going over Southsea on their way in and out of Gatwick and
- * Heathrow: too high to hear over the gulls, but there most of the day if
- * you look up. Occasionally something lower and slower off Solent way, and
- * now and then the Spitfire, in from the east along the seafront and away
- * over the Island.
+ * Heathrow: a distant rumble if you listen for it. Occasionally something
+ * lower and slower off Solent way, and now and then the Spitfire, in from
+ * the east along the seafront and away over the Island — that one you hear.
+ *
+ * Heights sit under the camera far plane and above the cloud deck. Ground fog
+ * is switched off on the meshes (same trick as the clouds) so a sunny sky
+ * still shows the airframe at the head of the trail.
  */
 
 export type PlaneKind = "jet" | "light" | "spitfire";
 
+let nextPlaneId = 1;
+
 /** Cruising height, and how far out either side they come from. */
-const CRUISE_Y = 1100;
-const LOW_Y = 520;
+const CRUISE_Y = 420;
+const LOW_Y = 280;
 const FIGHTER_Y = 85;
 const CROSSING = 1400;
 
@@ -28,31 +33,45 @@ const ISLAND_WAY = new THREE.Vector2(-0.93, -0.37).normalize();
 const TRAIL_LIFE = 20;
 const TRAIL_EVERY = 0.28;
 
+/** Sky props skip ground fog so they stay readable past the park haze. */
+const SKY_FOG = false;
+
 const METAL = new THREE.MeshStandardMaterial({
-  color: 0xdfe3e8,
-  roughness: 0.4,
-  metalness: 0.35,
+  color: 0xc5cbd2,
+  roughness: 0.45,
+  metalness: 0.3,
+  fog: SKY_FOG,
 });
 const TAIL_PAINT = new THREE.MeshStandardMaterial({
-  color: 0xc4ccd4,
+  color: 0xa8b0b8,
   roughness: 0.6,
+  fog: SKY_FOG,
 });
 
 /** Dark Earth and Dark Green over Sky, which is how they're still painted. */
 const CAMO_GREEN = new THREE.MeshStandardMaterial({
   color: 0x4a5a37,
   roughness: 0.85,
+  fog: SKY_FOG,
 });
 const CAMO_EARTH = new THREE.MeshStandardMaterial({
   color: 0x6b5334,
   roughness: 0.85,
+  fog: SKY_FOG,
 });
 const UNDERSIDE = new THREE.MeshStandardMaterial({
   color: 0xb9c6ab,
   roughness: 0.8,
+  fog: SKY_FOG,
 });
-const ROUNDEL_BLUE = new THREE.MeshBasicMaterial({ color: 0x1f3f8f });
-const ROUNDEL_RED = new THREE.MeshBasicMaterial({ color: 0xc0392b });
+const ROUNDEL_BLUE = new THREE.MeshBasicMaterial({
+  color: 0x1f3f8f,
+  fog: SKY_FOG,
+});
+const ROUNDEL_RED = new THREE.MeshBasicMaterial({
+  color: 0xc0392b,
+  fog: SKY_FOG,
+});
 
 type Puff = { mesh: THREE.Mesh; material: THREE.MeshBasicMaterial; left: number };
 
@@ -66,11 +85,14 @@ export class Plane {
   private speed: number;
   private travelled = 0;
   private since = 0;
+  public readonly id = nextPlaneId++;
   public readonly kind: PlaneKind;
   /** High jets leave a trail; the low stuff doesn't. */
   private readonly high: boolean;
   /** The Spitfire's propeller, which is a blur rather than blades. */
   private prop: THREE.Mesh | null = null;
+  /** Soft silhouette so the airframe still reads against a bright noon sky. */
+  private silhouette: THREE.Mesh | null = null;
 
   constructor(scene: THREE.Scene, sky: number, kind?: PlaneKind) {
     this.scene = scene;
@@ -88,6 +110,7 @@ export class Plane {
       transparent: true,
       opacity: 0.42 * (1 - sky),
       depthWrite: false,
+      fog: SKY_FOG,
     });
 
     this.group = new THREE.Group();
@@ -117,7 +140,7 @@ export class Plane {
     this.group.rotation.y = this.heading + Math.PI;
     // Big enough to read as an aeroplane from three hundred metres down.
     this.group.scale.setScalar(
-      this.kind === "jet" ? 3.4 : this.kind === "light" ? 1.6 : 1.5,
+      this.kind === "jet" ? 5.2 : this.kind === "light" ? 2.2 : 1.5,
     );
     scene.add(this.group);
   }
@@ -158,6 +181,25 @@ export class Plane {
       engine.position.set(side * 2.6, -0.35, 0.2);
       this.group.add(engine);
     }
+
+    // Dark planform under the wings — what you actually pick out looking up.
+    if (this.high) {
+      this.silhouette = new THREE.Mesh(
+        new THREE.PlaneGeometry(10.5, 3.2),
+        new THREE.MeshBasicMaterial({
+          color: 0x3a4048,
+          transparent: true,
+          opacity: 0.55,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          fog: SKY_FOG,
+        }),
+      );
+      this.silhouette.rotation.x = Math.PI / 2;
+      this.silhouette.position.y = -0.45;
+      this.silhouette.renderOrder = 2;
+      this.group.add(this.silhouette);
+    }
   }
 
   /**
@@ -196,6 +238,7 @@ export class Plane {
         opacity: 0.16,
         side: THREE.DoubleSide,
         depthWrite: false,
+        fog: SKY_FOG,
       }),
     );
     this.prop.position.z = -3.5;
@@ -207,6 +250,7 @@ export class Plane {
         color: 0x9fb4c4,
         roughness: 0.25,
         metalness: 0.2,
+        fog: SKY_FOG,
       }),
     );
     canopy.scale.set(0.8, 0.7, 1.5);
@@ -256,6 +300,11 @@ export class Plane {
 
   public getPosition(): THREE.Vector3 {
     return this.group.position.clone();
+  }
+
+  /** Still on the crossing — used to drive flyover audio. */
+  public isInFlight(): boolean {
+    return this.travelled <= CROSSING;
   }
 
   public isGone(): boolean {
@@ -341,5 +390,9 @@ export class Plane {
     for (const puff of this.trail) this.scene.remove(puff.mesh);
     this.trail = [];
     this.material.dispose();
+    if (this.silhouette) {
+      (this.silhouette.material as THREE.Material).dispose();
+      this.silhouette = null;
+    }
   }
 }

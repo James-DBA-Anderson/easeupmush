@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { WATER_Y, isInLake, nearestShore, outwardAt } from "../world/lake";
+import { parkAudio } from "../audio/ParkAudio";
 import { Grumble } from "../effects/Grumble";
 
 const HULLS = [0xd8452f, 0x2f6fd8, 0xe8e4dc, 0xe0b83c];
@@ -63,6 +64,7 @@ export class RcBoat {
   private lastNark = 0;
   private narkedAt = 0;
   private complaintDue = false;
+  private hitReady = false;
 
   constructor(scene: THREE.Scene, at: THREE.Vector2) {
     this.scene = scene;
@@ -313,7 +315,7 @@ export class RcBoat {
     this.packUp = Math.min(this.packUp, 2.5);
   }
 
-  public update(delta: number): void {
+  public update(delta: number, chase: THREE.Vector3 | null = null): void {
     this.grumble =
       this.grumble?.update(delta, this.kid.position) === false
         ? null
@@ -337,7 +339,6 @@ export class RcBoat {
     if (this.sunk) {
       this.sinkTimer += delta;
       this.poseBoat(0);
-      // A few bubbles while she slips under, then the kid packs it in.
       if (this.sinkTimer > 0.35 && Math.random() < delta * 6) this.bubble();
       if (this.sinkTimer > 2.8) {
         this.boat.visible = false;
@@ -353,10 +354,16 @@ export class RcBoat {
       return;
     }
 
-    this.donutWait -= delta;
-    if (this.donutWait <= 0 && this.donut <= 0) {
-      this.donut = 2 + Math.random() * 2.5;
-      this.donutWait = 8 + Math.random() * 16;
+    // When the cleaner's in the drink, ram them — otherwise potter about.
+    if (chase && isInLake(chase.x, chase.z)) {
+      this.target.set(chase.x, chase.z);
+      this.donut = 0;
+    } else {
+      this.donutWait -= delta;
+      if (this.donutWait <= 0 && this.donut <= 0) {
+        this.donut = 2 + Math.random() * 2.5;
+        this.donutWait = 8 + Math.random() * 16;
+      }
     }
 
     const to = new THREE.Vector2(
@@ -365,26 +372,30 @@ export class RcBoat {
     );
     let wanted = Math.atan2(to.x, to.y);
 
-    if (this.donut > 0) {
-      // Hard over on the stick, so it just carves circles for a few seconds.
+    if (this.donut > 0 && !(chase && isInLake(chase.x, chase.z))) {
       this.donut -= delta;
       wanted = this.heading + 1.4;
-    } else if (to.length() < 2.5) {
+    } else if (to.length() < 2.5 && !(chase && isInLake(chase.x, chase.z))) {
       this.pickTarget();
     }
 
-    // Turn towards where it's pointed, at a rate a little boat could manage.
     let turn = wanted - this.heading;
     while (turn > Math.PI) turn -= Math.PI * 2;
     while (turn < -Math.PI) turn += Math.PI * 2;
-    this.heading += THREE.MathUtils.clamp(turn, -2.6 * delta, 2.6 * delta);
+    const turnRate = chase && isInLake(chase.x, chase.z) ? 3.4 : 2.6;
+    this.heading += THREE.MathUtils.clamp(
+      turn,
+      -turnRate * delta,
+      turnRate * delta,
+    );
 
-    // Slows in the turns, and more so once she's shipping water.
     const tight = Math.min(1, Math.abs(turn));
     const laden = 1 - this.bilge * 0.72;
-    this.speed +=
-      (CRUISE * (1 - tight * 0.45) * laden - this.speed) *
-      Math.min(1, 2 * delta);
+    const wantSpeed =
+      chase && isInLake(chase.x, chase.z)
+        ? CRUISE * 1.15 * laden
+        : CRUISE * (1 - tight * 0.45) * laden;
+    this.speed += (wantSpeed - this.speed) * Math.min(1, 2 * delta);
 
     const step = new THREE.Vector3(
       Math.sin(this.heading) * this.speed * delta,
@@ -395,10 +406,19 @@ export class RcBoat {
     if (isInLake(next.x, next.z)) {
       this.position.copy(next);
     } else {
-      // Bounced off the wall, so spin it round and pick somewhere else.
       this.heading += Math.PI * (0.6 + Math.random() * 0.8);
       this.speed *= 0.3;
-      this.pickTarget();
+      if (!(chase && isInLake(chase.x, chase.z))) this.pickTarget();
+    }
+
+    // Ram the cleaner if close enough.
+    if (chase && isInLake(chase.x, chase.z) && !this.sunk) {
+      const gap = Math.hypot(chase.x - this.position.x, chase.z - this.position.z);
+      if (gap < 1.35 && this.speed > 0.8) {
+        this.hitReady = true;
+        this.heading += (Math.random() - 0.5) * 0.8;
+        this.speed *= 0.55;
+      }
     }
 
     this.bob += delta * (7 - this.bilge * 3);
@@ -411,6 +431,13 @@ export class RcBoat {
     }
 
     this.watch(delta);
+  }
+
+  /** Boat just clipped the cleaner — once. */
+  public claimHit(): boolean {
+    if (!this.hitReady) return false;
+    this.hitReady = false;
+    return true;
   }
 
   private poseBoat(turn: number): void {
@@ -475,6 +502,7 @@ export class RcBoat {
   }
 
   private wake(): void {
+    parkAudio.boatWash(0.25 + Math.min(0.5, this.speed * 0.12));
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(0.12, 0.22, 12),
       new THREE.MeshBasicMaterial({

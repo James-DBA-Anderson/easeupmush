@@ -1,8 +1,63 @@
 import * as THREE from 'three';
+import { addProp, type Footprint } from './collision';
+import { groundHeight } from './terrain';
 
 const LENGTH = 1.9;
-const SEAT_H = 0.45;
+export const BENCH_SEAT_H = 0.45;
+const SEAT_H = BENCH_SEAT_H;
 const DEPTH = 0.52;
+
+/** A park bench someone can claim for sitting. */
+export interface BenchSeat {
+  x: number;
+  z: number;
+  yaw: number;
+}
+
+/** Path / lawn benches available to daytime sitters (not play-park strips). */
+let sitterBenches: BenchSeat[] = [];
+
+export function clearSitterBenches(): void {
+  sitterBenches = [];
+}
+
+export function sitterBenchSeats(): readonly BenchSeat[] {
+  return sitterBenches;
+}
+
+/**
+ * Oriented solid for a bench. Shifted slightly toward the back so the front
+ * of the seat stays clear enough to sit on.
+ */
+export function benchFootprint(x: number, z: number, yaw: number): Footprint {
+  const back = 0.1;
+  const fx = Math.sin(yaw);
+  const fz = Math.cos(yaw);
+  return {
+    x: x - fx * back,
+    z: z - fz * back,
+    halfWide: LENGTH * 0.5,
+    halfDeep: DEPTH * 0.4,
+    yaw,
+  };
+}
+
+/** Mesh plus walk-blocker for a placed bench. */
+export function placeBench(
+  scene: THREE.Scene,
+  x: number,
+  z: number,
+  yaw: number,
+  opts?: { sitters?: boolean },
+): THREE.Group {
+  const bench = buildBench();
+  bench.position.set(x, groundHeight(x, z), z);
+  bench.rotation.y = yaw;
+  scene.add(bench);
+  addProp(benchFootprint(x, z, yaw));
+  if (opts?.sitters) sitterBenches.push({ x, z, yaw });
+  return bench;
+}
 
 const IRON = new THREE.MeshStandardMaterial({ color: 0x1f3a30, roughness: 0.55, metalness: 0.5 });
 const TIMBER = new THREE.MeshStandardMaterial({ color: 0x8a5a32, roughness: 0.85 });

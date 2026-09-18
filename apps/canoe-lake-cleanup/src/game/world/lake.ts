@@ -4,6 +4,13 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { waterNormalsTexture } from './waterNormals';
 import { DEFAULT_LEVEL } from '../../level/defaultLevel';
 import type { XZ } from '../../level/types';
+import { groundHeight } from './terrain';
+import {
+  ROAD_WIDTH,
+  distanceToNearestRoad,
+  freeSpansAlong,
+  roadGapsAlong,
+} from './buildings';
 
 /**
  * Canoe Lake: bean / teardrop, SW tip by the Emmanuel Memorial, NE bulb toward
@@ -15,10 +22,12 @@ function computeShore(outline: ReadonlyArray<XZ>): THREE.Vector2[] {
   const curve = new THREE.CatmullRomCurve3(
     outline.map(([x, z]) => new THREE.Vector3(x, 0, z)),
     true,
-    'catmullrom',
+    "catmullrom",
     0.5,
   );
-  return curve.getSpacedPoints(180).map((p) => new THREE.Vector2(p.x, p.z));
+  // Dense enough that offset rings stay smooth on editor curves (~0.65m).
+  const count = Math.max(280, Math.min(800, Math.round(curve.getLength() / 0.65)));
+  return curve.getSpacedPoints(count).map((p) => new THREE.Vector2(p.x, p.z));
 }
 
 /** Smoothed shoreline — rebuilt when a level is applied. */
@@ -66,7 +75,7 @@ export function nearestShore(x: number, z: number): THREE.Vector2 {
 function computeShoreNormals(
   shore: ReadonlyArray<THREE.Vector2>,
 ): THREE.Vector2[] {
-  return shore.map((point, i) => {
+  const raw = shore.map((point, i) => {
     const n = shore.length;
     const before = shore[(i - 1 + n) % n]!;
     const after = shore[(i + 1) % n]!;
@@ -76,6 +85,26 @@ function computeShoreNormals(
     // isInLake reads current SHORE — caller must assign SHORE first.
     if (isInLake(probe.x, probe.y)) normal.negate();
     return normal;
+  });
+
+  // Blend neighbours so offset ribbons don't tear on tight bends.
+  let cur = raw;
+  for (let pass = 0; pass < 2; pass++) {
+    cur = cur.map((n, i) => {
+      const a = cur[(i - 1 + cur.length) % cur.length]!;
+      const b = cur[(i + 1) % cur.length]!;
+      const blended = n.clone().add(a).add(b);
+      if (blended.lengthSq() < 1e-8) return n.clone();
+      return blended.normalize();
+    });
+  }
+
+  // Keep outward after smoothing.
+  return cur.map((n, i) => {
+    const point = shore[i]!;
+    const probe = point.clone().addScaledVector(n, 1.5);
+    if (isInLake(probe.x, probe.y)) n.negate();
+    return n;
   });
 }
 
@@ -99,11 +128,83 @@ export function distanceToShore(x: number, z: number): number {
   return nearestShore(x, z).distanceTo(new THREE.Vector2(x, z));
 }
 
+/**
+ * How much a spot sits in the north-west feeding corner (0–1). Bird food and
+ * most of the mess cluster here — west bank toward the parade.
+ */
+export function northwestScore(x: number, z: number): number {
+  const cx = -48;
+  const cz = 42;
+  const dx = (x - cx) / 48;
+  const dz = (z - cz) / 42;
+  return THREE.MathUtils.clamp(1.05 - Math.hypot(dx, dz), 0, 1);
+}
+
+/** Weighted pick of a path-loop index toward the NW corner. */
+export function pickNorthwestPathIndex(): number {
+  const n = PATH_LOOP.length;
+  if (n === 0) return 0;
+  let total = 0;
+  const weights = new Array<number>(n);
+  for (let i = 0; i < n; i++) {
+    const p = PATH_LOOP[i]!;
+    const w = 0.08 + northwestScore(p.x, p.y) ** 2 * 3.2;
+    weights[i] = w;
+    total += w;
+  }
+  let pick = Math.random() * total;
+  for (let i = 0; i < n; i++) {
+    pick -= weights[i]!;
+    if (pick <= 0) return i;
+  }
+  return n - 1;
+}
+
+/**
+ * How far out from the waterline mess must sit so it isn't buried under the
+ * coping. Matches KERB_OUT (0.55) plus splat half-width (~0.55) with a bit extra.
+ */
+export const RIM_CLEAR = 1.3;
+
+/**
+ * Nudge a ground mark off the lake and clear of the kerbstones so it stays
+ * visible on the paving / grass.
+ */
+export function clearOfLakeRim(
+  x: number,
+  z: number,
+  clearance = RIM_CLEAR,
+): THREE.Vector2 {
+  const shore = nearestShore(x, z);
+  const out = outwardAt(shore);
+  if (isInLake(x, z) || distanceToShore(x, z) < clearance) {
+    return new THREE.Vector2(
+      shore.x + out.x * clearance,
+      shore.y + out.y * clearance,
+    );
+  }
+  return new THREE.Vector2(x, z);
+}
+
 /** Shoreline pushed out (or in, for a negative distance) along the outward normal. */
 export function offsetShore(distance: number): THREE.Vector2[] {
+  const abs = Math.abs(distance);
   return SHORE.map((p, i) => {
+    const n = SHORE.length;
     const out = SHORE_NORMALS[i]!;
-    return new THREE.Vector2(p.x + out.x * distance, p.y + out.y * distance);
+    // Soft miter limit: when the local bend is sharp, don't let the offset
+    // spike farther than ~2× the requested width (stops ribbon tears).
+    const before = SHORE[(i - 1 + n) % n]!;
+    const after = SHORE[(i + 1) % n]!;
+    const d0 = new THREE.Vector2().subVectors(p, before).normalize();
+    const d1 = new THREE.Vector2().subVectors(after, p).normalize();
+    const turn = THREE.MathUtils.clamp(d0.dot(d1), -1, 1);
+    const miterScale = turn < 0.2 ? 0.85 + 0.15 * Math.max(0, turn + 1) : 1;
+    const dist = distance * miterScale;
+    // Also clamp absolute offset on hairpin bends.
+    const limited =
+      Math.sign(dist) * Math.min(Math.abs(dist), abs * (turn < -0.3 ? 0.75 : 1));
+    return new THREE.Vector2(p.x + out.x * limited, p.y + out.y * limited);
   });
 }
 
@@ -166,7 +267,20 @@ function flatMesh(shape: THREE.Shape, material: THREE.Material, y: number): THRE
 /** Paving sits at ground level; the water sits 20cm down inside its wall. */
 export const PATH_Y = 0.02;
 export const WATER_Y = PATH_Y - 0.2;
-const BED_Y = WATER_Y - 0.9;
+/** Flat lake bed under the reflective surface — chest-deep for a wading adult. */
+export const LAKE_BED_Y = WATER_Y - 0.9;
+const BED_Y = LAKE_BED_Y;
+
+/**
+ * Boot height when standing in the lake. Ramps from the kerb down to the bed
+ * over the first couple of metres so stepping in isn't a cliff.
+ */
+export function wadeFootY(x: number, z: number): number {
+  if (!isInLake(x, z)) return PATH_Y;
+  const t = THREE.MathUtils.clamp(distanceToShore(x, z) / 2, 0, 1);
+  const ease = t * t * (3 - 2 * t);
+  return THREE.MathUtils.lerp(PATH_Y - 0.08, BED_Y, ease);
+}
 
 /**
  * The coping: a run of pale kerbstones capping the lake wall all the way
@@ -231,14 +345,18 @@ function ribbonGeometry(
     const b = outer[j]!;
     const c = inner[j]!;
     const d = inner[i]!;
+    const ya = groundHeight(a.x, a.y);
+    const yb = groundHeight(b.x, b.y);
+    const yc = groundHeight(c.x, c.y);
+    const yd = groundHeight(d.x, d.y);
     positions.push(
-      a.x, 0, a.y,
-      d.x, 0, d.y,
-      c.x, 0, c.y,
+      a.x, ya, a.y,
+      d.x, yd, d.y,
+      c.x, yc, c.y,
 
-      a.x, 0, a.y,
-      c.x, 0, c.y,
-      b.x, 0, b.y,
+      a.x, ya, a.y,
+      c.x, yc, c.y,
+      b.x, yb, b.y,
     );
   }
   const geometry = new THREE.BufferGeometry();
@@ -266,13 +384,19 @@ function pointInRing(
 }
 
 /**
- * Fill a lake ring without ShapeGeometry/earcut — that leaves holes on the
- * concave bean. A rim of quads seals the edge; a grid fills the middle.
+ * Fill a lake ring as one triangulated polygon. Onion rims + a coarse grid
+ * used to z-fight under the Water mirror and read as a broken surface.
  */
 function lakeFillGeometry(edge: ReadonlyArray<THREE.Vector2>): THREE.BufferGeometry {
-  // A few metres in — wide enough that the rim covers earcut's usual failure
-  // band, narrow enough the tip still has a core after the offset.
-  const core = offsetShore(-(KERB_IN + 4));
+  // Dense edge → ShapeGeometry/earcut. Fall back to a rim + fine interior grid
+  // only if earcut leaves nothing usable.
+  const shape = shapeFrom(edge);
+  const shaped = shapeGeometryXZ(shape, 3);
+  if (shaped.getAttribute("position") && shaped.getAttribute("position")!.count >= 9) {
+    return shaped;
+  }
+
+  const core = offsetShore(-(KERB_IN + 1.5));
   const rim = ribbonGeometry(edge, core);
 
   let minX = Infinity;
@@ -286,7 +410,7 @@ function lakeFillGeometry(edge: ReadonlyArray<THREE.Vector2>): THREE.BufferGeome
     maxZ = Math.max(maxZ, p.y);
   }
 
-  const step = 1.4;
+  const step = 0.45;
   const positions: number[] = [];
   const inside = (x: number, z: number) => pointInRing(x, z, core);
 
@@ -294,8 +418,6 @@ function lakeFillGeometry(edge: ReadonlyArray<THREE.Vector2>): THREE.BufferGeome
     for (let z = minZ; z < maxZ; z += step) {
       const x1 = x + step;
       const z1 = z + step;
-      // Keep a triangle when its centroid is in the water — covers the core
-      // without the holes earcut leaves near reflex corners. Winding faces +Y.
       if (inside((x + 2 * x1) / 3, (2 * z + z1) / 3)) {
         positions.push(x, 0, z, x1, 0, z1, x1, 0, z);
       }
@@ -313,6 +435,61 @@ function lakeFillGeometry(edge: ReadonlyArray<THREE.Vector2>): THREE.BufferGeome
   coreGeom.computeVertexNormals();
 
   return mergeGeometries([rim, coreGeom], false) ?? rim;
+}
+
+/**
+ * Three's Water mirror treats local +Z as the surface normal (PlaneGeometry +
+ * rotation.x = −π/2). Our lake fill is already in XZ — remap to XY with
+ * Y = −Z so that rotation lands on the real shoreline without flipping it.
+ */
+function waterMirrorGeometry(xzFill: THREE.BufferGeometry): THREE.BufferGeometry {
+  const geo = xzFill.clone();
+  const pos = geo.attributes.position!;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    pos.setXYZ(i, x, -z, 0);
+  }
+  pos.needsUpdate = true;
+
+  const index = geo.index;
+  if (index) {
+    for (let i = 0; i < index.count; i += 3) {
+      const a = index.getX(i + 1);
+      const b = index.getX(i + 2);
+      index.setX(i + 1, b);
+      index.setX(i + 2, a);
+    }
+    index.needsUpdate = true;
+  } else {
+    // Non-indexed grid fallback — swap every second and third vertex.
+    const next = new Float32Array(pos.array.length);
+    for (let i = 0; i < pos.count; i += 3) {
+      const ax = pos.getX(i);
+      const ay = pos.getY(i);
+      const az = pos.getZ(i);
+      const bx = pos.getX(i + 1);
+      const by = pos.getY(i + 1);
+      const bz = pos.getZ(i + 1);
+      const cx = pos.getX(i + 2);
+      const cy = pos.getY(i + 2);
+      const cz = pos.getZ(i + 2);
+      const o = i * 3;
+      next[o] = ax;
+      next[o + 1] = ay;
+      next[o + 2] = az;
+      next[o + 3] = cx;
+      next[o + 4] = cy;
+      next[o + 5] = cz;
+      next[o + 6] = bx;
+      next[o + 7] = by;
+      next[o + 8] = bz;
+    }
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(next, 3));
+  }
+
+  geo.computeVertexNormals();
+  return geo;
 }
 
 /** A flat ring of ground between two rings of points, at one height. */
@@ -405,10 +582,10 @@ function buildMargin(scene: THREE.Scene): void {
       offsetShore(-1.2),
       WATER_Y + 0.006,
       new THREE.MeshStandardMaterial({
-        color: 0x3f7a76,
+        color: 0x2f5a4e,
         roughness: 1,
         transparent: true,
-        opacity: 0.35,
+        opacity: 0.4,
       }),
     ),
   );
@@ -439,7 +616,12 @@ export function buildGround(scene: THREE.Scene, size: number): THREE.Mesh {
 
 /** Keeps the reflective surface in step with the sun. */
 export interface LakeSurface {
-  update(delta: number, sunDirection: THREE.Vector3, sunColor: THREE.Color): void;
+  update(
+    delta: number,
+    sunDirection: THREE.Vector3,
+    sunColor: THREE.Color,
+    wind: THREE.Vector2,
+  ): void;
 }
 
 /** Water surface, its retaining wall and the bed beneath. */
@@ -454,34 +636,62 @@ export function buildLake(scene: THREE.Scene): LakeSurface {
 
   const bed = new THREE.Mesh(
     fill.clone(),
-    new THREE.MeshStandardMaterial({ color: 0x3d4a3c, roughness: 1 }),
+    new THREE.MeshStandardMaterial({ color: 0x2f3d30, roughness: 1 }),
   );
   bed.position.y = BED_Y;
   bed.receiveShadow = true;
   scene.add(bed);
 
-  const water = new Water(fill, {
+  // Solid body of the lake — always readable even if the mirror pass is thin.
+  const body = new THREE.Mesh(
+    fill.clone(),
+    new THREE.MeshStandardMaterial({
+      color: 0x243f38,
+      roughness: 0.28,
+      metalness: 0.08,
+      transparent: true,
+      opacity: 0.92,
+      depthWrite: true,
+    }),
+  );
+  body.position.y = WATER_Y - 0.015;
+  body.receiveShadow = true;
+  scene.add(body);
+
+  // Water.js mirrors across local +Z — use XY geometry + −90° X so that axis
+  // is world up. (Plain XZ fill leaves the mirror vertical and reflects the
+  // far bank onto the near one.)
+  const water = new Water(waterMirrorGeometry(fill), {
     textureWidth: 512,
     textureHeight: 512,
     waterNormals: waterNormalsTexture(),
     sunDirection: new THREE.Vector3(0.4, 0.8, 0.2).normalize(),
     sunColor: 0xffffff,
-    waterColor: 0x4a8f9c,
-    distortionScale: 2.8,
+    // Darker, greener pond water — less swimming-pool teal.
+    waterColor: 0x2a5348,
+    distortionScale: 0.35,
     fog: true,
-    alpha: 0.95,
+    alpha: 1,
   });
-  // The Water shader expects size as a uniform; smaller = finer lake ripples.
-  (water.material as THREE.ShaderMaterial).uniforms["size"]!.value = 2.4;
+  // World-space ripple scale — a bit coarser reads cleaner on a large lake.
+  const waterMat = water.material as THREE.ShaderMaterial;
+  waterMat.uniforms["size"]!.value = 1.15;
+  waterMat.transparent = false;
+  waterMat.depthWrite = true;
+  water.rotation.x = -Math.PI / 2;
   water.position.y = WATER_Y;
   scene.add(water);
 
   buildMargin(scene);
 
   return {
-    update(delta, sunDirection, sunColor) {
-      const uniforms = (water.material as THREE.ShaderMaterial).uniforms;
-      uniforms["time"]!.value += delta;
+    update(delta, sunDirection, sunColor, wind) {
+      const uniforms = waterMat.uniforms;
+      const mag = Math.hypot(wind.x, wind.y);
+      // Still when the air is calm; ripples only pick up with a proper breeze.
+      const breeze = THREE.MathUtils.smoothstep(mag, 0.6, 4.2);
+      uniforms["time"]!.value += delta * (0.15 + breeze * 0.85);
+      uniforms["distortionScale"]!.value = 0.22 + breeze * 1.2;
       uniforms["sunDirection"]!.value.copy(sunDirection).normalize();
       uniforms["sunColor"]!.value.copy(sunColor);
     },
@@ -557,6 +767,9 @@ export let PATH_SPURS: ReadonlyArray<PathSpurSeg> = computePathSpurs(
   DEFAULT_LEVEL.pathPolylines,
 );
 
+/** Author polylines — used to mesh continuous strips (not broken at bends). */
+let PATH_POLYLINES: ReadonlyArray<ReadonlyArray<XZ>> = DEFAULT_LEVEL.pathPolylines;
+
 /** Rebuild shore, path loop and spurs from level data (before the scene builds). */
 export function applyLakeLevel(
   shoreOutline: ReadonlyArray<XZ>,
@@ -565,11 +778,13 @@ export function applyLakeLevel(
   SHORE = computeShore(shoreOutline);
   SHORE_NORMALS = computeShoreNormals(SHORE);
   PATH_LOOP = offsetShore((PATH_INNER + PATH_OUTER) / 2);
+  PATH_POLYLINES = pathPolylines;
   PATH_SPURS = computePathSpurs(pathPolylines);
 }
 
-/** True if (x,z) lies on a spur corridor. */
+/** True if (x,z) lies on a spur corridor (not on parade tarmac). */
 function onSpurPaving(x: number, z: number, halfWidth: number): boolean {
+  if (distanceToNearestRoad(x, z) < ROAD_WIDTH * 0.5) return false;
   for (const spur of PATH_SPURS) {
     const abx = spur.bx - spur.ax;
     const abz = spur.bz - spur.az;
@@ -593,6 +808,11 @@ export function isOnPath(x: number, z: number): boolean {
 }
 
 /** Spur rectangles for the mini map — same layout as `buildPaths`. */
+/** Half-width of authored spur / path polylines (full strip = 4 m). */
+export const PATH_STRIP_HALF = 2;
+/** Full width of authored path polylines in metres. */
+export const PATH_STRIP_WIDTH = PATH_STRIP_HALF * 2;
+
 export interface PathSpur {
   x: number;
   z: number;
@@ -607,24 +827,201 @@ export function pathSpurs(): PathSpur[] {
     x: spur.mx,
     z: spur.mz,
     length: spur.length,
-    width: 4,
+    width: PATH_STRIP_WIDTH,
     yaw: spur.yaw,
   }));
 }
 
+/** Author path polylines in world XZ — for spawn / van placement. */
+export function pathPolylines(): ReadonlyArray<ReadonlyArray<{ x: number; z: number }>> {
+  return PATH_POLYLINES.map((line) =>
+    line.map(([x, z]) => ({ x, z })),
+  );
+}
+
+/**
+ * Continuous paved strip along an open polyline with mitered joins — avoids
+ * the triangular gaps you get from butting separate segment rectangles.
+ */
+function openPolylineStripGeometry(
+  points: ReadonlyArray<THREE.Vector2>,
+  halfWidth: number,
+): THREE.BufferGeometry | null {
+  if (points.length < 2) return null;
+  const n = points.length;
+  const left: THREE.Vector2[] = [];
+  const right: THREE.Vector2[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const curr = points[i]!;
+    let n0: THREE.Vector2;
+    let n1: THREE.Vector2;
+    if (i === 0) {
+      const dir = new THREE.Vector2().subVectors(points[1]!, curr).normalize();
+      n0 = new THREE.Vector2(-dir.y, dir.x);
+      n1 = n0;
+    } else if (i === n - 1) {
+      const dir = new THREE.Vector2()
+        .subVectors(curr, points[n - 2]!)
+        .normalize();
+      n0 = new THREE.Vector2(-dir.y, dir.x);
+      n1 = n0;
+    } else {
+      const d0 = new THREE.Vector2()
+        .subVectors(curr, points[i - 1]!)
+        .normalize();
+      const d1 = new THREE.Vector2()
+        .subVectors(points[i + 1]!, curr)
+        .normalize();
+      n0 = new THREE.Vector2(-d0.y, d0.x);
+      n1 = new THREE.Vector2(-d1.y, d1.x);
+    }
+
+    let miter = n0.clone().add(n1);
+    if (miter.lengthSq() < 1e-8) miter = n0.clone();
+    else miter.normalize();
+    // Keep strip width under the miter; clamp so hairpins don't explode.
+    const cos = Math.max(0.4, Math.abs(miter.dot(n0)));
+    miter.multiplyScalar(halfWidth / cos);
+
+    left.push(curr.clone().add(miter));
+    right.push(curr.clone().sub(miter));
+  }
+
+    const positions: number[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    const a = left[i]!;
+    const b = left[i + 1]!;
+    const c = right[i + 1]!;
+    const d = right[i]!;
+    const ya = groundHeight(a.x, a.y);
+    const yb = groundHeight(b.x, b.y);
+    const yc = groundHeight(c.x, c.y);
+    const yd = groundHeight(d.x, d.y);
+    // Winding faces +Y so the strip is visible from above.
+    positions.push(
+      a.x, ya, a.y,
+      b.x, yb, b.y,
+      c.x, yc, c.y,
+
+      a.x, ya, a.y,
+      c.x, yc, c.y,
+      d.x, yd, d.y,
+    );
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(positions, 3),
+  );
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 export function buildPaths(scene: THREE.Scene): void {
-  const paving = new THREE.MeshStandardMaterial({ color: 0xa8a294, roughness: 0.95 });
+  // Park tarmac — asphalt like the roads, but clearly lighter.
+  const paving = new THREE.MeshStandardMaterial({
+    color: 0xb4b4ba,
+    roughness: 0.92,
+  });
 
   scene.add(ribbon(offsetShore(PATH_OUTER), offsetShore(PATH_INNER), PATH_Y, paving));
 
-  for (const spur of PATH_SPURS) {
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(4, spur.length), paving);
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.rotation.z = -spur.yaw + Math.PI / 2;
-    mesh.position.set(spur.mx, PATH_Y - 0.004, spur.mz);
+  for (const piece of pathPolylinesSplitAtRoads(PATH_POLYLINES)) {
+    if (piece.length < 2) continue;
+    const pts = piece.map(([x, z]) => new THREE.Vector2(x, z));
+    const geom = openPolylineStripGeometry(pts, PATH_STRIP_HALF);
+    if (!geom) continue;
+    const mesh = new THREE.Mesh(geom, paving);
+    // Slightly above the ring so joins read cleanly over the grass.
+    mesh.position.y = PATH_Y + 0.002;
     mesh.receiveShadow = true;
     scene.add(mesh);
   }
+}
+
+/**
+ * Break authored path polylines wherever they cross a parade road so the
+ * paving leaves a clear gap for the tarmac.
+ */
+function pathPolylinesSplitAtRoads(
+  polylines: ReadonlyArray<ReadonlyArray<XZ>>,
+): XZ[][] {
+  const clearance = ROAD_WIDTH * 0.5 + 0.6;
+  const out: XZ[][] = [];
+
+  for (const line of polylines) {
+    if (line.length < 2) continue;
+    let current: XZ[] = [];
+
+    const startPiece = (p: XZ) => {
+      current = [p];
+    };
+    const addPoint = (p: XZ) => {
+      const last = current[current.length - 1];
+      if (
+        last &&
+        Math.hypot(last[0] - p[0], last[1] - p[1]) < 0.04
+      ) {
+        return;
+      }
+      current.push(p);
+    };
+    const closePiece = () => {
+      if (current.length >= 2) out.push(current);
+      current = [];
+    };
+
+    startPiece(line[0]!);
+
+    for (let i = 0; i < line.length - 1; i++) {
+      const a = line[i]!;
+      const b = line[i + 1]!;
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const len = Math.hypot(dx, dz);
+      if (len < 1e-4) continue;
+      const ux = dx / len;
+      const uz = dz / len;
+      const gaps = roadGapsAlong(a[0], a[1], b[0], b[1], clearance);
+      const spans = freeSpansAlong(len, gaps, 1.2);
+
+      if (spans.length === 0) {
+        closePiece();
+        startPiece(b);
+        continue;
+      }
+
+      for (let s = 0; s < spans.length; s++) {
+        const [s0, s1] = spans[s]!;
+        const start: XZ = [a[0] + ux * s0, a[1] + uz * s0];
+        const end: XZ = [a[0] + ux * s1, a[1] + uz * s1];
+
+        if (current.length === 0) startPiece(start);
+        else if (s0 > 0.35) {
+          // Gap between previous span / vertex and this one.
+          closePiece();
+          startPiece(start);
+        }
+
+        addPoint(end);
+
+        const reachesEnd = s1 >= len - 0.35;
+        const moreSpans = s < spans.length - 1;
+        if (moreSpans || !reachesEnd) {
+          closePiece();
+        }
+      }
+
+      if (current.length === 0) startPiece(b);
+      else addPoint(b);
+    }
+
+    closePiece();
+  }
+
+  return out;
 }
 
 /** Position along the path loop. Fractional indices slide between points. */

@@ -1,10 +1,10 @@
 import * as THREE from "three";
-import { PATH_Y } from "../world/lake";
+import { PATH_Y, clearOfLakeRim } from "../world/lake";
 
 /** How long a print takes to wear off the paving on its own. */
 const LIFE = 150;
 /** How many hits of water it takes to shift one. */
-const SCRUB_PER_HIT = 0.07;
+const SCRUB_PER_HIT = 0.1;
 /** How long a piece of tyre line is laid at a time. */
 export const TYRE_SEGMENT = 0.6;
 
@@ -52,7 +52,9 @@ export class Footprint {
 
     for (const part of this.group.children) part.rotation.x = -Math.PI / 2;
     // Sat just proud of the paving, which is itself a shade above the grass.
-    this.group.position.set(tread.at.x, PATH_Y + 0.008, tread.at.z);
+    // Kept clear of the coping so the mark isn't buried under the kerb.
+    const safe = clearOfLakeRim(tread.at.x, tread.at.z, 0.9);
+    this.group.position.set(safe.x, PATH_Y + 0.008, safe.y);
     this.group.rotation.y = tread.yaw;
     scene.add(this.group);
   }
@@ -100,6 +102,13 @@ export class Footprint {
 
   public isGone(): boolean {
     return this.left <= 0;
+  }
+
+  /** Still dark enough on the paving for the yellow arrow to bother with. */
+  public isWorthArrow(): boolean {
+    if (this.left <= 0) return false;
+    const fade = this.age < LIFE ? 1 - this.age / LIFE : 0;
+    return this.left * fade > 0.22;
   }
 
   /** How much of a mess it still is, for the state of the park. */

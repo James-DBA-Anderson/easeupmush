@@ -6,23 +6,36 @@
   <title>Canoe Lake — Level Editor</title>
   <style>
     :root {
-      --bg: #1a221c;
-      --panel: #243028;
+      --bg: #152018;
+      --chrome: #1e2a22;
+      --ribbon: #243028;
+      --ribbon-deep: #1a241e;
       --ink: #e8efe6;
       --muted: #9aaf9e;
       --accent: #ffd23a;
+      --line: #ffffff14;
+      --btn: #2f3c34;
+      --btn-hover: #3a4a40;
       --shore: #3aa0b8;
-      --path: #c4bda8;
+      --path: #b8b8be;
+      --road: #f0c070;
+      --terrace: #e8b4a0;
       --ring: #c9a0ff;
       --place: #ff8a4c;
       --bin: #7dcea0;
+      --play: #c4a06a;
+      --elev: #8bc34a;
+      --carpark: #90a4ae;
+      --beach: #c9bb9a;
+      --lights-blue: #6bb8ff;
+      --lights-red: #ff6b6b;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
       height: 100%;
       background: var(--bg);
       color: var(--ink);
-      font: 13px/1.4 "Segoe UI", system-ui, sans-serif;
+      font: 13px/1.35 "Segoe UI", system-ui, sans-serif;
       overflow: hidden;
     }
     #app {
@@ -30,42 +43,170 @@
       grid-template-rows: auto 1fr auto;
       height: 100%;
     }
-    header, footer {
+
+    /* —— Title bar —— */
+    #titlebar {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
       align-items: center;
-      padding: 8px 12px;
-      background: var(--panel);
-      border-bottom: 1px solid #0006;
+      gap: 8px;
+      padding: 6px 12px;
+      background: var(--chrome);
+      border-bottom: 1px solid var(--line);
     }
-    footer { border-bottom: none; border-top: 1px solid #0006; }
-    h1 {
-      font-size: 14px;
-      letter-spacing: 0.04em;
-      margin-right: 8px;
+    #titlebar h1 {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      margin-right: 4px;
     }
-    .tools, .actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    #titlebar .file-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    #titlebar a.play-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+      margin-left: 4px;
+    }
+    #titlebar a.play-link:hover { text-decoration: underline; }
+
+    /* —— Ribbon —— */
+    #ribbon {
+      background: linear-gradient(180deg, #2a3830 0%, var(--ribbon) 40%, var(--ribbon-deep) 100%);
+      border-bottom: 1px solid #0008;
+      box-shadow: 0 2px 8px #0004;
+    }
+    #ribbon-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
+      padding: 0 8px;
+      background: var(--chrome);
+      border-bottom: 1px solid var(--line);
+    }
+    #ribbon-tabs button {
+      appearance: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      padding: 8px 12px 7px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      border-radius: 0;
+    }
+    #ribbon-tabs button:hover {
+      color: var(--ink);
+      background: #ffffff08;
+    }
+    #ribbon-tabs button.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+      background: #ffffff0a;
+      font-weight: 600;
+    }
+    #ribbon-body {
+      min-height: 72px;
+      padding: 8px 12px 10px;
+    }
+    .ribbon-pane {
+      display: none;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 12px 16px;
+    }
+    .ribbon-pane.on { display: flex; }
+    .ribbon-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 0 12px 0 0;
+      border-right: 1px solid var(--line);
+      min-height: 52px;
+    }
+    .ribbon-group:last-child { border-right: none; padding-right: 0; }
+    .ribbon-group .group-label {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .ribbon-group .group-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+    }
+    .ribbon-group.has-image {
+      opacity: 1;
+    }
+    .ribbon-group#ref-panel:not(.has-image) {
+      opacity: 0.45;
+    }
+    .swatch {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      margin-right: 4px;
+      vertical-align: -1px;
+    }
+
     button, label.btn {
       appearance: none;
       border: 1px solid #ffffff22;
-      background: #2f3c34;
+      background: var(--btn);
       color: var(--ink);
       padding: 6px 10px;
-      border-radius: 6px;
+      border-radius: 5px;
       cursor: pointer;
       font: inherit;
     }
-    button:hover, label.btn:hover { background: #3a4a40; }
-    button.active {
-      background: var(--accent);
-      color: #1a1408;
-      border-color: transparent;
-      font-weight: 600;
+    button:hover, label.btn:hover { background: var(--btn-hover); }
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
     }
     button.danger { background: #5a2a2a; }
+    button.danger:hover { background: #6e3434; }
     label.btn input { display: none; }
     .spacer { flex: 1; }
+
+    select {
+      background: var(--btn);
+      color: var(--ink);
+      border: 1px solid #ffffff22;
+      border-radius: 5px;
+      padding: 5px 8px;
+      font: inherit;
+      max-width: 220px;
+    }
+
+    label.hint {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    label.hint .val {
+      min-width: 2.8em;
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+    input[type="range"] {
+      width: 100px;
+      vertical-align: middle;
+    }
+
+    /* —— Workspace —— */
     #workspace {
       display: grid;
       grid-template-columns: 1fr;
@@ -80,15 +221,15 @@
       flex-direction: column;
       gap: 10px;
       padding: 10px;
-      background: var(--panel);
+      background: var(--ribbon);
       border-right: 1px solid #0006;
       min-height: 0;
       overflow: auto;
     }
     #workspace.place-open #place-panel { display: flex; }
     #place-panel h2 {
-      font-size: 12px;
-      letter-spacing: 0.06em;
+      font-size: 11px;
+      letter-spacing: 0.08em;
       color: var(--muted);
       font-weight: 600;
     }
@@ -104,6 +245,8 @@
     #place-catalog button.active {
       background: var(--place);
       color: #1a1408;
+      border-color: transparent;
+      font-weight: 600;
     }
     .preview-wrap {
       position: relative;
@@ -138,6 +281,7 @@
       color: var(--ink);
       font-variant-numeric: tabular-nums;
     }
+
     #stage {
       position: relative;
       overflow: hidden;
@@ -160,7 +304,7 @@
       font-size: 12px;
       pointer-events: auto;
     }
-    .zoom-dock input[type="range"] { width: 140px; vertical-align: middle; }
+    .zoom-dock input[type="range"] { width: 140px; }
     .zoom-dock .val {
       min-width: 3.2em;
       color: var(--ink);
@@ -172,61 +316,432 @@
       height: 100%;
       cursor: crosshair;
     }
-    .hint { color: var(--muted); font-size: 12px; }
-    .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
-    input[type="range"] { width: 88px; vertical-align: middle; }
-    .ref-panel {
-      display: none;
+
+    /* —— First-person walk / edit —— */
+    #walk-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      background: #0b1210;
+      display: flex;
+      flex-direction: column;
+    }
+    #walk-overlay[hidden] { display: none !important; }
+    body.walk-mode #stage .zoom-dock { display: none; }
+    body.walk-mode #workspace.place-open #place-panel {
+      background: #1e2a22f2;
+      box-shadow: 0 8px 28px #000a;
+      z-index: 25;
+    }
+    #walk-canvas {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      cursor: crosshair;
+      display: block;
+    }
+    #walk-crosshair {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 18px;
+      height: 18px;
+      margin: -9px 0 0 -9px;
+      pointer-events: none;
+      z-index: 2;
+    }
+    #walk-crosshair::before,
+    #walk-crosshair::after {
+      content: "";
+      position: absolute;
+      background: #fff;
+      box-shadow: 0 0 0 1px #0008;
+    }
+    #walk-crosshair::before {
+      left: 8px;
+      top: 0;
+      width: 2px;
+      height: 18px;
+    }
+    #walk-crosshair::after {
+      left: 0;
+      top: 8px;
+      width: 18px;
+      height: 2px;
+    }
+    #walk-hud {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 14px;
+      background: linear-gradient(transparent, #000c);
+      color: #e8f0ea;
+      font-size: 12px;
+      pointer-events: none;
+      z-index: 3;
+    }
+    #walk-hud p { margin: 0; max-width: 52ch; line-height: 1.35; }
+    #walk-hud-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      pointer-events: auto;
+      flex-shrink: 0;
+    }
+    #walk-time-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      user-select: none;
+    }
+    #walk-time-label input[type="range"] {
+      width: 140px;
+      accent-color: #ffe066;
+    }
+    #walk-time-val {
+      font-variant-numeric: tabular-nums;
+      min-width: 3.2em;
+      color: #ffe066;
+      font-weight: 600;
+    }
+    #walk-exit {
+      pointer-events: auto;
+      font: inherit;
+      font-size: 12px;
+      padding: 6px 12px;
+      border: 1px solid #ffffff55;
+      border-radius: 4px;
+      background: #1a2a22;
+      color: #e8f0ea;
+      cursor: pointer;
+    }
+    #walk-exit:hover { background: #243830; }
+
+    .debug-wrap {
+      position: relative;
+      display: inline-flex;
+    }
+    #debug-toggle {
+      font: inherit;
+    }
+    #debug-menu {
+      position: absolute;
+      top: calc(100% + 4px);
+      right: 0;
+      z-index: 40;
+      min-width: 11rem;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--chrome);
+      box-shadow: 0 8px 24px #0008;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    #debug-menu[hidden] { display: none !important; }
+    #debug-menu button {
+      font: inherit;
+      font-size: 12px;
+      text-align: left;
+      padding: 7px 10px;
+      border: 0;
+      border-radius: 3px;
+      background: transparent;
+      color: var(--ink);
+      cursor: pointer;
+    }
+    #debug-menu button:hover {
+      background: var(--btn-hover);
+    }
+
+    /* —— Status —— */
+    footer {
+      display: flex;
       flex-wrap: wrap;
       gap: 8px;
       align-items: center;
-      width: 100%;
-      padding-top: 6px;
-      border-top: 1px solid #ffffff12;
-      margin-top: 4px;
+      padding: 6px 12px;
+      background: var(--chrome);
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
     }
-    .ref-panel.on { display: flex; }
-    .ref-panel label.hint { display: inline-flex; align-items: center; gap: 6px; }
-    .ref-panel .val { min-width: 2.5em; color: var(--ink); font-variant-numeric: tabular-nums; }
-    select {
-      background: #2f3c34;
-      color: var(--ink);
-      border: 1px solid #ffffff22;
-      border-radius: 6px;
-      padding: 5px 8px;
-      font: inherit;
-    }
+    #status { color: var(--muted); }
   </style>
 </head>
 <body>
   <div id="app">
-    <header>
-      <h1>LEVEL EDITOR</h1>
-      <div class="tools" id="tools">
-        <button type="button" data-tool="pan">Pan</button>
-        <button type="button" data-tool="bg">Background</button>
-        <button type="button" data-tool="shore" class="active">Shore</button>
-        <button type="button" data-tool="paths">Paths</button>
-        <button type="button" data-tool="ring">Park ring</button>
-        <button type="button" data-tool="place">Buildings</button>
-        <button type="button" data-tool="bins">Bins</button>
+    <div id="chrome">
+      <div id="titlebar">
+        <h1>LEVEL EDITOR</h1>
+        <div class="file-actions">
+          <button type="button" id="undo" disabled title="Undo (Ctrl/Cmd+Z)">Undo</button>
+          <button type="button" id="save">Save</button>
+          <button type="button" id="download">Download JSON</button>
+          <label class="btn">Import JSON<input type="file" id="import-file" accept="application/json,.json" /></label>
+          <button type="button" id="reset" class="danger">Reset default</button>
+          <button type="button" id="walk-toggle" title="Walk the park in first person and place items under the crosshair">Walk</button>
+          <div class="debug-wrap">
+            <button type="button" id="debug-toggle" title="Play the game with no intro — start of shift or a mission" aria-expanded="false" aria-haspopup="true">Debug</button>
+            <div id="debug-menu" hidden role="menu" aria-label="Debug start">
+              <button type="button" role="menuitem" data-debug-from="start">Start of shift</button>
+              <button type="button" role="menuitem" data-debug-from="picnic">Picnic raid</button>
+              <button type="button" role="menuitem" data-debug-from="geese">Geese inbound</button>
+              <button type="button" role="menuitem" data-debug-from="fire">Grass fire</button>
+              <button type="button" role="menuitem" data-debug-from="racers">Boy racers</button>
+              <button type="button" role="menuitem" data-debug-from="rebels">Rebel raid</button>
+            </div>
+          </div>
+          <a class="play-link" href="./">Play game</a>
+        </div>
       </div>
-      <div class="spacer"></div>
-      <div class="actions">
-        <label class="btn">Add image<input type="file" id="ref-file" accept="image/*" /></label>
-        <button type="button" id="paste-ref">Paste image</button>
-        <button type="button" id="clear-ref" class="danger">Remove image</button>
+
+      <div id="ribbon">
+        <div id="ribbon-tabs" role="tablist" aria-label="Edit tools">
+          <button type="button" role="tab" data-tool="pan">Pan</button>
+          <button type="button" role="tab" data-tool="bg">Background</button>
+          <button type="button" role="tab" data-tool="shore" class="active">Shore</button>
+          <button type="button" role="tab" data-tool="paths">Paths</button>
+          <button type="button" role="tab" data-tool="roads">Roads</button>
+          <button type="button" role="tab" data-tool="terraces">Terraces</button>
+          <button type="button" role="tab" data-tool="lights">Fairy lights</button>
+          <button type="button" role="tab" data-tool="ring">Fencing</button>
+          <button type="button" role="tab" data-tool="playArea">Play area</button>
+          <button type="button" role="tab" data-tool="carPark">Car park</button>
+          <button type="button" role="tab" data-tool="beach">Beach</button>
+          <button type="button" role="tab" data-tool="elev">Terrain</button>
+          <button type="button" role="tab" data-tool="place">Buildings</button>
+          <button type="button" role="tab" data-tool="bins">Bins</button>
+          <button type="button" role="tab" data-tool="trees">Foliage</button>
+          <button type="button" role="tab" data-tool="missions">Missions</button>
+        </div>
+
+        <div id="ribbon-body">
+          <div class="ribbon-pane" data-for="pan">
+            <div class="ribbon-group">
+              <span class="group-label">View</span>
+              <p class="ribbon-hint">Drag the map or scroll to pan. Zoom with the dock or Ctrl/Cmd+scroll. Middle-click or Alt-drag also pans from any tool.</p>
+            </div>
+          </div>
+
+          <div class="ribbon-pane" data-for="bg">
+            <div class="ribbon-group">
+              <span class="group-label">Image</span>
+              <div class="group-row">
+                <label class="btn">Add image<input type="file" id="ref-file" accept="image/*" /></label>
+                <button type="button" id="paste-ref">Paste image</button>
+                <button type="button" id="clear-ref" class="danger">Remove</button>
+              </div>
+            </div>
+            <div class="ribbon-group" id="ref-panel">
+              <span class="group-label">Align</span>
+              <div class="group-row">
+                <label class="hint">Image <input type="range" id="ref-opacity" min="0" max="100" value="45" /><span class="val" id="ref-opacity-val">45%</span></label>
+                <label class="hint">Map <input type="range" id="map-opacity" min="0" max="100" value="70" /><span class="val" id="map-opacity-val">70%</span></label>
+                <label class="hint">Size <input type="range" id="ref-size" min="40" max="900" value="420" /><span class="val" id="ref-size-val">420m</span></label>
+                <label class="hint">Rotate <input type="range" id="ref-rot" min="-180" max="180" value="0" /><span class="val" id="ref-rot-val">0°</span></label>
+              </div>
+              <div class="group-row">
+                <button type="button" id="fit-ref">Fit to park</button>
+                <button type="button" id="ref-flip">Flip H</button>
+                <button type="button" id="ref-rot-reset">Reset rotation</button>
+              </div>
+            </div>
+            <div class="ribbon-group">
+              <span class="group-label">Tip</span>
+              <p class="ribbon-hint">Drag on the map to move the photo. +Z is north (top). Flip H if the screenshot is mirrored.</p>
+            </div>
+          </div>
+
+          <div class="ribbon-pane" data-for="shore">
+            <div class="ribbon-group">
+              <span class="group-label">Shoreline</span>
+              <p class="ribbon-hint"><span class="swatch" style="background:var(--shore)"></span>Closed polygon for the lake. Drag points, click an edge to insert, arrows nudge, Delete removes a vertex.</p>
+            </div>
+          </div>
+
+          <div class="ribbon-pane" data-for="paths,roads,terraces,lights">
+            <div class="ribbon-group">
+              <span class="group-label" id="poly-group-label">Paths</span>
+              <div class="group-row">
+                <select id="path-select" title="Active line"></select>
+                <button type="button" id="add-path">+ Line</button>
+                <button type="button" id="del-path">Delete line</button>
+              </div>
+            </div>
+            <div class="ribbon-group" id="fairy-color-group" hidden>
+              <span class="group-label">Colour</span>
+              <div class="group-row">
+                <select id="fairy-color" title="Fairy light colour for new / active run">
+                  <option value="blue">Blue</option>
+                  <option value="red">Red</option>
+                </select>
+              </div>
+            </div>
+            <div class="ribbon-group">
+              <span class="group-label">Edit</span>
+              <p class="ribbon-hint" id="poly-hint">Click an edge to add a node · drag a node · Shift-drag moves the whole line · arrows nudge · dropdown selects a whole line.</p>
+            </div>
+          </div>
+
+          <div class="ribbon-pane" data-for="ring">
+            <div class="ribbon-group">
+              <span class="group-label">Style</span>
+              <div class="group-row">
+                <select id="fence-style" title="Park perimeter style">
+                  <option value="wire">Garden wire</option>
+                  <option value="brick">Brick wall</option>
+                  <option value="railings">Metal railings</option>
+                </select>
+              </div>
+            </div>
+            <div class="ribbon-group">
+              <span class="group-label">Fencing</span>
+              <p class="ribbon-hint"><span class="swatch" style="background:var(--ring)"></span>Closed perimeter. Drag points and arrow-nudge like the shore. Path spurs cut gateways.</p>
+            </div>
+          </div>
+
+          <div class="ribbon-pane" data-for="playArea">
+            <div class="ribbon-group">
+              <span class="group-label">Play park</span>
+              <p class="ribbon-hint"><span class="swatch" style="background:var(--play)"></span>Wood-chip boundary. Drag corners or click an edge to insert. Empty click seeds a small rectangle if none exists.</p>
+            </div>
+          </div>
+
+          <div class="ribbon-pane" data-for="carPark">
+            <div class="ribbon-group">
+              <span class="group-label">Car park</span>
+              <p class="ribbon-hint"><span class="swatch" style="background:var(--carpark)"></span>Asphalt boundary. Drag corners or click an edge to insert. Empty click seeds a rectangle if none exists. Cars fill the pad in-game.</p>
+            </div>
+          </div>
+
+          <div class="ribbon-pane" data-for="beach">
+            <div class="ribbon-group">
+              <span class="group-label">Beach</span>
+              <p class="ribbon-hint"><span class="swatch" style="background:var(--beach)"></span>Sand / shingle boundary. Drag corners or click an edge to insert. Empty click seeds a strip if none exists. The sea starts from the south edge of this zone.</p>
+            </div>
+          </div>
+
+          <div class="ribbon-pane" data-for="elev">
+            <div class="ribbon-group">
+              <span class="group-label">Berms</span>
+              <div class="group-row">
+                <select id="elev-select" title="Elevation zone"></select>
+                <button type="button" id="add-elev" class="btn">Add berm</button>
+                <button type="button" id="del-elev" class="btn">Delete</button>
+              </div>
+            </div>
+            <div class="ribbon-group">
+              <span class="group-label">Height</span>
+              <div class="group-row">
+                <input type="range" id="elev-height" min="0.1" max="4" step="0.05" value="0.6" />
+                <span id="elev-height-val">0.60 m</span>
+              </div>
+            </div>
+            <div class="ribbon-group">
+              <span class="group-label">Edge</span>
+              <div class="group-row">
+                <select id="elev-edge" title="How the berm drops to the flat park">
+                  <option value="wall">Wall (sheer)</option>
+                  <option value="steps">Steps</option>
+                  <option value="slope">Slope</option>
+                </select>
+              </div>
+              <p class="ribbon-hint"><span class="swatch" style="background:#8bc34a"></span>Closed berm outline. Drag corners, click an edge to insert, Add berm for another. Height raises the top; Edge picks wall, steps, or slope down to the park.</p>
+            </div>
+          </div>
+
+          <div class="ribbon-pane" data-for="place">
+            <div class="ribbon-group">
+              <span class="group-label">Buildings &amp; kit</span>
+              <p class="ribbon-hint"><span class="swatch" style="background:var(--place)"></span>Pick from the side catalog. Unique hire buildings select in place; cafés, bus stops and play kit stamp on empty clicks. Yaw in the preview (or Shift-drag).</p>
+            </div>
+          </div>
+
+          <div class="ribbon-pane" data-for="bins">
+            <div class="ribbon-group">
+              <span class="group-label">Bins</span>
+              <div class="group-row">
+                <button type="button" id="auto-bins">Auto bins</button>
+              </div>
+            </div>
+            <div class="ribbon-group">
+              <span class="group-label">Edit</span>
+              <p class="ribbon-hint"><span class="swatch" style="background:var(--bin)"></span>Click the map to place. Drag or arrows to move, Delete to remove. Auto bins clears the list so the game spaces them on the path lip.</p>
+            </div>
+          </div>
+
+          <div class="ribbon-pane" data-for="trees">
+            <div class="ribbon-group">
+              <span class="group-label">Kind</span>
+              <div class="group-row">
+                <select id="tree-kind" title="Foliage kind when placing">
+                  <option value="holm">Holm oak</option>
+                  <option value="plane">Plane</option>
+                  <option value="scrub">Scrub</option>
+                  <option value="shrub">Shrub</option>
+                  <option value="flowerBed">Flower bed</option>
+                </select>
+                <button type="button" id="auto-trees">Clear foliage</button>
+              </div>
+            </div>
+            <div class="ribbon-group" id="foliage-yaw-group" hidden>
+              <span class="group-label">Bed yaw</span>
+              <div class="group-row">
+                <label class="hint">Yaw
+                  <input type="range" id="foliage-yaw" min="-180" max="180" value="0" />
+                  <span class="val" id="foliage-yaw-val">0°</span>
+                </label>
+              </div>
+            </div>
+            <div class="ribbon-group">
+              <span class="group-label">Edit</span>
+              <p class="ribbon-hint">Click to place trees, shrubs, or flower beds. Only these appear in the game. Drag / arrows move; [ ] rotate a selected bed; Delete removes.</p>
+            </div>
+          </div>
+
+          <div class="ribbon-pane" data-for="missions">
+            <div class="ribbon-group">
+              <span class="group-label">Mission</span>
+              <div class="group-row">
+                <select id="mission-select" title="Active mission marker"></select>
+                <button type="button" id="add-mission" title="Add a named placeholder pin">Add</button>
+                <button type="button" id="del-mission" class="btn" title="Remove placeholder (built-ins stay)">Delete</button>
+              </div>
+              <div class="group-row">
+                <label class="hint">Name
+                  <input type="text" id="mission-name" maxlength="48" placeholder="Mission name" title="Display name" />
+                </label>
+              </div>
+            </div>
+            <div class="ribbon-group">
+              <span class="group-label">When</span>
+              <div class="group-row">
+                <label class="hint">Start
+                  <select id="mission-start" title="Earliest the mission may begin"></select>
+                </label>
+                <label class="hint">End
+                  <select id="mission-end" title="After this the mission will no longer start"></select>
+                </label>
+              </div>
+              <p class="ribbon-hint">Window on the shift clock. Game start / game end follow clock-on and end of shift; times are local park hours (wraps past midnight).</p>
+            </div>
+            <div class="ribbon-group">
+              <span class="group-label">Edit</span>
+              <p class="ribbon-hint"><span class="swatch" style="background:#e82a1a"></span>Red pins = wired jobs. <span class="swatch" style="background:#c45a18"></span>Amber pins = placeholders (name + window only — fill in later). Drag / arrows move; Delete removes placeholders.</p>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="ref-panel" id="ref-panel">
-        <label class="hint">Image <input type="range" id="ref-opacity" min="0" max="100" value="45" /><span class="val" id="ref-opacity-val">45%</span></label>
-        <label class="hint">Map <input type="range" id="map-opacity" min="0" max="100" value="70" /><span class="val" id="map-opacity-val">70%</span></label>
-        <label class="hint">Size <input type="range" id="ref-size" min="40" max="900" value="420" /><span class="val" id="ref-size-val">420m</span></label>
-        <label class="hint">Rotate <input type="range" id="ref-rot" min="-180" max="180" value="0" /><span class="val" id="ref-rot-val">0°</span></label>
-        <button type="button" id="fit-ref">Fit to park</button>
-        <button type="button" id="ref-rot-reset">Reset rotation</button>
-        <span class="hint">Background tool: drag to move · scroll pans · Zoom slider / Ctrl+scroll zooms</span>
-      </div>
-    </header>
+    </div>
+
     <div id="workspace">
       <aside id="place-panel">
         <h2>PLACE</h2>
@@ -239,11 +754,26 @@
             <input type="range" id="place-yaw" min="-180" max="180" value="0" />
             <span class="val" id="place-yaw-val">0°</span>
           </label>
-          <span class="hint">Drag preview to orbit · scroll to zoom · Shift-drag to set yaw</span>
+          <span class="hint">Drag preview to orbit · scroll to zoom · Shift-drag to set yaw · click map to place kit</span>
         </div>
       </aside>
       <div id="stage">
         <canvas id="view"></canvas>
+        <div id="walk-overlay" hidden>
+          <canvas id="walk-canvas"></canvas>
+          <div id="walk-crosshair" aria-hidden="true"></div>
+          <div id="walk-hud">
+            <p>Click to capture mouse · WASD move · Shift sprint · aim + click to select · hold drag · [ ] rotate · Del remove · Esc unlock</p>
+            <div id="walk-hud-controls">
+              <label id="walk-time-label" title="Time of day — sky, sun and window lights">
+                Time
+                <input type="range" id="walk-time" min="0" max="24" step="0.25" value="13" />
+                <span id="walk-time-val">13:00</span>
+              </label>
+              <button type="button" id="walk-exit">Exit walk</button>
+            </div>
+          </div>
+        </div>
         <label class="zoom-dock" title="Zoom (Ctrl/Cmd+scroll also zooms)">
           Zoom
           <input type="range" id="zoom" min="0" max="1000" value="500" />
@@ -251,19 +781,9 @@
         </label>
       </div>
     </div>
+
     <footer>
-      <span class="hint" id="status">Drag points · click path edge to add node · Shift-drag path · arrows nudge · Undo / Ctrl+Z</span>
-      <div class="spacer"></div>
-      <button type="button" id="undo" disabled title="Undo (Ctrl/Cmd+Z)">Undo</button>
-      <select id="path-select" title="Active path"></select>
-      <button type="button" id="add-path">+ Path</button>
-      <button type="button" id="del-path">Delete path</button>
-      <button type="button" id="auto-bins">Auto bins</button>
-      <button type="button" id="save">Save</button>
-      <button type="button" id="download">Download JSON</button>
-      <label class="btn">Import JSON<input type="file" id="import-file" accept="application/json,.json" /></label>
-      <button type="button" id="reset" class="danger">Reset default</button>
-      <a href="./" style="color:var(--accent);margin-left:8px">Play game</a>
+      <span id="status">Pick a ribbon tab to edit that layer. Undo / Ctrl+Z reverses edits.</span>
     </footer>
   </div>
   <script type="module" src="/src/editor/main.ts"></script>

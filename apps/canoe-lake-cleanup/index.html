@@ -151,7 +151,8 @@
       background: linear-gradient(90deg, #ffd23a, #ff8a2b);
     }
 
-    #objective-arrow {
+    #objective-arrow,
+    #mission-arrow {
       position: absolute;
       top: 64px;
       left: 50%;
@@ -167,16 +168,23 @@
       perspective-origin: 50% 100%;
     }
 
-    #objective-arrow.visible {
+    #mission-arrow {
+      z-index: 13;
+    }
+
+    #objective-arrow.visible,
+    #mission-arrow.visible {
       opacity: 0.95;
     }
 
-    #objective-arrow.hovering {
+    #objective-arrow.hovering,
+    #mission-arrow.hovering {
       filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.55));
     }
 
     /* Tilted like a marker on the ground — tip-up means straight ahead. */
-    #objective-arrow .objective-chevron {
+    #objective-arrow .objective-chevron,
+    #mission-arrow .objective-chevron {
       width: 44px;
       height: 44px;
       margin: 0 auto;
@@ -186,12 +194,12 @@
       will-change: transform;
     }
 
-    #objective-arrow .objective-chevron::before {
+    #objective-arrow .objective-chevron::before,
+    #mission-arrow .objective-chevron::before {
       content: "";
       display: block;
       width: 100%;
       height: 100%;
-      background: linear-gradient(180deg, #ffe566 0%, #ffd23a 42%, #e89a20 100%);
       clip-path: polygon(
         50% 0%,
         92% 48%,
@@ -202,7 +210,82 @@
         8% 48%
       );
       border-radius: 1px;
+    }
+
+    /* Yellow — general mess round the park. */
+    #objective-arrow .objective-chevron::before {
+      background: linear-gradient(180deg, #ffe566 0%, #ffd23a 42%, #e89a20 100%);
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    }
+
+    /* Red — scripted radio missions. */
+    #mission-arrow .objective-chevron::before {
+      background: linear-gradient(180deg, #ff6b5a 0%, #e82a1a 45%, #a01010 100%);
+      box-shadow: inset 0 1px 0 rgba(255, 220, 200, 0.35);
+    }
+
+    #compass {
+      position: absolute;
+      top: 148px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      padding: 6px 12px 7px;
+      background: rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 8px;
+      color: #f4efe4;
+      pointer-events: none;
+      z-index: 11;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+      min-width: 72px;
+    }
+
+    #compass .compass-rose {
+      position: relative;
+      width: 28px;
+      height: 28px;
+      margin-bottom: 1px;
+    }
+
+    #compass .compass-rose::before {
+      content: "";
+      position: absolute;
+      inset: 3px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+    }
+
+    #compass .compass-needle {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 0;
+      height: 0;
+      margin: -10px 0 0 -5px;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-bottom: 14px solid #ffe14a;
+      transform-origin: 50% 12px;
+      filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.55));
+    }
+
+    #compass .compass-bearing {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      line-height: 1.1;
+      color: #ffe14a;
+    }
+
+    #compass .compass-name {
+      font-size: 10px;
+      letter-spacing: 0.02em;
+      opacity: 0.82;
+      white-space: nowrap;
     }
 
     #instructions {
@@ -694,6 +777,35 @@
       display: none;
     }
 
+    body.touch-ui #compass {
+      top: 78px;
+      padding: 3px 8px 4px;
+      min-width: 56px;
+      border-radius: 6px;
+    }
+
+    body.touch-ui #compass .compass-rose {
+      width: 20px;
+      height: 20px;
+    }
+
+    body.touch-ui #compass .compass-needle {
+      margin: -7px 0 0 -3.5px;
+      border-left-width: 3.5px;
+      border-right-width: 3.5px;
+      border-bottom-width: 10px;
+      transform-origin: 50% 8.5px;
+    }
+
+    body.touch-ui #compass .compass-bearing {
+      font-size: 12px;
+      letter-spacing: 0.08em;
+    }
+
+    body.touch-ui #compass .compass-name {
+      display: none;
+    }
+
     body.touch-ui #minimap-panel {
       top: 4px;
       left: 4px;
@@ -826,6 +938,16 @@
     <div id="hurt-flash"></div>
     <div id="objective-arrow" aria-hidden="true">
       <div class="objective-chevron"></div>
+    </div>
+    <div id="mission-arrow" aria-hidden="true">
+      <div class="objective-chevron"></div>
+    </div>
+    <div id="compass" aria-live="polite">
+      <div class="compass-rose" aria-hidden="true">
+        <div class="compass-needle"></div>
+      </div>
+      <div class="compass-bearing">S</div>
+      <div class="compass-name">South</div>
     </div>
     <div id="minimap-panel">
       <canvas id="minimap"></canvas>

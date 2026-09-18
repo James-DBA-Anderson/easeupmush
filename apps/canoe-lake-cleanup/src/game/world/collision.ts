@@ -10,6 +10,21 @@ export interface Footprint {
   yaw: number;
 }
 
+/** Benches and other park furniture — cleared/rebuilt with the park. */
+const props: Footprint[] = [];
+
+export function clearProps(): void {
+  props.length = 0;
+}
+
+export function addProp(solid: Footprint): void {
+  props.push(solid);
+}
+
+export function atProp(x: number, z: number, radius = 0.45): boolean {
+  return hitsAny(x, z, props, radius);
+}
+
 /** True if (x, z) sits inside the footprint, with a body radius for padding. */
 export function hitsFootprint(
   x: number,

@@ -4,32 +4,42 @@ import type { Messages } from "../ui/Messages";
 export type Callout =
   | "shift"
   | "jobs"
+  | "picnic"
   | "poo"
   | "litter"
   | "bin"
   | "graffiti"
   | "swan"
   | "ebike"
-  | "branches"
+  | "drunks"
+  | "dunk"
   | "gulls"
   | "fire"
   | "spitfire"
+  | "rebels"
+  | "racers"
+  | "geese"
   | "praise";
 
 /** How long before the same sort of job can be reported again. */
 const COOLDOWN: Record<Callout, number> = {
   shift: 9999,
   jobs: 9999,
+  picnic: 9999,
   poo: 160,
   litter: 140,
   bin: 120,
   graffiti: 200,
   swan: 90,
   ebike: 130,
-  branches: 150,
+  drunks: 160,
+  dunk: 90,
   gulls: 180,
   fire: 9999,
   spitfire: 600,
+  rebels: 9999,
+  racers: 9999,
+  geese: 9999,
   praise: 300,
 };
 
@@ -44,9 +54,11 @@ const TROUBLE: ReadonlySet<Callout> = new Set([
   "graffiti",
   "swan",
   "ebike",
-  "branches",
+  "drunks",
   "gulls",
   "fire",
+  "picnic",
+  "geese",
 ]);
 
 /** Breathing room between any two jobs that need sorting. */
@@ -57,16 +69,21 @@ const SHIFT_GRACE = 55;
 const SENDERS: Record<Callout, string> = {
   shift: "DEPOT",
   jobs: "DEPOT",
+  picnic: "DEPOT",
   poo: "DEPOT",
   litter: "PARK WARDEN",
   bin: "DEPOT",
   graffiti: "PARK WARDEN",
   swan: "999 CONTROL",
   ebike: "PCSO GRANT",
-  branches: "TREE OFFICER",
+  drunks: "PCSO GRANT",
+  dunk: "999 CONTROL",
   gulls: "PARK WARDEN",
   fire: "999 CONTROL",
   spitfire: "DAVE (DEPOT)",
+  rebels: "999 CONTROL",
+  racers: "PCSO GRANT",
+  geese: "999 CONTROL",
   praise: "DEPOT",
 };
 
@@ -80,9 +97,16 @@ const LINES: Record<Callout, readonly string[]> = {
     "You look hanging, mush. Swans have carpeted the path by the van. Get stuck in.",
   ],
   jobs: [
-    "That's the overnight nearly done. Fresh mess further round {where} — keep going.",
-    "Opening tip's sorted. Path's a state {where}. Get the lance on it.",
-    "Good work. More dumps reported {where}. Rest of the park's yours now.",
+    "Feeders in the north-west section. Get there before the birds carpet the place.",
+    "We've got feeders on the north-west stretch. Birds'll bury that path if you hang about.",
+    "North-west feeding corner's busy. Get over before the swans and gulls carpet it.",
+    "Caller says bags out on the north-west path. Move — the birds will carpet it.",
+  ],
+  picnic: [
+    "Gulls have got into a picnic {where}. Get over and hose them out of the sky.",
+    "Seagulls diving a picnic on the east green. Spray them off before they strip it.",
+    "Caller says herring gulls are all over a picnic {where}. Lance them mid-air.",
+    "Picnic under attack {where}. Get the washer up and knock those gulls out of it.",
   ],
   poo: [
     "Complaints piling up about swan mess on the paving. Get the lance on it.",
@@ -118,10 +142,17 @@ const LINES: Record<Callout, readonly string[]> = {
     "Two on an e-bike doing forty past the café. Not your problem, but mind out.",
     "E-bikes on the footpath {where}. Nothing you can do, just don't get flattened.",
   ],
-  branches: [
-    "Kids swinging on the low branches {where}. Move them on before it snaps.",
-    "Tree officer's been on: someone's hanging off the limbs {where}.",
-    "They've had a branch off the oak {where}. That's a written report, that.",
+  drunks: [
+    "Drinkers on the grass {where} after closing. Move them on, please.",
+    "Caller says a group with cans {where}. Ask them to clear off.",
+    "Late drinkers reported {where}. PCSO wants them shifted before it kicks off.",
+    "They're still on the green {where} with the tins. Move them on.",
+  ],
+  dunk: [
+    "Someone's gone in the lake {where}. Get down there and see they're alright.",
+    "Old dear's fallen in the pond {where}. Make sure she gets out.",
+    "Caller says a lady's in the water {where}. You're nearest.",
+    "Public in the drink {where}. Check on them — don't hang about.",
   ],
   gulls: [
     "Gulls have got at somebody's chips again. Expect a mess after.",
@@ -139,6 +170,20 @@ const LINES: Record<Callout, readonly string[]> = {
     "That's the Spitfire over again. Best thing you'll see all shift.",
     "Spitfire inbound from Hayling, off out over the Island. Stop and watch it.",
     "Spitfire up. Sweet as nut, that. Have a look.",
+  ],
+  rebels: [
+    "MAJOR INCIDENT. Gosport separatist rebels storming Southsea Beach — intent on Canoe Lake. Hold the park.",
+  ],
+  racers: [
+    "Boy racers on the esplanade again — Skylines hammering it up and down. Keep clear of the road.",
+    "Reports of modified cars racing the seafront. Loud as you like. Watch the esplanade.",
+    "PCSO Grant: two GTs thrashing Eastney Esplanade. If one of them bottles it, you'll know about it.",
+  ],
+  geese: [
+    "Radar's picked up a flock of geese inbound. Get back to the van — heavy hose in the load bay.",
+    "Incoming geese on radar. Van. Back doors. Heavy hose. You haven't got long.",
+    "Control says a V of Canada geese is coming in. Heavy washer from the van — take them out of the sky.",
+    "Geese on the scope heading for the lake. Open the back of the van and grab the heavy reel.",
   ],
   praise: [
     "Park's looking smart today. Whatever you're doing, keep at it.",

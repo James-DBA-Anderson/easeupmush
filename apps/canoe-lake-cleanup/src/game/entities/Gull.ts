@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { Grumble } from "../effects/Grumble";
+import { parkAudio } from "../audio/ParkAudio";
 import { isInLake, WATER_Y } from "../world/lake";
 import { addEyes } from "./eyes";
 import { MuckFlecks } from "../effects/MuckFlecks";
@@ -13,14 +14,18 @@ const BILL = 0xe0a832;
 const SIZE = 0.55;
 
 const CRUISE_HEIGHT = 26;
+/** Picnic-raid circle — low enough the lance can reach. */
+const RAID_CRUISE_HEIGHT = 9.5;
 const CRUISE_SPEED = 11;
 const STOOP_SPEED = 17;
 /** How long they'll stand on the deck working at something. */
 const FEED_TIME = 9;
 /** On the water they don't hang about as long — snatch and go. */
 const WATER_FEED_TIME = 5.5;
-/** How close you can get before they're up and away. */
+/** How close you can get before they're up and away (non-raid). */
 const SPOOKED = 5;
+/** Raiding birds only flush when you're this close on the blanket. */
+const RAID_SPOOKED = 2.1;
 
 const SHRIEKS = ["EEEE-AH!", "AH-AH-AH!", "KYOW!", "EEEE-AH-AH!"];
 
@@ -33,12 +38,19 @@ export interface Scrap {
   take: () => void;
   /** Whether it's still there and still unattended. */
   going: () => boolean;
+  /**
+   * Bold raid on a picnic — dive even with people sat round it. Optional
+   * `onLand` fires the moment the bird touches down.
+   */
+  raid?: boolean;
+  onLand?: () => void;
 }
 
 /**
  * A herring gull working the park: circling over the lake, watching for food
- * nobody's stood over, and dropping on it the moment it's left. Get near and
- * it's up and off, shrieking about it.
+ * nobody's stood over, and dropping on it the moment it's left. Bold ones
+ * will also go for a picnic on the east green. Get near and it's up and off,
+ * shrieking about it.
  */
 export class Gull {
   private scene: THREE.Scene;
@@ -63,7 +75,12 @@ export class Gull {
   private joinAt = new THREE.Vector3();
   /** Feeding on floating bread rather than standing on the path. */
   private wetFeed = false;
+  /** Mid-raid on a picnic blanket. */
+  private raidFeed = false;
+  /** Keep the circle low while the picnic mission is pulling them in. */
+  private raidCircle = false;
   private flecks!: MuckFlecks;
+  private leavingPark = false;
 
   constructor(scene: THREE.Scene, over: THREE.Vector2, already = false) {
     this.scene = scene;
@@ -205,6 +222,31 @@ export class Gull {
     return this.mode === "feed";
   }
 
+  /** Stooping or on a picnic blanket — mission 3 target. */
+  public isRaiding(): boolean {
+    return this.mode === "stoop" || (this.mode === "feed" && !!this.scrap?.raid);
+  }
+
+  /**
+   * Hose hit — stooping birds are generous; high cruise needs a real aim so
+   * spraying the blanket doesn't wipe the whole flock through a tall column.
+   */
+  public hitBy(point: THREE.Vector3, heavy = false): boolean {
+    const here = this.group.position;
+    if (this.mode === "stoop" || this.mode === "up") {
+      const r = heavy ? 5.2 : 4.0;
+      const dx = here.x - point.x;
+      const dy = here.y - point.y;
+      const dz = here.z - point.z;
+      return dx * dx + dy * dy * 0.55 + dz * dz < r * r;
+    }
+    if (this.mode === "cruise" || this.mode === "in") {
+      // Must actually reach them in the air — no ground-spray cheat.
+      return here.distanceTo(point) < (heavy ? 4.8 : 3.6);
+    }
+    return here.distanceTo(point) < (heavy ? 3.6 : 2.4);
+  }
+
   /** True once per beakful, so the game knows what's coming later. */
   public claimFeed(): boolean {
     if (this.fed <= 0) return false;
@@ -212,15 +254,70 @@ export class Gull {
     return true;
   }
 
-  /** Up and off, with the usual racket. */
+  /** Up and off, with the usual racket — hose works in the air too. */
   public flush(): void {
-    if (this.mode !== "feed" && this.mode !== "stoop") return;
+    if (this.mode === "gone" || this.mode === "up") return;
+    this.scrap = null;
     this.mode = "up";
     this.shriek();
+    parkAudio.wingFlap(this.wetFeed ? 0.85 : 0.55);
+    if (this.wetFeed) parkAudio.waterPlop(0.35);
+  }
+
+  /**
+   * Hose during a picnic raid — climb out and leave so they don't pop onto a
+   * huge orbit and look like they vanished.
+   */
+  public hoseOff(): void {
+    if (this.mode === "gone") return;
+    this.leavingPark = true;
+    this.raidCircle = false;
+    this.scrap = null;
+    if (this.mode !== "up") {
+      this.mode = "up";
+      this.shriek();
+      parkAudio.wingFlap(0.7);
+      if (this.wetFeed) parkAudio.waterPlop(0.3);
+    }
+  }
+
+  /** Nightfall / end of shift — clear off whatever they're doing. */
+  public leavePark(): void {
+    if (this.mode === "gone") return;
+    this.leavingPark = true;
+    this.raidCircle = false;
+    this.scrap = null;
+    if (this.mode !== "up") {
+      if (this.wetFeed) parkAudio.waterPlop(0.3);
+      parkAudio.wingFlap(0.55);
+      this.mode = "up";
+    }
+  }
+
+  /** Force a bold stoop on a picnic (mission 3). */
+  public raidPicnic(at: THREE.Vector3, onLand?: () => void): void {
+    if (this.mode === "gone") return;
+    // Climbing away after a flush — wait until they're back on the circle.
+    if (this.mode === "up") return;
+    this.raidCircle = true;
+    this.height = Math.min(this.height, this.cruiseY());
+    this.scrap = {
+      at: at.clone(),
+      take: () => undefined,
+      going: () => true,
+      raid: true,
+      onLand,
+    };
+    this.mode = "stoop";
+    this.hold = 0;
   }
 
   public splatter(point: THREE.Vector3): void {
     this.flecks.splat(point);
+  }
+
+  public rinse(point: THREE.Vector3): boolean {
+    return this.flecks.rinseNear(point, 0.5);
   }
 
   private shriek(): void {
@@ -232,9 +329,23 @@ export class Gull {
     );
   }
 
+  /** Softly pull the cruise circle toward a picnic on the east green. */
+  public watchOver(x: number, z: number): void {
+    if (this.mode !== "cruise" && this.mode !== "in") return;
+    this.raidCircle = true;
+    this.circleAt.x += (x - this.circleAt.x) * 0.12;
+    this.circleAt.y += (z - this.circleAt.y) * 0.12;
+    // Ease down into hose range while loitering over the blanket.
+    this.height += (this.cruiseY() - this.height) * 0.08;
+  }
+
+  private cruiseY(): number {
+    return this.raidCircle ? RAID_CRUISE_HEIGHT : CRUISE_HEIGHT;
+  }
+
   /**
    * Runs the bird. `scraps` is everything going on the ground; the gull
-   * picks the nearest one nobody is stood over.
+   * picks the nearest one nobody is stood over — or a picnic worth raiding.
    */
   public update(
     delta: number,
@@ -248,7 +359,18 @@ export class Gull {
         : this.grumble;
 
     if (this.mode !== "gone" && this.group.position.distanceTo(player) < SPOOKED) {
-      this.flush();
+      // Diving / blanket raiders only flush when you're on top of them —
+      // otherwise walk-up spook puts them above the lance forever.
+      if (this.isRaiding()) {
+        if (
+          this.mode === "feed" &&
+          this.group.position.distanceTo(player) < RAID_SPOOKED
+        ) {
+          this.flush();
+        }
+      } else {
+        this.flush();
+      }
     }
 
     switch (this.mode) {
@@ -277,7 +399,7 @@ export class Gull {
     const gap = to.length();
     if (gap < 2) {
       this.mode = "cruise";
-      this.height = CRUISE_HEIGHT;
+      this.height = this.cruiseY();
       return;
     }
     to.normalize();
@@ -332,16 +454,20 @@ export class Gull {
     this.shriek();
   }
 
-  /** The nearest bit of food that nobody's guarding. */
+  /** The nearest bit of food — picnics are fair game from farther out. */
   private pickScrap(scraps: readonly Scrap[]): Scrap | null {
     const here = this.group.position;
     let best: Scrap | null = null;
     let closest = 95;
     for (const scrap of scraps) {
       if (!scrap.going()) continue;
+      const reach = scrap.raid ? 150 : 95;
       const gap = Math.hypot(scrap.at.x - here.x, scrap.at.z - here.z);
-      if (gap > closest) continue;
-      closest = gap;
+      if (gap > reach) continue;
+      // Prefer a picnic raid when one is in range — herring gulls can't resist.
+      const score = scrap.raid ? gap * 0.55 : gap;
+      if (score > closest) continue;
+      closest = score;
       best = scrap;
     }
     return best;
@@ -351,6 +477,7 @@ export class Gull {
   private dropIn(delta: number): void {
     const scrap = this.scrap;
     if (!scrap || !scrap.going()) {
+      parkAudio.wingFlap(0.5);
       this.mode = "up";
       return;
     }
@@ -378,15 +505,28 @@ export class Gull {
       here.set(scrap.at.x, deck, scrap.at.z);
       this.mode = "feed";
       this.wetFeed = wet;
-      this.hold = wet ? WATER_FEED_TIME : FEED_TIME;
+      this.raidFeed = !!scrap.raid;
+      // Snatch and go on a picnic — don't hang about for the sandwiches.
+      this.hold = scrap.raid
+        ? 2.2 + Math.random() * 1.2
+        : wet
+          ? WATER_FEED_TIME
+          : FEED_TIME;
       for (const leg of this.legs) leg.visible = !wet;
+      scrap.onLand?.();
+      if (wet) {
+        parkAudio.waterPlop(0.5);
+        parkAudio.wingFlap(0.4);
+      } else {
+        parkAudio.wingFlap(0.35);
+      }
     }
   }
 
   /** Stood on the path — or bobbing on the water — getting through it. */
   private workAtIt(delta: number): void {
     this.hold -= delta;
-    this.step += delta * 6;
+    this.step += delta * (this.raidFeed ? 9 : 6);
 
     const deck = this.wetFeed ? WATER_Y + 0.12 : 0.42;
     this.group.rotation.set(Math.abs(Math.sin(this.step)) * 0.5, this.heading, 0);
@@ -399,18 +539,26 @@ export class Gull {
       this.fed += 1;
     }
 
-    if (this.hold <= 0 || !this.scrap?.going()) this.mode = "up";
+    if (this.hold <= 0 || !this.scrap?.going()) {
+      if (this.wetFeed) parkAudio.waterPlop(0.3);
+      parkAudio.wingFlap(0.6);
+      this.mode = "up";
+    }
   }
 
   /** Straight up off the deck and back round to circling height. */
   private climbAway(delta: number): void {
     for (const leg of this.legs) leg.visible = false;
     this.wetFeed = false;
-    this.height += delta * 9;
+    const climb = this.leavingPark ? 14 : 9;
+    const drift = this.leavingPark ? 14 : 7;
+    this.height += delta * climb;
+    // Sync from pose if we were feeding (height may lag behind position.y).
     const here = this.group.position;
+    if (here.y > this.height) this.height = here.y;
     here.y = this.height;
-    here.x += Math.sin(this.heading) * 7 * delta;
-    here.z += Math.cos(this.heading) * 7 * delta;
+    here.x += Math.sin(this.heading) * drift * delta;
+    here.z += Math.cos(this.heading) * drift * delta;
     this.group.rotation.set(-0.2, this.heading, 0);
 
     this.flap += delta * 16;
@@ -419,12 +567,25 @@ export class Gull {
     this.wings[1]!.rotation.z = -beat;
     this.spreadWings(1);
 
-    if (this.height < CRUISE_HEIGHT) return;
-    // Back on the circuit, over wherever it's ended up.
-    this.height = CRUISE_HEIGHT;
-    this.circleAt.set(here.x, here.z);
-    this.circleRadius = 25 + Math.random() * 40;
+    const targetY = this.leavingPark ? CRUISE_HEIGHT + 8 : this.cruiseY();
+    if (this.height < targetY) return;
+    if (this.leavingPark) {
+      this.mode = "gone";
+      this.group.visible = false;
+      return;
+    }
+    // Rejoin the circle from *here* — never teleport out to a huge orbit.
+    this.height = this.cruiseY();
+    here.y = this.height;
+    const dx = here.x - this.circleAt.x;
+    const dz = here.z - this.circleAt.y;
+    this.circleAngle = Math.atan2(dz / 0.7, dx);
+    const dist = Math.hypot(dx, dz / 0.7);
+    this.circleRadius = this.raidCircle
+      ? Math.max(6, Math.min(16, dist > 1 ? dist : 10))
+      : Math.max(18, Math.min(55, dist > 1 ? dist : 30));
     this.scrap = null;
+    this.raidFeed = false;
     this.mode = "cruise";
   }
 

@@ -1,13 +1,19 @@
 import * as THREE from "three";
 import {
+  KERB_Y,
   PATH_OUTER,
+  PATH_Y,
   WATER_Y,
   distanceToShore,
   isInLake,
   nearestShore,
   outwardAt,
   waterSpot,
+  northwestScore,
+  SHORE,
 } from "../world/lake";
+import { groundHeight } from "../world/terrain";
+import { parkAudio } from "../audio/ParkAudio";
 import { addEyes } from "./eyes";
 import { MuckFlecks } from "../effects/MuckFlecks";
 
@@ -20,7 +26,8 @@ type Mode =
   | "beg"
   | "feast"
   | "roost"
-  | "fly";
+  | "fly"
+  | "tumble";
 
 /**
  * Coming in to land — the long descent, the flare, then skiing to a stop — or
@@ -40,12 +47,16 @@ const CYGNET_SIZE = 0.38;
 
 /** A cygnet keeps this close to its mother, and she keeps them this close. */
 const BROOD_GAP = 1.1;
-/** Get inside this of one of her cygnets and she comes straight for you. */
-const GUARD_RANGE = 5;
+/** How hard a hose blast sends a cygnet rolling. */
+const TUMBLE_SPEED = 7.5;
+/** How close another bird must be to get bowled over by a rolling cygnet. */
+const TUMBLE_HIT = 0.95;
 /** Wings up at anyone this close to a mother or her brood. */
-const BUSK_RANGE = 8;
-/** Ordinary birds on the bank busk inside this. */
-const BANK_BUSK_RANGE = 6;
+const BUSK_RANGE = 11;
+/** Ordinary birds busk inside this. */
+const BANK_BUSK_RANGE = 7;
+/** Rush only when this close to a chick — warning display first. */
+const BROOD_CHARGE_RANGE = 2.7;
 /** How long she keeps at you once her brood has been bothered. */
 const GUARD_TIME = 14;
 
@@ -60,6 +71,13 @@ const FLARE_GATE = 20;
 
 /** How long after a feed before they start eyeing up the public again. */
 const FULL_FOR = 40;
+
+/** Depot radio: NW feeders — bank-side birds foul the path harder. */
+let feederRush = false;
+
+export function setSwanFeederRush(on: boolean): void {
+  feederRush = on;
+}
 const BEG_RANGE = 1.7;
 
 /** Close enough to get a beak into the bread, and the rate they peck at it. */
@@ -73,8 +91,10 @@ const STRIKE_RANGE = 2;
 const STRIKE_COOLDOWN = 1.6;
 
 /** Scrambling up over the wall, and sliding back down into the water. */
-const CLIMB_TIME = 0.9;
-const SLIDE_TIME = 0.6;
+const CLIMB_TIME = 2.35;
+const SLIDE_TIME = 1.05;
+/** Wing-flick drip after the feet plant on the path. */
+const LAND_SHAKE = 0.85;
 
 export class Swan {
   private mesh: THREE.Group;
@@ -103,6 +123,11 @@ export class Swan {
   private climb = 0;
   private slide = 0;
   private wasInWater = true;
+  /** One mid-scramble splash so they don't only drip on the flip. */
+  private climbSplashed = false;
+  private climbSplashedLate = false;
+  /** Shake the wet off once the feet are on the path. */
+  private landShake = 0;
   private dip = 0;
   private dipWait = 3 + Math.random() * 6;
   private wakeWait = Math.random();
@@ -146,6 +171,8 @@ export class Swan {
   private slapGap = 0;
   private slapFoot = 1;
   private gone = false;
+  /** Landed from a revenge fly-in — charge the cleaner on touchdown. */
+  private revengeLand = false;
 
   public readonly kind: SwanKind;
   private readonly size: number;
@@ -164,6 +191,12 @@ export class Swan {
   /** Stops a dog stood over a bird frightening it every single frame. */
   private spooked = 0;
   private flecks!: MuckFlecks;
+
+  /** Rolling after a hose blast — spin about the travel axis. */
+  private tumbleSpin = 0;
+  private tumbleHitCool = 0;
+  /** Keep tumbling while the lance is still on them — stops upright/side flicker. */
+  private tumbleHoseLeft = 0;
 
   constructor(
     position: THREE.Vector3,
@@ -261,10 +294,11 @@ export class Swan {
       group.add(wing);
       this.wings.push(wing);
 
-      // The full spread, folded away out of sight unless they're in the air.
+      // The full spread, folded away out of sight unless they're flying or
+      // putting the wings up at someone.
       const spanGeometry = new THREE.SphereGeometry(1, 8, 5);
-      spanGeometry.scale(0.78, 0.05, 0.44);
-      spanGeometry.translate(side * 0.85, 0, -0.1);
+      spanGeometry.scale(0.92, 0.07, 0.52);
+      spanGeometry.translate(side * 0.95, 0.05, -0.08);
       const span = new THREE.Mesh(spanGeometry, wingMaterial);
       span.visible = false;
       span.castShadow = true;
@@ -323,7 +357,8 @@ export class Swan {
 
   /** Someone nearby has food. Drop everything and go and stand next to them. */
   public tempt(at: THREE.Vector3): void {
-    if (this.mode === "charge" || this.mode === "fly") return;
+    if (this.mode === "charge" || this.mode === "fly" || this.mode === "tumble")
+      return;
     this.quarry.copy(at);
     this.mode = "beg";
   }
@@ -393,6 +428,72 @@ export class Swan {
     this.mesh.rotation.y = this.longestRun();
     this.slapGap = 0;
     this.velocity.set(0, 0, 0);
+    parkAudio.wingFlap(0.55);
+    parkAudio.waterPlop(0.4 * this.size);
+  }
+
+  /**
+   * Pedalo (or anything heavy) took this bird out — climb away and leave for
+   * good. Cygnets and adults both.
+   */
+  public strikeDead(): void {
+    if (this.gone) return;
+    this.revengeLand = false;
+    this.mode = "fly";
+    this.flightPhase = "climb";
+    this.airspeed = Math.max(4, this.airspeed);
+    this.mesh.rotation.y = Math.random() * Math.PI * 2;
+    this.buskLeft = 0;
+    this.chaseLeft = 0;
+  }
+
+  /**
+   * V-formation fly-in aimed at the cleaner. Lands then charges.
+   * `slot` 0 is the tip; odds left, evens right.
+   */
+  public flyRevenge(
+    aim: THREE.Vector3,
+    slot: number,
+    _total: number,
+  ): void {
+    const toward = Math.atan2(aim.x, aim.z);
+    const approach = toward + Math.PI;
+    const rank = Math.ceil(slot / 2);
+    const side = slot === 0 ? 0 : slot % 2 === 1 ? -1 : 1;
+    const spread = rank * 4.2;
+    const back = 95 + rank * 7 + Math.random() * 8;
+
+    this.flightTo.set(
+      aim.x + Math.sin(toward) * 6 + Math.cos(toward) * side * spread * 0.35,
+      this.swimY,
+      aim.z + Math.cos(toward) * 6 - Math.sin(toward) * side * spread * 0.35,
+    );
+    // Prefer open water near the aim.
+    if (!isInLake(this.flightTo.x, this.flightTo.z)) {
+      const shore = nearestShore(aim.x, aim.z);
+      const out = outwardAt(shore);
+      this.flightTo.set(shore.x - out.x * 8, this.swimY, shore.y - out.y * 8);
+    }
+
+    this.position.set(
+      this.flightTo.x + Math.sin(approach) * back + Math.cos(approach) * side * spread,
+      28 + rank * 1.2,
+      this.flightTo.z + Math.cos(approach) * back - Math.sin(approach) * side * spread,
+    );
+    this.target.copy(this.flightTo);
+    this.mesh.position.copy(this.position);
+    this.mesh.rotation.y = toward;
+    this.mode = "fly";
+    this.flightPhase = "approach";
+    this.airspeed = CRUISE * 1.05;
+    this.revengeLand = true;
+    this.wasInWater = false;
+    this.velocity.set(0, 0, 0);
+  }
+
+  public forceCharge(): void {
+    if (this.kind === "cygnet") return;
+    this.startCharge();
   }
 
   /** Well up and away over the rooftops. */
@@ -460,7 +561,8 @@ export class Swan {
     if (this.airspeed >= UNSTICK || !clear) {
       this.flightPhase = "climb";
       this.wasInWater = false;
-      this.splash();
+      this.splash(0.75);
+      parkAudio.wingFlap(0.95);
     }
   }
 
@@ -487,6 +589,7 @@ export class Swan {
     );
     this.ripple(0.42, 1.9, 0.8, at);
     this.skiSpray(heading, at);
+    parkAudio.boatWash(0.4 + Math.min(0.35, this.airspeed * 0.03));
   }
 
   /** The whole arrival: descend, flare, then ski to a halt on the water. */
@@ -544,7 +647,8 @@ export class Swan {
     this.airspeed = Math.max(this.airspeed, TOUCHDOWN * 0.9);
     this.sprayGap = 0;
     this.wasInWater = true;
-    this.splash();
+    this.splash(0.9);
+    parkAudio.waterSplash(0.85);
   }
 
   private skiToAStop(delta: number): void {
@@ -561,6 +665,7 @@ export class Swan {
       this.sprayGap = 0.07;
       this.skiSpray(heading);
       this.wake();
+      parkAudio.boatWash(0.35 + Math.min(0.4, this.airspeed * 0.04));
     }
 
     this.flightPose(delta);
@@ -571,11 +676,15 @@ export class Swan {
       this.mesh.rotation.x = 0;
       this.mesh.rotation.z = 0;
       for (const wing of this.wings) wing.rotation.set(0, 0, 0);
-      for (const feather of this.feathers) feather.visible = false;
+      this.foldWingSpans();
       for (const leg of this.legs) leg.rotation.x = 0;
       this.modeTimer = 0;
       this.modeLength = 10 + Math.random() * 12;
       this.pickTarget();
+      if (this.revengeLand) {
+        this.revengeLand = false;
+        this.startCharge();
+      }
     }
   }
 
@@ -589,7 +698,10 @@ export class Swan {
     const climbing = this.flightPhase === "climb";
     // Full span whenever they're working; the feet disappear under the surface
     // the moment the body is back in the water.
-    for (const feather of this.feathers) feather.visible = true;
+    for (const feather of this.feathers) {
+      feather.visible = true;
+      feather.rotation.set(0, 0, 0);
+    }
     for (const leg of this.legs) leg.visible = !skiing;
 
     // Slow and heavy on the glide, hammering when they're hauling themselves
@@ -613,6 +725,8 @@ export class Swan {
     rightWing.rotation.z = -sweep;
     leftWing.rotation.x = gliding || running ? 0 : -0.3;
     rightWing.rotation.x = gliding || running ? 0 : -0.3;
+    leftWing.rotation.y = 0;
+    rightWing.rotation.y = 0;
 
     const [left, right] = this.legs as [THREE.Group, THREE.Group];
     if (running) {
@@ -812,12 +926,19 @@ export class Swan {
     this.target = this.position.clone();
   }
 
+  /** Heavy hose from the van — adults roll like cygnets. */
+  public heavyBlast(from?: THREE.Vector3): void {
+    if (this.gone || this.mode === "fly") return;
+    this.beginTumble(from, TUMBLE_SPEED * (this.kind === "cygnet" ? 2.4 : 2.1));
+  }
+
   /** Hit by the hose. A few of these and it comes for you — unless it's
    * already coming, in which case the jet knocks it back. */
   public soak(from?: THREE.Vector3): void {
     if (this.kind === "cygnet") {
-      // A cygnet won't fight you. It doesn't have to: it has a mother.
+      // A cygnet won't fight you. It rolls — and mother comes looking.
       this.mother?.defend();
+      this.beginTumble(from);
       return;
     }
 
@@ -836,9 +957,93 @@ export class Swan {
     if (this.soakings >= PATIENCE) this.startCharge();
   }
 
+  /**
+   * Bowl a cygnet across the paving. Further blasts while already rolling
+   * just shove it harder.
+   */
+  private beginTumble(from?: THREE.Vector3, boost = TUMBLE_SPEED): void {
+    const away = new THREE.Vector3();
+    if (from) {
+      away.subVectors(this.position, from).setY(0);
+    }
+    if (away.lengthSq() < 0.01) {
+      away.set(
+        -Math.sin(this.mesh.rotation.y),
+        0,
+        -Math.cos(this.mesh.rotation.y),
+      );
+    }
+    away.normalize();
+
+    // Fresh spray: don't pop upright mid-blast.
+    this.tumbleHoseLeft = 0.55;
+
+    if (this.mode === "tumble") {
+      this.velocity.addScaledVector(away, boost * 0.55);
+      if (this.velocity.length() > TUMBLE_SPEED * 1.6) {
+        this.velocity.setLength(TUMBLE_SPEED * 1.6);
+      }
+      this.modeLength = Math.max(this.modeLength, this.modeTimer + 0.85);
+      return;
+    }
+
+    this.mode = "tumble";
+    this.modeTimer = 0;
+    this.modeLength = 2.4 + Math.random() * 1.2;
+    this.buskLeft = 0;
+    this.scrapLeft = 0;
+    this.velocity.copy(away.multiplyScalar(boost));
+    this.tumbleSpin = 0;
+    this.tumbleHitCool = 0;
+    // Legs tuck — they're on their side.
+    for (const leg of this.legs) {
+      leg.rotation.x = 1.4;
+      leg.visible = false;
+    }
+    // Tip onto the side immediately so the first frame isn't upright.
+    const yaw = Math.atan2(away.x, away.z);
+    this.mesh.rotation.set(0, yaw, Math.PI / 2);
+    this.mesh.quaternion.setFromEuler(this.mesh.rotation);
+    this.position.y = this.tumbleFloorY();
+    this.mesh.position.copy(this.position);
+  }
+
+  /**
+   * Hit by another rolling cygnet — chicks tumble on, adults just get shoved.
+   */
+  public receiveTumbleHit(from: THREE.Vector3, impulse: THREE.Vector3): void {
+    if (this.mode === "fly" || this.mode === "charge") return;
+    if (this.kind === "cygnet") {
+      if (this.mode === "tumble") {
+        this.velocity.add(impulse);
+        if (this.velocity.length() > TUMBLE_SPEED * 1.5) {
+          this.velocity.setLength(TUMBLE_SPEED * 1.5);
+        }
+        return;
+      }
+      this.beginTumble(from, Math.max(4.2, impulse.length()));
+      this.velocity.copy(impulse);
+      if (this.velocity.length() < 3.5) this.velocity.setLength(3.5);
+      this.mother?.defend();
+      return;
+    }
+    // Grown bird: a shove and a dirty look, not a roll.
+    this.shoveBack(from, 0.45 + Math.min(0.5, impulse.length() * 0.08));
+    if (this.brood.length > 0) this.defend();
+  }
+
+  public isTumbling(): boolean {
+    return this.mode === "tumble";
+  }
+
   /** Filthy bounce spray — sticks to the plumage. */
   public splatter(point: THREE.Vector3): void {
     this.flecks.splat(point);
+  }
+
+  /** Clean water rinses the muck off the feathers. */
+  public rinse(point: THREE.Vector3): boolean {
+    return this.flecks.rinseNear(point, 0.7);
   }
 
   private hoseHits = 0;
@@ -869,6 +1074,101 @@ export class Swan {
     this.position.addScaledVector(away, force);
     this.velocity.copy(away.multiplyScalar(force * 3.2));
     this.mesh.position.copy(this.position);
+  }
+
+  /**
+   * Bowl across the bank on its side. Knocks other birds if it hits them;
+   * stops when the spin dies or it hits the water.
+   */
+  private rollAlong(delta: number, flock: readonly Swan[]): void {
+    if (this.tumbleHoseLeft > 0) this.tumbleHoseLeft -= delta;
+
+    this.velocity.y = 0;
+    this.velocity.multiplyScalar(Math.max(0, 1 - 1.15 * delta));
+    this.position.addScaledVector(this.velocity, delta);
+
+    const speed = this.velocity.length();
+    // Origin sits through the body — lift clear so a side-roll doesn't bury.
+    this.position.y = this.tumbleFloorY();
+
+    const yaw =
+      speed > 0.12
+        ? Math.atan2(this.velocity.x, this.velocity.z)
+        : this.mesh.rotation.y;
+    if (speed > 0.15) {
+      const radius = 0.32 * this.size;
+      this.tumbleSpin += (speed / Math.max(0.12, radius)) * delta;
+    }
+    // Stable euler roll: tip on side + spin along travel. Avoids quaternion
+    // flips when travel direction wobbles near ±Z.
+    this.mesh.rotation.set(this.tumbleSpin, yaw, Math.PI / 2);
+    this.mesh.quaternion.setFromEuler(this.mesh.rotation);
+
+    this.mesh.position.copy(this.position);
+
+    // Clip into other birds while still going.
+    if (this.tumbleHitCool <= 0 && speed > 1.4) {
+      for (const other of flock) {
+        if (other === this) continue;
+        if (other.mode === "fly") continue;
+        const gap = this.position.distanceTo(other.position);
+        const reach =
+          TUMBLE_HIT * (this.size + other.size) / (ADULT_SIZE + CYGNET_SIZE);
+        if (gap > reach * 1.35) continue;
+        const push = this.velocity
+          .clone()
+          .normalize()
+          .multiplyScalar(speed * 0.72);
+        other.receiveTumbleHit(this.position, push);
+        // Bounce a touch off the contact.
+        this.velocity.multiplyScalar(0.82);
+        this.tumbleHitCool = 0.18;
+        break;
+      }
+    }
+
+    // Into the lake — splash and swim it off.
+    if (isInLake(this.position.x, this.position.z)) {
+      this.endTumble("swim");
+      return;
+    }
+
+    // Stay down while the jet's still on them; only settle once it lets up.
+    if (this.tumbleHoseLeft > 0) return;
+    if (this.modeTimer >= this.modeLength || speed < 0.55) {
+      this.endTumble(this.isAshore() ? "graze" : "swim");
+    }
+  }
+
+  /** Clearance so a bird on its side sits on the deck, not through it. */
+  private tumbleFloorY(): number {
+    const x = this.position.x;
+    const z = this.position.z;
+    if (isInLake(x, z)) return WATER_Y + 0.22 * this.size;
+    return groundHeight(x, z) + PATH_Y + 0.58 * this.size;
+  }
+
+  private endTumble(next: Mode): void {
+    this.mode = next;
+    this.modeTimer = 0;
+    this.modeLength =
+      next === "graze" ? 8 + Math.random() * 12 : 6 + Math.random() * 10;
+    this.velocity.multiplyScalar(0.2);
+    this.tumbleSpin = 0;
+    this.tumbleHoseLeft = 0;
+    const yaw =
+      this.velocity.length() > 0.1
+        ? Math.atan2(this.velocity.x, this.velocity.z)
+        : this.mesh.rotation.y;
+    this.mesh.rotation.set(0, yaw, 0);
+    this.mesh.quaternion.setFromEuler(this.mesh.rotation);
+    for (const leg of this.legs) {
+      leg.visible = true;
+      leg.rotation.x = 0;
+    }
+    this.position.y = next === "swim" ? this.swimY : this.landY;
+    this.mesh.position.copy(this.position);
+    this.pickTarget();
   }
 
   /** Had enough of the hose — back to the water, wings still up for a moment. */
@@ -953,8 +1253,9 @@ export class Swan {
   }
 
   /**
-   * A mother keeps half an eye on you the whole time. Come inside the brood
-   * and she puts the wings up; get any closer to a chick and she charges.
+   * A mother keeps half an eye on you the whole time. Come near her or the
+   * brood and she puts the wings up and holds them; only rush when you're
+   * right on top of a chick (or after something's already set her off).
    */
   private mindTheBrood(delta: number, player?: THREE.Vector3): void {
     if (this.brood.length === 0) return;
@@ -962,23 +1263,28 @@ export class Swan {
 
     if (this.guarding > 0) this.guarding -= delta;
 
-    if (player && this.mode !== "fly") {
-      const close = this.brood.some(
-        (chick) => chick.getPosition().distanceTo(player) < GUARD_RANGE,
+    if (
+      player &&
+      this.mode !== "fly" &&
+      this.mode !== "tumble" &&
+      this.mode !== "charge"
+    ) {
+      const nearMum = this.position.distanceTo(player) < BUSK_RANGE;
+      const nearBrood = this.brood.some(
+        (chick) => chick.getPosition().distanceTo(player) < BUSK_RANGE,
       );
-      if (close) this.guarding = GUARD_TIME;
+      const onChick = this.brood.some(
+        (chick) => chick.getPosition().distanceTo(player) < BROOD_CHARGE_RANGE,
+      );
 
-      // Warning display before a charge, and whenever you're near her.
-      if (
-        this.buskLeft <= 0 &&
-        this.buskCool <= 0 &&
-        this.mode !== "charge" &&
-        (close || this.position.distanceTo(player) < BUSK_RANGE)
-      ) {
-        this.buskLeft = 3.5 + Math.random() * 2;
-        this.buskCool = 1.5 + Math.random() * 1.5;
+      if (nearMum || nearBrood) {
         this.buskFace.copy(player);
+        // Hold the threat while you're still in her space.
+        this.buskLeft = Math.max(this.buskLeft, 3.2);
+        this.buskCool = 0.25;
       }
+
+      if (onChick) this.guarding = GUARD_TIME;
     }
 
     if (this.guarding > 0 && this.mode !== "charge" && this.mode !== "fly") {
@@ -993,6 +1299,7 @@ export class Swan {
   private tagAlong(): void {
     const mum = this.mother;
     if (!mum) return;
+    if (this.mode === "tumble") return;
     if (mum.hasLeft()) {
       this.mother = null;
       return;
@@ -1018,8 +1325,8 @@ export class Swan {
   }
 
   private startCharge(): void {
-    // No picking fights on the way in.
-    if (this.mode === "fly") return;
+    // Revenge birds may still be folding wings after touchdown.
+    if (this.mode === "fly" && !this.revengeLand) return;
     this.soakings = 0;
     this.hoseHits = 0;
     this.mode = "charge";
@@ -1033,23 +1340,23 @@ export class Swan {
   }
 
   /**
-   * Anyone wandered too close gets the wings. Mothers do it on the water or
-   * the bank whenever someone hangs about the brood; other adults only busk
-   * ashore while grazing.
+   * Anyone wandered too close gets the wings. Mothers always busk when you're
+   * near them or the brood; other adults do it when you close in on them.
    */
   public noticeCrowd(crowd: readonly THREE.Vector3[]): void {
-    if (this.buskCool > 0 || this.buskLeft > 0) return;
     if (this.kind === "cygnet") return;
     if (
       this.mode === "charge" ||
       this.mode === "fly" ||
-      this.mode === "roost"
+      this.mode === "roost" ||
+      this.mode === "tumble"
     ) {
       return;
     }
 
     const mother = this.brood.length > 0;
-    if (!mother && (this.mode !== "graze" || !this.isAshore())) return;
+    // Mothers keep refreshing via mindTheBrood; loners need a free slot.
+    if (!mother && (this.buskCool > 0 || this.buskLeft > 0)) return;
 
     const range = mother ? BUSK_RANGE : BANK_BUSK_RANGE;
     for (const at of crowd) {
@@ -1061,14 +1368,14 @@ export class Swan {
       }
       if (!near) continue;
 
-      // Mothers hold the display longer and will do it again sooner.
-      this.buskLeft = mother
-        ? 3.8 + Math.random() * 2.2
-        : 2.2 + Math.random() * 1.8;
-      this.buskCool = mother
-        ? 2.2 + Math.random() * 1.8
-        : 7 + Math.random() * 6;
       this.buskFace.copy(at);
+      if (mother) {
+        this.buskLeft = Math.max(this.buskLeft, 3.5);
+        this.buskCool = 0.25;
+      } else {
+        this.buskLeft = 2.6 + Math.random() * 2;
+        this.buskCool = 5 + Math.random() * 5;
+      }
       return;
     }
   }
@@ -1109,7 +1416,14 @@ export class Swan {
    * the shore so the flock doesn't queue up on one square metre.
    */
   private besideShore(away: number, spread: number): THREE.Vector2 {
-    const here = nearestShore(this.position.x, this.position.z);
+    let here = nearestShore(this.position.x, this.position.z);
+    // Haul-outs prefer the NW feeding corner where the bread is.
+    if (away > 0 && Math.random() < 0.72) {
+      const nw = SHORE.filter((p) => northwestScore(p.x, p.y) > 0.35);
+      if (nw.length > 0) {
+        here = nw[Math.floor(Math.random() * nw.length)]!.clone();
+      }
+    }
     const out = outwardAt(here);
     const along = (Math.random() - 0.5) * spread;
     return new THREE.Vector2(
@@ -1136,24 +1450,39 @@ export class Swan {
     this.pickTarget();
   }
 
-  public update(delta: number, player?: THREE.Vector3): void {
+  public update(
+    delta: number,
+    player?: THREE.Vector3,
+    flock: readonly Swan[] = [],
+  ): void {
     this.flecks.update(delta);
     this.modeTimer += delta;
     // Asleep they tick over far slower, or a night's roosting would bury the
-    // grass by morning.
-    this.dropTimer += delta * (this.mode === "roost" ? 0.2 : 1);
+    // grass by morning. On the NW bank they foul it faster — that's where
+    // the feeders are.
+    const nw = northwestScore(this.position.x, this.position.z);
+    const rush = feederRush ? 1 + nw * 2.8 : 1;
+    const dropPace =
+      (this.mode === "roost" ? 0.2 : 1) * (0.35 + nw * 2.1) * rush;
+    this.dropTimer += delta * dropPace;
     this.fedAgo += delta;
     if (this.strikeCooldown > 0) this.strikeCooldown -= delta;
     if (this.hoseCool > 0) this.hoseCool -= delta;
     if (this.spooked > 0) this.spooked -= delta;
     if (this.buskCool > 0) this.buskCool -= delta;
     if (this.scrapCool > 0) this.scrapCool -= delta;
+    if (this.tumbleHitCool > 0) this.tumbleHitCool -= delta;
 
     this.mindTheBrood(delta, player);
     this.tagAlong();
 
     if (this.mode === "fly") {
       this.fly(delta);
+      return;
+    }
+
+    if (this.mode === "tumble") {
+      this.rollAlong(delta, flock);
       return;
     }
 
@@ -1231,15 +1560,39 @@ export class Swan {
       }
     }
 
-    // They pause mid-scramble rather than gliding over the wall.
-    const climbing = this.climb > 0 || this.slide > 0;
-    let speed = climbing ? 0.25 : this.onLand ? 0.7 : 1.6;
+    // Keep heaving shoreward while scrambling — don't freeze mid-wall.
+    let speed = this.onLand ? 0.7 : 1.6;
+    if (this.climb > 0) {
+      const t = 1 - this.climb / CLIMB_TIME;
+      // Slow approach, hard shove over the kerb, then settle on the paving.
+      if (t < 0.22) speed = 0.55 + t * 1.2;
+      else if (t < 0.7) speed = 0.9 + Math.sin(((t - 0.22) / 0.48) * Math.PI) * 1.6;
+      else speed = 0.55 + (1 - t) * 0.8;
+    } else if (this.slide > 0) {
+      const t = 1 - this.slide / SLIDE_TIME;
+      speed = 0.7 + t * 1.1;
+    } else if (this.mode === "haulOut" && !ashore) {
+      // Last metres: put on a bit of pace toward the coping.
+      const toBank = distanceToShore(this.position.x, this.position.z);
+      if (toBank < 3.5) speed = 1.9 + (1 - toBank / 3.5) * 0.7;
+    }
     // A cygnet dawdles in its slot and puts a spurt on if it drops behind.
     if (this.mother) {
       speed *= THREE.MathUtils.clamp(flat.length() / BROOD_GAP, 0.15, 3);
     }
     this.velocity.lerp(flat.normalize().multiplyScalar(speed), 3 * delta);
     this.position.addScaledVector(this.velocity, delta);
+
+    // Extra shove along the shore normal while climbing out.
+    if (this.climb > 0) {
+      const shore = nearestShore(this.position.x, this.position.z);
+      const out = outwardAt(shore);
+      const t = 1 - this.climb / CLIMB_TIME;
+      const shove =
+        t < 0.55 ? 2.4 * Math.sin((t / 0.55) * Math.PI) : 1.1 * (1 - t);
+      this.position.x += out.x * shove * delta;
+      this.position.z += out.y * shove * delta;
+    }
 
     // Waddling swans keep to the bank; swimming ones keep to the water.
     const inWater = isInLake(this.position.x, this.position.z);
@@ -1310,6 +1663,7 @@ export class Swan {
     }
 
     this.mesh.position.copy(this.position);
+    if (this.playBankCrossing(delta)) return;
     this.roostPose(delta, settled);
   }
 
@@ -1329,6 +1683,11 @@ export class Swan {
     const [leftWing, rightWing] = this.wings as [THREE.Mesh, THREE.Mesh];
     leftWing.rotation.z = settled ? -0.12 : 0.05;
     rightWing.rotation.z = settled ? 0.12 : -0.05;
+    leftWing.rotation.x = 0;
+    rightWing.rotation.x = 0;
+    leftWing.rotation.y = 0;
+    rightWing.rotation.y = 0;
+    this.foldWingSpans();
 
     this.mesh.rotation.x = 0;
     this.mesh.rotation.z = 0;
@@ -1388,6 +1747,7 @@ export class Swan {
     this.settleHeight(delta);
 
     this.mesh.position.copy(this.position);
+    if (this.playBankCrossing(delta)) return;
     if (gap > 0.2) this.mesh.rotation.y = Math.atan2(flat.x, flat.z);
     this.feastPose(delta, gap);
   }
@@ -1412,6 +1772,11 @@ export class Swan {
     const jostle = moving ? 0.08 : 0.3 + Math.sin(this.stride * 0.5) * 0.15;
     leftWing.rotation.z = jostle;
     rightWing.rotation.z = -jostle;
+    leftWing.rotation.x = 0;
+    rightWing.rotation.x = 0;
+    leftWing.rotation.y = 0;
+    rightWing.rotation.y = 0;
+    this.foldWingSpans();
 
     this.mesh.rotation.x = 0;
     this.mesh.rotation.z = moving ? swing * 0.05 : 0;
@@ -1468,6 +1833,7 @@ export class Swan {
     this.settleHeight(delta);
 
     this.mesh.position.copy(this.position);
+    if (this.playBankCrossing(delta)) return;
     if (gap > 0.2) this.mesh.rotation.y = Math.atan2(flat.x, flat.z);
     this.begPose(delta, gap);
   }
@@ -1494,6 +1860,11 @@ export class Swan {
     const [leftWing, rightWing] = this.wings as [THREE.Mesh, THREE.Mesh];
     leftWing.rotation.z = 0.05;
     rightWing.rotation.z = -0.05;
+    leftWing.rotation.x = 0;
+    rightWing.rotation.x = 0;
+    leftWing.rotation.y = 0;
+    rightWing.rotation.y = 0;
+    this.foldWingSpans();
 
     this.mesh.rotation.x = 0;
     this.mesh.rotation.z = moving ? swing * 0.04 : 0;
@@ -1542,8 +1913,38 @@ export class Swan {
     this.settleHeight(delta);
 
     this.mesh.position.copy(this.position);
+    if (this.playBankCrossing(delta)) return;
     if (gap > 0.2) this.mesh.rotation.y = Math.atan2(flat.x, flat.z);
     this.chargePose(delta);
+  }
+
+  /**
+   * Mute-swan threat: wings raised over the back with the primaries out.
+   * Same Z sense as the haul-out scramble (tips up) — the old busk pose had
+   * the sign flipped so they looked folded-down instead of arched.
+   */
+  private poseThreatWings(pulse = 0, fierce = false): void {
+    for (const feather of this.feathers) feather.visible = true;
+    const [leftWing, rightWing] = this.wings as [THREE.Mesh, THREE.Mesh];
+    const [leftSpan, rightSpan] = this.feathers as [THREE.Mesh, THREE.Mesh];
+    const arch = (fierce ? 1.4 : 1.2) + pulse * 0.12;
+    leftWing.rotation.z = -arch;
+    rightWing.rotation.z = arch;
+    leftWing.rotation.x = fierce ? -0.55 : -0.4;
+    rightWing.rotation.x = fierce ? -0.55 : -0.4;
+    leftWing.rotation.y = fierce ? 0.4 : 0.25;
+    rightWing.rotation.y = fierce ? -0.4 : -0.25;
+    // Tip the sail so the broad face reads from ahead, not as a thin edge.
+    leftSpan.rotation.set(0.4, 0.2, 0.15);
+    rightSpan.rotation.set(0.4, -0.2, -0.15);
+  }
+
+  /** Hide the primary sails and clear any threat/flight twist on them. */
+  private foldWingSpans(): void {
+    for (const feather of this.feathers) {
+      feather.visible = false;
+      feather.rotation.set(0, 0, 0);
+    }
   }
 
   /** Wings up, neck out low and flat — the full seaside menace. */
@@ -1556,10 +1957,7 @@ export class Swan {
     left.rotation.x = swing * 0.8;
     right.rotation.x = -swing * 0.8;
 
-    const [leftWing, rightWing] = this.wings as [THREE.Mesh, THREE.Mesh];
-    const beat = 0.7 + Math.sin(this.stride * 0.7) * 0.35;
-    leftWing.rotation.z = beat;
-    rightWing.rotation.z = -beat;
+    this.poseThreatWings(Math.sin(this.stride * 0.7), true);
 
     this.mesh.rotation.x = 0;
     this.mesh.rotation.z = swing * 0.06;
@@ -1595,6 +1993,7 @@ export class Swan {
     this.settleHeight(delta);
 
     this.mesh.position.copy(this.position);
+    if (this.playBankCrossing(delta)) return;
     if (gap > 0.15) this.mesh.rotation.y = Math.atan2(flat.x, flat.z);
 
     for (const leg of this.legs) leg.visible = !this.wasInWater;
@@ -1606,10 +2005,7 @@ export class Swan {
       right.rotation.x = -stamp * 0.55;
     }
 
-    const [leftWing, rightWing] = this.wings as [THREE.Mesh, THREE.Mesh];
-    const arch = 1.1 + Math.sin(this.stride * 2.2) * 0.18;
-    leftWing.rotation.z = arch;
-    rightWing.rotation.z = -arch;
+    this.poseThreatWings(Math.sin(this.stride * 2.2), true);
 
     this.mesh.rotation.x = 0;
     this.mesh.rotation.z = stamp * 0.08;
@@ -1620,8 +2016,8 @@ export class Swan {
   }
 
   /**
-   * Busking on the bank: wings arched high, neck coiled, staring the
-   * passer-by down. They don't give chase unless something else sets them off.
+   * Busking: full wing-spread threat display, neck coiled, staring the
+   * passer-by down. Mothers hold this whenever you hang about the brood.
    */
   private holdBusk(delta: number): void {
     this.velocity.multiplyScalar(Math.max(0, 1 - 6 * delta));
@@ -1630,46 +2026,64 @@ export class Swan {
     this.settleHeight(delta);
 
     this.mesh.position.copy(this.position);
+    if (this.playBankCrossing(delta)) return;
     const dx = this.buskFace.x - this.position.x;
     const dz = this.buskFace.z - this.position.z;
     if (dx * dx + dz * dz > 0.05) this.mesh.rotation.y = Math.atan2(dx, dz);
 
-    for (const leg of this.legs) leg.visible = !this.wasInWater;
+    const ashore = !this.wasInWater;
+    for (const leg of this.legs) leg.visible = ashore;
+
     this.stride += delta * 5;
     const stamp = Math.sin(this.stride);
     const [left, right] = this.legs as [THREE.Group, THREE.Group];
-    left.rotation.x = stamp * 0.12;
-    right.rotation.x = -stamp * 0.12;
+    left.rotation.x = stamp * 0.1;
+    right.rotation.x = -stamp * 0.1;
 
-    const [leftWing, rightWing] = this.wings as [THREE.Mesh, THREE.Mesh];
-    // Arched right up — the classic mute swan threat display.
     const mother = this.brood.length > 0;
-    const arch =
-      (mother ? 1.45 : 1.2) + Math.sin(this.stride * 1.6) * 0.14;
-    leftWing.rotation.z = arch;
-    rightWing.rotation.z = -arch;
-    leftWing.rotation.x = mother ? -0.25 : -0.12;
-    rightWing.rotation.x = mother ? -0.25 : -0.12;
+    this.poseThreatWings(Math.sin(this.stride * 1.8), mother || this.aggressive);
 
-    this.mesh.rotation.x = 0;
-    this.mesh.rotation.z = stamp * 0.03;
-    this.body.rotation.x = -0.08;
-    this.neck.rotation.x = 0.35 + Math.sin(this.stride * 2) * 0.08;
-    this.head.rotation.x = -0.15;
-    this.head.rotation.y = 0;
+    this.mesh.rotation.x = ashore ? -0.06 : 0;
+    this.mesh.rotation.z = stamp * 0.04;
+    this.body.rotation.x = -0.12;
+    // Neck drawn back in an S, beak tipped down at you.
+    this.neck.rotation.x = 0.55 + Math.sin(this.stride * 2.2) * 0.1;
+    this.head.rotation.x = -0.35;
+    this.head.rotation.y = Math.sin(this.stride * 0.7) * 0.12;
+  }
+
+  /** Climb / slide / wet-shake wins over whatever else they were posing. */
+  private playBankCrossing(delta: number): boolean {
+    if (this.climb <= 0 && this.slide <= 0 && this.landShake <= 0) return false;
+    this.animate(delta);
+    return true;
   }
 
   /** Fires the scramble or the slide when they cross the waterline. */
   private trackWaterline(delta: number, inWater: boolean): void {
-    if (this.climb > 0) this.climb = Math.max(0, this.climb - delta);
+    if (this.climb > 0) {
+      this.climb = Math.max(0, this.climb - delta);
+      if (this.climb === 0) this.landShake = LAND_SHAKE;
+    }
     if (this.slide > 0) this.slide = Math.max(0, this.slide - delta);
+    if (this.landShake > 0) {
+      this.landShake = Math.max(0, this.landShake - delta);
+    }
 
     if (this.wasInWater !== inWater) {
       if (inWater) {
         this.slide = SLIDE_TIME;
-        this.splash();
+        this.climb = 0;
+        this.climbSplashed = false;
+        this.climbSplashedLate = false;
+        this.landShake = 0;
+        this.splash(0.7);
       } else {
         this.climb = CLIMB_TIME;
+        this.slide = 0;
+        this.climbSplashed = false;
+        this.climbSplashedLate = false;
+        this.splash(0.55);
       }
       this.wasInWater = inWater;
     }
@@ -1677,18 +2091,51 @@ export class Swan {
 
   private settleHeight(delta: number): void {
     if (this.climb > 0) {
-      // Heave up out of the water, with a shove at the top of the effort.
+      // Reach → breast on the kerb → kick up → plant on the path.
       const t = 1 - this.climb / CLIMB_TIME;
-      const eased = t * t * (3 - 2 * t);
-      this.position.y =
-        this.swimY +
-        (this.landY - this.swimY) * eased +
-        Math.sin(Math.PI * t) * 0.12;
+      const crest =
+        Math.max(this.landY, KERB_Y + 0.28 * this.size) + 0.16 * this.size;
+      let y: number;
+      if (t < 0.28) {
+        // Rear and reach from the water.
+        const u = t / 0.28;
+        const eased = u * u * (3 - 2 * u);
+        y = this.swimY + (crest * 0.55 - this.swimY) * eased;
+      } else if (t < 0.55) {
+        // Breast onto the coping.
+        const u = (t - 0.28) / 0.27;
+        const eased = u * u * (3 - 2 * u);
+        y = crest * 0.55 + (crest - crest * 0.55) * eased;
+      } else if (t < 0.78) {
+        // Hang / kick over the top.
+        const u = (t - 0.55) / 0.23;
+        y = crest + Math.sin(u * Math.PI) * 0.08 * this.size;
+      } else {
+        // Drop onto the feet on the paving.
+        const u = (t - 0.78) / 0.22;
+        const eased = u * u * (3 - 2 * u);
+        y = crest + (this.landY - crest) * eased;
+      }
+      // Foot-plant heaves along the scramble.
+      const plant =
+        t > 0.35 && t < 0.92
+          ? Math.sin((t - 0.35) * Math.PI * 4.5) * 0.09 * this.size
+          : 0;
+      this.position.y = y + plant * (1 - t * 0.4);
       return;
     }
     if (this.slide > 0) {
+      // Tip onto the coping, then tip in.
       const t = 1 - this.slide / SLIDE_TIME;
-      this.position.y = this.landY + (this.swimY - this.landY) * (t * t);
+      const crest = this.landY + 0.14 * this.size;
+      if (t < 0.22) {
+        const u = t / 0.22;
+        this.position.y = this.landY + (crest - this.landY) * u;
+      } else {
+        const u = (t - 0.22) / 0.78;
+        const eased = u * u * (3 - 2 * u);
+        this.position.y = crest + (this.swimY - crest) * eased;
+      }
       return;
     }
     const restY = this.wasInWater ? this.swimY : this.landY;
@@ -1700,23 +2147,48 @@ export class Swan {
     const [left, right] = this.legs as [THREE.Group, THREE.Group];
     const [leftWing, rightWing] = this.wings as [THREE.Mesh, THREE.Mesh];
 
-    if (this.climb > 0 || this.slide > 0) {
-      const effort =
-        this.climb > 0
-          ? 1 - this.climb / CLIMB_TIME
-          : 1 - this.slide / SLIDE_TIME;
-      const flap = Math.sin(effort * Math.PI * 3);
+    if (this.climb > 0) {
+      this.poseClimbOut(1 - this.climb / CLIMB_TIME, left, right, leftWing, rightWing);
+      return;
+    }
 
-      for (const leg of this.legs) leg.visible = true;
-      // Nose up while heaving out, nose down while sliding back in.
-      this.mesh.rotation.x =
-        this.climb > 0 ? -0.3 * (1 - effort) : 0.22 * effort;
-      this.mesh.rotation.z = 0;
-      leftWing.rotation.z = -0.5 * Math.abs(flap);
-      rightWing.rotation.z = 0.5 * Math.abs(flap);
-      left.rotation.x = Math.sin(effort * Math.PI * 4) * 0.7;
-      right.rotation.x = -Math.sin(effort * Math.PI * 4) * 0.7;
-      this.neck.rotation.x = -0.3 - 0.25 * Math.sin(effort * Math.PI);
+    if (this.slide > 0) {
+      const t = 1 - this.slide / SLIDE_TIME;
+      for (const leg of this.legs) leg.visible = t < 0.55;
+      this.foldWingSpans();
+
+      // Tip forward over the coping, then belly-flop into the swim.
+      this.mesh.rotation.x = 0.15 + t * 0.55;
+      this.mesh.rotation.z = Math.sin(t * Math.PI * 2) * 0.08 * (1 - t);
+
+      const fold = Math.min(1, t * 1.4);
+      leftWing.rotation.z = -0.15 * (1 - fold);
+      rightWing.rotation.z = 0.15 * (1 - fold);
+      leftWing.rotation.x = fold * 0.35;
+      rightWing.rotation.x = fold * 0.35;
+      leftWing.rotation.y = 0;
+      rightWing.rotation.y = 0;
+
+      left.rotation.x = 0.4 + t * 0.8;
+      right.rotation.x = 0.35 + t * 0.7;
+      this.neck.rotation.x = -0.2 + t * 0.9;
+      this.head.rotation.x = t * 0.35;
+      this.body.rotation.x = t * 0.2;
+      return;
+    }
+
+    if (this.landShake > 0) {
+      this.poseLandShake(1 - this.landShake / LAND_SHAKE, left, right, leftWing, rightWing);
+      return;
+    }
+
+    // Near the bank on a haul-out — rear up and start beating before the kerb.
+    if (
+      this.mode === "haulOut" &&
+      this.wasInWater &&
+      distanceToShore(this.position.x, this.position.z) < 2.8
+    ) {
+      this.poseClimbApproach(delta, pace, left, right, leftWing, rightWing);
       return;
     }
 
@@ -1725,6 +2197,8 @@ export class Swan {
     rightWing.rotation.z = 0;
     leftWing.rotation.x = 0;
     rightWing.rotation.x = 0;
+    leftWing.rotation.y = 0;
+    rightWing.rotation.y = 0;
 
     if (this.wasInWater) {
       this.swimPose(delta, pace);
@@ -1733,8 +2207,168 @@ export class Swan {
     }
   }
 
+  /**
+   * Haul-out scramble: reach from the water, breast the kerb, kick over, plant.
+   */
+  private poseClimbOut(
+    t: number,
+    left: THREE.Group,
+    right: THREE.Group,
+    leftWing: THREE.Mesh,
+    rightWing: THREE.Mesh,
+  ): void {
+    for (const leg of this.legs) leg.visible = true;
+    for (const feather of this.feathers) {
+      feather.visible = true;
+      feather.rotation.set(0, 0, 0);
+    }
+
+    // Face up the bank, not along whatever swim heading they had.
+    const shore = nearestShore(this.position.x, this.position.z);
+    const out = outwardAt(shore);
+    this.mesh.rotation.y = Math.atan2(out.x, out.y);
+
+    // Pitch: nose up reaching → level on the coping → settle upright.
+    let pitch: number;
+    if (t < 0.28) pitch = -0.15 - 0.72 * (t / 0.28);
+    else if (t < 0.55) pitch = -0.87 + 0.55 * ((t - 0.28) / 0.27);
+    else if (t < 0.78) pitch = -0.32 + 0.38 * ((t - 0.55) / 0.23);
+    else pitch = 0.06 * (1 - (t - 0.78) / 0.22);
+    this.mesh.rotation.x = pitch;
+
+    const plant = Math.sin(t * Math.PI * 5.2);
+    this.mesh.rotation.z = plant * (0.28 - t * 0.12);
+
+    // Full primary beats — heaving the breast over the wall.
+    const beat = t * Math.PI * (t < 0.7 ? 7.2 : 4.5);
+    const heave = Math.sin(beat);
+    const lift = 0.55 + Math.abs(heave) * 1.15;
+    leftWing.rotation.z = -lift;
+    rightWing.rotation.z = lift;
+    leftWing.rotation.x = -0.25 - Math.abs(heave) * 0.45;
+    rightWing.rotation.x = -0.25 - Math.abs(heave) * 0.45;
+    leftWing.rotation.y = 0;
+    rightWing.rotation.y = 0;
+
+    // High-step scramble: one foot clawing while the other plants.
+    const step = t * Math.PI * 6.2;
+    const kick = t < 0.3 ? 0.55 : 1.15;
+    left.rotation.x = 0.2 + Math.sin(step) * kick;
+    right.rotation.x = 0.2 - Math.sin(step) * kick;
+
+    // Neck stretches for the coping, then S-curves as they stand.
+    if (t < 0.5) {
+      this.neck.rotation.x = -0.15 - Math.sin((t / 0.5) * Math.PI) * 0.75;
+      this.head.rotation.x = -0.35 * Math.sin((t / 0.5) * Math.PI);
+    } else {
+      const u = (t - 0.5) / 0.5;
+      this.neck.rotation.x = -0.15 - 0.2 * (1 - u);
+      this.head.rotation.x = -0.1 * (1 - u);
+    }
+    this.head.rotation.y = plant * 0.08;
+    this.body.rotation.x = -0.18 * Math.sin(Math.min(1, t * 1.3) * Math.PI);
+
+    if (!this.climbSplashed && t > 0.16) {
+      this.climbSplashed = true;
+      this.splash(0.5);
+      this.ripple(0.55, 1.1, 0.45);
+    }
+    if (!this.climbSplashedLate && t > 0.62) {
+      this.climbSplashedLate = true;
+      this.ripple(0.4, 0.85, 0.35);
+      parkAudio.waterPlop(0.28 * this.size);
+    }
+  }
+
+  /** Brief wet-shake once the scramble is done. */
+  private poseLandShake(
+    t: number,
+    left: THREE.Group,
+    right: THREE.Group,
+    leftWing: THREE.Mesh,
+    rightWing: THREE.Mesh,
+  ): void {
+    for (const leg of this.legs) leg.visible = true;
+    for (const feather of this.feathers) {
+      feather.visible = t < 0.65;
+      feather.rotation.set(0, 0, 0);
+    }
+
+    const shiver = Math.sin(t * Math.PI * 10) * (1 - t);
+    this.mesh.rotation.x = shiver * 0.12;
+    this.mesh.rotation.z = shiver * 0.22;
+    this.body.rotation.x = 0.04 + shiver * 0.08;
+
+    const flick = Math.abs(Math.sin(t * Math.PI * 8)) * (1 - t);
+    leftWing.rotation.z = -0.25 - flick * 0.9;
+    rightWing.rotation.z = 0.25 + flick * 0.9;
+    leftWing.rotation.x = -flick * 0.35;
+    rightWing.rotation.x = -flick * 0.35;
+    leftWing.rotation.y = 0;
+    rightWing.rotation.y = 0;
+
+    left.rotation.x = 0.1 + shiver * 0.15;
+    right.rotation.x = 0.1 - shiver * 0.15;
+    this.neck.rotation.x = -0.28 + shiver * 0.2;
+    this.head.rotation.x = shiver * 0.15;
+    this.head.rotation.y = shiver * 0.25;
+
+    if (t > 0.15 && t < 0.2) this.ripple(0.28, 0.7, 0.4);
+  }
+
+  /** Last metres of a haul-out — rear up and beat before hitting the wall. */
+  private poseClimbApproach(
+    delta: number,
+    pace: number,
+    _left: THREE.Group,
+    _right: THREE.Group,
+    leftWing: THREE.Mesh,
+    rightWing: THREE.Mesh,
+  ): void {
+    for (const leg of this.legs) leg.visible = false;
+    for (const feather of this.feathers) {
+      feather.visible = true;
+      feather.rotation.set(0, 0, 0);
+    }
+
+    const shore = nearestShore(this.position.x, this.position.z);
+    const out = outwardAt(shore);
+    const face = Math.atan2(out.x, out.y);
+    // Ease yaw toward the bank.
+    let yaw = this.mesh.rotation.y;
+    let turn = face - yaw;
+    while (turn > Math.PI) turn -= Math.PI * 2;
+    while (turn < -Math.PI) turn += Math.PI * 2;
+    this.mesh.rotation.y = yaw + turn * Math.min(1, 4 * delta);
+
+    const near = 1 - distanceToShore(this.position.x, this.position.z) / 2.8;
+    this.stride += delta * (8 + near * 10);
+    const beat = Math.sin(this.stride);
+    const lift = 0.35 + near * 0.55 + Math.abs(beat) * (0.4 + near * 0.5);
+    leftWing.rotation.z = -lift;
+    rightWing.rotation.z = lift;
+    leftWing.rotation.x = -0.2 - near * 0.25;
+    rightWing.rotation.x = -0.2 - near * 0.25;
+    leftWing.rotation.y = 0;
+    rightWing.rotation.y = 0;
+
+    this.mesh.rotation.x = -0.12 - near * 0.35;
+    this.mesh.rotation.z = beat * 0.06;
+    this.body.rotation.x = -0.08 * near;
+    this.neck.rotation.x = -0.2 - near * 0.45;
+    this.head.rotation.x = -0.15 * near;
+    this.head.rotation.y = 0;
+
+    this.wakeWait -= delta * Math.max(0.4, pace);
+    if (this.wakeWait <= 0) {
+      this.wakeWait = 0.45;
+      this.wake();
+    }
+  }
+
   private swimPose(delta: number, pace: number): void {
     for (const leg of this.legs) leg.visible = false;
+    this.foldWingSpans();
 
     const t = performance.now() / 1000;
     // Riding the ripples, plus a slow roll as the feet paddle out of sight.
@@ -1768,6 +2402,7 @@ export class Swan {
 
   private walkPose(delta: number, pace: number): void {
     for (const leg of this.legs) leg.visible = true;
+    this.foldWingSpans();
 
     this.stride += delta * (2 + pace * 5);
     const swing = Math.sin(this.stride);
@@ -1828,8 +2463,9 @@ export class Swan {
     this.ripple(0.45, 1.6, 0.28);
   }
 
-  private splash(): void {
+  private splash(intensity = 0.45): void {
     this.ripple(0.34, 0.9, 0.7);
+    if (intensity > 0.01) parkAudio.waterPlop(intensity * this.size);
   }
 
   /** Swans only foul the ground once they're out of the lake. */
@@ -1841,7 +2477,15 @@ export class Swan {
     if (!this.shouldDropNext) return false;
     this.shouldDropNext = false;
     if (!this.onLand) return false;
-    return !isInLake(this.position.x, this.position.z);
+    if (isInLake(this.position.x, this.position.z)) return false;
+    // Most deposits land on the NW stretch; elsewhere they often hold it.
+    // During a feeder rush they'll empty on anything near the bags.
+    const nw = northwestScore(this.position.x, this.position.z);
+    const chance = feederRush
+      ? 0.45 + nw * 0.55
+      : 0.18 + nw * 0.85;
+    if (Math.random() > chance) return false;
+    return true;
   }
 
   /** Did a droplet at this point catch the bird? */

@@ -1,4 +1,5 @@
 import type { LevelData, XZ } from "./types";
+import { DEFAULT_MISSION_SPOTS } from "./missions";
 
 /** Current baked layout — editor and game fall back to this. */
 export const DEFAULT_LEVEL: LevelData = {
@@ -177,15 +178,66 @@ export const DEFAULT_LEVEL: LevelData = {
     [-148, -40],
     [-145, -85],
   ],
+  fenceStyle: "wire",
   placeables: [
     { id: "boathouse", x: -47.9, z: 76, yaw: -0.562 },
     { id: "cafe", x: 148, z: 28, yaw: 1.384 },
     { id: "toilets", x: -21.9, z: -99.6, yaw: -2.926 },
-    { id: "playPark", x: 152, z: 33, yaw: 1.357, wide: 34, deep: 26 },
     { id: "roseGarden", x: 150, z: 101, yaw: 0.98 },
+    { id: "swing", x: 145.86, z: 42.41, yaw: 1.357 },
+    { id: "swing", x: 146.39, z: 39.97, yaw: 1.357 },
+    { id: "swing", x: 146.92, z: 37.53, yaw: 1.357 },
+    { id: "slide", x: 150.77, z: 24.55, yaw: 1.357 },
+    { id: "spring", x: 157.44, z: 36.23, yaw: 1.357 },
+    { id: "zip", x: 161.52, z: 26.88, yaw: 1.357 },
   ],
+  /** Wood-chip boundary for the east-lawn play park. */
+  playParkOutline: [
+    [135.69, 46.85],
+    [142.9, 13.63],
+    [168.31, 19.15],
+    [161.1, 52.37],
+  ] as XZ[],
+  /** Empty → no car park (draw one with the Car park tool). */
+  carParkOutline: [] as XZ[],
+  /** Empty → no beach / sea pad (draw one with Beach). */
+  beachOutline: [] as XZ[],
+  /** Parade stone roads outside the railings. */
+  roadPolylines: [
+    [
+      [-280, 158],
+      [280, 158],
+    ],
+    [
+      [-205, -130],
+      [-205, 150],
+    ],
+  ] as XZ[][],
+  /** Terrace façade runs — houses face the park. */
+  terraceRuns: [
+    [
+      [-280, 172],
+      [260, 172],
+    ],
+    [
+      [-220, -110],
+      [-220, 150],
+    ],
+    [
+      [255, -85],
+      [255, 135],
+    ],
+  ] as XZ[][],
+  /** Empty → no fairy lights (draw runs with the Fairy lights tool). */
+  fairyLightRuns: [],
   /** Empty → auto-place on the outer path lip at boot. */
   bins: [] as XZ[],
+  /** Empty → no foliage (place trees / shrubs / beds in the editor). */
+  trees: [],
+  /** Empty → flat park (draw berms in the Terrain tool). */
+  elevationZones: [],
+  /** Red-arrow mission anchors — picnic, geese, fire, rebels. */
+  missionSpots: DEFAULT_MISSION_SPOTS.map((s) => ({ ...s })),
 };
 
 export function cloneLevel(level: LevelData): LevelData {
