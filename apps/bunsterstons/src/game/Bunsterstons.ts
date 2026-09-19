@@ -9,6 +9,11 @@ export class Bunsterstons extends Character {
   protected readonly radius = 0.42;
   protected readonly height = 1.15;
 
+  /** Skull sits well above the body centre — include it for ceiling hits. */
+  protected get crownOffset(): number {
+    return 1.1;
+  }
+
   private ears: THREE.Group[] = [];
   private arms: THREE.Group[] = [];
   private feet: THREE.Mesh[] = [];
@@ -51,6 +56,7 @@ export class Bunsterstons extends Character {
   protected poseIdle(t: number): void {
     const breath = Math.sin(t) * 0.03;
     this.root.position.y = breath;
+    this.root.rotation.z = 0;
     this.body.scale.set(0.92, 1.15 + breath * 0.4, 0.85);
     this.body.rotation.x = 0;
     this.body.rotation.z = 0;
@@ -73,6 +79,7 @@ export class Bunsterstons extends Character {
   private poseBored(t: number): void {
     const breath = Math.sin(t * 1.4) * 0.025;
     this.root.position.y = breath;
+    this.root.rotation.z = 0;
     this.body.scale.set(0.94, 1.1 + breath * 0.3, 0.88);
     this.body.rotation.x = 0.08;
     this.body.rotation.z = Math.sin(t * 0.35) * 0.04;
@@ -108,6 +115,7 @@ export class Bunsterstons extends Character {
     const leanZ = this.edgeLocalZ * 0.28 * a;
 
     this.root.position.y = Math.abs(Math.sin(t * 8)) * 0.03 * a;
+    this.root.rotation.z = 0;
     this.body.scale.set(0.9, 1.18, 0.82);
     this.body.rotation.x = leanZ + wobble * 0.5;
     this.body.rotation.z = -leanX + wobble2;
@@ -133,22 +141,24 @@ export class Bunsterstons extends Character {
   private poseRun(t: number, amp: number): void {
     const swing = Math.sin(t) * 0.55 * amp;
     const bob = Math.abs(Math.sin(t)) * 0.09 * amp;
+    const lean = this.turnLean;
     this.root.position.y = bob;
+    this.root.rotation.z = -lean * 0.1;
     this.body.rotation.x = -0.08 * amp;
-    this.body.rotation.z = Math.sin(t) * 0.06;
+    this.body.rotation.z = Math.sin(t) * 0.06 - lean * 0.28;
     this.head.rotation.x = -0.1 + Math.sin(t * 2) * 0.05;
-    this.head.rotation.y = 0;
-    this.head.rotation.z = Math.sin(t) * 0.08;
+    this.head.rotation.y = lean * 0.45;
+    this.head.rotation.z = Math.sin(t) * 0.08 + lean * 0.12;
 
     this.swingEars(
       0.12 + Math.sin(t + 0.4) * 0.22 * amp,
-      Math.sin(t * 1.1) * 0.28 * amp,
+      Math.sin(t * 1.1) * 0.28 * amp + lean * 0.35,
     );
 
     this.arms[0]!.rotation.x = -swing * 1.1;
     this.arms[1]!.rotation.x = swing * 1.1;
-    this.arms[0]!.rotation.z = -0.38;
-    this.arms[1]!.rotation.z = 0.38;
+    this.arms[0]!.rotation.z = -0.38 - lean * 0.28;
+    this.arms[1]!.rotation.z = 0.38 - lean * 0.28;
 
     this.feet[0]!.rotation.x = swing * 0.9;
     this.feet[1]!.rotation.x = -swing * 0.9;
@@ -158,19 +168,21 @@ export class Bunsterstons extends Character {
 
   private poseJump(_delta: number): void {
     const rising = this.vel.y > 0.4;
+    const lean = this.turnLean;
     this.root.position.y = 0;
+    this.root.rotation.z = -lean * 0.08;
     this.body.rotation.x = rising ? -0.2 : 0.15;
-    this.body.rotation.z = 0;
+    this.body.rotation.z = -lean * 0.2;
     this.head.rotation.x = rising ? -0.15 : 0.2;
-    this.head.rotation.y = 0;
-    this.head.rotation.z = 0;
+    this.head.rotation.y = lean * 0.35;
+    this.head.rotation.z = lean * 0.1;
 
-    this.swingEars(rising ? 0.05 : 0.35, rising ? 0.12 : -0.08);
+    this.swingEars(rising ? 0.05 : 0.35, rising ? 0.12 : -0.08 + lean * 0.2);
 
     this.arms[0]!.rotation.x = rising ? -0.9 : 0.5;
     this.arms[1]!.rotation.x = rising ? -0.9 : 0.5;
-    this.arms[0]!.rotation.z = rising ? -0.7 : -0.35;
-    this.arms[1]!.rotation.z = rising ? 0.7 : 0.35;
+    this.arms[0]!.rotation.z = (rising ? -0.7 : -0.35) - lean * 0.2;
+    this.arms[1]!.rotation.z = (rising ? 0.7 : 0.35) - lean * 0.2;
 
     this.feet[0]!.rotation.x = rising ? -0.5 : 0.35;
     this.feet[1]!.rotation.x = rising ? -0.5 : 0.35;
@@ -208,10 +220,12 @@ export class Bunsterstons extends Character {
     this.body.castShadow = true;
     this.root.add(this.body);
 
-    const tum = new THREE.Mesh(new THREE.CircleGeometry(0.22, 24), belly);
-    tum.position.set(0, -0.02, 0.41);
-    tum.scale.set(1, 1.15, 1);
-    this.root.add(tum);
+    // Soft tummy blob — curved so it sits on the body instead of a flat disc.
+    const tum = new THREE.Mesh(new THREE.SphereGeometry(0.26, 16, 12), belly);
+    tum.scale.set(0.88, 0.98, 0.4);
+    tum.position.set(0, -0.06, 0.36);
+    tum.castShadow = true;
+    this.body.add(tum);
 
     this.head = new THREE.Group();
     this.head.position.y = 0.72;

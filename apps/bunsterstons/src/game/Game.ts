@@ -70,8 +70,8 @@ export class Game {
       200,
     );
 
-    this.scene.background = new THREE.Color(0xfff4e8);
-    this.scene.fog = new THREE.Fog(0xfff4e8, 45, 95);
+    this.scene.background = new THREE.Color(0xb8e4ff);
+    this.scene.fog = new THREE.Fog(0xb8e4ff, 45, 95);
 
     const hemi = new THREE.HemisphereLight(0xffe8f5, 0x88c0ff, 1.15);
     this.scene.add(hemi);
@@ -150,12 +150,12 @@ export class Game {
   private applyLevelBounds(): void {
     if (isLevel2(this.level)) {
       this.player.setWorldBounds(-14, 22, -6, 6);
-      this.scene.background = new THREE.Color(0xffe8d4);
-      this.scene.fog = new THREE.Fog(0xffe8d4, 40, 90);
+      this.scene.background = new THREE.Color(0xb8e4ff);
+      this.scene.fog = new THREE.Fog(0xb8e4ff, 40, 90);
     } else {
       this.player.setWorldBounds(-16, 28, -10, 10);
-      this.scene.background = new THREE.Color(0xfff4e8);
-      this.scene.fog = new THREE.Fog(0xfff4e8, 45, 95);
+      this.scene.background = new THREE.Color(0xb8e4ff);
+      this.scene.fog = new THREE.Fog(0xb8e4ff, 45, 95);
     }
   }
 
@@ -338,8 +338,8 @@ export class Game {
         if (this.targetSubEl) this.targetSubEl.textContent = "Climb over";
         if (this.hintEl) {
           this.hintEl.textContent = touch
-            ? "Climb the gate · up at the top to mount · steps down to the boat"
-            : "Hold W to climb · keep up at the top to mount · walk the steps to the boat";
+            ? "Climb the gate · up at the top to mount · jump down to the boat"
+            : "Hold W to climb · keep up at the top to mount · jump down to the boat";
         }
       }
       return;

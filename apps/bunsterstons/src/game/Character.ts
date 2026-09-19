@@ -14,7 +14,9 @@ const JUMP_CUT = 0.45;
 const ACCEL_GROUND = 18;
 const ACCEL_AIR = 10;
 const FRICTION = 10;
-const TURN_SPEED = 14;
+const TURN_SPEED = 7.5;
+/** Yaw rate (rad/s) that maps to full turn lean. */
+const TURN_LEAN_REF = 5.5;
 const COYOTE = 0.1;
 const JUMP_BUFFER = 0.12;
 const BORED_AFTER = 5;
@@ -45,6 +47,8 @@ export abstract class Character {
   private coyote = 0;
   private jumpBuffer = 0;
   private facing = 0;
+  /** −1…+1 visual lean while changing direction (right is +). */
+  protected turnLean = 0;
   private lastInputAt = 0;
   /** Elapsed time in the bored-idle state (0 when not bored). */
   protected boredPhase = 0;
@@ -69,6 +73,11 @@ export abstract class Character {
 
   protected abstract readonly radius: number;
   protected abstract readonly height: number;
+
+  /** Distance from group origin up to the crown (ceiling hits). */
+  protected get crownOffset(): number {
+    return this.height * 0.5;
+  }
 
   constructor() {
     this.group.add(this.root);
@@ -103,8 +112,8 @@ export abstract class Character {
   /** True once per swing during the strike window (Chippy headbutt). */
   public consumeAttackHit(): boolean {
     if (this.attackTimer <= 0 || this.attackHitSpent) return false;
-    // Hit frames in the middle of the swing.
-    if (this.attackTimer < 0.28 && this.attackTimer > 0.12) {
+    // Hit frames through the mid–late swing.
+    if (this.attackTimer < 0.32 && this.attackTimer > 0.08) {
       this.attackHitSpent = true;
       return true;
     }
@@ -123,6 +132,7 @@ export abstract class Character {
     this.coyote = 0;
     this.jumpBuffer = 0;
     this.facing = 0;
+    this.turnLean = 0;
     this.lastInputAt = this.time;
     this.boredPhase = 0;
     this.edgeAmount = 0;
@@ -185,6 +195,7 @@ export abstract class Character {
     const moving = Math.hypot(ix, iz) > 0.12;
     let wishX = 0;
     let wishZ = 0;
+    const prevFacing = this.facing;
     if (moving) {
       const len = Math.hypot(ix, iz);
       ix /= len;
@@ -198,6 +209,22 @@ export abstract class Character {
     } else if (this.onGround) {
       this.hopPhase += delta * 2.2;
     }
+
+    // Smooth lean from how hard we're yawing this frame.
+    let yawRate = 0;
+    if (delta > 1e-5) {
+      let d = this.facing - prevFacing;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      yawRate = d / delta;
+    }
+    const leanTarget = THREE.MathUtils.clamp(yawRate / TURN_LEAN_REF, -1, 1);
+    this.turnLean = THREE.MathUtils.damp(
+      this.turnLean,
+      leanTarget,
+      moving ? 10 : 14,
+      delta,
+    );
 
     const zone = this.canClimb
       ? this.findClimbZone(this.group.position, climbZones)
@@ -370,8 +397,10 @@ export abstract class Character {
     const next = this.group.position.clone();
     next.x += this.vel.x * delta;
     this.resolveSolids(next, solids, "x");
+    this.resolveLowCeilings(next, platforms);
     next.z += this.vel.z * delta;
     this.resolveSolids(next, solids, "z");
+    this.resolveLowCeilings(next, platforms);
     next.y += this.vel.y * delta;
 
     // Grab gate if we bump into a climb zone mid-air / against the bars.
@@ -393,19 +422,32 @@ export abstract class Character {
     this.onGround = false;
     const prevFeet = prevY - this.height * 0.5;
     const feet = next.y - this.height * 0.5;
-    const canLand = this.vel.y <= 0;
+    const crown = this.crownOffset;
+    const prevHead = prevY + crown;
+    const head = next.y + crown;
 
+    // Ceiling — bump head on the underside of low platforms.
+    if (this.vel.y > 0 || head > prevHead) {
+      for (const p of platforms) {
+        if (!this.onPlatformXZ(next.x, next.z, p)) continue;
+        const bottom = p.bottom ?? p.top - 0.28;
+        // Skip near-ground slabs (don't bonk the floor from below).
+        if (bottom < 0.35) continue;
+        const hitRising = prevHead <= bottom + 0.02 && head >= bottom;
+        const alreadyIn = head > bottom && prevHead < bottom + 0.35;
+        if (hitRising || alreadyIn) {
+          next.y = bottom - crown - 0.03;
+          this.vel.y = Math.min(0, this.vel.y);
+          break;
+        }
+      }
+    }
+
+    const canLand = this.vel.y <= 0;
     for (const p of platforms) {
       if (!canLand) continue;
-      const dx = next.x - p.x;
-      const dz = next.z - p.z;
-      const onPad =
-        p.halfW != null && p.halfD != null
-          ? Math.abs(dx) < p.halfW - this.radius * 0.2 &&
-            Math.abs(dz) < p.halfD - this.radius * 0.2
-          : dx * dx + dz * dz <= (p.radius - this.radius * 0.35) ** 2;
-      if (!onPad) continue;
-      if (prevFeet >= p.top - 0.02 && feet <= p.top) {
+      if (!this.onPlatformXZ(next.x, next.z, p)) continue;
+      if (prevFeet >= p.top - 0.05 && feet <= p.top + 0.02) {
         next.y = p.top + this.height * 0.5;
         this.vel.y = 0;
         this.onGround = true;
@@ -414,8 +456,8 @@ export abstract class Character {
 
     for (const s of solids) {
       if (!canLand) continue;
-      if (!this.overlapsXZ(next.x, next.z, s, this.radius * 0.35)) continue;
-      if (prevFeet >= s.y1 - 0.02 && feet <= s.y1) {
+      if (!this.overlapsXZ(next.x, next.z, s, 0)) continue;
+      if (prevFeet >= s.y1 - 0.05 && feet <= s.y1 + 0.02) {
         next.y = s.y1 + this.height * 0.5;
         this.vel.y = 0;
         this.onGround = true;
@@ -507,9 +549,8 @@ export abstract class Character {
       const dz = z - p.z;
 
       if (p.halfW != null && p.halfD != null) {
-        const inset = this.radius * 0.2;
-        const distX = p.halfW - inset - Math.abs(dx);
-        const distZ = p.halfD - inset - Math.abs(dz);
+        const distX = p.halfW - Math.abs(dx);
+        const distZ = p.halfD - Math.abs(dz);
         if (distX < 0 || distZ < 0) continue;
         const dist = Math.min(distX, distZ);
         if (dist >= EDGE_ZONE) continue;
@@ -524,9 +565,9 @@ export abstract class Character {
           wz = Math.sign(dz) || 1;
         }
       } else {
-        const outer = Math.max(0.2, p.radius - this.radius * 0.35);
+        const outer = p.radius;
         const d = Math.hypot(dx, dz);
-        if (d < outer - EDGE_ZONE || d > outer + 0.15) continue;
+        if (d < outer - EDGE_ZONE || d > outer + 0.12) continue;
         const amount = 1 - (outer - d) / EDGE_ZONE;
         if (amount <= best) continue;
         best = Math.min(1, amount);
@@ -541,9 +582,9 @@ export abstract class Character {
       const dx = x - s.x;
       const dz = z - s.z;
       if (s.kind === "cylinder") {
-        const outer = Math.max(0.2, (s.radius ?? 0.5) - this.radius * 0.35);
+        const outer = s.radius ?? 0.5;
         const d = Math.hypot(dx, dz);
-        if (d < outer - EDGE_ZONE || d > outer + 0.15) continue;
+        if (d < outer - EDGE_ZONE || d > outer + 0.12) continue;
         const amount = 1 - (outer - d) / EDGE_ZONE;
         if (amount <= best) continue;
         best = Math.min(1, amount);
@@ -551,9 +592,8 @@ export abstract class Character {
         wx = dx * inv;
         wz = dz * inv;
       } else {
-        const inset = this.radius * 0.2;
-        const distX = (s.halfW ?? 0.5) - inset - Math.abs(dx);
-        const distZ = (s.halfD ?? 0.5) - inset - Math.abs(dz);
+        const distX = (s.halfW ?? 0.5) - Math.abs(dx);
+        const distZ = (s.halfD ?? 0.5) - Math.abs(dz);
         if (distX < 0 || distZ < 0) continue;
         const dist = Math.min(distX, distZ);
         if (dist >= EDGE_ZONE) continue;
@@ -599,6 +639,16 @@ export abstract class Character {
     bored: boolean,
   ): void;
   protected abstract poseIdle(t: number): void;
+
+  /** True when the character centre is over the platform footprint (visual edge). */
+  private onPlatformXZ(x: number, z: number, p: Platform): boolean {
+    const dx = x - p.x;
+    const dz = z - p.z;
+    if (p.halfW != null && p.halfD != null) {
+      return Math.abs(dx) <= p.halfW && Math.abs(dz) <= p.halfD;
+    }
+    return dx * dx + dz * dz <= p.radius * p.radius;
+  }
 
   private overlapsXZ(x: number, z: number, s: Solid, pad: number): boolean {
     const dx = x - s.x;
@@ -657,6 +707,61 @@ export abstract class Character {
             this.vel.z = 0;
           }
         }
+      }
+    }
+  }
+
+  /**
+   * Block walking under a platform when the character is taller than the gap
+   * (feet below the underside, head would poke through).
+   */
+  private resolveLowCeilings(
+    next: THREE.Vector3,
+    platforms: readonly Platform[],
+  ): void {
+    const feet = next.y - this.height * 0.5;
+    const head = next.y + this.crownOffset;
+    const bodyR = this.radius * 0.9;
+
+    for (const p of platforms) {
+      const bottom = p.bottom ?? p.top - 0.28;
+      // Skip near-ground slabs / already standing on or above the pad.
+      if (bottom < 0.35) continue;
+      if (feet >= bottom - 0.05) continue;
+      if (head <= bottom) continue;
+
+      if (p.halfW != null && p.halfD != null) {
+        const hw = p.halfW + bodyR;
+        const hd = p.halfD + bodyR;
+        const dx = next.x - p.x;
+        const dz = next.z - p.z;
+        if (Math.abs(dx) >= hw || Math.abs(dz) >= hd) continue;
+        const px = hw - Math.abs(dx);
+        const pz = hd - Math.abs(dz);
+        if (px < pz) {
+          next.x = p.x + Math.sign(dx || 1) * hw;
+          this.vel.x = 0;
+        } else {
+          next.z = p.z + Math.sign(dz || 1) * hd;
+          this.vel.z = 0;
+        }
+        continue;
+      }
+
+      const r = p.radius + bodyR;
+      const dx = next.x - p.x;
+      const dz = next.z - p.z;
+      const d = Math.hypot(dx, dz) || 0.001;
+      if (d >= r) continue;
+      const push = (r - d) / d;
+      next.x += dx * push;
+      next.z += dz * push;
+      const nx = dx / d;
+      const nz = dz / d;
+      const into = this.vel.x * nx + this.vel.z * nz;
+      if (into < 0) {
+        this.vel.x -= into * nx;
+        this.vel.z -= into * nz;
       }
     }
   }

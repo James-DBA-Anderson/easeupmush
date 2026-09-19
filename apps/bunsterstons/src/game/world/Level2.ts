@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { ClimbZone, Platform, Solid } from "../types";
 import type { Carrot } from "./Carrot";
+import { addFlowers } from "./flowers";
 import type { Level } from "./Level";
 import { AllyBunsterstons } from "./AllyBunsterstons";
 import { Ken } from "./Ken";
@@ -19,7 +20,7 @@ export class Level2 implements Level {
   readonly climbZones: ClimbZone[] = [];
   readonly targetCarrots = 0;
 
-  readonly deckTop = 2.2;
+  readonly deckTop = 2.225;
   readonly boatCenter = new THREE.Vector3(13, this.deckTop, 0);
 
   phase: Level2Phase = "approach";
@@ -30,17 +31,17 @@ export class Level2 implements Level {
   private battleStarted = false;
 
   private readonly deckBounds = {
-    minX: 6.8,
-    maxX: 19.2,
-    minZ: -4.2,
-    maxZ: 4.2,
+    minX: 6.5,
+    maxX: 19.5,
+    minZ: -4.5,
+    maxZ: 4.5,
   };
 
   constructor(scene: THREE.Scene) {
     this.buildApproach();
+    this.buildFlowers();
     this.buildTree(-9, 0);
     this.buildMetalGate(3.5);
-    this.buildGateBoatSteps(3.5);
     this.buildLavaAndBoat();
     this.ken = new Ken(14.5, this.deckTop + 0.55, 0);
     this.ken.deckMinX = this.deckBounds.minX;
@@ -104,15 +105,16 @@ export class Level2 implements Level {
     if (
       this.ally.update(delta, this.ken.position, this.deckTop, this.deckBounds)
     ) {
-      this.ken.knock(this.ally.position, 8, true);
+      // Bunny taps are soft — Chippy's headbutt does the real shove.
+      this.ken.knock(this.ally.position, 2.8, false);
     }
 
     if (attackHit) {
       const dx = playerPos.x - this.ken.position.x;
       const dy = playerPos.y - this.ken.position.y;
       const dz = playerPos.z - this.ken.position.z;
-      if (dx * dx + dy * dy * 0.5 + dz * dz < 2.4 * 2.4) {
-        this.ken.knock(playerPos, 10, true);
+      if (dx * dx + dy * dy * 0.5 + dz * dz < 3.0 * 3.0) {
+        this.ken.knock(playerPos, 16, true);
       }
     }
 
@@ -152,41 +154,6 @@ export class Level2 implements Level {
     this.ally.group.visible = true;
   }
 
-  /** Wooden steps from the gate top down onto the boat — no teleport. */
-  private buildGateBoatSteps(gateX: number): void {
-    const wood = new THREE.MeshStandardMaterial({
-      color: 0x9a6a3a,
-      roughness: 0.82,
-    });
-    const steps: Array<{ x: number; top: number; halfW: number; halfD: number }> =
-      [
-        { x: gateX + 2.15, top: 4.55, halfW: 0.85, halfD: 1.5 },
-        { x: gateX + 3.9, top: 3.85, halfW: 0.95, halfD: 1.7 },
-        { x: gateX + 5.7, top: 3.2, halfW: 1.05, halfD: 1.9 },
-        { x: gateX + 7.6, top: 2.6, halfW: 1.15, halfD: 2.1 },
-      ];
-    for (const s of steps) {
-      const thick = 0.22;
-      const plank = new THREE.Mesh(
-        new THREE.BoxGeometry(s.halfW * 2, thick, s.halfD * 2),
-        wood,
-      );
-      plank.position.set(s.x, s.top - thick * 0.5, 0);
-      plank.castShadow = true;
-      plank.receiveShadow = true;
-      this.root.add(plank);
-      this.platforms.push({
-        x: s.x,
-        y: s.top,
-        z: 0,
-        radius: Math.max(s.halfW, s.halfD) + 0.5,
-        top: s.top,
-        halfW: s.halfW,
-        halfD: s.halfD,
-      });
-    }
-  }
-
   private buildApproach(): void {
     const ground = new THREE.Mesh(
       new THREE.BoxGeometry(16, 0.35, 12),
@@ -212,6 +179,37 @@ export class Level2 implements Level {
       halfW: 8,
       halfD: 6,
     });
+  }
+
+  /** Daisies and bright blooms along the approach grass. */
+  private buildFlowers(): void {
+    addFlowers(this.root, [
+      // Near the tree
+      { x: -10.2, z: -3.6, kind: "daisy" },
+      { x: -9.4, z: -4.2, kind: "bright", s: 0.95 },
+      { x: -8.6, z: -3.4, kind: "daisy", s: 0.85 },
+      { x: -10.0, z: 3.8, kind: "bright" },
+      { x: -8.8, z: 4.3, kind: "daisy", s: 1.1 },
+      { x: -7.6, z: 3.5, kind: "daisy" },
+      // Mid approach — banks
+      { x: -5.5, z: -4.5, kind: "bright", s: 1.05 },
+      { x: -4.2, z: -4.0, kind: "daisy" },
+      { x: -3.0, z: -4.6, kind: "daisy", s: 0.9 },
+      { x: -5.2, z: 4.2, kind: "daisy" },
+      { x: -3.8, z: 4.7, kind: "bright", s: 0.95 },
+      { x: -2.4, z: 4.0, kind: "daisy", s: 1.05 },
+      // Closer to the gate (still on grass)
+      { x: -0.8, z: -4.3, kind: "bright" },
+      { x: 0.6, z: -4.8, kind: "daisy", s: 0.85 },
+      { x: 1.8, z: -4.1, kind: "daisy" },
+      { x: -0.5, z: 4.4, kind: "daisy", s: 1.1 },
+      { x: 0.9, z: 4.9, kind: "bright", s: 0.9 },
+      { x: 2.0, z: 4.2, kind: "daisy" },
+      // A few nearer the path for colour
+      { x: -6.5, z: -2.6, kind: "daisy", s: 0.8 },
+      { x: -1.5, z: 2.8, kind: "bright", s: 0.85 },
+      { x: 0.2, z: -2.9, kind: "daisy", s: 0.75 },
+    ]);
   }
 
   private buildTree(x: number, z: number): void {
@@ -319,7 +317,7 @@ export class Level2 implements Level {
     lintel.position.set(0, this.gateTopY + 0.35, 0);
     group.add(lintel);
 
-    // Top landing — overhangs boat-side so Chippy can walk onto the steps.
+    // Top landing — walkable pad matching the metal slab.
     const topPad = new THREE.Mesh(
       new THREE.BoxGeometry(2.8, 0.2, 4.8),
       darkMetal,
@@ -327,12 +325,14 @@ export class Level2 implements Level {
     topPad.position.set(0.85, this.gateTopY, 0);
     topPad.receiveShadow = true;
     group.add(topPad);
+    const padTop = this.gateTopY + 0.1;
     this.platforms.push({
       x: x + 0.85,
       y: this.gateTopY,
       z: 0,
       radius: 3,
-      top: this.gateTopY + 0.1,
+      top: padTop,
+      bottom: this.gateTopY - 0.1,
       halfW: 1.4,
       halfD: 2.4,
     });
@@ -416,8 +416,11 @@ export class Level2 implements Level {
       boat.add(rail);
     }
 
+    // Deck plank — visual walk surface.
+    const deckW = 12.8;
+    const deckD = 8.8;
     const deck = new THREE.Mesh(
-      new THREE.BoxGeometry(11.5, 0.25, 7.8),
+      new THREE.BoxGeometry(deckW, 0.25, deckD),
       new THREE.MeshStandardMaterial({ color: 0xc4a06a, roughness: 0.75 }),
     );
     deck.position.y = 1.25;
@@ -432,14 +435,16 @@ export class Level2 implements Level {
     boat.add(mast);
 
     this.root.add(boat);
+    // Collision footprint matches the deck mesh (boat at x=13).
     this.platforms.push({
       x: 13,
       y: this.deckTop,
       z: 0,
       radius: 8,
       top: this.deckTop,
-      halfW: 5.7,
-      halfD: 3.85,
+      bottom: this.deckTop - 0.25,
+      halfW: deckW * 0.5,
+      halfD: deckD * 0.5,
     });
   }
 }

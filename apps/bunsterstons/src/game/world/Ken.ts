@@ -71,9 +71,10 @@ export class Ken {
       else if (nearest === toMaxX) ex = 1;
       else if (nearest === toMinZ) ez = -1;
       else ez = 1;
-      // Mostly shove away from attacker; light pull toward rim.
-      dx = dx * 0.7 + ex * 0.3;
-      dz = dz * 0.7 + ez * 0.3;
+      // Mostly shove away from attacker; stronger pull toward rim on hard hits.
+      const rim = power >= 14 ? 0.45 : power >= 8 ? 0.3 : 0.08;
+      dx = dx * (1 - rim) + ex * rim;
+      dz = dz * (1 - rim) + ez * rim;
       const len = Math.hypot(dx, dz) || 1;
       dx /= len;
       dz /= len;
@@ -81,11 +82,12 @@ export class Ken {
 
     this.vel.x = dx * power;
     this.vel.z = dz * power;
-    this.vel.y = 2.8;
-    this.group.position.x += dx * 0.28;
-    this.group.position.z += dz * 0.28;
+    this.vel.y = 2.8 + power * 0.12;
+    this.group.position.x += dx * (0.22 + power * 0.035);
+    this.group.position.z += dz * (0.22 + power * 0.035);
     this.onDeck = false;
-    this.hurtTimer = 0.55;
+    // Soft taps wear off quicker so Ken shrugs them off.
+    this.hurtTimer = power >= 10 ? 0.42 : 0.22;
     (this.body.material as THREE.MeshStandardMaterial).color.setHex(0xff6644);
     gameAudio.knock();
     return true;
@@ -130,10 +132,10 @@ export class Ken {
       this.group.rotation.y = Math.atan2(dx, dz);
       this.group.rotation.z = Math.sin(elapsed * 3) * 0.06;
     } else {
-      // Airborne after a knock — heavy fall, quick horizontal bleed-off.
+      // Airborne after a knock — heavy fall, some horizontal carry.
       this.vel.y -= 32 * delta;
-      this.vel.x = THREE.MathUtils.damp(this.vel.x, 0, 3.2, delta);
-      this.vel.z = THREE.MathUtils.damp(this.vel.z, 0, 3.2, delta);
+      this.vel.x = THREE.MathUtils.damp(this.vel.x, 0, 2.1, delta);
+      this.vel.z = THREE.MathUtils.damp(this.vel.z, 0, 2.1, delta);
       this.group.position.x += this.vel.x * delta;
       this.group.position.z += this.vel.z * delta;
       this.group.position.y += this.vel.y * delta;

@@ -62,7 +62,7 @@ export class AllyBunsterstons {
     if (this.arms[1]) this.arms[1].rotation.x = swing;
 
     if (dist < 1.6 && this.punchCooldown <= 0) {
-      this.punchCooldown = 0.45;
+      this.punchCooldown = 0.95;
       return true;
     }
     return false;

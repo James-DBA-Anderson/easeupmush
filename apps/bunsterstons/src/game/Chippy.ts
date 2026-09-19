@@ -73,6 +73,8 @@ export class Chippy extends Character {
 
     this.root.position.y = 0;
     this.root.position.z = -0.08 * coil + 0.18 * strike;
+    this.root.rotation.x = 0;
+    this.root.rotation.z = 0;
     this.body.rotation.x = 0.25 * coil - 0.55 * strike;
     this.body.rotation.z = 0;
     this.body.scale.set(1 + strike * 0.06, 1, 1 + coil * 0.05);
@@ -94,21 +96,26 @@ export class Chippy extends Character {
     this.legs[3]!.position.set(0.22, -0.14, -0.26);
   }
 
-  /** Scramble up the bars — alternating paws, body hugging the gate. */
+  /** Scramble up the bars — body vertical, belly to the gate, head up. */
   private poseClimb(t: number, moving: boolean): void {
     const amp = moving ? 1 : 0.35;
     const reach = Math.sin(t) * 0.7 * amp;
     const bob = Math.abs(Math.sin(t * 0.5)) * 0.04 * amp;
 
+    // Tip upright against the wall (local +Z → world up, belly into the bars).
+    this.root.rotation.x = -Math.PI / 2 + 0.08;
+    this.root.rotation.z = Math.sin(t * 0.5) * 0.06 * amp;
     this.root.position.y = bob;
-    this.root.position.z = 0.06;
-    this.body.rotation.x = -0.45;
-    this.body.rotation.z = Math.sin(t * 0.5) * 0.08 * amp;
+    // Nudge into the face so paws meet the bars.
+    this.root.position.z = 0.22;
+
+    this.body.rotation.x = Math.sin(t * 0.5) * 0.06 * amp;
+    this.body.rotation.z = 0;
     this.body.scale.set(1, 1, 1);
 
-    this.head.rotation.x = -0.55 + Math.sin(t * 1.2) * 0.08;
-    this.head.rotation.y = Math.sin(t * 0.7) * 0.1;
-    this.head.rotation.z = Math.sin(t) * 0.06;
+    this.head.rotation.x = -0.15 + Math.sin(t * 1.2) * 0.1;
+    this.head.rotation.y = Math.sin(t * 0.7) * 0.12;
+    this.head.rotation.z = Math.sin(t) * 0.08;
     this.snoot.scale.setScalar(1);
     this.mouth.scale.set(1, 1.05, 1);
     this.wiggleEars(0.15 + Math.abs(reach) * 0.12);
@@ -128,6 +135,8 @@ export class Chippy extends Character {
     const breath = Math.sin(t) * 0.02;
     this.root.position.y = breath;
     this.root.position.z = 0;
+    this.root.rotation.x = 0;
+    this.root.rotation.z = 0;
     this.body.rotation.x = 0;
     this.body.rotation.z = Math.sin(t * 0.5) * 0.02;
     this.body.scale.set(1, 1 + breath * 0.08, 1);
@@ -144,6 +153,8 @@ export class Chippy extends Character {
     const breath = Math.sin(t * 1.6) * 0.015;
     this.root.position.y = breath;
     this.root.position.z = 0;
+    this.root.rotation.x = 0;
+    this.root.rotation.z = 0;
     this.body.rotation.x = 0.06;
     this.body.rotation.z = Math.sin(t * 0.4) * 0.05;
     this.body.scale.set(1, 1 + breath * 0.1, 1);
@@ -171,6 +182,8 @@ export class Chippy extends Character {
 
     this.root.position.y = Math.abs(Math.sin(t * 9)) * 0.025 * a;
     this.root.position.z = 0;
+    this.root.rotation.x = 0;
+    this.root.rotation.z = 0;
     this.body.rotation.x = leanZ + wobble * 0.4;
     this.body.rotation.z = -leanX + wobble2;
     this.body.scale.set(1, 1, 1);
@@ -193,30 +206,36 @@ export class Chippy extends Character {
   private poseRun(t: number, amp: number): void {
     const swing = Math.sin(t) * 0.55 * amp;
     const bob = Math.abs(Math.sin(t)) * 0.05 * amp;
+    const lean = this.turnLean;
     this.root.position.y = bob;
     this.root.position.z = 0;
+    this.root.rotation.x = 0;
+    this.root.rotation.z = -lean * 0.12;
     this.body.rotation.x = -0.04 * amp;
-    this.body.rotation.z = Math.sin(t) * 0.06;
+    this.body.rotation.z = Math.sin(t) * 0.06 - lean * 0.3;
     this.body.scale.set(1, 1, 1);
     this.head.rotation.x = -0.15 + Math.sin(t * 2) * 0.08;
-    this.head.rotation.y = 0;
-    this.head.rotation.z = Math.sin(t) * 0.08;
+    this.head.rotation.y = lean * 0.5;
+    this.head.rotation.z = Math.sin(t) * 0.08 + lean * 0.15;
     this.snoot.scale.setScalar(1);
     this.mouth.scale.set(1, 0.9, 1);
-    this.wiggleEars(0.12 + Math.sin(t * 1.5) * 0.18 * amp);
+    this.wiggleEars(0.12 + Math.sin(t * 1.5) * 0.18 * amp + Math.abs(lean) * 0.12);
     this.plantLegs(swing, -swing);
   }
 
   private poseJump(): void {
     const rising = this.vel.y > 0.4;
+    const lean = this.turnLean;
     this.root.position.y = 0;
     this.root.position.z = 0;
+    this.root.rotation.x = 0;
+    this.root.rotation.z = -lean * 0.1;
     this.body.rotation.x = rising ? -0.25 : 0.15;
-    this.body.rotation.z = 0;
+    this.body.rotation.z = -lean * 0.22;
     this.body.scale.set(1, 1, 1);
     this.head.rotation.x = rising ? -0.35 : 0.05;
-    this.head.rotation.y = 0;
-    this.head.rotation.z = 0;
+    this.head.rotation.y = lean * 0.4;
+    this.head.rotation.z = lean * 0.12;
     this.snoot.scale.setScalar(1);
     this.mouth.scale.set(1, rising ? 1.2 : 0.8, 1);
     this.wiggleEars(rising ? 0.05 : 0.25);

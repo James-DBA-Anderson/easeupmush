@@ -87,9 +87,17 @@ export function buildLollipop(
   group.add(rim);
 
   const top = height + 0.28;
+  const bottom = height;
   return {
     group,
-    platform: { x, y: 0, z, radius: radius * 0.92, top },
+    platform: {
+      x,
+      y: 0,
+      z,
+      radius,
+      top,
+      bottom,
+    },
     stick: {
       kind: "cylinder",
       x,

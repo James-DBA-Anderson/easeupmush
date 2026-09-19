@@ -6,6 +6,8 @@ export interface Platform {
   radius: number;
   /** Top surface Y. */
   top: number;
+  /** Underside Y for head-bonk (defaults to a thin slab under `top`). */
+  bottom?: number;
   /** Optional rectangular slab (ground). */
   halfW?: number;
   halfD?: number;
