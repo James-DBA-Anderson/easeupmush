@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { gameAudio } from "./audio";
 import type { VirtualInput } from "./MobileControls";
 import type { ClimbZone, Platform, Solid } from "./types";
 
@@ -18,7 +19,7 @@ const COYOTE = 0.1;
 const JUMP_BUFFER = 0.12;
 const BORED_AFTER = 5;
 const EDGE_ZONE = 0.65;
-const CLIMB_SPEED = 6.2;
+const CLIMB_SPEED = 6.8;
 
 /**
  * Shared third-person controller — subclasses supply mesh + animation.
@@ -34,7 +35,12 @@ export abstract class Character {
   private virtMoveY = 0;
   private virtJump = false;
   private virtSprint = false;
+  private virtAttack = false;
+  private attackHeld = false;
   private jumpLocked = false;
+  /** Remaining attack anim time; >0 while attacking. */
+  protected attackTimer = 0;
+  private attackHitSpent = false;
   private time = 0;
   private coyote = 0;
   private jumpBuffer = 0;
@@ -91,6 +97,22 @@ export abstract class Character {
     this.virtMoveY = input.moveY;
     this.virtJump = input.jump;
     this.virtSprint = input.sprint;
+    this.virtAttack = input.attack;
+  }
+
+  /** True once per swing during the strike window (Chippy headbutt). */
+  public consumeAttackHit(): boolean {
+    if (this.attackTimer <= 0 || this.attackHitSpent) return false;
+    // Hit frames in the middle of the swing.
+    if (this.attackTimer < 0.28 && this.attackTimer > 0.12) {
+      this.attackHitSpent = true;
+      return true;
+    }
+    return false;
+  }
+
+  public isAttacking(): boolean {
+    return this.attackTimer > 0;
   }
 
   public reset(x: number, y: number, z: number): void {
@@ -107,6 +129,10 @@ export abstract class Character {
     this.edgeLocalX = 0;
     this.edgeLocalZ = 0;
     this.balancePhase = 0;
+    this.climbing = false;
+    this.attackTimer = 0;
+    this.attackHitSpent = false;
+    this.attackHeld = false;
     this.group.rotation.y = 0;
     this.poseIdle(0);
   }
@@ -200,27 +226,27 @@ export abstract class Character {
       );
       this.group.rotation.y = this.facing;
 
-      // Crest the top → vault onto the landing (fixes getting stuck on the face).
-      const cresting = this.group.position.y >= zone.y1 - 0.4;
-      if (cresting && (climbDir > 0 || (wantJump && !this.jumpLocked))) {
+      // Crest the lip → climb onto the top pad (stand on it, don't fling).
+      const cresting = this.group.position.y >= zone.y1 - 0.55;
+      if (cresting && climbDir > 0) {
         this.climbing = false;
-        if (wantJump) this.jumpLocked = true;
         const mountZ = THREE.MathUtils.clamp(
           this.group.position.z,
           zone.z - zone.halfD + this.radius,
           zone.z + zone.halfD - this.radius,
         );
+        const padTop = zone.y1 + 0.1;
         this.group.position.set(
-          zone.x + 0.8,
-          zone.y1 + this.height * 0.5 + 0.14,
+          zone.x + 0.75,
+          padTop + this.height * 0.5,
           mountZ,
         );
-        this.vel.set(4.2, 3.4, 0);
+        this.vel.set(2.2, 0.5, 0);
         this.facing = Math.atan2(1, 0);
         this.group.rotation.y = this.facing;
-        this.onGround = false;
-        this.coyote = 0;
-        this.hopPhase += delta * 12;
+        this.onGround = true;
+        this.coyote = COYOTE;
+        this.hopPhase += delta * 10;
         this.lastInputAt = this.time;
         this.boredPhase = 0;
         this.edgeAmount = 0;
@@ -228,14 +254,7 @@ export abstract class Character {
         return;
       }
 
-      const faceX = zone.x - this.radius * 0.55;
-      this.vel.x = (faceX - this.group.position.x) * 12;
-      this.vel.z = slide * CLIMB_SPEED * 0.75;
-      this.vel.y = climbDir * CLIMB_SPEED;
-      this.onGround = false;
-      this.coyote = 0;
-      this.hopPhase += delta * (climbDir !== 0 || slide !== 0 ? 14 : 6);
-
+      // Jump off the face while mid-climb (not at the crest).
       if (wantJump && !this.jumpLocked) {
         this.climbing = false;
         const away = Math.sign(this.group.position.x - zone.x) || -1;
@@ -243,8 +262,20 @@ export abstract class Character {
         this.vel.x = away * 5.5;
         this.jumpLocked = true;
         this.jumpBuffer = 0;
+        this.lastInputAt = this.time;
+        gameAudio.jump();
+        this.animate(delta, false, false, false);
+        return;
       }
       if (!wantJump) this.jumpLocked = false;
+
+      const faceX = zone.x - this.radius * 0.55;
+      this.vel.x = (faceX - this.group.position.x) * 12;
+      this.vel.z = slide * CLIMB_SPEED * 0.8;
+      this.vel.y = climbDir * CLIMB_SPEED;
+      this.onGround = false;
+      this.coyote = 0;
+      this.hopPhase += delta * (climbDir !== 0 || slide !== 0 ? 14 : 6);
 
       if (holdUp || holdDown || slide !== 0 || wantJump) {
         this.lastInputAt = this.time;
@@ -325,6 +356,7 @@ export abstract class Character {
       this.onGround = false;
       this.coyote = 0;
       this.jumpBuffer = 0;
+      gameAudio.jump();
     }
 
     if (!wantJump && this.vel.y > 0) {
@@ -403,10 +435,32 @@ export abstract class Character {
     if (this.edgeAmount > 0.2) this.balancePhase += delta;
     else this.balancePhase = 0;
 
+    // Attack (Chippy headbutt / bunny swipe) — press, don't hold-spam.
+    const wantAttack =
+      this.virtAttack ||
+      this.keys.has("KeyF") ||
+      this.keys.has("KeyE");
+    if (
+      wantAttack &&
+      !this.attackHeld &&
+      this.attackTimer <= 0 &&
+      !this.climbing
+    ) {
+      this.attackTimer = 0.42;
+      this.attackHitSpent = false;
+      this.lastInputAt = this.time;
+      this.boredPhase = 0;
+    }
+    this.attackHeld = wantAttack;
+    if (this.attackTimer > 0) {
+      this.attackTimer = Math.max(0, this.attackTimer - delta);
+    }
+
     const bored =
       this.onGround &&
       !moving &&
       this.edgeAmount < 0.25 &&
+      this.attackTimer <= 0 &&
       this.time - this.lastInputAt >= BORED_AFTER;
     if (bored) this.boredPhase += delta;
     else this.boredPhase = 0;

@@ -27,7 +27,6 @@ export class Level2 implements Level {
   private ally!: AllyBunsterstons;
   private lava!: THREE.Mesh;
   private gateTopY = 5.0;
-  private playerAttackCd = 0;
   private battleStarted = false;
 
   private readonly deckBounds = {
@@ -41,6 +40,7 @@ export class Level2 implements Level {
     this.buildApproach();
     this.buildTree(-9, 0);
     this.buildMetalGate(3.5);
+    this.buildGateBoatSteps(3.5);
     this.buildLavaAndBoat();
     this.ken = new Ken(14.5, this.deckTop + 0.55, 0);
     this.ken.deckMinX = this.deckBounds.minX;
@@ -86,16 +86,15 @@ export class Level2 implements Level {
   public combatUpdate(
     delta: number,
     playerPos: THREE.Vector3,
-    wantsAttack: boolean,
+    attackHit: boolean,
   ): boolean {
-    this.playerAttackCd = Math.max(0, this.playerAttackCd - delta);
-
     if (
       !this.battleStarted &&
-      playerPos.y > this.gateTopY - 0.6 &&
-      playerPos.x > 3.5
+      playerPos.x > 8.5 &&
+      playerPos.y > this.deckTop - 0.15 &&
+      playerPos.y < this.deckTop + 1.4
     ) {
-      this.startBattle(playerPos);
+      this.startBattle();
     }
 
     if (this.phase !== "battle") return false;
@@ -108,13 +107,12 @@ export class Level2 implements Level {
       this.ken.knock(this.ally.position, 8, true);
     }
 
-    if (wantsAttack && this.playerAttackCd <= 0) {
+    if (attackHit) {
       const dx = playerPos.x - this.ken.position.x;
       const dy = playerPos.y - this.ken.position.y;
       const dz = playerPos.z - this.ken.position.z;
-      if (dx * dx + dy * dy * 0.5 + dz * dz < 2.2 * 2.2) {
-        this.playerAttackCd = 0.45;
-        this.ken.knock(playerPos, 9, true);
+      if (dx * dx + dy * dy * 0.5 + dz * dz < 2.4 * 2.4) {
+        this.ken.knock(playerPos, 10, true);
       }
     }
 
@@ -137,7 +135,6 @@ export class Level2 implements Level {
   public reset(): void {
     this.phase = "approach";
     this.battleStarted = false;
-    this.playerAttackCd = 0;
     this.ken.reset();
     this.ken.group.visible = false;
     this.ally.reset(11, this.deckTop + 0.55, 1.2);
@@ -148,13 +145,45 @@ export class Level2 implements Level {
     scene.remove(this.root);
   }
 
-  private startBattle(playerPos: THREE.Vector3): void {
+  private startBattle(): void {
     this.battleStarted = true;
     this.phase = "battle";
     this.ken.group.visible = true;
     this.ally.group.visible = true;
-    if (playerPos.y > 3) {
-      playerPos.set(11, this.deckTop + 0.4, -0.5);
+  }
+
+  /** Wooden steps from the gate top down onto the boat — no teleport. */
+  private buildGateBoatSteps(gateX: number): void {
+    const wood = new THREE.MeshStandardMaterial({
+      color: 0x9a6a3a,
+      roughness: 0.82,
+    });
+    const steps: Array<{ x: number; top: number; halfW: number; halfD: number }> =
+      [
+        { x: gateX + 2.15, top: 4.55, halfW: 0.85, halfD: 1.5 },
+        { x: gateX + 3.9, top: 3.85, halfW: 0.95, halfD: 1.7 },
+        { x: gateX + 5.7, top: 3.2, halfW: 1.05, halfD: 1.9 },
+        { x: gateX + 7.6, top: 2.6, halfW: 1.15, halfD: 2.1 },
+      ];
+    for (const s of steps) {
+      const thick = 0.22;
+      const plank = new THREE.Mesh(
+        new THREE.BoxGeometry(s.halfW * 2, thick, s.halfD * 2),
+        wood,
+      );
+      plank.position.set(s.x, s.top - thick * 0.5, 0);
+      plank.castShadow = true;
+      plank.receiveShadow = true;
+      this.root.add(plank);
+      this.platforms.push({
+        x: s.x,
+        y: s.top,
+        z: 0,
+        radius: Math.max(s.halfW, s.halfD) + 0.5,
+        top: s.top,
+        halfW: s.halfW,
+        halfD: s.halfD,
+      });
     }
   }
 
@@ -290,21 +319,21 @@ export class Level2 implements Level {
     lintel.position.set(0, this.gateTopY + 0.35, 0);
     group.add(lintel);
 
-    // Top landing only.
+    // Top landing — overhangs boat-side so Chippy can walk onto the steps.
     const topPad = new THREE.Mesh(
-      new THREE.BoxGeometry(2.2, 0.2, 4.8),
+      new THREE.BoxGeometry(2.8, 0.2, 4.8),
       darkMetal,
     );
-    topPad.position.set(0.55, this.gateTopY, 0);
+    topPad.position.set(0.85, this.gateTopY, 0);
     topPad.receiveShadow = true;
     group.add(topPad);
     this.platforms.push({
-      x: x + 0.55,
+      x: x + 0.85,
       y: this.gateTopY,
       z: 0,
       radius: 3,
       top: this.gateTopY + 0.1,
-      halfW: 1.1,
+      halfW: 1.4,
       halfD: 2.4,
     });
 

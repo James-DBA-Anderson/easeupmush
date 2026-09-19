@@ -95,66 +95,8 @@ export class Level1 implements Level {
 
   /** Giant candy obstacles on the path — jump over or around. */
   private buildObstacle(): void {
-    this.buildGumdrop(-4.5, 0.2);
     this.buildCandyCane(5.5, -2.2);
     this.buildMarshmallowStack(13.2, 1.4);
-  }
-
-  private buildGumdrop(x: number, z: number): void {
-    const group = new THREE.Group();
-    group.position.set(x, 0, z);
-
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: 0x7bed9f,
-      roughness: 0.35,
-      metalness: 0.05,
-    });
-    const sugar = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.9,
-    });
-
-    const gum = new THREE.Mesh(
-      new THREE.SphereGeometry(1.15, 24, 18, 0, Math.PI * 2, 0, Math.PI * 0.55),
-      bodyMat,
-    );
-    gum.position.y = 0.15;
-    gum.scale.set(1.15, 1.35, 1.15);
-    gum.castShadow = true;
-    gum.receiveShadow = true;
-    group.add(gum);
-
-    for (let i = 0; i < 10; i++) {
-      const speck = new THREE.Mesh(
-        new THREE.SphereGeometry(0.06, 6, 5),
-        sugar,
-      );
-      const a = (i / 10) * Math.PI * 2;
-      speck.position.set(
-        Math.cos(a) * 0.55,
-        1.35 + (i % 3) * 0.05,
-        Math.sin(a) * 0.45,
-      );
-      group.add(speck);
-    }
-
-    const wrap = new THREE.Mesh(
-      new THREE.TorusGeometry(0.85, 0.08, 8, 24),
-      new THREE.MeshStandardMaterial({ color: 0xff6bb5, roughness: 0.4 }),
-    );
-    wrap.rotation.x = Math.PI / 2;
-    wrap.position.y = 0.35;
-    group.add(wrap);
-
-    this.root.add(group);
-    this.solids.push({
-      kind: "cylinder",
-      x,
-      z,
-      y0: 0,
-      y1: 1.55,
-      radius: 1.05,
-    });
   }
 
   /** Striped candy cane arch — hop through the gap or over the hook. */

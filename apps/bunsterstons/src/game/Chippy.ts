@@ -33,6 +33,10 @@ export class Chippy extends Character {
     bored: boolean,
   ): void {
     const t = this.hopPhase;
+    if (this.attackTimer > 0) {
+      this.poseAttack(1 - this.attackTimer / 0.42);
+      return;
+    }
     if (this.climbing) {
       this.poseClimb(t, moving);
       return;
@@ -54,6 +58,40 @@ export class Chippy extends Character {
       return;
     }
     this.poseIdle(t);
+  }
+
+  /** Headbutt — coils back then lunges the snout forward. */
+  private poseAttack(progress: number): void {
+    const wind = progress < 0.35 ? progress / 0.35 : 0;
+    const strike =
+      progress >= 0.35 && progress < 0.7
+        ? (progress - 0.35) / 0.35
+        : progress >= 0.7
+          ? 1 - (progress - 0.7) / 0.3
+          : 0;
+    const coil = wind * (1 - strike);
+
+    this.root.position.y = 0;
+    this.root.position.z = -0.08 * coil + 0.18 * strike;
+    this.body.rotation.x = 0.25 * coil - 0.55 * strike;
+    this.body.rotation.z = 0;
+    this.body.scale.set(1 + strike * 0.06, 1, 1 + coil * 0.05);
+
+    this.head.rotation.x = 0.35 * coil - 0.75 * strike;
+    this.head.rotation.y = 0;
+    this.head.rotation.z = Math.sin(progress * Math.PI * 2) * 0.08;
+    this.snoot.scale.setScalar(1 + strike * 0.15);
+    this.mouth.scale.set(1, 1.15 + strike * 0.35, 1);
+    this.wiggleEars(0.1 + strike * 0.35);
+
+    this.legs[0]!.rotation.x = -0.4 - strike * 0.5;
+    this.legs[1]!.rotation.x = -0.4 - strike * 0.5;
+    this.legs[0]!.position.set(-0.2, -0.1, 0.3);
+    this.legs[1]!.position.set(0.2, -0.1, 0.3);
+    this.legs[2]!.rotation.x = 0.35 + coil * 0.4;
+    this.legs[3]!.rotation.x = 0.35 + coil * 0.4;
+    this.legs[2]!.position.set(-0.22, -0.14, -0.26);
+    this.legs[3]!.position.set(0.22, -0.14, -0.26);
   }
 
   /** Scramble up the bars — alternating paws, body hugging the gate. */

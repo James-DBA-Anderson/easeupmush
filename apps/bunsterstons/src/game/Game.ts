@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { gameAudio } from "./audio";
 import { Bunsterstons } from "./Bunsterstons";
 import { CameraRig } from "./CameraRig";
 import type { Character } from "./Character";
@@ -29,7 +30,6 @@ export class Game {
   private collected = 0;
   private won = false;
   private elapsed = 0;
-  private attackKeys = new Set<string>();
   private mobile: MobileControls;
   /** Game time when intro title / play-as / hint should start fading. */
   private introHideAt = 2.4;
@@ -40,6 +40,9 @@ export class Game {
   private winEl: HTMLElement;
   private winTitleEl: HTMLElement;
   private winBodyEl: HTMLElement;
+  private winEyebrowEl: HTMLElement | null;
+  private winActionsDesktopEl: HTMLElement | null;
+  private winNextBtn: HTMLElement | null;
   private levelTitleEl: HTMLElement;
   private playAsEl: HTMLElement | null;
   private hudTopEl: HTMLElement | null;
@@ -97,6 +100,9 @@ export class Game {
     this.winEl = document.getElementById("win")!;
     this.winTitleEl = document.getElementById("win-title")!;
     this.winBodyEl = document.getElementById("win-body")!;
+    this.winEyebrowEl = document.getElementById("win-eyebrow");
+    this.winActionsDesktopEl = document.getElementById("win-actions-desktop");
+    this.winNextBtn = document.getElementById("win-next");
     this.levelTitleEl = document.getElementById("level-title")!;
     this.playAsEl = document.getElementById("play-as");
     this.hudTopEl = document.querySelector(".hud-top");
@@ -115,7 +121,10 @@ export class Game {
 
     window.addEventListener("resize", this.onResize);
     window.addEventListener("keydown", this.onKey);
-    window.addEventListener("keyup", this.onKeyUp);
+    const unlock = () => gameAudio.unlock();
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+    window.addEventListener("touchstart", unlock, { once: true, passive: true });
   }
 
   public start(): void {
@@ -184,12 +193,13 @@ export class Game {
           this.player.reset(lavaSpawn.x, lavaSpawn.y, lavaSpawn.z);
         }
 
-        const touch = this.mobile.getInput();
-        const attack =
-          touch.attack ||
-          this.attackKeys.has("KeyF") ||
-          this.attackKeys.has("KeyE");
-        if (this.level.combatUpdate(delta, this.player.position, attack)) {
+        if (
+          this.level.combatUpdate(
+            delta,
+            this.player.position,
+            this.player.consumeAttackHit(),
+          )
+        ) {
           this.win();
         }
         if (this.level.phase !== this.lastHudPhase) {
@@ -201,6 +211,7 @@ export class Game {
         for (const carrot of this.level.carrots) {
           if (carrot.tryCollect(this.player.position)) {
             this.collected += 1;
+            gameAudio.carrot();
             this.syncHud();
             if (this.collected >= this.level.targetCarrots) this.win();
           }
@@ -215,15 +226,34 @@ export class Game {
   private win(): void {
     this.won = true;
     const who = characterDisplayName(characterForLevel(this.levelNum));
-    this.winTitleEl.textContent = `Level ${this.levelNum} clear!`;
-    if (this.level.targetCarrots > 0) {
-      this.winBodyEl.textContent = `${who} got all the carrots. Nice one.`;
-    } else if (isLevel2(this.level)) {
+    const congrats = isLevel2(this.level);
+    this.winEl.classList.toggle("congrats", congrats);
+
+    if (congrats) {
+      this.winTitleEl.textContent = "Congratulations!";
       this.winBodyEl.textContent =
-        "Chippy and Bunsterstons knocked Ken into the lava!";
+        "Chippy and Bunsterstons knocked Ken into the lava. Proper job.";
+      if (this.winEyebrowEl) this.winEyebrowEl.textContent = "Level 2 clear";
+      if (this.winActionsDesktopEl) {
+        this.winActionsDesktopEl.innerHTML =
+          "Press <kbd>R</kbd> to play again · <kbd>Enter</kbd> for Level 1";
+      }
+      if (this.winNextBtn) this.winNextBtn.textContent = "Level 1";
     } else {
-      this.winBodyEl.textContent = `${who} cleared the stage!`;
+      this.winTitleEl.textContent = `Level ${this.levelNum} clear!`;
+      if (this.level.targetCarrots > 0) {
+        this.winBodyEl.textContent = `${who} got all the carrots. Nice one.`;
+      } else {
+        this.winBodyEl.textContent = `${who} cleared the stage!`;
+      }
+      if (this.winEyebrowEl) this.winEyebrowEl.textContent = "You did it";
+      if (this.winActionsDesktopEl) {
+        this.winActionsDesktopEl.innerHTML =
+          "Press <kbd>Enter</kbd> for the next level · <kbd>R</kbd> to replay";
+      }
+      if (this.winNextBtn) this.winNextBtn.textContent = "Next level";
     }
+
     this.winEl.classList.add("on");
     document.body.classList.add("level-clear");
   }
@@ -234,7 +264,7 @@ export class Game {
     this.level.reset();
     this.player.reset(this.spawnX(), this.spawnY(), 0);
     this.camRig.snapTo(this.player.position);
-    this.winEl.classList.remove("on");
+    this.winEl.classList.remove("on", "congrats");
     document.body.classList.remove("level-clear");
     this.syncHud();
     this.revealIntroChrome();
@@ -256,7 +286,7 @@ export class Game {
     this.applyLevelBounds();
     this.player.reset(this.spawnX(), this.spawnY(), 0);
     this.camRig.snapTo(this.player.position);
-    this.winEl.classList.remove("on");
+    this.winEl.classList.remove("on", "congrats");
     document.body.classList.remove("level-clear");
     this.syncHud();
     this.syncMobileChrome();
@@ -298,7 +328,7 @@ export class Game {
         if (this.hintEl) {
           this.hintEl.textContent = touch
             ? "Bash Ken with Attack · Bunny helps push"
-            : "Knock Ken into the lava! F/E bash · Bunny helps";
+            : "Knock Ken into the lava! F/E headbutt · Bunny helps";
         }
       } else {
         this.countEl.textContent = "Climb";
@@ -308,8 +338,8 @@ export class Game {
         if (this.targetSubEl) this.targetSubEl.textContent = "Climb over";
         if (this.hintEl) {
           this.hintEl.textContent = touch
-            ? "Stick into the gate · push up to climb · up at the top to hop over"
-            : "Walk into the gate · hold W to climb · Space to jump off";
+            ? "Climb the gate · up at the top to mount · steps down to the boat"
+            : "Hold W to climb · keep up at the top to mount · walk the steps to the boat";
         }
       }
       return;
@@ -339,7 +369,10 @@ export class Game {
       "click",
       (e) => {
         e.preventDefault();
-        if (this.won) this.goToLevel(this.levelNum + 1);
+        if (!this.won) return;
+        // After Level 2 congrats, "Level 1" sends you back to the start.
+        if (isLevel2(this.level)) this.goToLevel(1);
+        else this.goToLevel(this.levelNum + 1);
       },
       { passive: false },
     );
@@ -372,20 +405,14 @@ export class Game {
   };
 
   private onKey = (ev: KeyboardEvent): void => {
-    if (ev.code === "KeyF" || ev.code === "KeyE") {
-      this.attackKeys.add(ev.code);
-    }
     if (ev.code === "KeyR" || ev.key === "r" || ev.key === "R") {
       this.restartLevel();
       return;
     }
     if (!this.won) return;
     if (ev.code === "Enter" || ev.key === "n" || ev.key === "N") {
-      this.goToLevel(this.levelNum + 1);
+      if (isLevel2(this.level)) this.goToLevel(1);
+      else this.goToLevel(this.levelNum + 1);
     }
-  };
-
-  private onKeyUp = (ev: KeyboardEvent): void => {
-    this.attackKeys.delete(ev.code);
   };
 }

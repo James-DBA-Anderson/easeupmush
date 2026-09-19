@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { gameAudio } from "../audio";
 
 /** Ken — big hamster boss. Knock him off the boat into lava. */
 export class Ken {
@@ -86,6 +87,7 @@ export class Ken {
     this.onDeck = false;
     this.hurtTimer = 0.55;
     (this.body.material as THREE.MeshStandardMaterial).color.setHex(0xff6644);
+    gameAudio.knock();
     return true;
   }
 
