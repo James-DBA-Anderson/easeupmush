@@ -11,10 +11,19 @@ import {
   northwestScore,
   pickNorthwestPathIndex,
 } from "../world/lake";
-import { parkGates } from "../world/fence";
+import { insidePark, parkGates } from "../world/fence";
 import { binStations, cafeQueueSpot } from "../world/park";
 import { stepWalk, clearWalkSpot } from "../world/blocking";
 import { groundHeight } from "../world/terrain";
+import {
+  emptyRoute,
+  gateOutside,
+  nearestGate,
+  nearestLoopIndex,
+  routeAim,
+  setRouteToward,
+  type LoopRoute,
+} from "../world/pathRoute";
 import { Grumble } from "../effects/Grumble";
 import { MuckFlecks } from "../effects/MuckFlecks";
 import { Dog } from "./Dog";
@@ -243,8 +252,6 @@ const HANDFULS = 3;
 /** During the radio feeder rush a bag lasts a couple of minutes of feeding. */
 const HANDFULS_RUSH = 55;
 const FEED_PAUSE = 2.2;
-/** Kid tipped / rolling — local Y so the body clears the paving. */
-const KID_DOWN_Y = 0.48;
 
 /** Depot radio: feeders on the NW stretch — bag odds go up for a while. */
 let feederRush = false;
@@ -376,14 +383,6 @@ export class Person {
   private kid: THREE.Group | null = null;
   private kidLegs: THREE.Object3D[] = [];
   private kidArms: THREE.Object3D[] = [];
-  /** Seconds left on their side after a hose tip. */
-  private kidDown = 0;
-  /** Hose hits taken while already down — enough and they start rolling. */
-  private kidSprayHits = 0;
-  private kidHoseCool = 0;
-  private kidRolling = false;
-  private readonly kidVel = new THREE.Vector3();
-  private kidSpin = 0;
   private readonly kidHome = new THREE.Vector3(-0.48, 0, -0.1);
   /** Getting up after a bike dump before they come for you. */
   private getUpLeft = 0;
@@ -468,7 +467,12 @@ export class Person {
   private errand: Errand = "strolling";
   private visitLeft = VISIT_MIN + Math.random() * (VISIT_MAX - VISIT_MIN);
   private gateFor: THREE.Vector2 | null = null;
+  /** Gateway midpoint — walk through here before joining / after leaving the path. */
+  private gateWay: THREE.Vector2 | null = null;
   private joinAt = new THREE.Vector2();
+  private route: LoopRoute = emptyRoute();
+  /** Arrival: through the opening first, then along the path. */
+  private arriveStage: "gate" | "path" = "gate";
   private gone = false;
 
   /**
@@ -569,6 +573,7 @@ export class Person {
   /** Lined up outside a gate, walking in toward the nearest bit of path. */
   private startArrival(preferred?: THREE.Vector2): void {
     this.errand = "arriving";
+    this.arriveStage = "gate";
     const gates = parkGates();
     // Prefer openings that land you on the NW feeding stretch.
     let gate = preferred;
@@ -582,22 +587,18 @@ export class Person {
           best = g;
         }
       }
-      gate = Math.random() < 0.75 ? best : gates[Math.floor(Math.random() * gates.length)]!;
+      gate =
+        Math.random() < 0.75
+          ? best
+          : gates[Math.floor(Math.random() * gates.length)]!;
     }
     // A few metres outside the park, so they walk through the opening.
-    const out = gate.clone().normalize().multiplyScalar(8);
-    this.group.position.set(gate.x + out.x, 0, gate.y + out.y);
+    const out = gateOutside(gate, 8);
+    this.group.position.set(out.x, 0, out.y);
+    this.gateWay = gate.clone();
 
     // Join the loop at whichever point is closest to that gate.
-    let best = 0;
-    let closest = Infinity;
-    for (let i = 0; i < PATH_LOOP.length; i++) {
-      const gap = PATH_LOOP[i]!.distanceToSquared(gate);
-      if (gap < closest) {
-        closest = gap;
-        best = i;
-      }
-    }
+    const best = nearestLoopIndex(gate.x, gate.y);
     this.index = best;
     // Join on a clear footfall near the loop — not inside a bench / bin / trunk.
     const join = loopPoint(best);
@@ -612,11 +613,16 @@ export class Person {
       reach: 5,
     });
     this.joinAt.set(clear.x, clear.z);
-    this.faceToward(this.joinAt.x, this.joinAt.y);
+    this.faceToward(gate.x, gate.y);
   }
 
   /** Time's up — peel off the loop toward the nearest way out. */
   public headHome(): void {
+    // Don't vanish mid-scrap — finish the chase first.
+    if (this.madLeft > 0 || this.lungeLeft > 0) {
+      this.visitLeft = Math.max(this.visitLeft, 40);
+      return;
+    }
     if (
       this.errand === "leaving" ||
       this.errand === "binning" ||
@@ -625,20 +631,37 @@ export class Person {
       return;
     }
     this.errand = "leaving";
-    const here = new THREE.Vector2(this.group.position.x, this.group.position.z);
-    const gates = parkGates();
-    let best = gates[0]!;
-    let closest = Infinity;
-    for (const gate of gates) {
-      const gap = gate.distanceToSquared(here);
-      if (gap < closest) {
-        closest = gap;
-        best = gate;
-      }
-    }
+    const here = this.group.position;
+    const best = nearestGate(here.x, here.z);
+    this.gateWay = best.clone();
     // A little past the gate, so they clear the park before vanishing.
-    const out = best.clone().normalize().multiplyScalar(14);
-    this.gateFor = new THREE.Vector2(best.x + out.x, best.y + out.y);
+    this.gateFor = gateOutside(best, 14);
+    setRouteToward(this.route, here.x, here.z, best.x, best.y);
+  }
+
+  /**
+   * Prefer the lakeside path toward a goal; only cut grass once close enough.
+   * Returns remaining gap to the real goal.
+   */
+  private walkRouted(
+    goal: THREE.Vector2,
+    delta: number,
+    peelAt: number,
+  ): number {
+    const here = this.group.position;
+    const aim = routeAim(
+      this.route,
+      here.x,
+      here.z,
+      goal.x,
+      goal.y,
+      peelAt,
+    );
+    if (aim) {
+      this.walkToward(aim, delta);
+      return Math.hypot(goal.x - here.x, goal.y - here.z);
+    }
+    return this.walkToward(goal, delta);
   }
 
   public isGone(): boolean {
@@ -740,20 +763,12 @@ export class Person {
       groundHeight(this.group.position.x, this.group.position.z) + bob;
 
     if (this.kid) {
-      if (this.kidDown > 0) {
-        // Stay flat — no trotting while they're on the deck.
-        this.kidLegs[0]!.rotation.x = 0.9;
-        this.kidLegs[1]!.rotation.x = 0.9;
-        this.kidArms[0]!.rotation.x = -0.4;
-        this.kidArms[1]!.rotation.x = -0.4;
-      } else {
-        const trot = Math.sin(phase * 1.9 * rate) * 0.65;
-        this.kidLegs[0]!.rotation.x = trot;
-        this.kidLegs[1]!.rotation.x = -trot;
-        this.kidArms[0]!.rotation.x = -trot * 0.7;
-        this.kidArms[1]!.rotation.x = trot * 0.7;
-        this.kid.position.y = Math.abs(Math.sin(phase * 1.9)) * 0.05;
-      }
+      const trot = Math.sin(phase * 1.9 * rate) * 0.65;
+      this.kidLegs[0]!.rotation.x = trot;
+      this.kidLegs[1]!.rotation.x = -trot;
+      this.kidArms[0]!.rotation.x = -trot * 0.7;
+      this.kidArms[1]!.rotation.x = trot * 0.7;
+      this.kid.position.y = Math.abs(Math.sin(phase * 1.9)) * 0.05;
     }
     this.poseUmbrella();
   }
@@ -829,6 +844,7 @@ export class Person {
     this.showMood("disgusted");
     this.strop = STROP_TIME * 0.45;
     this.stropFor = this.strop;
+    this.visitLeft = Math.max(this.visitLeft, 50);
   }
 
   /** Dog's done a runner, or the kid's been left on the ground / behind. */
@@ -849,7 +865,6 @@ export class Person {
       const kw = new THREE.Vector3();
       this.kid.getWorldPosition(kw);
       const kidGap = this.group.position.distanceTo(kw);
-      if (this.kidDown > 0 && kidGap > 1.1) return true;
       if (kidGap > 3.8) return true;
     }
     return false;
@@ -1239,6 +1254,13 @@ export class Person {
     }
     this.errand = "binning";
     this.binFor = new THREE.Vector2(best.x, best.z);
+    setRouteToward(
+      this.route,
+      this.group.position.x,
+      this.group.position.z,
+      best.x,
+      best.z,
+    );
   }
 
   /** Bag in the bin, then back onto the circuit from the nearest paving. */
@@ -1274,6 +1296,13 @@ export class Person {
     this.errand = "icecream";
     this.cafeFor = new THREE.Vector2(spot.x, spot.z);
     this.iceBuyLeft = 0;
+    setRouteToward(
+      this.route,
+      this.group.position.x,
+      this.group.position.z,
+      spot.x,
+      spot.z,
+    );
   }
 
   /** Paid up — cones in hand, back onto the circuit. */
@@ -1719,7 +1748,7 @@ export class Person {
    * Chopper on the Island run — kids stop and wave; adults look up with them.
    */
   public noticeHelicopter(id: number, at: THREE.Vector3): void {
-    if (!this.kid || this.kidDown > 0) return;
+    if (!this.kid) return;
     if (this.heliWavedId === id) return;
     if (
       this.dunk > 0 ||
@@ -1787,8 +1816,8 @@ export class Person {
     // Hose the feeders off the NW stretch — bag ditched, they're done.
     if (first) this.ditchFeederBag();
 
-    // Little ones tip over on the jet; they only roll if you keep blasting.
-    if (this.kid) this.tipKid(from);
+    // Parent gets the hose — kid gets hauled along in the chase, not left tipped.
+    if (this.kid) this.haulKidAlong();
 
     const here = this.group.position;
     if (distanceToShore(here.x, here.z) < EDGE && !isInLake(here.x, here.z)) {
@@ -1848,7 +1877,7 @@ export class Person {
       this.spillCone(attacker);
     }
 
-    if (this.kid) this.tipKid(attacker);
+    if (this.kid) this.haulKidAlong();
 
     const here = this.group.position;
     if (distanceToShore(here.x, here.z) < EDGE && !isInLake(here.x, here.z)) {
@@ -1899,7 +1928,9 @@ export class Person {
     this.lungeStuck = 0;
     this.strop = 0;
     this.madLeft = Math.max(this.madLeft, this.lungeFor + 5 + Math.random() * 3);
+    this.visitLeft = Math.max(this.visitLeft, 55);
     this.pleasedHold = 0;
+    if (this.kid) this.haulKidAlong();
     if (shout) this.say(this.handbag ? HANDBAG_LINES : SQUARE_UP);
     this.showMood("angry");
   }
@@ -1959,107 +1990,17 @@ export class Person {
   }
 
   /**
-   * Hose tips the kid onto their side. One blast = down and staying put;
-   * keep the jet on them and they bowl along like a cygnet.
+   * Parent's been sprayed and is about to come for you — yank the kid upright
+   * onto their hip so they get dragged along instead of left on the paving.
    */
-  private tipKid(from?: THREE.Vector3): void {
-    if (!this.kid || this.dunk > 0) return;
-
-    if (this.kidDown > 0) {
-      if (this.kidHoseCool > 0) return;
-      this.kidHoseCool = 0.16;
-      this.kidSprayHits += 1;
-      this.kidDown = Math.max(this.kidDown, 1.6);
-      this.shoveKid(from, this.kidRolling ? 2.8 : 1.1);
-      if (this.kidSprayHits >= 2) this.kidRolling = true;
-      return;
-    }
-
-    this.kidDown = 2.2;
-    this.kidSprayHits = 0;
-    this.kidRolling = false;
-    this.kidVel.set(0, 0, 0);
-    this.kidSpin = 0;
-    this.kidHoseCool = 0.2;
-    this.kid.rotation.set(0, 0, Math.PI / 2);
-    this.kid.position.y = KID_DOWN_Y;
+  private haulKidAlong(): void {
+    if (!this.kid) return;
+    this.resetKidPose();
     this.kidFace?.setMood("shocked");
-    if (this.kidCone) this.spillCone(from);
-    this.shoveKid(from, 0.35);
-  }
-
-  /** Push the kid in parent-local xz away from the lance. */
-  private shoveKid(from: THREE.Vector3 | undefined, force: number): void {
-    if (!this.kid || !from || force <= 0) return;
-    const world = new THREE.Vector3();
-    this.kid.getWorldPosition(world);
-    const away = new THREE.Vector3().subVectors(world, from).setY(0);
-    if (away.lengthSq() < 0.01) {
-      away.set(-Math.sin(this.group.rotation.y), 0, -Math.cos(this.group.rotation.y));
-    }
-    away.normalize();
-    // World push → parent local (yaw only).
-    const yaw = this.group.rotation.y;
-    const lx = away.x * Math.cos(yaw) + away.z * Math.sin(yaw);
-    const lz = -away.x * Math.sin(yaw) + away.z * Math.cos(yaw);
-    this.kidVel.x += lx * force;
-    this.kidVel.z += lz * force;
-    const max = this.kidRolling ? 5.5 : 1.6;
-    if (this.kidVel.length() > max) this.kidVel.setLength(max);
-  }
-
-  private tickKidDown(delta: number): void {
-    if (!this.kid || this.kidDown <= 0) return;
-    if (this.kidHoseCool > 0) this.kidHoseCool = Math.max(0, this.kidHoseCool - delta);
-    this.kidDown -= delta;
-
-    if (this.kidRolling) {
-      this.kidVel.multiplyScalar(Math.max(0, 1 - 1.4 * delta));
-      this.kid.position.x += this.kidVel.x * delta;
-      this.kid.position.z += this.kidVel.z * delta;
-      const speed = this.kidVel.length();
-      if (speed > 0.2) {
-        this.kidSpin += speed * 3.2 * delta;
-        this.kid.rotation.x = this.kidSpin;
-      }
-      this.kid.rotation.z = Math.PI / 2;
-      this.kid.position.y = KID_DOWN_Y;
-      // Cap how far they skid from mum.
-      const homeGap = Math.hypot(
-        this.kid.position.x - this.kidHome.x,
-        this.kid.position.z - this.kidHome.z,
-      );
-      if (homeGap > 2.4) {
-        this.kidVel.multiplyScalar(0.35);
-      }
-    } else {
-      this.kid.rotation.set(0, 0, Math.PI / 2);
-      this.kid.position.y = KID_DOWN_Y;
-      this.kidVel.multiplyScalar(Math.max(0, 1 - 3 * delta));
-      this.kid.position.x += this.kidVel.x * delta;
-      this.kid.position.z += this.kidVel.z * delta;
-    }
-
-    if (this.kidDown > 0) return;
-
-    // Back on their feet beside mum.
-    this.kidRolling = false;
-    this.kidSprayHits = 0;
-    this.kidVel.set(0, 0, 0);
-    this.kidSpin = 0;
-    this.kid.rotation.set(0, 0, 0);
-    this.kid.position.copy(this.kidHome);
-    this.kidFace?.setMood("idle");
   }
 
   private resetKidPose(): void {
     if (!this.kid) return;
-    this.kidDown = 0;
-    this.kidRolling = false;
-    this.kidSprayHits = 0;
-    this.kidHoseCool = 0;
-    this.kidVel.set(0, 0, 0);
-    this.kidSpin = 0;
     this.kid.rotation.set(0, 0, 0);
     this.kid.position.copy(this.kidHome);
   }
@@ -2498,21 +2439,49 @@ export class Person {
       this.sprayTalkCool = Math.max(0, this.sprayTalkCool - delta);
     this.face.update(delta);
     this.kidFace?.update(delta);
-    this.tickKidDown(delta);
-    if (this.gawpCool > 0) this.gawpCool -= delta;
     this.tickUmbrella(delta, raining);
     this.tickMad(delta, player);
 
     if (this.errand === "arriving") {
-      if (this.walkToward(this.joinAt, delta) < 0.4) {
+      if (this.arriveStage === "gate" && this.gateWay) {
+        const gap = this.walkToward(this.gateWay, delta);
+        const here = this.group.position;
+        if (gap < 1.1 || insidePark(here.x, here.z)) {
+          this.arriveStage = "path";
+          this.gateWay = null;
+          setRouteToward(
+            this.route,
+            here.x,
+            here.z,
+            this.joinAt.x,
+            this.joinAt.y,
+          );
+        }
+        return -1;
+      }
+      if (this.walkRouted(this.joinAt, delta, 5) < 0.4) {
         this.errand = "strolling";
+        this.route.ready = false;
         this.place();
       }
       return -1;
     }
 
     if (this.errand === "leaving") {
-      if (!this.gateFor || this.walkToward(this.gateFor, delta) < 0.5) {
+      if (!this.gateFor) {
+        this.gone = true;
+        return -1;
+      }
+      // Path to the opening, then straight out through the fence gap.
+      if (this.gateWay && this.route.ready) {
+        const gap = this.walkRouted(this.gateWay, delta, 9);
+        if (gap < 1.4) {
+          this.route.ready = false;
+          this.gateWay = null;
+        }
+        return -1;
+      }
+      if (this.walkToward(this.gateFor, delta) < 0.5) {
         this.gone = true;
       }
       return -1;
@@ -2555,7 +2524,7 @@ export class Person {
       this.gawpLeft -= delta;
       this.faceToward(this.gawpAt.x, this.gawpAt.z);
       this.standAndWatch();
-      if (this.heliWave && this.kid && this.kidDown <= 0) {
+      if (this.heliWave && this.kid) {
         this.poseKidWave(delta);
       }
       if (this.gawpLeft <= 0) {
@@ -2585,7 +2554,7 @@ export class Person {
     }
 
     if (this.errand === "binning") {
-      if (!this.binFor || this.walkToward(this.binFor, delta) < 0.55) {
+      if (!this.binFor || this.walkRouted(this.binFor, delta, 7) < 0.55) {
         this.finishBinning();
       }
       return -1;
@@ -2600,7 +2569,7 @@ export class Person {
         if (this.iceBuyLeft <= 0) this.finishIceCream();
         return -1;
       }
-      if (!this.cafeFor || this.walkToward(this.cafeFor, delta) < 0.55) {
+      if (!this.cafeFor || this.walkRouted(this.cafeFor, delta, 7) < 0.55) {
         this.iceBuyLeft = 2.2 + Math.random() * 2.4;
         this.say(ICE_BUY);
       }
@@ -2662,6 +2631,10 @@ export class Person {
     // Bag still full on the feeder stretch — linger until it's empty or sprayed.
     if (feederRush && this.handfuls > 0) {
       this.visitLeft = Math.max(this.visitLeft, 45);
+    }
+    // Mid-temper: stay on the park until they've cooled off.
+    if (this.madLeft > 0 || this.lungeLeft > 0) {
+      this.visitLeft = Math.max(this.visitLeft, 35);
     }
     if (this.visitLeft <= 0) this.headHome();
 
@@ -2962,7 +2935,7 @@ export class Person {
       );
     }
 
-    if (!this.kid || this.kidDown > 0) return;
+    if (!this.kid) return;
     // The kid throws it in fistfuls, and bounces about doing it.
     const kidToss = Math.sin(age * 8.5);
     this.kidArms[0]!.rotation.x = -1.1 - kidToss * 0.8;
@@ -2992,6 +2965,8 @@ export class Person {
     this.lungeLeft -= delta;
     this.showMood("angry");
     this.faceToward(this.lungeAt.x, this.lungeAt.z);
+    // Kid stays on the hip for the charge — no leaving them tipped behind.
+    if (this.kid) this.haulKidAlong();
 
     const here = this.group.position;
     const to = new THREE.Vector3()

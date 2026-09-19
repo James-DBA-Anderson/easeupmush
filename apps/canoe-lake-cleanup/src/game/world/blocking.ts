@@ -94,16 +94,22 @@ export function setWalkCrowd(
 
 export type CrowdIgnore = { x: number; z: number };
 
-function isSelf(
-  px: number,
-  pz: number,
-  ignore?: CrowdIgnore,
-  pad = 0.25,
-): boolean {
-  if (!ignore) return false;
-  const dx = px - ignore.x;
-  const dz = pz - ignore.z;
-  return dx * dx + dz * dz < pad * pad;
+/** Index of this walker's crowd slot, or -1 if not listed. */
+function selfCrowdIndex(ignore?: CrowdIgnore, pad = 0.55): number {
+  if (!ignore) return -1;
+  let best = -1;
+  let bestD = pad * pad;
+  for (let i = 0; i < walkCrowd.length; i++) {
+    const p = walkCrowd[i]!;
+    const dx = p.x - ignore.x;
+    const dz = p.z - ignore.z;
+    const d = dx * dx + dz * dz;
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
 }
 
 /** True if a body at (x,z) would overlap another walker. */
@@ -113,14 +119,86 @@ export function hitsCrowd(
   radius = 0.55,
   ignore?: CrowdIgnore,
 ): boolean {
+  const skip = selfCrowdIndex(ignore);
   const r2 = radius * radius;
-  for (const p of walkCrowd) {
-    if (isSelf(p.x, p.z, ignore)) continue;
+  for (let i = 0; i < walkCrowd.length; i++) {
+    if (i === skip) continue;
+    const p = walkCrowd[i]!;
     const dx = p.x - x;
     const dz = p.z - z;
     if (dx * dx + dz * dz < r2) return true;
   }
   return false;
+}
+
+/**
+ * Nearest walker ahead (or overlapping) — used to bias a sidestep before the
+ * step stalls against them.
+ */
+function nearestCrowdAhead(
+  x: number,
+  z: number,
+  fx: number,
+  fz: number,
+  ignore?: CrowdIgnore,
+  reach = 2.6,
+): { x: number; z: number; dist: number; ahead: number } | null {
+  const skip = selfCrowdIndex(ignore);
+  let best: { x: number; z: number; dist: number; ahead: number } | null =
+    null;
+  for (let i = 0; i < walkCrowd.length; i++) {
+    if (i === skip) continue;
+    const p = walkCrowd[i]!;
+    const ox = p.x - x;
+    const oz = p.z - z;
+    const dist = Math.hypot(ox, oz);
+    if (dist < 0.02 || dist > reach) continue;
+    const ahead = ox * fx + oz * fz;
+    // Overlap / very close counts even if slightly behind.
+    if (ahead < -0.35 && dist > 0.7) continue;
+    if (!best || dist < best.dist) {
+      best = { x: ox, z: oz, dist, ahead };
+    }
+  }
+  return best;
+}
+
+/**
+ * Bias a desired step left around anyone ahead (British path etiquette — two
+ * people head-on therefore peel to opposite world sides).
+ */
+function steerAroundCrowd(
+  x: number,
+  z: number,
+  dx: number,
+  dz: number,
+  ignore?: CrowdIgnore,
+): { x: number; z: number } {
+  const len = Math.hypot(dx, dz);
+  if (len < 1e-6) return { x: dx, z: dz };
+  const fx = dx / len;
+  const fz = dz / len;
+  const near = nearestCrowdAhead(x, z, fx, fz, ignore);
+  if (!near) return { x: dx, z: dz };
+
+  // Facing-left in XZ.
+  const leftX = -fz;
+  const leftZ = fx;
+  const urgency = Math.min(2.4, 1.35 / Math.max(near.dist, 0.18));
+  // Stronger when head-on; softer when already clearing past.
+  const headOn = Math.max(0, near.ahead / Math.max(near.dist, 0.01));
+  const steer = len * urgency * (0.35 + 0.55 * headOn);
+  let sx = dx + leftX * steer;
+  let sz = dz + leftZ * steer;
+  // Already overlapping — also push straight away from them.
+  if (near.dist < 0.75) {
+    const away = 1 / Math.max(near.dist, 0.12);
+    sx -= near.x * away * len * 0.55;
+    sz -= near.z * away * len * 0.55;
+  }
+  const sl = Math.hypot(sx, sz);
+  if (sl < 1e-6) return { x: dx, z: dz };
+  return { x: (sx / sl) * len, z: (sz / sl) * len };
 }
 
 /** Like {@link isBlocked}, plus the lake and other pedestrians. */
@@ -169,8 +247,8 @@ export function slideWalk(
 }
 
 /**
- * Walk a step with axis slide; if fully stuck, try a side step so folk can
- * slip around benches and each other.
+ * Walk a step with crowd steering and multi-angle slips so folk walk around
+ * each other instead of freezing nose-to-nose.
  */
 export function stepWalk(
   x: number,
@@ -180,23 +258,75 @@ export function stepWalk(
   radius = 0.45,
   ignore?: CrowdIgnore,
 ): { x: number; z: number } {
-  const landed = slideWalk(x, z, dx, dz, radius, ignore);
-  if (landed.x !== x || landed.z !== z) return landed;
-
   const len = Math.hypot(dx, dz);
-  if (len < 1e-6) return landed;
-  const px = -dz;
-  const pz = dx;
+  if (len < 1e-6) return { x, z };
+
+  const steered = steerAroundCrowd(x, z, dx, dz, ignore);
+  let landed = slideWalk(x, z, steered.x, steered.z, radius, ignore);
+  if (moved(landed, x, z)) return commitCrowd(landed, ignore);
+
+  // Still stuck — try keep-left first, then right, at several angles / lengths.
+  const fx = dx / len;
+  const fz = dz / len;
+  const leftX = -fz;
+  const leftZ = fx;
+  const angles = [0.4, 0.75, 1.05, 1.35, 1.7];
+  const scales = [1, 1.25, 1.55];
   for (const side of [1, -1] as const) {
-    const sidestep = slideWalk(
+    for (const ang of angles) {
+      const c = Math.cos(ang);
+      const s = Math.sin(ang) * side;
+      const dirX = fx * c + leftX * s;
+      const dirZ = fz * c + leftZ * s;
+      for (const scale of scales) {
+        const tryStep = slideWalk(
+          x,
+          z,
+          dirX * len * scale,
+          dirZ * len * scale,
+          radius,
+          ignore,
+        );
+        if (moved(tryStep, x, z)) return commitCrowd(tryStep, ignore);
+      }
+    }
+  }
+
+  // Last ditch: pure lateral slip away from the nearest body.
+  const near = nearestCrowdAhead(x, z, fx, fz, ignore, 3.2);
+  if (near && near.dist > 0.02) {
+    const awayLen = Math.max(len, 0.35);
+    const ax = -near.x / near.dist;
+    const az = -near.z / near.dist;
+    const escape = slideWalk(x, z, ax * awayLen, az * awayLen, radius, ignore);
+    if (moved(escape, x, z)) return commitCrowd(escape, ignore);
+    const slip = slideWalk(
       x,
       z,
-      (px / len) * len * side,
-      (pz / len) * len * side,
+      leftX * awayLen * 1.2,
+      leftZ * awayLen * 1.2,
       radius,
       ignore,
     );
-    if (sidestep.x !== x || sidestep.z !== z) return sidestep;
+    if (moved(slip, x, z)) return commitCrowd(slip, ignore);
   }
+
   return landed;
+}
+
+function moved(at: { x: number; z: number }, x: number, z: number): boolean {
+  return at.x !== x || at.z !== z;
+}
+
+/** Keep the live crowd list in sync so the next walker this frame sees us. */
+function commitCrowd(
+  at: { x: number; z: number },
+  ignore?: CrowdIgnore,
+): { x: number; z: number } {
+  const i = selfCrowdIndex(ignore);
+  if (i >= 0) {
+    walkCrowd[i]!.x = at.x;
+    walkCrowd[i]!.z = at.z;
+  }
+  return at;
 }

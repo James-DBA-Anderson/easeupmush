@@ -3,14 +3,16 @@ import { distanceToShore, isInLake, isOnPath, PATH_OUTER } from "../world/lake";
 import { insidePark } from "../world/fence";
 import { liveTrees, type LiveTree } from "../world/trees";
 
-const CELL = 1.9;
-const MAX_PATCHES = 72;
+const CELL = 1.55;
+const MAX_PATCHES = 90;
 /** Seconds between spread attempts — lower = walks the green faster. */
 const SPREAD_EVERY = 0.48;
 /** How close a flame must sit to cook a trunk. */
 const TREE_NEAR = 2.6;
 /** Continuous exposure before the canopy goes up. */
 const TREE_COOK = 15;
+/** Ash disc radius — big enough to overlap neighbours with no grass showing through. */
+const ASH_RADIUS = 1.28;
 
 interface FlameBit {
   mesh: THREE.Mesh;
@@ -51,6 +53,16 @@ interface SmokePuff {
   dying: boolean;
 }
 
+/** White rush when the hose hits hot grass. */
+interface SteamPuff {
+  mesh: THREE.Mesh;
+  life: number;
+  maxLife: number;
+  rise: number;
+  vx: number;
+  vz: number;
+}
+
 interface TreeBlaze {
   tree: LiveTree;
   /** Seconds of hot patches sitting around the trunk. */
@@ -73,6 +85,7 @@ export class GrassFire {
   private patches: Patch[] = [];
   private embers: Ember[] = [];
   private smoke: SmokePuff[] = [];
+  private steam: SteamPuff[] = [];
   private trees: TreeBlaze[] = [];
   /** Grid cells that have burnt out — fire never comes back on them. */
   private burnt = new Set<string>();
@@ -179,24 +192,30 @@ export class GrassFire {
   /** Hose or bucket water. Returns true if it hit something hot. */
   public douse(point: THREE.Vector3, strength = 0.55): boolean {
     let hit = false;
+    let hotHits = 0;
+    // Each fleck only knocks a little — needs a proper soak to kill a patch.
+    const bite = strength * 0.085;
     for (const patch of this.patches) {
       const dx = patch.x - point.x;
       const dz = patch.z - point.z;
       if (dx * dx + dz * dz > 2.1 * 2.1) continue;
-      patch.heat = Math.max(0, patch.heat - strength);
+      if (patch.heat < 0.05) continue;
+      patch.heat = Math.max(0, patch.heat - bite);
+      this.paintPatchGround(patch);
       hit = true;
-      this.steamAt(point.x, point.z);
+      hotHits++;
     }
     for (const blaze of this.trees) {
       if (!blaze.ablaze) continue;
       const dx = blaze.tree.x - point.x;
       const dz = blaze.tree.z - point.z;
       if (dx * dx + dz * dz > 4.5 * 4.5) continue;
-      blaze.life = Math.max(0, blaze.life - strength * 2.8);
+      blaze.life = Math.max(0, blaze.life - strength * 0.5);
       hit = true;
-      this.steamAt(point.x, point.z + 0.2);
+      hotHits += 2;
       if (blaze.life <= 0.4) this.snuffTree(blaze);
     }
+    if (hit) this.steamBurst(point.x, point.z, hotHits);
     return hit;
   }
 
@@ -249,13 +268,15 @@ export class GrassFire {
     this.updateTrees(delta);
     this.updateEmbers(delta);
     this.updateSmoke(delta);
+    this.updateSteam(delta);
 
     if (
       this.everLit &&
       this.patches.length === 0 &&
       !this.trees.some((t) => t.ablaze) &&
       this.embers.length === 0 &&
-      this.smoke.length === 0
+      this.smoke.length === 0 &&
+      this.steam.length === 0
     ) {
       this.cleared = true;
       this.gone = true;
@@ -288,6 +309,12 @@ export class GrassFire {
       (puff.mesh.material as THREE.Material).dispose();
     }
     this.smoke = [];
+    for (const puff of this.steam) {
+      this.scene.remove(puff.mesh);
+      puff.mesh.geometry.dispose();
+      (puff.mesh.material as THREE.Material).dispose();
+    }
+    this.steam = [];
     // Ashes stay parented to the scene — do not remove or dispose them.
     this.ashes = [];
     this.gone = true;
@@ -529,29 +556,47 @@ export class GrassFire {
 
   private animatePatch(patch: Patch, delta: number): void {
     const pulse = 0.85 + Math.sin(patch.age * 11 + patch.x) * 0.15;
-    const groundSize = 0.85 + patch.heat * 0.5;
+    // Keep the burnt disc wide so neighbouring scorches always meet.
+    const groundSize = 1.05 + patch.heat * 0.35;
     patch.ground.scale.set(groundSize, 1, groundSize);
-    patch.glow.scale.set(groundSize * 1.6, 1, groundSize * 1.6);
-    patch.glow.visible = patch.heat > 0.1;
+    patch.glow.scale.set(groundSize * 1.45, 1, groundSize * 1.45);
+    patch.glow.visible = patch.heat > 0.06;
     (patch.glow.material as THREE.MeshBasicMaterial).opacity =
-      0.12 + patch.heat * 0.4;
+      0.06 + patch.heat * 0.42;
+    this.paintPatchGround(patch);
 
     for (const flame of patch.flames) {
-      flame.phase += delta * (6 + patch.heat * 8);
+      flame.phase += delta * (5 + patch.heat * 7);
       const flicker =
         0.7 +
         Math.sin(flame.phase) * 0.25 +
         Math.sin(flame.phase * 2.3) * 0.1;
-      const h = (0.55 + patch.heat * 1.4) * flicker * pulse;
-      flame.mesh.scale.set(0.55 + patch.heat * 0.5, h, 0.55 + patch.heat * 0.5);
+      // Flames shrink as the hose knocks the heat back.
+      const h = (0.2 + patch.heat * 1.55) * flicker * pulse;
+      const w = 0.35 + patch.heat * 0.65;
+      flame.mesh.scale.set(w, h, w);
       flame.mesh.position.y = h * 0.45;
       flame.mesh.rotation.z = Math.sin(flame.phase * 0.7) * flame.lean;
       flame.mesh.rotation.x = Math.cos(flame.phase * 0.5) * flame.lean * 0.4;
-      flame.mesh.visible = patch.heat > 0.08;
+      flame.mesh.visible = patch.heat > 0.05;
       const mat = flame.mesh.material as THREE.MeshStandardMaterial;
       mat.emissiveIntensity =
-        0.8 + patch.heat * 1.8 + Math.sin(flame.phase) * 0.3;
+        0.35 + patch.heat * 2.0 + Math.sin(flame.phase) * 0.25;
+      mat.opacity = 0.25 + patch.heat * 0.7;
     }
+  }
+
+  /** Ground goes from glowing coal to black ash as heat falls. */
+  private paintPatchGround(patch: Patch): void {
+    const mat = patch.ground.material as THREE.MeshStandardMaterial;
+    const t = 1 - THREE.MathUtils.clamp(patch.heat, 0, 1);
+    mat.color.setRGB(
+      THREE.MathUtils.lerp(0.28, 0.1, t),
+      THREE.MathUtils.lerp(0.14, 0.086, t),
+      THREE.MathUtils.lerp(0.08, 0.07, t),
+    );
+    mat.emissive.setHex(patch.heat > 0.15 ? 0x4a1808 : 0x000000);
+    mat.emissiveIntensity = patch.heat * 0.55;
   }
 
   private finishPatch(patch: Patch, leaveAsh: boolean): void {
@@ -571,10 +616,11 @@ export class GrassFire {
       mat.color.setHex(0x1a1612);
       mat.emissive.setHex(0x000000);
       mat.emissiveIntensity = 0;
-      mat.opacity = 0.95;
+      mat.opacity = 0.97;
       mat.transparent = true;
-      patch.ground.scale.set(1.1, 1, 1.1);
-      patch.ground.position.y = 0.022;
+      // Overlap neighbours so no green shows between scorches.
+      patch.ground.scale.set(1.45, 1, 1.45);
+      patch.ground.position.y = 0.02;
       this.ashes.push(patch.ground);
     } else {
       this.scene.remove(patch.ground);
@@ -604,12 +650,12 @@ export class GrassFire {
   private ignite(x: number, z: number, heat: number): boolean {
     if (!this.canBurn(x, z)) return false;
     if (this.burnt.has(this.cellKey(x, z))) return false;
-    if (this.patches.some((p) => Math.hypot(p.x - x, p.z - z) < CELL * 0.72)) {
+    if (this.patches.some((p) => Math.hypot(p.x - x, p.z - z) < CELL * 0.85)) {
       return false;
     }
 
     const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(0.95, 8),
+      new THREE.CircleGeometry(ASH_RADIUS, 10),
       new THREE.MeshStandardMaterial({
         color: 0x3a2214,
         emissive: 0x4a1808,
@@ -626,7 +672,7 @@ export class GrassFire {
     this.scene.add(ground);
 
     const glow = new THREE.Mesh(
-      new THREE.CircleGeometry(1.4, 8),
+      new THREE.CircleGeometry(ASH_RADIUS * 1.35, 10),
       new THREE.MeshBasicMaterial({
         color: 0xff7018,
         transparent: true,
@@ -673,7 +719,7 @@ export class GrassFire {
       x,
       z,
       heat,
-      fuel: 1.15 + Math.random() * 0.35,
+      fuel: 1.55 + Math.random() * 0.45,
       ground,
       glow,
       flames,
@@ -769,24 +815,63 @@ export class GrassFire {
     });
   }
 
-  private steamAt(x: number, z: number): void {
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.14, 6, 5),
-      new THREE.MeshBasicMaterial({
-        color: 0xd8e4ea,
+  /** Fat white kick when water hits hot patches — denser the more you soak. */
+  private steamBurst(x: number, z: number, heatHits: number): void {
+    const count = Math.min(18, 8 + heatHits * 2 + Math.floor(Math.random() * 4));
+    const greys = [0xf2f6f8, 0xe4eef2, 0xd0dde4, 0xc4d2da] as const;
+    for (let i = 0; i < count; i++) {
+      if (this.steam.length > 120) break;
+      const mat = new THREE.MeshBasicMaterial({
+        color: greys[Math.floor(Math.random() * greys.length)]!,
         transparent: true,
-        opacity: 0.55,
+        opacity: 0.5 + Math.random() * 0.25,
         depthWrite: false,
-      }),
-    );
-    mesh.position.set(x, 0.3, z);
-    this.scene.add(mesh);
-    this.embers.push({
-      mesh,
-      life: 0.55,
-      rise: 2.0,
-      drift: (Math.random() - 0.5) * 0.4,
-    });
+      });
+      const size = 0.22 + Math.random() * 0.28;
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(size, 7, 6), mat);
+      const ang = Math.random() * Math.PI * 2;
+      const kick = 0.8 + Math.random() * 1.8;
+      mesh.position.set(
+        x + Math.cos(ang) * Math.random() * 0.45,
+        0.25 + Math.random() * 0.35,
+        z + Math.sin(ang) * Math.random() * 0.45,
+      );
+      mesh.scale.set(1, 1.15 + Math.random() * 0.35, 1);
+      this.scene.add(mesh);
+      const life = 0.7 + Math.random() * 0.85;
+      this.steam.push({
+        mesh,
+        life,
+        maxLife: life,
+        rise: 2.4 + Math.random() * 2.8,
+        vx: Math.cos(ang) * kick,
+        vz: Math.sin(ang) * kick,
+      });
+    }
+  }
+
+  private updateSteam(delta: number): void {
+    for (let i = this.steam.length - 1; i >= 0; i--) {
+      const puff = this.steam[i]!;
+      puff.life -= delta;
+      puff.mesh.position.y += puff.rise * delta;
+      puff.mesh.position.x += puff.vx * delta;
+      puff.mesh.position.z += puff.vz * delta;
+      // Billows out fast, then hangs.
+      puff.rise *= 1 - delta * 0.55;
+      puff.vx *= 1 - delta * 1.1;
+      puff.vz *= 1 - delta * 1.1;
+      const spent = 1 - Math.max(0, puff.life) / puff.maxLife;
+      const grow = 1 + spent * 2.4;
+      puff.mesh.scale.set(grow * 1.15, grow * 1.45, grow * 1.15);
+      const mat = puff.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = Math.max(0, (1 - spent) * (1 - spent) * 0.65);
+      if (puff.life > 0 && mat.opacity > 0.02) continue;
+      this.scene.remove(puff.mesh);
+      puff.mesh.geometry.dispose();
+      mat.dispose();
+      this.steam.splice(i, 1);
+    }
   }
 
   private updateEmbers(delta: number): void {

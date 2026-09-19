@@ -71,7 +71,7 @@ const TYRE_RANGE = 0.5;
 const SMEAR_LENGTH = 12;
 const DRYING = 10;
 /** How long they hunt you once they've had enough. */
-const RAM_TIME = 7.5;
+const RAM_TIME = 14;
 const RAM_SPEED = 7.2;
 const CRASH_RANGE = 1.55;
 
@@ -278,6 +278,8 @@ export class Scooter {
 
   /** Done their lap and off home for their tea. */
   public isGone(): boolean {
+    // Still hunting — stay on the board even if their lap ticket ran out.
+    if (this.ramLeft > 0 || this.anger > 0.4) return false;
     return this.ticketLeft <= 0;
   }
 
@@ -342,6 +344,8 @@ export class Scooter {
     this.crashReady = false;
     this.flinch = 0;
     this.chatting = 0;
+    // Fresh ticket so they don't vanish the moment the chase ends.
+    this.ticketLeft = Math.max(this.ticketLeft, PATH_LOOP.length * 0.85);
     this.sound(RAM_LINES);
   }
 
@@ -458,6 +462,7 @@ export class Scooter {
     if (this.ramLeft <= 0) {
       this.anger = Math.max(0, this.anger - 1);
       this.group.rotation.x = 0;
+      this.ticketLeft = Math.max(this.ticketLeft, PATH_LOOP.length * 0.55);
       this.rejoinLoop();
     }
   }

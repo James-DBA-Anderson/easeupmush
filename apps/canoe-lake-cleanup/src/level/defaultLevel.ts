@@ -183,13 +183,19 @@ export const DEFAULT_LEVEL: LevelData = {
     { id: "boathouse", x: -47.9, z: 76, yaw: -0.562 },
     { id: "cafe", x: 148, z: 28, yaw: 1.384 },
     { id: "toilets", x: -21.9, z: -99.6, yaw: -2.926 },
-    { id: "roseGarden", x: 150, z: 101, yaw: 0.98 },
+    { id: "emanuelFountain", x: -102, z: -52, yaw: 1.0 },
+    { id: "roseGarden", x: 168, z: 92, yaw: 0.15 },
     { id: "swing", x: 145.86, z: 42.41, yaw: 1.357 },
     { id: "swing", x: 146.39, z: 39.97, yaw: 1.357 },
     { id: "swing", x: 146.92, z: 37.53, yaw: 1.357 },
     { id: "slide", x: 150.77, z: 24.55, yaw: 1.357 },
     { id: "spring", x: 157.44, z: 36.23, yaw: 1.357 },
     { id: "zip", x: 161.52, z: 26.88, yaw: 1.357 },
+    { id: "gymPullUp", x: 178, z: 58, yaw: 0.4 },
+    { id: "gymBars", x: 182, z: 55, yaw: 0.4 },
+    { id: "gymBench", x: 175, z: 54, yaw: 0.9 },
+    { id: "gymWalker", x: 186, z: 60, yaw: -0.2 },
+    { id: "gymBike", x: 172, z: 61, yaw: 1.1 },
   ],
   /** Wood-chip boundary for the east-lawn play park. */
   playParkOutline: [
@@ -236,7 +242,7 @@ export const DEFAULT_LEVEL: LevelData = {
   trees: [],
   /** Empty → flat park (draw berms in the Terrain tool). */
   elevationZones: [],
-  /** Red-arrow mission anchors — picnic, geese, fire, rebels. */
+  /** Red-arrow mission anchors — picnic, geese, swanboat, fire, rebels. */
   missionSpots: DEFAULT_MISSION_SPOTS.map((s) => ({ ...s })),
 };
 

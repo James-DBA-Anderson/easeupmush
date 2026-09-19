@@ -26,7 +26,8 @@ function footY(x: number, z: number): number {
  * The buildings and fittings marked on a map of Canoe Lake: the small boat
  * house with swan pedalos moored on the shore beside it, the café out on
  * the east green toward the splash, the toilet block south of the lake by
- * the esplanade, the play park on the east green, the rose beds toward St
+ * the esplanade, the Emanuel fountain at the western end, outdoor gym kit on
+ * the east lawn, the play park on the east green, the rose beds toward St
  * Helens Parade, bins round the circuit, and bus shelters along the parade.
  *
  * +Z is inland (St Helens Parade), −Z is the seafront, and the lake runs
@@ -260,6 +261,14 @@ let wreckPending = false;
 
 /** Hire office pose — hatch faces local −Z. */
 let boatHouseAt: { x: number; z: number; yaw: number } | null = null;
+/** Formal rose beds east of the play park — for benches and the editor pin. */
+let roseGardenAt: {
+  x: number;
+  z: number;
+  yaw: number;
+  halfW: number;
+  halfD: number;
+} | null = null;
 /** Café / kiosk poses — hatch faces local −Z, same as the boat house. */
 const cafeSpots: { x: number; z: number; yaw: number }[] = [];
 
@@ -898,7 +907,7 @@ function placeBusStop(scene: THREE.Scene, pl: Placeable): void {
   });
 }
 
-/** The toilet block, south of the lake between the path and the esplanade. */
+/** The toilet block, south of the lake — a wide curved pavilion hugging the path. */
 function toilets(scene: THREE.Scene): void {
   const placed = placeable("toilets");
   const at = placed
@@ -908,40 +917,206 @@ function toilets(scene: THREE.Scene): void {
   group.position.set(at.x, footY(at.x, at.z), at.z);
   group.rotation.y = at.yaw;
 
-  const WIDE = 7;
-  const DEEP = 4.5;
+  // Arc along the front: wider than the old square block, bowed toward the
+  // path (local −Z). Arc centre sits behind the building so the facade is convex.
+  const BAYS = 7;
+  const ARC = 0.52;
+  const DEEP = 4.8;
+  const WALL_H = 2.85;
+  const midR = 30;
+  const bayAngle = ARC / BAYS;
+  const bayWide = 2 * midR * Math.sin(bayAngle / 2) * 1.14;
 
-  const walls = block(WIDE, 2.8, DEEP, BRICK);
-  walls.position.y = 1.4;
-  group.add(walls);
+  const doorBays = new Set([1, BAYS - 2]);
+  const doorColours = [0x3f6b9c, 0x8b3a6b] as const;
+  let doorI = 0;
 
-  const roof = gable(WIDE, DEEP, 1);
-  roof.position.y = 2.8;
-  group.add(roof);
+  for (let i = 0; i < BAYS; i++) {
+    const amid = -ARC / 2 + (i + 0.5) * bayAngle;
+    // Shift so the middle bay sits on the placeable origin.
+    const cx = Math.sin(amid) * midR;
+    const cz = -Math.cos(amid) * midR + midR;
+    const yaw = -amid;
 
-  for (const [x, colour] of [
-    [-1.8, 0x3f6b9c],
-    [1.8, 0x8b3a6b],
-  ] as const) {
-    const door = block(1.1, 2.1, 0.16, new THREE.MeshStandardMaterial({
-      color: colour,
-      roughness: 0.8,
-    }));
-    door.position.set(x, 1.05, -DEEP / 2 - 0.05);
-    group.add(door);
+    const walls = block(bayWide, WALL_H, DEEP, BRICK);
+    walls.position.set(cx, WALL_H / 2, cz);
+    walls.rotation.y = yaw;
+    group.add(walls);
 
-    const plate = block(0.4, 0.4, 0.06, WHITE);
-    plate.position.set(x, 2.35, -DEEP / 2 - 0.05);
-    group.add(plate);
+    const roof = gable(bayWide + 0.2, DEEP + 0.2, 0.95);
+    roof.position.set(cx, WALL_H, cz);
+    roof.rotation.y = yaw;
+    group.add(roof);
+
+    if (doorBays.has(i)) {
+      const colour = doorColours[doorI++] ?? doorColours[0]!;
+      // Front face of the bay (local −Z).
+      const fx = -Math.sin(yaw);
+      const fz = -Math.cos(yaw);
+      const door = block(
+        1.15,
+        2.15,
+        0.16,
+        new THREE.MeshStandardMaterial({ color: colour, roughness: 0.8 }),
+      );
+      door.position.set(
+        cx + fx * (DEEP / 2 + 0.05),
+        1.08,
+        cz + fz * (DEEP / 2 + 0.05),
+      );
+      door.rotation.y = yaw;
+      group.add(door);
+
+      const plate = block(0.4, 0.4, 0.06, WHITE);
+      plate.position.set(
+        cx + fx * (DEEP / 2 + 0.08),
+        2.4,
+        cz + fz * (DEEP / 2 + 0.08),
+      );
+      plate.rotation.y = yaw;
+      group.add(plate);
+    }
+
+    // World-space collision for this bay.
+    const cos = Math.cos(at.yaw);
+    const sin = Math.sin(at.yaw);
+    solids.push({
+      x: at.x + sin * cz + cos * cx,
+      z: at.z + cos * cz - sin * cx,
+      halfWide: bayWide / 2,
+      halfDeep: DEEP / 2,
+      yaw: at.yaw + yaw,
+    });
   }
 
-  // The back of the toilets is the most tagged wall in the park, obviously.
-  taggable(at, 0, DEEP / 2 + 0.1, 0, WIDE, 1.4);
-  taggable(at, WIDE / 2 + 0.1, 0, Math.PI / 2, DEEP, 1.4);
-  taggable(at, -WIDE / 2 - 0.1, 0, -Math.PI / 2, DEEP, 1.4);
+  // Tagged faces — long rear (esplanade) and the two curved ends.
+  const halfSpan = midR * Math.sin(ARC / 2);
+  const backOut = midR * (1 - Math.cos(ARC / 2)) + DEEP / 2 + 0.15;
+  taggable(at, 0, backOut, 0, halfSpan * 2.1, 1.4);
+  taggable(at, halfSpan + 0.2, DEEP * 0.15, Math.PI / 2 - ARC / 4, DEEP, 1.4);
+  taggable(at, -halfSpan - 0.2, DEEP * 0.15, -Math.PI / 2 + ARC / 4, DEEP, 1.4);
 
   scene.add(group);
-  solids.push({ x: at.x, z: at.z, halfWide: WIDE / 2, halfDeep: DEEP / 2, yaw: at.yaw });
+}
+
+/**
+ * Alderman Emanuel Emanuel drinking fountain — stone plinth under a cast-iron
+ * canopy at the western end of the lake
+ * (https://memorialsinportsmouth.co.uk/southsea/emanuel.htm).
+ */
+function emanuelFountain(scene: THREE.Scene): void {
+  const placed = placeable("emanuelFountain");
+  const at = placed
+    ? { x: placed.x, z: placed.z, yaw: placed.yaw }
+    : pitch(200, 16);
+  const group = new THREE.Group();
+  group.position.set(at.x, footY(at.x, at.z), at.z);
+  group.rotation.y = at.yaw;
+
+  const STONE = new THREE.MeshStandardMaterial({
+    color: 0xc8c2b4,
+    roughness: 0.92,
+  });
+  const IRON = new THREE.MeshStandardMaterial({
+    color: 0x2a3228,
+    roughness: 0.55,
+    metalness: 0.35,
+  });
+  const BASIN = new THREE.MeshStandardMaterial({
+    color: 0xb8b4a8,
+    roughness: 0.75,
+  });
+
+  // Stepped stone base.
+  const step = block(1.55, 0.35, 1.55, STONE);
+  step.position.y = 0.18;
+  group.add(step);
+  const plinth = block(1.15, 0.55, 1.15, STONE);
+  plinth.position.y = 0.62;
+  group.add(plinth);
+
+  // Drinking bowl on a short pedestal.
+  const bowl = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.55, 0.48, 0.22, 12),
+    BASIN,
+  );
+  bowl.position.y = 1.05;
+  bowl.castShadow = true;
+  group.add(bowl);
+  const stem = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.12, 0.16, 0.7, 8),
+    STONE,
+  );
+  stem.position.y = 1.5;
+  stem.castShadow = true;
+  group.add(stem);
+  const cup = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.22, 0.18, 0.14, 10),
+    BASIN,
+  );
+  cup.position.y = 1.92;
+  group.add(cup);
+
+  // Four cast-iron posts carrying the canopy.
+  const POST = 0.48;
+  for (const [x, z] of [
+    [-POST, -POST],
+    [POST, -POST],
+    [-POST, POST],
+    [POST, POST],
+  ] as const) {
+    const post = block(0.09, 2.05, 0.09, IRON);
+    post.position.set(x, 1.85, z);
+    group.add(post);
+    // Simple capital.
+    const cap = block(0.16, 0.08, 0.16, IRON);
+    cap.position.set(x, 2.9, z);
+    group.add(cap);
+  }
+
+  // Flat iron soffit + four pitched slabs meeting at a finial.
+  const soffit = block(1.35, 0.08, 1.35, IRON);
+  soffit.position.y = 2.95;
+  group.add(soffit);
+  for (const [dx, dz] of [
+    [0, 1],
+    [0, -1],
+    [1, 0],
+    [-1, 0],
+  ] as const) {
+    const pitchSlab = block(1.45, 0.06, 0.85, IRON);
+    pitchSlab.position.set(dx * 0.22, 3.28, dz * 0.22);
+    pitchSlab.rotation.x = dz * 0.48;
+    pitchSlab.rotation.z = -dx * 0.48;
+    group.add(pitchSlab);
+  }
+  const spike = block(0.06, 0.38, 0.06, IRON);
+  spike.position.y = 3.38;
+  group.add(spike);
+  const finial = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), IRON);
+  finial.position.y = 3.58;
+  group.add(finial);
+
+  // Small dedication plaque on the path face (−Z).
+  const plaque = block(0.55, 0.28, 0.04, IRON);
+  plaque.position.set(0, 0.72, -0.6);
+  group.add(plaque);
+
+  scene.add(group);
+  solids.push({
+    x: at.x,
+    z: at.z,
+    halfWide: 0.85,
+    halfDeep: 0.85,
+    yaw: at.yaw,
+  });
+  addProp({
+    x: at.x,
+    z: at.z,
+    halfWide: 0.85,
+    halfDeep: 0.85,
+    yaw: at.yaw,
+  });
 }
 
 /**
@@ -1226,6 +1401,189 @@ function placeZip(scene: THREE.Scene, pl: Placeable): void {
   scene.add(group);
 }
 
+const GYM_YELLOW = new THREE.MeshStandardMaterial({
+  color: 0xd4a018,
+  roughness: 0.7,
+});
+const GYM_PAD = new THREE.MeshStandardMaterial({
+  color: 0x2a2a32,
+  roughness: 0.9,
+});
+
+/** Outdoor fitness stations — multi-place, usually on the east green. */
+function outdoorGym(scene: THREE.Scene): void {
+  for (const pl of placeablesOf("gymPullUp")) placeGymPullUp(scene, pl);
+  for (const pl of placeablesOf("gymBars")) placeGymBars(scene, pl);
+  for (const pl of placeablesOf("gymBench")) placeGymBench(scene, pl);
+  for (const pl of placeablesOf("gymWalker")) placeGymWalker(scene, pl);
+  for (const pl of placeablesOf("gymBike")) placeGymBike(scene, pl);
+}
+
+function placeGymPullUp(scene: THREE.Scene, pl: Placeable): void {
+  const group = new THREE.Group();
+  group.position.set(pl.x, footY(pl.x, pl.z), pl.z);
+  group.rotation.y = pl.yaw;
+
+  const bar = block(2.4, 0.12, 0.12, STEEL);
+  bar.position.set(0, 2.35, 0);
+  group.add(bar);
+  for (const x of [-1.1, 1.1]) {
+    const post = block(0.12, 2.4, 0.12, STEEL);
+    post.position.set(x, 1.2, 0);
+    group.add(post);
+    const foot = block(0.7, 0.1, 0.7, GYM_YELLOW);
+    foot.position.set(x, 0.05, 0);
+    group.add(foot);
+  }
+  // Lower grip for dips / kids.
+  const low = block(0.9, 0.08, 0.08, GYM_YELLOW);
+  low.position.set(0, 1.55, 0);
+  group.add(low);
+
+  scene.add(group);
+  solids.push({
+    x: pl.x,
+    z: pl.z,
+    halfWide: 1.3,
+    halfDeep: 0.45,
+    yaw: pl.yaw,
+  });
+}
+
+function placeGymBars(scene: THREE.Scene, pl: Placeable): void {
+  const group = new THREE.Group();
+  group.position.set(pl.x, footY(pl.x, pl.z), pl.z);
+  group.rotation.y = pl.yaw;
+
+  for (const z of [-0.35, 0.35]) {
+    const rail = block(2.2, 0.1, 0.1, STEEL);
+    rail.position.set(0, 1.15, z);
+    group.add(rail);
+    for (const x of [-1.0, 1.0]) {
+      const post = block(0.1, 1.2, 0.1, STEEL);
+      post.position.set(x, 0.6, z);
+      group.add(post);
+      const foot = block(0.55, 0.08, 0.55, GYM_YELLOW);
+      foot.position.set(x, 0.04, z);
+      group.add(foot);
+    }
+  }
+
+  scene.add(group);
+  solids.push({
+    x: pl.x,
+    z: pl.z,
+    halfWide: 1.2,
+    halfDeep: 0.65,
+    yaw: pl.yaw,
+  });
+}
+
+function placeGymBench(scene: THREE.Scene, pl: Placeable): void {
+  const group = new THREE.Group();
+  group.position.set(pl.x, footY(pl.x, pl.z), pl.z);
+  group.rotation.y = pl.yaw;
+
+  const seat = block(0.55, 0.12, 1.7, GYM_PAD);
+  seat.position.set(0, 0.55, 0.15);
+  group.add(seat);
+  const back = block(0.55, 0.12, 1.1, GYM_PAD);
+  back.position.set(0, 1.05, -0.85);
+  back.rotation.x = -0.95;
+  group.add(back);
+  for (const x of [-0.22, 0.22]) {
+    const frontLeg = block(0.08, 0.55, 0.08, STEEL);
+    frontLeg.position.set(x, 0.28, 0.5);
+    group.add(frontLeg);
+    const rearLeg = block(0.08, 0.7, 0.08, STEEL);
+    rearLeg.position.set(x, 0.5, -0.55);
+    group.add(rearLeg);
+  }
+  const pad = block(0.7, 0.08, 0.7, GYM_YELLOW);
+  pad.position.set(0, 0.04, 0);
+  group.add(pad);
+
+  scene.add(group);
+  solids.push({
+    x: pl.x,
+    z: pl.z,
+    halfWide: 0.45,
+    halfDeep: 1.1,
+    yaw: pl.yaw,
+  });
+}
+
+function placeGymWalker(scene: THREE.Scene, pl: Placeable): void {
+  const group = new THREE.Group();
+  group.position.set(pl.x, footY(pl.x, pl.z), pl.z);
+  group.rotation.y = pl.yaw;
+
+  const base = block(0.9, 0.1, 1.4, GYM_YELLOW);
+  base.position.set(0, 0.05, 0);
+  group.add(base);
+  const mast = block(0.12, 1.5, 0.12, STEEL);
+  mast.position.set(0, 0.85, -0.35);
+  group.add(mast);
+  const cross = block(0.7, 0.08, 0.08, STEEL);
+  cross.position.set(0, 1.55, -0.35);
+  group.add(cross);
+  for (const side of [-1, 1] as const) {
+    const arm = block(0.08, 1.1, 0.08, STEEL);
+    arm.position.set(side * 0.35, 1.0, 0.1);
+    arm.rotation.z = side * 0.25;
+    arm.rotation.x = -0.35;
+    group.add(arm);
+    const pedal = block(0.28, 0.06, 0.55, GYM_PAD);
+    pedal.position.set(side * 0.28, 0.35, 0.45);
+    group.add(pedal);
+  }
+
+  scene.add(group);
+  solids.push({
+    x: pl.x,
+    z: pl.z,
+    halfWide: 0.55,
+    halfDeep: 0.8,
+    yaw: pl.yaw,
+  });
+}
+
+function placeGymBike(scene: THREE.Scene, pl: Placeable): void {
+  const group = new THREE.Group();
+  group.position.set(pl.x, footY(pl.x, pl.z), pl.z);
+  group.rotation.y = pl.yaw;
+
+  const base = block(0.7, 0.1, 1.2, GYM_YELLOW);
+  base.position.set(0, 0.05, 0);
+  group.add(base);
+  const frame = block(0.1, 0.9, 0.1, STEEL);
+  frame.position.set(0, 0.55, -0.25);
+  group.add(frame);
+  const seat = block(0.35, 0.1, 0.45, GYM_PAD);
+  seat.position.set(0, 0.95, -0.15);
+  group.add(seat);
+  const handles = block(0.5, 0.08, 0.08, STEEL);
+  handles.position.set(0, 1.15, 0.35);
+  group.add(handles);
+  const wheel = new THREE.Mesh(
+    new THREE.TorusGeometry(0.32, 0.04, 6, 16),
+    STEEL,
+  );
+  wheel.rotation.y = Math.PI / 2;
+  wheel.position.set(0, 0.4, 0.35);
+  wheel.castShadow = true;
+  group.add(wheel);
+
+  scene.add(group);
+  solids.push({
+    x: pl.x,
+    z: pl.z,
+    halfWide: 0.45,
+    halfDeep: 0.7,
+    yaw: pl.yaw,
+  });
+}
+
 /** Weathered stump bole shared by the carved ornaments. */
 function stumpBase(group: THREE.Group): void {
   const bole = new THREE.Mesh(
@@ -1448,13 +1806,12 @@ function carvedStumps(scene: THREE.Scene): void {
   }
 }
 
-/** The rose beds on the east lawn, past the play park. */
+/** The rose beds north of the play park — a proper formal garden with paths. */
 function roseGarden(scene: THREE.Scene): void {
-  // East of the lake, north of the play park.
   const placed = placeable("roseGarden");
   const at = placed
     ? { x: placed.x, z: placed.z, yaw: placed.yaw }
-    : { x: 150, z: 101, yaw: Math.atan2(150, 101) };
+    : { x: 168, z: 92, yaw: 0.15 };
   const group = new THREE.Group();
   group.position.set(at.x, footY(at.x, at.z), at.z);
   group.rotation.y = at.yaw;
@@ -1467,49 +1824,159 @@ function roseGarden(scene: THREE.Scene): void {
     color: 0x5a4433,
     roughness: 1,
   });
+  const gravel = new THREE.MeshStandardMaterial({
+    color: 0x9a9080,
+    roughness: 1,
+  });
+  const blooms = [
+    new THREE.MeshStandardMaterial({ color: 0xd8446a, roughness: 0.8 }),
+    new THREE.MeshStandardMaterial({ color: 0xe8c04a, roughness: 0.8 }),
+    new THREE.MeshStandardMaterial({ color: 0xf0e8e0, roughness: 0.75 }),
+    new THREE.MeshStandardMaterial({ color: 0xc45a9a, roughness: 0.8 }),
+  ];
 
-  for (const bx of [-7, 0, 7]) {
-    const bed = block(5.4, 0.3, 7, soil);
-    bed.position.set(bx, 0.15, 0);
-    group.add(bed);
+  // Formal grid — five by three beds with gravel walks between.
+  const cols = 5;
+  const rows = 3;
+  const pitchX = 7.6;
+  const pitchZ = 8.8;
+  const bedW = 5.8;
+  const bedD = 7.0;
+  const halfW = ((cols - 1) * pitchX) / 2 + bedW / 2 + 4.2;
+  const halfD = ((rows - 1) * pitchZ) / 2 + bedD / 2 + 4.2;
 
-    const kerb = block(5.8, 0.5, 7.4, hedge);
-    kerb.position.set(bx, 0.25, 0);
-    group.add(kerb);
+  const pad = block(halfW * 2, 0.08, halfD * 2, gravel);
+  pad.position.y = 0.04;
+  pad.receiveShadow = true;
+  group.add(pad);
 
-    const inner = block(5.2, 0.4, 6.8, soil);
-    inner.position.set(bx, 0.35, 0);
-    group.add(inner);
+  // Outer yew hedge — south wall leaves a gate gap in the middle.
+  const hedgeH = 1.15;
+  const wallN = block(halfW * 2 + 0.6, hedgeH, 0.55, hedge);
+  wallN.position.set(0, hedgeH / 2, halfD);
+  wallN.castShadow = true;
+  group.add(wallN);
+  const gateGap = 3.6;
+  const southLen = halfW - gateGap * 0.5;
+  const wallSW = block(southLen, hedgeH, 0.55, hedge);
+  wallSW.position.set(-(halfW - southLen / 2), hedgeH / 2, -halfD);
+  wallSW.castShadow = true;
+  group.add(wallSW);
+  const wallSE = block(southLen, hedgeH, 0.55, hedge);
+  wallSE.position.set(halfW - southLen / 2, hedgeH / 2, -halfD);
+  wallSE.castShadow = true;
+  group.add(wallSE);
+  const wallE = block(0.55, hedgeH, halfD * 2, hedge);
+  wallE.position.set(halfW, hedgeH / 2, 0);
+  wallE.castShadow = true;
+  group.add(wallE);
+  const wallW = block(0.55, hedgeH, halfD * 2, hedge);
+  wallW.position.set(-halfW, hedgeH / 2, 0);
+  wallW.castShadow = true;
+  group.add(wallW);
 
-    // Rose bushes, a few in bloom.
-    for (let i = 0; i < 10; i++) {
-      const bush = new THREE.Mesh(
-        new THREE.SphereGeometry(0.42, 7, 6),
-        hedge,
-      );
-      bush.position.set(
-        bx + (Math.random() - 0.5) * 4.2,
-        0.7,
-        (Math.random() - 0.5) * 5.6,
-      );
-      bush.castShadow = true;
-      group.add(bush);
+  // Gate pillars.
+  const pillarL = block(0.55, hedgeH * 1.15, 0.55, hedge);
+  pillarL.position.set(-gateGap * 0.5, hedgeH * 0.55, -halfD);
+  group.add(pillarL);
+  const pillarR = block(0.55, hedgeH * 1.15, 0.55, hedge);
+  pillarR.position.set(gateGap * 0.5, hedgeH * 0.55, -halfD);
+  group.add(pillarR);
 
-      if (Math.random() > 0.4) {
-        const bloom = new THREE.Mesh(
-          new THREE.SphereGeometry(0.12, 6, 5),
-          new THREE.MeshStandardMaterial({
-            color: Math.random() < 0.5 ? 0xd8446a : 0xe8c04a,
-            roughness: 0.8,
-          }),
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const bx = (col - (cols - 1) / 2) * pitchX;
+      const bz = (row - (rows - 1) / 2) * pitchZ;
+
+      const kerb = block(bedW + 0.45, 0.42, bedD + 0.45, hedge);
+      kerb.position.set(bx, 0.22, bz);
+      group.add(kerb);
+
+      const bed = block(bedW, 0.28, bedD, soil);
+      bed.position.set(bx, 0.32, bz);
+      group.add(bed);
+
+      for (let i = 0; i < 14; i++) {
+        const bush = new THREE.Mesh(
+          new THREE.SphereGeometry(0.38 + Math.random() * 0.16, 7, 6),
+          hedge,
         );
-        bloom.position.copy(bush.position).add(new THREE.Vector3(0, 0.34, 0));
-        group.add(bloom);
+        bush.position.set(
+          bx + (Math.random() - 0.5) * (bedW - 1.1),
+          0.72,
+          bz + (Math.random() - 0.5) * (bedD - 1.1),
+        );
+        bush.castShadow = true;
+        group.add(bush);
+
+        if (Math.random() > 0.28) {
+          const bloom = new THREE.Mesh(
+            new THREE.SphereGeometry(0.11, 6, 5),
+            blooms[Math.floor(Math.random() * blooms.length)]!,
+          );
+          bloom.position
+            .copy(bush.position)
+            .add(new THREE.Vector3(0, 0.32, 0));
+          group.add(bloom);
+        }
       }
     }
   }
 
+  // Central urn on a plinth.
+  const plinth = block(1.4, 0.55, 1.4, gravel);
+  plinth.position.set(0, 0.35, 0);
+  group.add(plinth);
+  const urn = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.35, 0.48, 0.9, 10),
+    new THREE.MeshStandardMaterial({ color: 0xb8b0a4, roughness: 0.7 }),
+  );
+  urn.position.set(0, 1.05, 0);
+  urn.castShadow = true;
+  group.add(urn);
+  const topBush = new THREE.Mesh(new THREE.SphereGeometry(0.55, 8, 6), hedge);
+  topBush.position.set(0, 1.7, 0);
+  group.add(topBush);
+
   scene.add(group);
+
+  roseGardenAt = { x: at.x, z: at.z, yaw: at.yaw, halfW, halfD };
+
+  // Hedge walls block walking; gravel paths inside stay open.
+  const cos = Math.cos(at.yaw);
+  const sin = Math.sin(at.yaw);
+  const hedgeFoot = (
+    lx: number,
+    lz: number,
+    halfWide: number,
+    halfDeep: number,
+  ): void => {
+    solids.push({
+      x: at.x + lx * cos + lz * sin,
+      z: at.z - lx * sin + lz * cos,
+      halfWide,
+      halfDeep,
+      yaw: at.yaw,
+    });
+  };
+  hedgeFoot(0, halfD, halfW + 0.3, 0.35);
+  // South wall in two halves — leave the gate open.
+  const southRun = halfW - 3.6 * 0.5;
+  hedgeFoot(-(halfW - southRun / 2), -halfD, southRun / 2, 0.35);
+  hedgeFoot(halfW - southRun / 2, -halfD, southRun / 2, 0.35);
+  hedgeFoot(halfW, 0, 0.35, halfD);
+  hedgeFoot(-halfW, 0, 0.35, halfD);
+}
+
+/** Pose of the formal rose garden, if built. */
+export function getRoseGarden(): {
+  x: number;
+  z: number;
+  yaw: number;
+  halfW: number;
+  halfD: number;
+} | null {
+  return roseGardenAt;
 }
 
 export function buildParkBuildings(scene: THREE.Scene): void {
@@ -1521,6 +1988,7 @@ export function buildParkBuildings(scene: THREE.Scene): void {
   sinkEject = null;
   wreckPending = false;
   boatHouseAt = null;
+  roseGardenAt = null;
   cafeSpots.length = 0;
   walls.length = 0;
   binSpots.length = 0;
@@ -1529,9 +1997,11 @@ export function buildParkBuildings(scene: THREE.Scene): void {
   boatHouse(scene);
   cafe(scene);
   toilets(scene);
+  emanuelFountain(scene);
   playPark(scene);
   roseGarden(scene);
   busStops(scene);
+  outdoorGym(scene);
   carvedStumps(scene);
 
   // Bin stations: explicit from the level, or auto on the outer path lip.
@@ -1622,11 +2092,14 @@ export function boardPedalo(x: number, z: number): boolean {
 }
 
 /**
- * Climb out onto the nearest bank. Returns the foot spot, or null if not aboard.
+ * Climb out beside the swan — mid-lake means into the water. Returns the foot
+ * spot, or null if not aboard.
  */
 export function disembarkPedalo(): { x: number; z: number } | null {
   if (hiredIndex < 0) return null;
   const boat = moored[hiredIndex]!;
+  const bx = boat.mesh.position.x;
+  const bz = boat.mesh.position.z;
   boat.hired = false;
   boat.speed = 0;
   // Abandoned half-full — keep flooding; dry boats settle again.
@@ -1638,11 +2111,11 @@ export function disembarkPedalo(): { x: number; z: number } | null {
   }
   hiredIndex = -1;
 
-  const shore = nearestShore(boat.mesh.position.x, boat.mesh.position.z);
-  const out = outwardAt(shore);
+  // Step off the starboard side — stay where the boat is, don't teleport to bank.
+  const side = 1.15;
   return {
-    x: shore.x + out.x * 1.5,
-    z: shore.y + out.y * 1.5,
+    x: bx + Math.cos(boat.heading) * side,
+    z: bz - Math.sin(boat.heading) * side,
   };
 }
 
@@ -1769,8 +2242,16 @@ function tickPedaloFlood(index: number, delta: number): void {
   const boat = moored[index];
   if (!boat || boat.sunk) return;
   if (boat.flood <= 0) return;
-  // Crack in the hull — keeps filling until she's gone.
-  const seep = boat.flood < 0.35 ? 0.035 : 0.055 + boat.flood * 0.04;
+  // NPC chase boats (stolen swan) ship water slowly — needs a proper hose-down.
+  // Player hire still fills after a hard bank bump.
+  const npc = boat.hired && index !== hiredIndex;
+  const seep = npc
+    ? boat.flood < 0.6
+      ? 0.0022
+      : 0.0055 + boat.flood * 0.005
+    : boat.flood < 0.35
+      ? 0.035
+      : 0.055 + boat.flood * 0.04;
   boat.flood = Math.min(1, boat.flood + seep * delta);
   paintBilge(boat);
   if (boat.flood >= 1) beginPedaloSink(index);
@@ -2032,6 +2513,31 @@ export function sprayPedalo(point: THREE.Vector3, dirty: boolean): boolean {
     return true;
   }
   return false;
+}
+
+/** True if the spray point catches that pedalo's hull. */
+export function pedaloHitByIndex(index: number, point: THREE.Vector3): boolean {
+  const boat = moored[index];
+  if (!boat) return false;
+  return pedaloHit(boat.mesh, point);
+}
+
+/**
+ * Hose water into a hired pedalo (stolen-boat chase). Does not mark a
+ * player wreck — sinking thieves is the job.
+ */
+export function floodPedaloIndex(index: number, amount: number): void {
+  const boat = moored[index];
+  if (!boat || boat.sunk || amount <= 0) return;
+  boat.flood = Math.min(1, boat.flood + amount);
+  paintBilge(boat);
+  if (boat.flood >= 1) beginPedaloSink(index);
+}
+
+/** Bilge fill on any pedalo (0–1). */
+export function pedaloFloodAt(index: number): number {
+  if (index < 0) return 0;
+  return moored[index]?.flood ?? 0;
 }
 
 function pedaloHit(mesh: THREE.Object3D, point: THREE.Vector3): boolean {

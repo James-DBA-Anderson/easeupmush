@@ -19,6 +19,7 @@ export type Callout =
   | "rebels"
   | "racers"
   | "geese"
+  | "swanboat"
   | "praise";
 
 /** How long before the same sort of job can be reported again. */
@@ -40,6 +41,7 @@ const COOLDOWN: Record<Callout, number> = {
   rebels: 9999,
   racers: 9999,
   geese: 9999,
+  swanboat: 9999,
   praise: 300,
 };
 
@@ -84,6 +86,7 @@ const SENDERS: Record<Callout, string> = {
   rebels: "999 CONTROL",
   racers: "PCSO GRANT",
   geese: "999 CONTROL",
+  swanboat: "BOAT HIRE",
   praise: "DEPOT",
 };
 
@@ -180,10 +183,15 @@ const LINES: Record<Callout, readonly string[]> = {
     "PCSO Grant: two GTs thrashing Eastney Esplanade. If one of them bottles it, you'll know about it.",
   ],
   geese: [
-    "Radar's picked up a flock of geese inbound. Get back to the van — heavy hose in the load bay.",
-    "Incoming geese on radar. Van. Back doors. Heavy hose. You haven't got long.",
-    "Control says a V of Canada geese is coming in. Heavy washer from the van — take them out of the sky.",
+    "Radar's picked up a flock of geese inbound from the north. Get back to the van — heavy hose in the load bay.",
+    "Incoming geese on radar. Van. Back doors. Heavy hose. They'll land on the lake and foul everything.",
+    "Control says a V of Canada geese is coming in. Heavy washer from the van — take them out of the sky or off the water.",
     "Geese on the scope heading for the lake. Open the back of the van and grab the heavy reel.",
+  ],
+  swanboat: [
+    "Lads have nicked a swan boat off the raft {where}. Get in one yourself and chase them — fill that hull till she sinks. Watch for cans.",
+    "Stolen pedalo on the lake {where}. Hire a swan, catch them up, and hose theirs under. They'll chuck the odd can at you.",
+    "Couple of scummers pedalling off in a hire swan {where}. Board one and spray their bilge till she's on the bottom.",
   ],
   praise: [
     "Park's looking smart today. Whatever you're doing, keep at it.",

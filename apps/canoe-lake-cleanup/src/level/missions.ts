@@ -1,9 +1,16 @@
 /** Built-in scripted jobs the game already wires up. */
-export type MissionId = "picnic" | "geese" | "fire" | "rebels" | "racers";
+export type MissionId =
+  | "picnic"
+  | "geese"
+  | "swanboat"
+  | "fire"
+  | "rebels"
+  | "racers";
 
 export const MISSION_IDS: readonly MissionId[] = [
   "picnic",
   "geese",
+  "swanboat",
   "fire",
   "rebels",
   "racers",
@@ -12,6 +19,7 @@ export const MISSION_IDS: readonly MissionId[] = [
 export const MISSION_LABELS: Record<MissionId, string> = {
   picnic: "Picnic raid",
   geese: "Geese inbound",
+  swanboat: "Stolen swanboat",
   fire: "Grass fire",
   rebels: "Rebel raid",
   racers: "Boy racers",
@@ -47,6 +55,7 @@ export const MISSION_SHIFT_START = 6;
 export const DEFAULT_MISSION_SPOTS: readonly MissionSpot[] = [
   { id: "picnic", x: 140, z: -10, start: 9.5, end: 17 },
   { id: "geese", x: 0, z: -8, start: 10, end: 18 },
+  { id: "swanboat", x: 95, z: 40, start: 12.5, end: 15 },
   { id: "fire", x: 118, z: -28, start: 15, end: 19.5 },
   { id: "racers", x: 20, z: -117, start: 22, end: 1 },
   { id: "rebels", x: 10, z: -150, start: 1, end: 6 },

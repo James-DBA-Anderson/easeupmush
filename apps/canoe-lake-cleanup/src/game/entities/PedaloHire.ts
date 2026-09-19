@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { Grumble } from "../effects/Grumble";
-import { parkGates } from "../world/fence";
 import { waterSpot, nearestShore, outwardAt } from "../world/lake";
+import { gateOutside, nearestGate } from "../world/pathRoute";
 import {
   drivePedaloIndex,
   freePedaloCount,
@@ -69,19 +69,16 @@ export class PedaloHire {
     this.boatman = boatman;
 
     const hatch = hatchQueueSpot() ?? new THREE.Vector3(0, 0, 40);
-    const gates = parkGates();
-    const gate =
-      gates.length > 0
-        ? gates[Math.floor(Math.random() * gates.length)]!
-        : new THREE.Vector2(hatch.x + 30, hatch.z + 40);
-    this.exit.set(gate.x + (Math.random() - 0.5) * 8, 0, gate.y - 12);
+    const gate = nearestGate(hatch.x, hatch.z);
+    const outside = gateOutside(gate, 9);
+    this.exit.set(outside.x, 0, outside.y);
 
     const party = Math.random() < 0.55 ? 2 : 1;
     for (let i = 0; i < party; i++) {
       const start = new THREE.Vector3(
-        gate.x + (Math.random() - 0.5) * 6,
+        outside.x + (Math.random() - 0.5) * 3,
         0,
-        gate.y + (Math.random() - 0.5) * 6,
+        outside.y + (Math.random() - 0.5) * 3,
       );
       this.guests.push(this.buildGuest(start));
     }
@@ -177,6 +174,7 @@ export class PedaloHire {
     }
     this.boatIndex = reservePedalo(hatch.x, hatch.z);
     if (this.boatIndex < 0) {
+      this.aimExit();
       this.phase = "leaving";
       return;
     }
@@ -191,6 +189,7 @@ export class PedaloHire {
   private toBoat(delta: number): void {
     const boat = pedaloWorldPos(this.boatIndex);
     if (!boat) {
+      this.aimExit();
       this.phase = "leaving";
       return;
     }
@@ -270,6 +269,7 @@ export class PedaloHire {
     this.unseatGuests();
     this.boatIndex = -1;
     this.boarded = false;
+    this.aimExit();
     this.phase = "leaving";
     return true;
   }
@@ -278,7 +278,15 @@ export class PedaloHire {
     if (this.timer > 0) return;
     releasePedalo(this.boatIndex);
     this.boatIndex = -1;
+    this.aimExit();
     this.phase = "leaving";
+  }
+
+  private aimExit(): void {
+    const lead = this.guests[0]?.group.position ?? this.exit;
+    const gate = nearestGate(lead.x, lead.z);
+    const out = gateOutside(gate, 10);
+    this.exit.set(out.x, 0, out.y);
   }
 
   private leave(delta: number): void {

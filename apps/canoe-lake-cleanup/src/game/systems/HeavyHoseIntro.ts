@@ -401,13 +401,13 @@ export class HeavyHoseIntro {
     this.swingToPos.set(x, y, z);
 
     const lookYaw = this.van.pathYaw;
+    // Cameras look down −Z; match Player.takeOverFromIntro so the swing
+    // lands facing the same way as first-person (Object3D.lookAt faces +Z).
     const fx = Math.sin(lookYaw);
     const fz = Math.cos(lookYaw);
-    const target = new THREE.Vector3(x + fx * 8, y, z + fz * 8);
-    const tmp = new THREE.Object3D();
-    tmp.position.copy(this.swingToPos);
-    tmp.lookAt(target);
-    this.swingToQuat.copy(tmp.quaternion);
+    this.swingToQuat.setFromEuler(
+      new THREE.Euler(0, Math.atan2(-fx, -fz), 0, "YXZ"),
+    );
   }
 
   private tickSwing(): void {

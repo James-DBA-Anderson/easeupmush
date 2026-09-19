@@ -539,7 +539,14 @@ function selectPlaceableType(id: PlaceableId, focus = false): void {
     selectPlaceableIndex(existing, focus);
     return;
   }
-  status.textContent = `${PLACEABLE_LABELS[id]} is missing from this level.`;
+  // Unique landmark not in this level yet — arm stamp mode like multis.
+  const yaw = stampYaw();
+  selected = null;
+  syncPlaceCatalog();
+  placePreview.setPlaceable(id, yaw);
+  syncPlaceYawUi(yaw);
+  status.textContent = `${PLACEABLE_LABELS[id]} — click the map to place.`;
+  draw();
 }
 
 function syncPlacePanel(): void {
@@ -2109,7 +2116,11 @@ function actAtWorld(wx: number, wz: number, shift = false): boolean {
     syncFoliageYawUi();
     status.textContent = `Placed ${TREE_LABELS[placeTreeKind]} — drag or arrows to move, Delete to remove.`;
     dirty();
-  } else if (tool === "place" && isMultiPlaceable(catalogPlaceId)) {
+  } else if (
+    tool === "place" &&
+    (isMultiPlaceable(catalogPlaceId) ||
+      !level.placeables.some((p) => p.id === catalogPlaceId))
+  ) {
     pushHistory();
     level.placeables.push({
       id: catalogPlaceId,

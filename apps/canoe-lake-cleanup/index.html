@@ -224,6 +224,101 @@
       box-shadow: inset 0 1px 0 rgba(255, 220, 200, 0.35);
     }
 
+    #mission-arrow.throbbing.visible {
+      animation: mission-arrow-throb 0.65s ease-in-out infinite;
+    }
+
+    @keyframes mission-arrow-throb {
+      0%,
+      100% {
+        opacity: 0.88;
+        filter: drop-shadow(0 0 2px rgba(255, 40, 40, 0.35));
+      }
+      50% {
+        opacity: 1;
+        filter: drop-shadow(0 0 18px rgba(255, 55, 40, 1))
+          drop-shadow(0 0 6px rgba(255, 200, 160, 0.85));
+      }
+    }
+
+    /* Mission start flash — top centre over the park. */
+    #mission-banner {
+      position: absolute;
+      top: max(14px, env(safe-area-inset-top));
+      left: 50%;
+      transform: translateX(-50%) translateY(-12px);
+      z-index: 22;
+      pointer-events: none;
+      text-align: center;
+      color: #fff8f0;
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85);
+      opacity: 0;
+      visibility: hidden;
+      transition:
+        opacity 0.35s ease,
+        transform 0.35s ease,
+        visibility 0s linear 0.35s;
+    }
+
+    #mission-banner.show {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(-50%) translateY(0);
+      transition:
+        opacity 0.28s ease,
+        transform 0.35s cubic-bezier(0.2, 0.9, 0.2, 1),
+        visibility 0s;
+    }
+
+    #mission-banner.show.out {
+      opacity: 0;
+      transform: translateX(-50%) translateY(-8px);
+    }
+
+    #mission-banner .mission-banner-eyebrow {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.28em;
+      color: #ff6b5a;
+      margin-bottom: 4px;
+    }
+
+    #mission-banner .mission-banner-title {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      line-height: 1.1;
+      padding: 8px 22px 10px;
+      background: linear-gradient(
+        180deg,
+        rgba(40, 8, 6, 0.72) 0%,
+        rgba(20, 4, 4, 0.55) 100%
+      );
+      border: 1px solid rgba(255, 90, 70, 0.55);
+      border-radius: 10px;
+      box-shadow:
+        0 8px 28px rgba(0, 0, 0, 0.45),
+        0 0 24px rgba(255, 40, 30, 0.25);
+    }
+
+    #mission-banner.show .mission-banner-title {
+      animation: mission-banner-glow 0.9s ease-in-out infinite;
+    }
+
+    @keyframes mission-banner-glow {
+      0%,
+      100% {
+        box-shadow:
+          0 8px 28px rgba(0, 0, 0, 0.45),
+          0 0 18px rgba(255, 40, 30, 0.22);
+      }
+      50% {
+        box-shadow:
+          0 8px 28px rgba(0, 0, 0, 0.45),
+          0 0 32px rgba(255, 60, 40, 0.55);
+      }
+    }
+
     #compass {
       position: absolute;
       top: 148px;
@@ -471,6 +566,79 @@
 
     #health-fill.low {
       animation: throb 0.7s ease-in-out infinite;
+    }
+
+    #pressure-panel {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-200px);
+      width: 64px;
+      padding: 8px 8px 10px;
+      background: rgba(0, 0, 0, 0.6);
+      border: 2px solid #666;
+      border-radius: 8px;
+      color: white;
+      text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.85);
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-align: center;
+      pointer-events: none;
+      z-index: 10;
+      display: none;
+    }
+
+    #pressure-panel.on {
+      display: block;
+    }
+
+    #pressure-panel .pressure-title {
+      margin-bottom: 6px;
+      opacity: 0.9;
+    }
+
+    #pressure-meter {
+      position: relative;
+      width: 28px;
+      height: 108px;
+      margin: 0 auto 6px;
+      background: #1a1a1a;
+      border: 2px solid #888;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    #pressure-fill {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 100%;
+      background: linear-gradient(180deg, #ff5252 0%, #ff9800 35%, #8bc34a 100%);
+      transition: height 0.1s linear;
+    }
+
+    #pressure-meter::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        to top,
+        transparent 0,
+        transparent 10px,
+        rgba(255, 255, 255, 0.12) 10px,
+        rgba(255, 255, 255, 0.12) 11px
+      );
+      pointer-events: none;
+    }
+
+    #pressure-pct {
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #pressure-panel.low #pressure-fill {
+      background: linear-gradient(180deg, #ff1744 0%, #ff5722 55%, #ff9800 100%);
     }
 
     @keyframes throb {
@@ -784,6 +952,22 @@
       border-radius: 6px;
     }
 
+    body.touch-ui #mission-banner {
+      top: max(4px, env(safe-area-inset-top));
+    }
+
+    body.touch-ui #mission-banner .mission-banner-eyebrow {
+      font-size: 9px;
+      letter-spacing: 0.22em;
+      margin-bottom: 2px;
+    }
+
+    body.touch-ui #mission-banner .mission-banner-title {
+      font-size: 16px;
+      padding: 5px 12px 6px;
+      border-radius: 7px;
+    }
+
     body.touch-ui #compass .compass-rose {
       width: 20px;
       height: 20px;
@@ -854,6 +1038,21 @@
       transform: translateX(6px);
       padding: 3px 5px;
       font-size: 8px;
+    }
+
+    body.touch-ui #pressure-panel {
+      left: 50%;
+      bottom: calc(14px + env(safe-area-inset-bottom));
+      transform: translateX(-92px);
+      width: 48px;
+      padding: 4px 4px 6px;
+      font-size: 8px;
+    }
+
+    body.touch-ui #pressure-meter {
+      width: 20px;
+      height: 64px;
+      margin-bottom: 3px;
     }
 
     body.touch-ui #health-bar {
@@ -935,6 +1134,10 @@
         </div>
       </div>
     </div>
+    <div id="mission-banner" aria-live="assertive">
+      <div class="mission-banner-eyebrow">MISSION</div>
+      <div class="mission-banner-title"></div>
+    </div>
     <div id="hurt-flash"></div>
     <div id="objective-arrow" aria-hidden="true">
       <div class="objective-chevron"></div>
@@ -962,6 +1165,11 @@
     <div id="health-panel">
       HEALTH
       <div id="health-bar"><div id="health-fill"></div></div>
+    </div>
+    <div id="pressure-panel" aria-hidden="true">
+      <div class="pressure-title">PRESSURE</div>
+      <div id="pressure-meter"><div id="pressure-fill"></div></div>
+      <div id="pressure-pct">100%</div>
     </div>
     <button type="button" id="pause-btn">PAUSE</button>
     <div id="pause-menu">

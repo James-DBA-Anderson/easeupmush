@@ -1,7 +1,15 @@
 import * as THREE from "three";
-import { parkGates } from "../world/fence";
 import { stepWalk } from "../world/blocking";
+import { insidePark } from "../world/fence";
 import { groundHeight } from "../world/terrain";
+import {
+  emptyRoute,
+  gateOutside,
+  nearestGate,
+  routeAim,
+  setRouteToward,
+  type LoopRoute,
+} from "../world/pathRoute";
 import { Face } from "./Face";
 import { Grumble } from "../effects/Grumble";
 import { PATH_Y } from "../world/lake";
@@ -54,7 +62,7 @@ const HOSED = [
   "YOU'VE RUINED THE PICNIC!",
 ];
 
-type Phase = "arriving" | "settled" | "leaving";
+type Phase = "toGate" | "arriving" | "settled" | "toExit" | "leaving";
 
 interface Guest {
   group: THREE.Group;
@@ -62,8 +70,11 @@ interface Guest {
   arms: THREE.Group[];
   face: Face;
   seat: THREE.Vector3;
+  /** Midpoint of the fence opening they use. */
+  gate: THREE.Vector3;
   exit: THREE.Vector3;
   phase: Phase;
+  route: LoopRoute;
   step: number;
   chatIn: number;
 }
@@ -115,8 +126,10 @@ export class Picnic {
     scene.add(this.root);
 
     const party = 2 + Math.floor(Math.random() * 3);
-    const approach = this.pickApproach();
-    const exit = this.pickGate();
+    const gatePt = nearestGate(this.spot.x, this.spot.z);
+    const approach = gateOutside(gatePt, 9);
+    const exit = gateOutside(gatePt, 12);
+    const gate = new THREE.Vector3(gatePt.x, 0, gatePt.y);
     for (let i = 0; i < party; i++) {
       const ang = (i / party) * Math.PI * 2 + Math.random() * 0.35;
       const rad = 1.15 + Math.random() * 0.35;
@@ -125,25 +138,17 @@ export class Picnic {
         0,
         this.spot.z + Math.sin(ang) * rad,
       );
-      const start = approach
-        .clone()
-        .add(
-          new THREE.Vector3(
-            (Math.random() - 0.5) * 5,
-            0,
-            (Math.random() - 0.5) * 5,
-          ),
-        );
-      const leave = exit
-        .clone()
-        .add(
-          new THREE.Vector3(
-            (Math.random() - 0.5) * 10,
-            0,
-            (Math.random() - 0.5) * 10,
-          ),
-        );
-      this.guests.push(this.buildGuest(start, seat, leave));
+      const start = new THREE.Vector3(
+        approach.x + (Math.random() - 0.5) * 3,
+        0,
+        approach.y + (Math.random() - 0.5) * 3,
+      );
+      const leave = new THREE.Vector3(
+        exit.x + (Math.random() - 0.5) * 3,
+        0,
+        exit.y + (Math.random() - 0.5) * 3,
+      );
+      this.guests.push(this.buildGuest(start, seat, gate, leave));
     }
   }
 
@@ -158,26 +163,25 @@ export class Picnic {
   }
 
   /**
-   * Blanket + sitters — dense enough that path walkers go around the picnic
-   * instead of cutting between people on the rug.
+   * Sitters (and the rug once they're down) — path folk go around without
+   * fencing arrivals out of their own seats.
    */
   public crowdBlockers(): { x: number; z: number }[] {
     if (this.gone) return [];
-    const pts: { x: number; z: number }[] = [
-      { x: this.spot.x, z: this.spot.z },
-    ];
-    for (const r of [1.15, 2.05] as const) {
-      const n = r < 1.5 ? 6 : 8;
-      for (let i = 0; i < n; i++) {
-        const a = (i / n) * Math.PI * 2 + 0.2;
+    const pts: { x: number; z: number }[] = [];
+    if (this.settled) {
+      pts.push({ x: this.spot.x, z: this.spot.z });
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
         pts.push({
-          x: this.spot.x + Math.cos(a) * r,
-          z: this.spot.z + Math.sin(a) * r,
+          x: this.spot.x + Math.cos(a) * 1.35,
+          z: this.spot.z + Math.sin(a) * 1.35,
         });
       }
     }
     for (const g of this.guests) {
       if (!g.group.visible) continue;
+      if (g.phase === "toGate" || g.phase === "leaving") continue;
       pts.push({ x: g.group.position.x, z: g.group.position.z });
     }
     return pts;
@@ -327,14 +331,42 @@ export class Picnic {
     for (const guest of this.guests) {
       guest.face.update(delta);
 
+      if (guest.phase === "toGate") {
+        const gap = this.amble(guest, guest.gate, delta, 1.45);
+        const here = guest.group.position;
+        if (gap < 1.1 || insidePark(here.x, here.z)) {
+          guest.phase = "arriving";
+          setRouteToward(
+            guest.route,
+            here.x,
+            here.z,
+            guest.seat.x,
+            guest.seat.z,
+          );
+        }
+        anyHere = true;
+        continue;
+      }
+
       if (guest.phase === "arriving") {
-        if (this.amble(guest, guest.seat, delta, 1.4) < 0.3) {
+        if (this.walkRouted(guest, guest.seat, delta, 1.4, 12) < 0.35) {
           guest.phase = "settled";
+          guest.route.ready = false;
           guest.group.position.x = guest.seat.x;
           guest.group.position.z = guest.seat.z;
           this.sitPose(guest);
           this.kit.visible = true;
           this.settled = true;
+        }
+        anyHere = true;
+        continue;
+      }
+
+      if (guest.phase === "toExit") {
+        const gap = this.walkRouted(guest, guest.gate, delta, 1.5, 10);
+        if (gap < 1.2) {
+          guest.phase = "leaving";
+          guest.route.ready = false;
         }
         anyHere = true;
         continue;
@@ -371,7 +403,12 @@ export class Picnic {
 
     if (
       !anyHere &&
-      this.guests.every((g) => g.phase === "leaving" || !g.group.visible)
+      this.guests.every(
+        (g) =>
+          g.phase === "leaving" ||
+          g.phase === "toExit" ||
+          !g.group.visible,
+      )
     ) {
       this.gone = true;
     }
@@ -412,40 +449,12 @@ export class Picnic {
     this.settled = false;
     this.kit.visible = false;
     for (const guest of this.guests) {
-      if (guest.phase === "leaving") continue;
-      guest.phase = "leaving";
+      if (guest.phase === "toExit" || guest.phase === "leaving") continue;
+      guest.phase = "toExit";
       this.standPose(guest);
+      const here = guest.group.position;
+      setRouteToward(guest.route, here.x, here.z, guest.gate.x, guest.gate.z);
     }
-  }
-
-  private pickApproach(): THREE.Vector3 {
-    const dist = 14 + Math.random() * 12;
-    const yaw = Math.PI * 0.92 + (Math.random() - 0.5) * 0.7;
-    return new THREE.Vector3(
-      this.spot.x + Math.sin(yaw) * dist,
-      0,
-      this.spot.z + Math.cos(yaw) * dist,
-    );
-  }
-
-  private pickGate(): THREE.Vector3 {
-    const gates = parkGates();
-    if (gates.length === 0) {
-      return new THREE.Vector3(this.spot.x + 20, 0, this.spot.z - 30);
-    }
-    let best = gates[0]!;
-    let bestScore = Infinity;
-    for (const g of gates) {
-      const score =
-        Math.hypot(g.x - this.spot.x, g.y - this.spot.z) +
-        (g.y > this.spot.z ? 18 : 0) +
-        (g.x < this.spot.x ? 8 : 0);
-      if (score < bestScore) {
-        bestScore = score;
-        best = g;
-      }
-    }
-    return new THREE.Vector3(best.x, 0, best.y);
   }
 
   private buildKit(): void {
@@ -539,6 +548,7 @@ export class Picnic {
   private buildGuest(
     start: THREE.Vector3,
     seat: THREE.Vector3,
+    gate: THREE.Vector3,
     exit: THREE.Vector3,
   ): Guest {
     const pick = <T>(list: readonly T[]): T =>
@@ -558,7 +568,8 @@ export class Picnic {
 
     const group = new THREE.Group();
     group.position.copy(start);
-    group.rotation.y = Math.atan2(seat.x - start.x, seat.z - start.z);
+    group.position.y = this.footY(start.x, start.z);
+    group.rotation.y = Math.atan2(gate.x - start.x, gate.z - start.z);
     this.scene.add(group);
 
     const hips = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.18, 0.22), legMat);
@@ -616,11 +627,36 @@ export class Picnic {
       arms,
       face,
       seat,
+      gate,
       exit,
-      phase: "arriving",
+      phase: "toGate",
+      route: emptyRoute(),
       step: Math.random() * Math.PI * 2,
       chatIn: 5 + Math.random() * 10,
     };
+  }
+
+  private walkRouted(
+    guest: Guest,
+    to: THREE.Vector3,
+    delta: number,
+    speed: number,
+    peelAt: number,
+  ): number {
+    const here = guest.group.position;
+    const aim = routeAim(
+      guest.route,
+      here.x,
+      here.z,
+      to.x,
+      to.z,
+      peelAt,
+    );
+    if (aim) {
+      this.amble(guest, new THREE.Vector3(aim.x, 0, aim.y), delta, speed);
+      return Math.hypot(to.x - here.x, to.z - here.z);
+    }
+    return this.amble(guest, to, delta, speed);
   }
 
   private amble(
@@ -653,7 +689,7 @@ export class Picnic {
     guest.group.position.y =
       this.footY(here.x, here.z) + Math.abs(Math.sin(guest.step)) * 0.04;
     guest.face.setMood("idle");
-    return gap - step;
+    return Math.hypot(to.x - here.x, to.z - here.z);
   }
 
   private faceCentre(guest: Guest): void {

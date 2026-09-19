@@ -793,8 +793,10 @@ export class Player {
       if (!spot) return;
       this.camera.position.x = spot.x;
       this.camera.position.z = spot.z;
+      this.camera.position.y = EYE_HEIGHT + wadeFootY(spot.x, spot.z);
       this.euler.z = 0;
       this.camera.quaternion.setFromEuler(this.euler);
+      this.wasWading = isInLake(spot.x, spot.z);
       this.velocity.set(0, 0, 0);
       this.setSpraying(false);
       this.game.showTool(this.wanted);

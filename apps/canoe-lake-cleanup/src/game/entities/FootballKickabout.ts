@@ -1,7 +1,7 @@
 import * as THREE from "three";
-import { parkGates } from "../world/fence";
 import { stepWalk } from "../world/blocking";
 import { groundHeight } from "../world/terrain";
+import { gateOutside, nearestGate } from "../world/pathRoute";
 import { Face } from "./Face";
 
 const KID_COATS = [
@@ -69,7 +69,9 @@ export class FootballKickabout {
     this.root.add(this.ball);
 
     const n = 4 + Math.floor(Math.random() * 3);
-    const gate = this.pickGate();
+    const gate = nearestGate(this.spot.x, this.spot.z);
+    const approach = gateOutside(gate, 9);
+    const leaveAt = gateOutside(gate, 12);
     for (let i = 0; i < n; i++) {
       const side = i % 2 === 0 ? -1 : 1;
       const slot = (Math.floor(i / 2) + 0.5) / Math.ceil(n / 2) - 0.5;
@@ -77,24 +79,16 @@ export class FootballKickabout {
         side * (HALF_LEN * 0.35 + Math.random() * 2.5),
         slot * HALF_WIDE * 1.4 + (Math.random() - 0.5) * 1.5,
       );
-      const start = gate
-        .clone()
-        .add(
-          new THREE.Vector3(
-            (Math.random() - 0.5) * 8,
-            0,
-            (Math.random() - 0.5) * 8,
-          ),
-        );
-      const exit = gate
-        .clone()
-        .add(
-          new THREE.Vector3(
-            (Math.random() - 0.5) * 12,
-            0,
-            (Math.random() - 0.5) * 12,
-          ),
-        );
+      const start = new THREE.Vector3(
+        approach.x + (Math.random() - 0.5) * 3,
+        0,
+        approach.y + (Math.random() - 0.5) * 3,
+      );
+      const exit = new THREE.Vector3(
+        leaveAt.x + (Math.random() - 0.5) * 3,
+        0,
+        leaveAt.y + (Math.random() - 0.5) * 3,
+      );
       this.kids.push(this.buildKid(start, home, exit, side));
     }
 
@@ -483,23 +477,6 @@ export class FootballKickabout {
       chaseIn: 0,
       kickLeft: 0,
     };
-  }
-
-  private pickGate(): THREE.Vector3 {
-    const gates = parkGates();
-    if (gates.length === 0) {
-      return this.spot.clone().add(new THREE.Vector3(20, 0, 20));
-    }
-    let best = gates[0]!;
-    let bestD = Infinity;
-    for (const g of gates) {
-      const d = g.distanceToSquared(new THREE.Vector2(this.spot.x, this.spot.z));
-      if (d < bestD) {
-        bestD = d;
-        best = g;
-      }
-    }
-    return new THREE.Vector3(best.x, 0, best.y);
   }
 }
 

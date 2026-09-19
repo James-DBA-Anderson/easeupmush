@@ -260,6 +260,13 @@ function normalizeLevel(raw: unknown): LevelData | null {
 
   const migrated = migrateLegacyPlayPark(draftPlaceables, outlineRaw);
 
+  // Seed any unique landmarks missing from older saves (e.g. new buildings).
+  for (const id of UNIQUE_PLACEABLES) {
+    if (migrated.placeables.some((p) => p.id === id)) continue;
+    const seed = DEFAULT_LEVEL.placeables.find((p) => p.id === id);
+    if (seed) migrated.placeables.push({ ...seed });
+  }
+
   const roads = Array.isArray(data.roadPolylines)
     ? normalizePolylines(data.roadPolylines)
     : null;

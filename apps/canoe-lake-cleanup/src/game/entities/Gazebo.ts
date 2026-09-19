@@ -1,8 +1,18 @@
 import * as THREE from "three";
-import { parkGates } from "../world/fence";
 import { stepWalk } from "../world/blocking";
+import { insidePark } from "../world/fence";
+import {
+  emptyRoute,
+  gateOutside,
+  nearestGate,
+  routeAim,
+  setRouteToward,
+  type LoopRoute,
+} from "../world/pathRoute";
 import { Face } from "./Face";
 import { Grumble } from "../effects/Grumble";
+import { PATH_Y } from "../world/lake";
+import { groundHeight } from "../world/terrain";
 
 const COATS = [0x2f4f7f, 0x8b3a3a, 0x3f6b4a, 0x5a4a7a, 0x2b2b33, 0xb06a2c, 0xd8c8a0];
 const TROUSERS = [0x2b3038, 0x4a4a52, 0x6b5a44, 0x3a5a6a];
@@ -19,7 +29,7 @@ const CHAT = [
   "CRACKING GAZEBO",
 ];
 
-type Phase = "arriving" | "settled" | "leaving";
+type Phase = "toGate" | "arriving" | "settled" | "toExit" | "leaving";
 
 interface Guest {
   group: THREE.Group;
@@ -27,8 +37,10 @@ interface Guest {
   arms: THREE.Group[];
   face: Face;
   stand: THREE.Vector3;
+  gate: THREE.Vector3;
   exit: THREE.Vector3;
   phase: Phase;
+  route: LoopRoute;
   step: number;
   chatIn: number;
 }
@@ -63,7 +75,10 @@ export class Gazebo {
     scene.add(this.root);
 
     const party = 2 + Math.floor(Math.random() * 3);
-    const gate = this.pickGate();
+    const gatePt = nearestGate(this.spot.x, this.spot.z);
+    const approach = gateOutside(gatePt, 9);
+    const leaveAt = gateOutside(gatePt, 12);
+    const gate = new THREE.Vector3(gatePt.x, 0, gatePt.y);
     for (let i = 0; i < party; i++) {
       const ang = this.yaw + (i / party) * Math.PI * 2 + Math.random() * 0.4;
       const rad = 0.7 + Math.random() * 0.55;
@@ -72,25 +87,17 @@ export class Gazebo {
         0,
         this.spot.z + Math.sin(ang) * rad,
       );
-      const start = gate
-        .clone()
-        .add(
-          new THREE.Vector3(
-            (Math.random() - 0.5) * 6,
-            0,
-            (Math.random() - 0.5) * 6,
-          ),
-        );
-      const exit = gate
-        .clone()
-        .add(
-          new THREE.Vector3(
-            (Math.random() - 0.5) * 10,
-            0,
-            (Math.random() - 0.5) * 10,
-          ),
-        );
-      this.guests.push(this.buildGuest(start, stand, exit));
+      const start = new THREE.Vector3(
+        approach.x + (Math.random() - 0.5) * 3,
+        0,
+        approach.y + (Math.random() - 0.5) * 3,
+      );
+      const exit = new THREE.Vector3(
+        leaveAt.x + (Math.random() - 0.5) * 3,
+        0,
+        leaveAt.y + (Math.random() - 0.5) * 3,
+      );
+      this.guests.push(this.buildGuest(start, stand, gate, exit));
     }
   }
 
@@ -116,15 +123,42 @@ export class Gazebo {
     for (const guest of this.guests) {
       guest.face.update(delta);
 
+      if (guest.phase === "toGate") {
+        const gap = this.amble(guest, guest.gate, delta, 1.4);
+        const here = guest.group.position;
+        if (gap < 1.1 || insidePark(here.x, here.z)) {
+          guest.phase = "arriving";
+          setRouteToward(
+            guest.route,
+            here.x,
+            here.z,
+            guest.stand.x,
+            guest.stand.z,
+          );
+        }
+        anyHere = true;
+        continue;
+      }
+
       if (guest.phase === "arriving") {
-        if (this.amble(guest, guest.stand, delta, 1.4) < 0.35) {
+        if (this.walkRouted(guest, guest.stand, delta, 1.4, 12) < 0.35) {
           guest.phase = "settled";
+          guest.route.ready = false;
           guest.group.position.copy(guest.stand);
-          guest.group.position.y = 0;
+          guest.group.position.y = PATH_Y + groundHeight(guest.stand.x, guest.stand.z);
           this.idlePose(guest);
           this.faceIn(guest);
           this.frame.visible = true;
           this.settled = true;
+        }
+        anyHere = true;
+        continue;
+      }
+
+      if (guest.phase === "toExit") {
+        if (this.walkRouted(guest, guest.gate, delta, 1.5, 10) < 1.2) {
+          guest.phase = "leaving";
+          guest.route.ready = false;
         }
         anyHere = true;
         continue;
@@ -157,7 +191,12 @@ export class Gazebo {
 
     if (
       !anyHere &&
-      this.guests.every((g) => g.phase === "leaving" || !g.group.visible)
+      this.guests.every(
+        (g) =>
+          g.phase === "leaving" ||
+          g.phase === "toExit" ||
+          !g.group.visible,
+      )
     ) {
       this.gone = true;
     }
@@ -173,29 +212,11 @@ export class Gazebo {
     this.settled = false;
     this.frame.visible = false;
     for (const guest of this.guests) {
-      if (guest.phase === "leaving") continue;
-      guest.phase = "leaving";
+      if (guest.phase === "toExit" || guest.phase === "leaving") continue;
+      guest.phase = "toExit";
+      const here = guest.group.position;
+      setRouteToward(guest.route, here.x, here.z, guest.gate.x, guest.gate.z);
     }
-  }
-
-  private pickGate(): THREE.Vector3 {
-    const gates = parkGates();
-    if (gates.length === 0) {
-      return new THREE.Vector3(this.spot.x + 20, 0, this.spot.z - 30);
-    }
-    let best = gates[0]!;
-    let bestScore = Infinity;
-    for (const g of gates) {
-      const score =
-        Math.hypot(g.x - this.spot.x, g.y - this.spot.z) +
-        (g.y > this.spot.z ? 18 : 0) +
-        (g.x < this.spot.x ? 8 : 0);
-      if (score < bestScore) {
-        bestScore = score;
-        best = g;
-      }
-    }
-    return new THREE.Vector3(best.x, 0, best.y);
   }
 
   private buildFrame(): void {
@@ -298,6 +319,7 @@ export class Gazebo {
   private buildGuest(
     start: THREE.Vector3,
     stand: THREE.Vector3,
+    gate: THREE.Vector3,
     exit: THREE.Vector3,
   ): Guest {
     const pick = <T>(list: readonly T[]): T =>
@@ -317,7 +339,8 @@ export class Gazebo {
 
     const group = new THREE.Group();
     group.position.copy(start);
-    group.rotation.y = Math.atan2(stand.x - start.x, stand.z - start.z);
+    group.position.y = PATH_Y + groundHeight(start.x, start.z);
+    group.rotation.y = Math.atan2(gate.x - start.x, gate.z - start.z);
     this.scene.add(group);
 
     const hips = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.18, 0.22), legMat);
@@ -370,11 +393,36 @@ export class Gazebo {
       arms,
       face,
       stand,
+      gate,
       exit,
-      phase: "arriving",
+      phase: "toGate",
+      route: emptyRoute(),
       step: Math.random() * Math.PI * 2,
       chatIn: 4 + Math.random() * 10,
     };
+  }
+
+  private walkRouted(
+    guest: Guest,
+    to: THREE.Vector3,
+    delta: number,
+    speed: number,
+    peelAt: number,
+  ): number {
+    const here = guest.group.position;
+    const aim = routeAim(
+      guest.route,
+      here.x,
+      here.z,
+      to.x,
+      to.z,
+      peelAt,
+    );
+    if (aim) {
+      this.amble(guest, new THREE.Vector3(aim.x, 0, aim.y), delta, speed);
+      return Math.hypot(to.x - here.x, to.z - here.z);
+    }
+    return this.amble(guest, to, delta, speed);
   }
 
   private amble(
@@ -404,9 +452,12 @@ export class Gazebo {
     guest.legs[1]!.rotation.x = -swing;
     guest.arms[0]!.rotation.x = -swing * 0.7;
     guest.arms[1]!.rotation.x = swing * 0.7;
-    guest.group.position.y = Math.abs(Math.sin(guest.step)) * 0.04;
+    guest.group.position.y =
+      PATH_Y +
+      groundHeight(here.x, here.z) +
+      Math.abs(Math.sin(guest.step)) * 0.04;
     guest.face.setMood("idle");
-    return gap - step;
+    return Math.hypot(to.x - here.x, to.z - here.z);
   }
 
   private faceIn(guest: Guest): void {

@@ -17,6 +17,7 @@ import { Graffiti } from "./entities/Graffiti";
 import { Drunks, drunkSpots } from "./entities/Drunks";
 import { RebelRaid } from "./entities/RebelRaid";
 import { BoyRacers } from "./entities/BoyRacers";
+import { StolenSwanboat } from "./entities/StolenSwanboat";
 import { Scooter } from "./entities/Scooter";
 import { TrafficCar } from "./entities/TrafficCar";
 import { RcBoat } from "./entities/RcBoat";
@@ -62,7 +63,7 @@ import {
   setRearDoorsOpen,
   vanSpotWorld,
 } from "./world/cleanerVan";
-import { getMissionSpot, missionWindowOpen } from "./world/missions";
+import { getMission, getMissionSpot, missionWindowOpen } from "./world/missions";
 import { GooseFlock } from "./entities/GooseFlock";
 import { parkAudio } from "./audio/ParkAudio";
 import { readDebugBoot, type DebugFrom } from "../level/debugBoot";
@@ -85,6 +86,7 @@ import {
   hatchQueueSpot,
   setPedaloChop,
   consumePedaloWreck,
+  getRoseGarden,
 } from "./world/park";
 import { DayCycle } from "./systems/DayCycle";
 import { Weather } from "./systems/Weather";
@@ -93,8 +95,10 @@ import { MiniMap } from "./ui/MiniMap";
 import { Mugshot } from "./ui/Mugshot";
 import { Messages } from "./ui/Messages";
 import { ObjectiveArrow } from "./ui/ObjectiveArrow";
+import { MissionBanner } from "./ui/MissionBanner";
 import { Compass } from "./ui/Compass";
 import { Callouts } from "./systems/Callouts";
+import { MISSION_LABELS, missionClockHour, type MissionId } from "../level/missions";
 
 const WASH_RADIUS = 1.28;
 /**
@@ -151,7 +155,7 @@ const MAX_PEDALO_HIRES = 2;
 const MAX_BBQS = 2;
 const MAX_PICNICS = 3;
 const MAX_GAZEBOS = 2;
-const MAX_BENCH_SITS = 5;
+const MAX_BENCH_SITS = 8;
 const MAX_PLAY_VISITS = 3;
 const MAX_FOOTBALL = 1;
 /**
@@ -233,7 +237,7 @@ export class Game {
   private playVisits: PlayVisit[] = [];
   private nextPlayVisit = 35 + Math.random() * 40;
   private football: FootballKickabout[] = [];
-  private nextFootball = 40 + Math.random() * 50;
+  private nextFootball = 18 + Math.random() * 28;
   private nextArrival = 40 + Math.random() * 60;
   private nextDeparture = 50 + Math.random() * 70;
   private fox: Fox | null = null;
@@ -269,6 +273,12 @@ export class Game {
   private racerHourWas = -1;
   private rebelBriefing: { wait: number; from: string; text: string }[] = [];
 
+  /** Afternoon — lads nick a swan pedalo; chase and sink by hose. */
+  private stolenSwanboat: StolenSwanboat | null = null;
+  private swanboatMissionStarted = false;
+  private swanboatMissionDone = false;
+  private swanboatHourWas = -1;
+
   /** The player's view, worked out afresh each frame. */
   private view = new THREE.Frustum();
   private viewMatrix = new THREE.Matrix4();
@@ -287,6 +297,7 @@ export class Game {
   private mugshot: Mugshot;
   private objectiveArrow: ObjectiveArrow;
   private missionArrow: ObjectiveArrow;
+  private missionBanner: MissionBanner;
   private compass: Compass;
   private messages: Messages;
   private callouts: Callouts;
@@ -304,6 +315,8 @@ export class Game {
   private faceWetLeft = 0;
   private faceDirty = false;
   private complaints = 0;
+  /** Debounce the hiss when the lance is on the grass fire. */
+  private fireSteamCool = 0;
 
   /** Opening piles seeded at clock-on; clearing them unlocks the second event. */
   private overnightPiles = new Set<Dropping>();
@@ -339,8 +352,6 @@ export class Game {
   private frozen = false;
   /** Player pause — sim stopped, last frame still drawn under the overlay. */
   private paused = false;
-  /** How far through the collapse, once they've had the last one. */
-  private collapse = 0;
   /**
    * Shift hasn't started until the van intro hands off to first person.
    */
@@ -356,6 +367,9 @@ export class Game {
   private hurtFlash: HTMLElement;
   private complaintsElement: HTMLElement;
   private healthFill: HTMLElement;
+  private pressurePanel: HTMLElement;
+  private pressureFill: HTMLElement;
+  private pressurePct: HTMLElement;
   private gameOverPanel: HTMLElement;
   private gameOverDetail: HTMLElement;
   private instructionsElement: HTMLElement;
@@ -409,6 +423,9 @@ export class Game {
     this.hurtFlash = document.getElementById("hurt-flash")!;
     this.complaintsElement = document.getElementById("complaints")!;
     this.healthFill = document.getElementById("health-fill")!;
+    this.pressurePanel = document.getElementById("pressure-panel")!;
+    this.pressureFill = document.getElementById("pressure-fill")!;
+    this.pressurePct = document.getElementById("pressure-pct")!;
     this.gameOverPanel = document.getElementById("game-over")!;
     this.gameOverDetail = document.getElementById("game-over-detail")!;
     this.instructionsElement = document.getElementById("instructions")!;
@@ -448,6 +465,9 @@ export class Game {
     this.missionArrow = new ObjectiveArrow(
       document.getElementById("mission-arrow")!,
       "mission",
+    );
+    this.missionBanner = new MissionBanner(
+      document.getElementById("mission-banner")!,
     );
     this.compass = new Compass(document.getElementById("compass")!);
 
@@ -535,6 +555,42 @@ export class Game {
       const yaw = Math.atan2(facing.x, facing.y);
       placeBench(this.scene, spot.x, spot.y, yaw, { sitters: true });
     }
+
+    this.placeRoseGardenBenches();
+  }
+
+  /** Iron benches round the rose hedge, facing the beds — for the older lot. */
+  private placeRoseGardenBenches(): void {
+    const rose = getRoseGarden();
+    if (!rose) return;
+    const cos = Math.cos(rose.yaw);
+    const sin = Math.sin(rose.yaw);
+    const ox = rose.halfW + 2.1;
+    const oz = rose.halfD + 2.1;
+    const slots: { lx: number; lz: number; fx: number; fz: number }[] = [
+      { lx: -14, lz: oz, fx: 0, fz: -1 },
+      { lx: -5, lz: oz, fx: 0, fz: -1 },
+      { lx: 5, lz: oz, fx: 0, fz: -1 },
+      { lx: 14, lz: oz, fx: 0, fz: -1 },
+      { lx: -14, lz: -oz, fx: 0, fz: 1 },
+      { lx: -5, lz: -oz, fx: 0, fz: 1 },
+      { lx: 5, lz: -oz, fx: 0, fz: 1 },
+      { lx: 14, lz: -oz, fx: 0, fz: 1 },
+      { lx: ox, lz: -10, fx: -1, fz: 0 },
+      { lx: ox, lz: 0, fx: -1, fz: 0 },
+      { lx: ox, lz: 10, fx: -1, fz: 0 },
+      { lx: -ox, lz: -10, fx: 1, fz: 0 },
+      { lx: -ox, lz: 0, fx: 1, fz: 0 },
+      { lx: -ox, lz: 10, fx: 1, fz: 0 },
+    ];
+    for (const slot of slots) {
+      const x = rose.x + slot.lx * cos + slot.lz * sin;
+      const z = rose.z - slot.lx * sin + slot.lz * cos;
+      const fx = slot.fx * cos + slot.fz * sin;
+      const fz = -slot.fx * sin + slot.fz * cos;
+      const yaw = Math.atan2(fx, fz);
+      placeBench(this.scene, x, z, yaw, { sitters: true, crowd: "elder" });
+    }
   }
 
   private setupLights(): void {
@@ -558,6 +614,7 @@ export class Game {
   private applyTimeAndWeather(delta: number): void {
     this.dayCycle.update(delta);
     const sky = this.dayCycle.skyState();
+    this.weather.setRainAllowed(this.rainUnlocked());
     this.weather.update(delta, sky);
     updateTrees(this.elapsed, this.weather.getWind());
     updateFlowerBeds(delta);
@@ -576,6 +633,32 @@ export class Game {
     // Lights come on across the seafront as the daylight goes.
     lightWindows(THREE.MathUtils.clamp(1 - sky.sun / 0.45, 0, 1));
     lightFairyBulbs(THREE.MathUtils.clamp(1 - sky.sun / 0.45, 0, 1));
+  }
+
+  /**
+   * Keep the shift dry through picnic + grass fire so hose jobs read clearly.
+   * Once both are cleared (or their windows have closed), weather may rain.
+   */
+  private rainUnlocked(): boolean {
+    const hour = this.dayCycle.hour;
+    const picnicOk =
+      (this.picnicRaidDone && !this.picnicRaidActive) ||
+      this.missionWindowEnded("picnic", hour);
+    const fireOk =
+      this.fireMissionDone ||
+      (!this.grassFire && this.missionWindowEnded("fire", hour));
+    return picnicOk && fireOk;
+  }
+
+  /** True once the mission start window has fully closed for this shift hour. */
+  private missionWindowEnded(id: MissionId, hour: number): boolean {
+    if (missionWindowOpen(id, hour)) return false;
+    const m = getMission(id);
+    const start = missionClockHour(m.start);
+    const end = missionClockHour(m.end);
+    if (start < end) return hour >= end;
+    // Wrapped window (e.g. overnight): ended while in the closed gap.
+    return hour >= end && hour < start;
   }
 
   private refreshView(): void {
@@ -1223,6 +1306,7 @@ export class Game {
     }
 
     this.callouts.raise("picnic", this.dayCycle.clockFace(), this.picnicRaidTip);
+    this.announceMission("picnic");
   }
 
   private updatePicnicRaid(delta: number): void {
@@ -1325,6 +1409,7 @@ export class Game {
       this.dayCycle.clockFace(),
       20,
     );
+    this.announceMission("geese");
     this.showTool(null);
   }
 
@@ -1373,6 +1458,10 @@ export class Game {
 
     this.gooseFlock.update(delta);
 
+    for (const drop of this.gooseFlock.claimDrops()) {
+      this.addDropping(drop, "swan");
+    }
+
     // Keep barn doors ajar while the heavy hose is in play.
     const doorTarget = this.gooseHeavyArmed ? 0.35 : 0;
     this.rearDoorOpen = THREE.MathUtils.damp(
@@ -1390,23 +1479,11 @@ export class Game {
       this.updateHUD();
       this.messages.send(
         "999 CONTROL",
-        "Geese broken up — radar clear. Nice work with the heavy hose.",
+        "Geese cleared off — radar quiet. Nice work with the heavy hose.",
         this.dayCycle.clockFace(),
         16,
       );
       this.callouts.raise("praise", this.dayCycle.clockFace());
-      this.gooseFlock.dispose();
-      this.gooseFlock = null;
-    } else if (this.gooseFlock.isOverrun() && !this.gooseMissionDone) {
-      this.gooseMissionDone = true;
-      this.complain();
-      this.complain();
-      this.messages.send(
-        "999 CONTROL",
-        "Geese on the lake — public's going mad. Where were you with that hose?",
-        this.dayCycle.clockFace(),
-        18,
-      );
       this.gooseFlock.dispose();
       this.gooseFlock = null;
     }
@@ -1439,7 +1516,7 @@ export class Game {
     this.gooseFlock = new GooseFlock(this.scene, getMissionSpot("geese"));
     this.messages.send(
       "DEPOT",
-      "Heavy hose online — two minutes on the tank. Knock those geese out of the sky.",
+      "Heavy hose online — watch the pressure gauge. Knock the geese out of the sky, or off the water. Clear most of them and the rest will go.",
       this.dayCycle.clockFace(),
       14,
     );
@@ -1573,18 +1650,6 @@ export class Game {
       }
     }
 
-    // Pigeons on the fairy lights — hose knocks them (and neighbours) off.
-    for (const bird of this.wireBirds) {
-      if (!bird.soakedBy(point)) continue;
-      const at = bird.getPosition();
-      bird.scare();
-      for (const other of this.wireBirds) {
-        if (other === bird || other.isGone()) continue;
-        if (other.getPosition().distanceTo(at) < 3.8) other.scare();
-      }
-      return true;
-    }
-
     // Gulls (incl. picnic stoops) — before ground crowds so the lance connects.
     for (const gull of this.gulls) {
       if (gull.isGone()) continue;
@@ -1596,7 +1661,31 @@ export class Game {
       return true;
     }
 
-    // Hire swan pedalos — dirty bounce sticks on the hull; clean water rinses it.
+    // Pigeons — heavy reel reaches further and knocks whole clusters.
+    for (const bird of this.wireBirds) {
+      if (bird.isGone()) continue;
+      const here = bird.getPosition();
+      const catchR = heavy ? 4.2 : 1.6;
+      const dx = point.x - here.x;
+      const dy = point.y - here.y;
+      const dz = point.z - here.z;
+      const hit = heavy
+        ? dx * dx + dy * dy * 0.45 + dz * dz < catchR * catchR
+        : bird.soakedBy(point);
+      if (!hit) continue;
+      const at = bird.getPosition();
+      bird.scare();
+      for (const other of this.wireBirds) {
+        if (other === bird || other.isGone()) continue;
+        if (other.getPosition().distanceTo(at) < (heavy ? 6.5 : 3.8)) {
+          other.scare();
+        }
+      }
+      return true;
+    }
+
+    // Hire swan pedalos — stolen chase floods the hull; otherwise flecks / rinse.
+    if (this.stolenSwanboat?.takeSpray(point, heavy)) return true;
     if (sprayPedalo(point, dirty)) return true;
 
     // Late drinkers — a blast of the washer and they're off.
@@ -1673,7 +1762,10 @@ export class Game {
     }
 
     // Grass fire from a runaway barbecue — lance it before it walks.
-    if (this.grassFire?.douse(point)) return true;
+    if (this.grassFire?.douse(point)) {
+      this.hissFireSteam();
+      return true;
+    }
 
     // Radio boats take on water until they go under.
     for (const boat of this.boats) {
@@ -1898,7 +1990,6 @@ export class Game {
   /** That's the shift over. Down they go, and the park carries on without them. */
   private die(): void {
     this.dead = true;
-    this.collapse = 0;
     document.exitPointerLock?.();
     const title = this.gameOverPanel.querySelector("h1");
     if (title) {
@@ -1917,13 +2008,13 @@ export class Game {
           `Score <strong>${this.score}</strong> &middot; ${this.cleaned} cleaned &middot; ${this.complaints} complaints`,
           `Park left at ${Math.round(this.cleanliness)}% clean.`,
         ].join("<br>");
+    this.gameOverPanel.classList.add("on");
   }
 
   /** Held the lake — shift ends in glory rather than feathers. */
   private triumph(): void {
     this.dead = true;
     this.rebelMissionWon = true;
-    this.collapse = 0;
     document.exitPointerLock?.();
     const title = this.gameOverPanel.querySelector("h1");
     if (title) title.textContent = "LAKE HELD";
@@ -1932,15 +2023,7 @@ export class Game {
       `Score <strong>${this.score}</strong> &middot; ${this.cleaned} cleaned &middot; ${this.complaints} complaints`,
       `Armed response rolling in. The park stays Pompey tonight.`,
     ].join("<br>");
-  }
-
-  /** Sinking to the paving with the world tipping over sideways. */
-  private goDown(delta: number): void {
-    this.collapse = Math.min(1, this.collapse + delta * 0.8);
-    const t = this.collapse;
-    this.camera.position.y = THREE.MathUtils.lerp(1.7, 0.45, t * t);
-    this.camera.rotation.z = t * 0.9;
-    if (t >= 1) this.gameOverPanel.classList.add("on");
+    this.gameOverPanel.classList.add("on");
   }
 
   /** Water landed here — scrub anything close enough to the splash.
@@ -2002,7 +2085,10 @@ export class Game {
       }
     }
 
-    if (this.grassFire?.douse(point)) bounce = Math.max(bounce, 1);
+    if (this.grassFire?.douse(point)) {
+      this.hissFireSteam();
+      bounce = Math.max(bounce, 1);
+    }
 
     // Standing water on the paving — skip while scrubbing a pile so the
     // wash trail stays readable.
@@ -2445,7 +2531,7 @@ export class Game {
     if (isPedaloHired()) {
       this.instructionsElement.innerHTML = mobile
         ? "Left stick: Pedal & steer | Look stick: Look | Spray: Aim & fire | Hold spray centred: Climb out"
-        : "WASD: Pedal & steer | Mouse: Look | Click: Spray | E: Climb out onto the bank";
+        : "WASD: Pedal & steer | Mouse: Look | Click: Spray | E: Climb out";
       return;
     }
     if (tool === "heavyHose") {
@@ -2463,6 +2549,15 @@ export class Game {
       this.instructionsElement.innerHTML = mobile
         ? "Geese inbound! Follow the red arrow to the van for the heavy hose"
         : "Geese on radar — follow the red arrow to the van for the heavy hose";
+      return;
+    }
+    if (
+      this.stolenSwanboat?.isActive() &&
+      !isPedaloHired()
+    ) {
+      this.instructionsElement.innerHTML = mobile
+        ? "Stolen swanboat — board a hire swan (tap spray near one) and chase; spray their hull till she sinks"
+        : "Stolen swanboat — E near a hire swan to board, chase them, spray their hull till she sinks";
       return;
     }
     this.instructionsElement.innerHTML = mobile
@@ -2603,19 +2698,28 @@ export class Game {
       this.picnicRaidDone = true;
       this.clockOn({ quiet: true });
       this.startGooseMission();
+    } else if (from === "swanboat") {
+      this.dayCycle.setHour(12.75);
+      this.picnicRaidDone = true;
+      this.gooseMissionDone = true;
+      this.clockOn({ quiet: true });
+      this.beginSwanboatMission();
     } else if (from === "fire") {
       this.dayCycle.setHour(16);
       this.picnicRaidDone = true;
       this.gooseMissionDone = true;
+      this.swanboatMissionDone = true;
       this.clockOn({ quiet: true });
       const spot = getMissionSpot("fire");
       const at = new THREE.Vector3(spot.x, 0, spot.z);
       this.grassFire = new GrassFire(this.scene, at);
       this.callouts.raise("fire", this.dayCycle.clockFace(), spot);
+      this.announceMission("fire");
     } else if (from === "racers") {
       this.dayCycle.setHour(22.2);
       this.picnicRaidDone = true;
       this.gooseMissionDone = true;
+      this.swanboatMissionDone = true;
       this.fireMissionDone = true;
       this.racerHourWas = 22;
       this.clockOn({ quiet: true });
@@ -2624,6 +2728,7 @@ export class Game {
       this.dayCycle.setHour(1.1);
       this.picnicRaidDone = true;
       this.gooseMissionDone = true;
+      this.swanboatMissionDone = true;
       this.fireMissionDone = true;
       this.racerMissionDone = true;
       this.rebelHourWas = 1;
@@ -3116,7 +3221,11 @@ export class Game {
   private pickBenchPastime(seat: {
     x: number;
     z: number;
+    crowd?: "elder";
   }): BenchPastime {
+    if (seat.crowd === "elder") {
+      return Math.random() < 0.55 ? "chat" : "book";
+    }
     const nearWater = distanceToShore(seat.x, seat.z) < 12;
     const roll = Math.random();
     if (nearWater) {
@@ -3134,7 +3243,8 @@ export class Game {
   private freeBenchSeat() {
     const taken = this.benchSits.map((lot) => lot.getSeat());
     const options = sitterBenchSeats().filter((seat) => {
-      if (this.inShot(seat.x, seat.z, 0)) return false;
+      // Rose benches can fill in view — you want to see the older lot sat there.
+      if (seat.crowd !== "elder" && this.inShot(seat.x, seat.z, 0)) return false;
       for (const used of taken) {
         const dx = used.x - seat.x;
         const dz = used.z - seat.z;
@@ -3143,6 +3253,13 @@ export class Game {
       return true;
     });
     if (options.length === 0) return null;
+
+    // Fill rose-garden seats first so the older lot show up.
+    const rose = options.filter((seat) => seat.crowd === "elder");
+    if (rose.length > 0 && Math.random() < 0.72) {
+      return rose[Math.floor(Math.random() * rose.length)]!;
+    }
+
     // Prefer lakeside seats so bird-feeding shows up where swans can notice.
     const lakeside = options.filter(
       (seat) => distanceToShore(seat.x, seat.z) < 10,
@@ -3186,11 +3303,13 @@ export class Game {
           x: at.x,
           z: at.z,
         });
+        this.announceMission("fire");
       } else if (cooking.length === 0 && Math.random() < delta * 0.004) {
         // Authored fire pin — still light even if no BBQ is on.
         const at = new THREE.Vector3(prefer.x, 0, prefer.z);
         this.grassFire = new GrassFire(this.scene, at);
         this.callouts.raise("fire", this.dayCycle.clockFace(), prefer);
+        this.announceMission("fire");
       }
     }
 
@@ -3237,6 +3356,95 @@ export class Game {
       this.grassFire = null;
       this.fireMissionDone = true;
     }
+  }
+
+  /**
+   * Early afternoon: lads nick a swan pedalo. Hire one, chase, hose the hull
+   * until she sinks — they abandon, wade out, and run off.
+   */
+  private updateSwanboatMission(delta: number): void {
+    const hour = this.dayCycle.hour;
+    const open = missionWindowOpen("swanboat", hour);
+    const wasOpen =
+      this.swanboatHourWas < 0
+        ? false
+        : missionWindowOpen("swanboat", this.swanboatHourWas);
+    if (
+      !this.swanboatMissionStarted &&
+      !this.swanboatMissionDone &&
+      open &&
+      !wasOpen
+    ) {
+      this.beginSwanboatMission();
+    }
+    this.swanboatHourWas = hour;
+
+    if (!this.stolenSwanboat) return;
+    const player = this.camera.position;
+    this.stolenSwanboat.update(delta, player);
+
+    if (this.stolenSwanboat.claimStolen()) {
+      const tip = this.stolenSwanboat.aimSpot() ?? getMissionSpot("swanboat");
+      this.callouts.raise("swanboat", this.dayCycle.clockFace(), tip);
+      this.messages.send(
+        "BOAT HIRE",
+        "Lads have nicked a swan! Get in one and chase them — fill their hull till she sinks. Mind the odd can.",
+        this.dayCycle.clockFace(),
+        14,
+      );
+      this.announceMission("swanboat");
+    }
+
+    if (this.stolenSwanboat.claimCanHit()) {
+      const from = this.stolenSwanboat.aimSpot();
+      this.takeStrike(
+        from
+          ? new THREE.Vector3(from.x, 1.2, from.z)
+          : this.camera.position.clone(),
+      );
+    }
+
+    if (this.stolenSwanboat.claimSunk()) {
+      parkAudio.waterSplash(1.2, 0);
+      this.messages.send(
+        "BOAT HIRE",
+        "She's going under — they'll wade out then scarper round the path. Keep after them.",
+        this.dayCycle.clockFace(),
+        12,
+      );
+    }
+
+    if (this.stolenSwanboat.claimCleared()) {
+      this.cleaned += 1;
+      this.comboRun = this.comboLeft > 0 ? this.comboRun + 1 : 1;
+      this.comboLeft = COMBO_WINDOW;
+      this.score += 90 * this.multiplier();
+      this.updateHUD();
+      this.messages.send(
+        "BOAT HIRE",
+        "Lads scarpered. Swan'll be hauled out and dried. Nice work.",
+        this.dayCycle.clockFace(),
+        14,
+      );
+      this.callouts.raise("praise", this.dayCycle.clockFace());
+    }
+
+    if (this.stolenSwanboat.isDone()) {
+      this.stolenSwanboat.dispose();
+      this.stolenSwanboat = null;
+      this.swanboatMissionDone = true;
+    }
+  }
+
+  private beginSwanboatMission(): void {
+    this.swanboatMissionStarted = true;
+    this.stolenSwanboat = new StolenSwanboat(this.scene);
+    if (this.stolenSwanboat.isDone()) {
+      this.stolenSwanboat.dispose();
+      this.stolenSwanboat = null;
+      this.swanboatMissionDone = true;
+    }
+    // Banner / radio wait until they actually nick the boat (claimStolen).
   }
 
   /**
@@ -3309,6 +3517,7 @@ export class Game {
       this.dayCycle.clockFace(),
       12,
     );
+    this.announceMission("racers");
   }
 
   /**
@@ -3395,6 +3604,14 @@ export class Game {
       },
     ];
     this.rebelRaid = new RebelRaid(this.scene, 14, getMissionSpot("rebels"));
+    this.announceMission("rebels");
+  }
+
+  /** Banner + throbbing red arrow / mini-map pins when a scripted job starts. */
+  private announceMission(id: MissionId): void {
+    this.missionBanner.show(MISSION_LABELS[id]);
+    this.missionArrow.pulse(9);
+    this.miniMap.pulseMissions(9);
   }
 
   /**
@@ -3445,6 +3662,7 @@ export class Game {
     nearX: number | null,
     nearZ: number | null,
     spacing: number,
+    opts?: { allowInShot?: boolean },
   ): THREE.Vector2 | null {
     const occupied: THREE.Vector3[] = [
       ...this.bbqs.map((party) => party.getPosition()),
@@ -3453,7 +3671,7 @@ export class Game {
       ...this.football.map((match) => match.getPosition()),
     ];
     const options = lawnGatherSpots().filter((spot) => {
-      if (this.inShot(spot.x, spot.y, 0)) return false;
+      if (!opts?.allowInShot && this.inShot(spot.x, spot.y, 0)) return false;
       if (atParkBuilding(spot.x, spot.y)) return false;
       for (const at of occupied) {
         const dx = at.x - spot.x;
@@ -3527,17 +3745,23 @@ export class Game {
       dry &&
       this.football.length < MAX_FOOTBALL
     ) {
-      // Needs a clear stretch of lawn for the pitch.
-      const spot = this.freeLawnGatherSpot(32);
+      // Pitch is ~19×11 m — clear blankets/BBQs by that, not a huge no-go zone.
+      // Prefer the picnic green; kids walk in from the gate so in-shot is fine.
+      const prefer = getMissionSpot("picnic");
+      const spot =
+        this.freeLawnGatherSpotNear(prefer.x, prefer.z, 18, {
+          allowInShot: true,
+        }) ??
+        this.freeLawnGatherSpotNear(null, null, 16, { allowInShot: true });
       if (!spot) {
-        this.nextFootball = WAIT_AND_SEE;
+        this.nextFootball = 10 + Math.random() * 14;
       } else {
         this.football.push(new FootballKickabout(this.scene, spot));
-        this.nextFootball = 160 + Math.random() * 220;
+        this.nextFootball = 90 + Math.random() * 130;
       }
     } else if (this.nextFootball <= 0) {
       this.nextFootball = footyHours
-        ? 45 + Math.random() * 50
+        ? 20 + Math.random() * 30
         : 100 + Math.random() * 80;
     }
 
@@ -3934,6 +4158,13 @@ export class Game {
     this.updateHUD();
   }
 
+  /** Soft steam hiss while the hose is on hot grass — not every fleck. */
+  private hissFireSteam(): void {
+    if (this.fireSteamCool > 0) return;
+    this.fireSteamCool = 0.22;
+    parkAudio.steamHiss(0.75);
+  }
+
   /** Scores a finished dropping and keeps the combo run alive. */
   private creditClean(): void {
     this.cleaned += 1;
@@ -4010,6 +4241,7 @@ export class Game {
 
     this.healthFill.style.width = `${(this.health / HEALTH_MAX) * 100}%`;
     this.healthFill.classList.toggle("low", this.health <= 30);
+    this.refreshPressureGauge();
 
     const running = this.comboLeft > 0 && this.multiplier() > 1;
     this.comboElement.classList.toggle("active", running);
@@ -4017,6 +4249,21 @@ export class Game {
       this.comboValueElement.textContent = `x${this.multiplier()}`;
       this.comboFill.style.width = `${(this.comboLeft / COMBO_WINDOW) * 100}%`;
     }
+  }
+
+  private refreshPressureGauge(): void {
+    const heavyOn = this.player.isHeavyHoseActive();
+    this.pressurePanel.classList.toggle("on", heavyOn);
+    if (!heavyOn) {
+      this.pressurePanel.setAttribute("aria-hidden", "true");
+      return;
+    }
+    const frac = this.player.heavyTankFraction();
+    const pct = Math.round(frac * 100);
+    this.pressureFill.style.height = `${pct}%`;
+    this.pressurePct.textContent = `${pct}%`;
+    this.pressurePanel.classList.toggle("low", frac < 0.28);
+    this.pressurePanel.setAttribute("aria-hidden", "false");
   }
 
   private updateParkAudio(delta: number): void {
@@ -4071,6 +4318,7 @@ export class Game {
     ];
     parkAudio.update(delta, {
       hosing: this.player.isHosing(),
+      heavyHose: this.player.isHeavyHoseActive(),
       swanAngry,
       gullsNear,
       ducksNear,
@@ -4119,7 +4367,6 @@ export class Game {
     const delta = Math.min(this.clock.getDelta(), 0.05);
 
     if (this.dead) {
-      this.goDown(delta);
       parkAudio.update(delta, {
         hosing: false,
         swanAngry: false,
@@ -4167,6 +4414,9 @@ export class Game {
       this.faceWetLeft = Math.max(0, this.faceWetLeft - delta);
       if (this.faceWetLeft === 0) this.faceDirty = false;
     }
+    if (this.fireSteamCool > 0) {
+      this.fireSteamCool = Math.max(0, this.fireSteamCool - delta);
+    }
     const activeMess = this.droppings.filter(
       (dropping) => !dropping.isRinsing(),
     );
@@ -4205,6 +4455,7 @@ export class Game {
     this.watchTheState();
     this.callouts.update(delta);
     this.messages.update(delta);
+    this.missionBanner.update(delta);
     this.updateCyclists(delta, mess);
     this.updateTraffic(delta);
     this.updateBoats(delta);
@@ -4217,6 +4468,7 @@ export class Game {
     this.updateBenchSits(delta);
     this.updateFootball(delta);
     this.updateGrassFire(delta);
+    this.updateSwanboatMission(delta);
     this.updateRacerMission(delta);
     this.updateRebelMission(delta);
     this.updatePlayVisits(delta);
@@ -4301,6 +4553,7 @@ export class Game {
       delta,
     );
 
+    this.refreshPressureGauge();
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -4331,6 +4584,11 @@ export class Game {
     if (this.grassFire?.isBurning()) {
       const at = this.grassFire.getPosition();
       spots.push({ x: at.x, z: at.z });
+    }
+
+    if (this.stolenSwanboat?.isActive()) {
+      const aim = this.stolenSwanboat.aimSpot();
+      if (aim) spots.push(aim);
     }
 
     if (this.rebelRaid?.isActive()) {

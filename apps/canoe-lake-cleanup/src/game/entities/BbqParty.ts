@@ -5,11 +5,19 @@ import {
   distanceToShore,
   isInLake,
 } from "../world/lake";
-import { insidePark, parkGates } from "../world/fence";
+import { insidePark } from "../world/fence";
 import { getCarParkOutline } from "../world/buildings";
 import { getPlayPark } from "../world/park";
 import { stepWalk } from "../world/blocking";
 import { groundHeight } from "../world/terrain";
+import {
+  emptyRoute,
+  gateOutside,
+  nearestGate,
+  routeAim,
+  setRouteToward,
+  type LoopRoute,
+} from "../world/pathRoute";
 import { Face } from "./Face";
 import { Grumble } from "../effects/Grumble";
 import { PATH_Y } from "../world/lake";
@@ -120,7 +128,7 @@ export function bbqSpots(): THREE.Vector2[] {
   return lawnGatherSpots();
 }
 
-type Phase = "arriving" | "cooking" | "leaving";
+type Phase = "toGate" | "arriving" | "cooking" | "toExit" | "leaving";
 
 interface Guest {
   group: THREE.Group;
@@ -128,8 +136,10 @@ interface Guest {
   arms: THREE.Group[];
   face: Face;
   stand: THREE.Vector3;
+  gate: THREE.Vector3;
   exit: THREE.Vector3;
   phase: Phase;
+  route: LoopRoute;
   step: number;
   chatIn: number;
   cook: boolean;
@@ -183,8 +193,10 @@ export class BbqParty {
     scene.add(this.root);
 
     const party = 2 + Math.floor(Math.random() * 3);
-    const approach = this.pickApproach();
-    const exit = this.pickGate();
+    const gatePt = nearestGate(this.spot.x, this.spot.z);
+    const approach = gateOutside(gatePt, 9);
+    const exit = gateOutside(gatePt, 12);
+    const gate = new THREE.Vector3(gatePt.x, 0, gatePt.y);
 
     for (let i = 0; i < party; i++) {
       const ang = (i / party) * Math.PI * 2 + Math.random() * 0.4;
@@ -194,60 +206,18 @@ export class BbqParty {
         0,
         this.spot.z + Math.sin(ang) * rad,
       );
-      const start = approach
-        .clone()
-        .add(
-          new THREE.Vector3(
-            (Math.random() - 0.5) * 5,
-            0,
-            (Math.random() - 0.5) * 5,
-          ),
-        );
-      const leave = exit
-        .clone()
-        .add(
-          new THREE.Vector3(
-            (Math.random() - 0.5) * 10,
-            0,
-            (Math.random() - 0.5) * 10,
-          ),
-        );
-      this.guests.push(this.buildGuest(start, stand, leave, i === 0));
+      const start = new THREE.Vector3(
+        approach.x + (Math.random() - 0.5) * 3,
+        0,
+        approach.y + (Math.random() - 0.5) * 3,
+      );
+      const leave = new THREE.Vector3(
+        exit.x + (Math.random() - 0.5) * 3,
+        0,
+        exit.y + (Math.random() - 0.5) * 3,
+      );
+      this.guests.push(this.buildGuest(start, stand, gate, leave, i === 0));
     }
-  }
-
-  /** Walk in from nearby path / lawn, not a distant park gate. */
-  private pickApproach(): THREE.Vector3 {
-    const dist = 14 + Math.random() * 12;
-    // Prefer coming from the lakeside path (west) onto the east green.
-    const yaw = Math.PI * 0.92 + (Math.random() - 0.5) * 0.7;
-    return new THREE.Vector3(
-      this.spot.x + Math.sin(yaw) * dist,
-      0,
-      this.spot.z + Math.cos(yaw) * dist,
-    );
-  }
-
-  /** Nearest park gate, preferring ones south / east of the grill. */
-  private pickGate(): THREE.Vector3 {
-    const gates = parkGates();
-    if (gates.length === 0) {
-      return new THREE.Vector3(this.spot.x + 20, 0, this.spot.z - 30);
-    }
-    let best = gates[0]!;
-    let bestScore = Infinity;
-    for (const g of gates) {
-      const dx = g.x - this.spot.x;
-      const dz = g.y - this.spot.z;
-      // Prefer closer gates that sit a bit south or further east.
-      const score =
-        Math.hypot(dx, dz) + (g.y > this.spot.z ? 18 : 0) + (g.x < this.spot.x ? 8 : 0);
-      if (score < bestScore) {
-        bestScore = score;
-        best = g;
-      }
-    }
-    return new THREE.Vector3(best.x, 0, best.y);
   }
 
   public getPosition(): THREE.Vector3 {
@@ -334,15 +304,42 @@ export class BbqParty {
     for (const guest of this.guests) {
       guest.face.update(delta);
 
+      if (guest.phase === "toGate") {
+        const gap = this.amble(guest, guest.gate, delta, 1.45);
+        const here = guest.group.position;
+        if (gap < 1.1 || insidePark(here.x, here.z)) {
+          guest.phase = "arriving";
+          setRouteToward(
+            guest.route,
+            here.x,
+            here.z,
+            guest.stand.x,
+            guest.stand.z,
+          );
+        }
+        anyHere = true;
+        continue;
+      }
+
       if (guest.phase === "arriving") {
-        if (this.amble(guest, guest.stand, delta, 1.45) < 0.35) {
+        if (this.walkRouted(guest, guest.stand, delta, 1.45, 12) < 0.35) {
           guest.phase = "cooking";
+          guest.route.ready = false;
           guest.group.position.x = guest.stand.x;
           guest.group.position.z = guest.stand.z;
           this.faceGrill(guest);
           this.idlePose(guest);
           this.grill.visible = true;
           this.cooking = true;
+        }
+        anyHere = true;
+        continue;
+      }
+
+      if (guest.phase === "toExit") {
+        if (this.walkRouted(guest, guest.gate, delta, 1.55, 10) < 1.2) {
+          guest.phase = "leaving";
+          guest.route.ready = false;
         }
         anyHere = true;
         continue;
@@ -382,7 +379,15 @@ export class BbqParty {
 
     this.updateSmoke(delta);
 
-    if (!anyHere && this.guests.every((g) => g.phase === "leaving" || !g.group.visible)) {
+    if (
+      !anyHere &&
+      this.guests.every(
+        (g) =>
+          g.phase === "leaving" ||
+          g.phase === "toExit" ||
+          !g.group.visible,
+      )
+    ) {
       this.gone = true;
     }
   }
@@ -405,8 +410,10 @@ export class BbqParty {
     this.cooking = false;
     this.grill.visible = false;
     for (const guest of this.guests) {
-      if (guest.phase === "leaving") continue;
-      guest.phase = "leaving";
+      if (guest.phase === "toExit" || guest.phase === "leaving") continue;
+      guest.phase = "toExit";
+      const here = guest.group.position;
+      setRouteToward(guest.route, here.x, here.z, guest.gate.x, guest.gate.z);
     }
   }
 
@@ -483,6 +490,7 @@ export class BbqParty {
   private buildGuest(
     start: THREE.Vector3,
     stand: THREE.Vector3,
+    gate: THREE.Vector3,
     exit: THREE.Vector3,
     cook: boolean,
   ): Guest {
@@ -503,7 +511,8 @@ export class BbqParty {
 
     const group = new THREE.Group();
     group.position.copy(start);
-    group.rotation.y = Math.atan2(stand.x - start.x, stand.z - start.z);
+    group.position.y = PATH_Y + groundHeight(start.x, start.z);
+    group.rotation.y = Math.atan2(gate.x - start.x, gate.z - start.z);
     this.scene.add(group);
 
     const hips = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.18, 0.22), legMat);
@@ -561,12 +570,37 @@ export class BbqParty {
       arms,
       face,
       stand,
+      gate,
       exit,
-      phase: "arriving",
+      phase: "toGate",
+      route: emptyRoute(),
       step: Math.random() * Math.PI * 2,
       chatIn: 4 + Math.random() * 10,
       cook,
     };
+  }
+
+  private walkRouted(
+    guest: Guest,
+    to: THREE.Vector3,
+    delta: number,
+    speed: number,
+    peelAt: number,
+  ): number {
+    const here = guest.group.position;
+    const aim = routeAim(
+      guest.route,
+      here.x,
+      here.z,
+      to.x,
+      to.z,
+      peelAt,
+    );
+    if (aim) {
+      this.amble(guest, new THREE.Vector3(aim.x, 0, aim.y), delta, speed);
+      return Math.hypot(to.x - here.x, to.z - here.z);
+    }
+    return this.amble(guest, to, delta, speed);
   }
 
   private amble(
@@ -599,7 +633,7 @@ export class BbqParty {
     guest.group.position.y =
       this.footY(here.x, here.z) + Math.abs(Math.sin(guest.step)) * 0.04;
     guest.face.setMood("idle");
-    return gap - step;
+    return Math.hypot(to.x - here.x, to.z - here.z);
   }
 
   private faceGrill(guest: Guest): void {

@@ -300,7 +300,13 @@ export class WaterJet {
 
   private streamPower(): number {
     if (!this.heavy) return 1;
-    return 1.65 * (0.4 + this.pressure * 0.6);
+    // Full tank punches hard and far; low pressure still beats the lance.
+    return 2.55 * (0.55 + this.pressure * 0.55);
+  }
+
+  /** Stream cylinder radius — heavy reel is a fat jet. */
+  private streamRadius(): number {
+    return STREAM_RADIUS * (this.heavy ? 4.8 : 1);
   }
 
   /** Slung over the shoulder while they're on the litter. */
@@ -485,8 +491,9 @@ export class WaterJet {
       node.at.addScaledVector(node.vel, delta);
 
       const surface = isInLake(node.at.x, node.at.z) ? WATER_Y + 0.03 : 0.04;
+      const reach = this.heavy ? 55 * 55 : 28 * 28;
       const far =
-        node.at.distanceToSquared(muzzle) > 28 * 28 || node.at.y < -2;
+        node.at.distanceToSquared(muzzle) > reach || node.at.y < -2;
       if (node.at.y > surface && !far) continue;
 
       if (!this.ribbonHit && node.at.y <= surface && prev.y > surface) {
@@ -565,7 +572,7 @@ export class WaterJet {
         const mesh = this.stream[used]!;
         const along = (i + t0) / Math.max(1, pts.length - 1);
         const radius =
-          STREAM_RADIUS * (1 + along * 0.35) * (this.heavy ? 2.4 : 1);
+          this.streamRadius() * (1 + along * 0.4) * (this.heavy ? 1 : 1);
         mesh.position.copy(from);
         mesh.scale.set(radius, bitLen * 1.06, radius);
         mesh.quaternion.setFromUnitVectors(
@@ -614,7 +621,10 @@ export class WaterJet {
         .normalize();
 
       const speed =
-        MUZZLE_SPEED * this.streamPower() * (0.97 + Math.random() * 0.06);
+        MUZZLE_SPEED *
+        this.streamPower() *
+        (this.heavy ? 1.15 : 1) *
+        (0.97 + Math.random() * 0.06);
       const velocity = dir.multiplyScalar(speed);
 
       this.tint(mesh, false);
@@ -629,7 +639,7 @@ export class WaterJet {
           .addScaledVector(fanUp, along)
           .normalize(),
         fanRate: 0.4 + Math.random() * 1.1,
-        life: DROPLET_LIFE,
+        life: DROPLET_LIFE * (this.heavy ? 1.45 : 1),
         bounced: false,
         dirty: false,
       };

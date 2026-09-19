@@ -24,12 +24,21 @@ export class ObjectiveArrow {
   private locked: { x: number; z: number } | null = null;
   private scratch = new THREE.Vector3();
   private bob = 0;
+  /** Extra flash when a mission just started (seconds). */
+  private throbLeft = 0;
 
   constructor(root: HTMLElement, kind: ArrowKind = "mess") {
     this.root = root;
     this.kind = kind;
     this.chevron = root.querySelector(".objective-chevron") as HTMLElement;
     this.root.classList.add(kind);
+  }
+
+  /** Red mission arrow: flash hard so the player clocks the new job. */
+  public pulse(seconds = 9): void {
+    if (this.kind !== "mission") return;
+    this.throbLeft = Math.max(this.throbLeft, seconds);
+    this.root.classList.add("throbbing");
   }
 
   /**
@@ -42,6 +51,11 @@ export class ObjectiveArrow {
     spots: ReadonlyArray<{ x: number; z: number }>,
     delta: number,
   ): void {
+    if (this.throbLeft > 0) {
+      this.throbLeft = Math.max(0, this.throbLeft - delta);
+      if (this.throbLeft <= 0) this.root.classList.remove("throbbing");
+    }
+
     const target = this.pick(player, spots);
     if (!target) {
       this.root.classList.remove("visible", "hovering");
@@ -121,11 +135,14 @@ export class ObjectiveArrow {
     // Tip points forward on the HUD; tip points down onto the mark when hovering.
     const tipZ = THREE.MathUtils.lerp(turn, Math.PI, ease);
     const tipX = THREE.MathUtils.lerp(58, 18, ease);
-    const scale = THREE.MathUtils.lerp(
+    let scale = THREE.MathUtils.lerp(
       this.kind === "mission" ? 1.08 : 1,
       this.kind === "mission" ? 1.25 : 1.15,
       ease,
     );
+    if (this.throbLeft > 0) {
+      scale *= 1 + Math.sin(performance.now() * 0.012) * 0.2;
+    }
 
     this.place(x, y, tipZ, tipX, scale, ease > 0.55);
     this.root.classList.add("visible");

@@ -247,15 +247,21 @@ export class Gull {
   public hitBy(point: THREE.Vector3, heavy = false): boolean {
     const here = this.group.position;
     if (this.mode === "stoop" || this.mode === "up") {
-      const r = heavy ? 5.2 : 4.0;
+      const r = heavy ? 7.5 : 4.0;
       const dx = here.x - point.x;
       const dy = here.y - point.y;
       const dz = here.z - point.z;
-      return dx * dx + dy * dy * 0.55 + dz * dz < r * r;
+      return dx * dx + dy * dy * 0.45 + dz * dz < r * r;
     }
     if (this.mode === "cruise" || this.mode === "in") {
-      const low = here.y < 12;
-      const r = heavy ? (low ? 5.4 : 4.8) : low ? 4.2 : 3.6;
+      const low = here.y < 14;
+      const r = heavy
+        ? low
+          ? 7.2
+          : 6.0
+        : low
+          ? 4.2
+          : 3.6;
       return here.distanceTo(point) < r;
     }
     return here.distanceTo(point) < (heavy ? 3.6 : 2.4);

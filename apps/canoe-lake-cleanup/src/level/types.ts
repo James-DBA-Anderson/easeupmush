@@ -25,26 +25,33 @@ export type PlaceableId =
   | "cafe"
   | "cafeKiosk"
   | "toilets"
+  | "emanuelFountain"
   | "roseGarden"
   | "busStop"
   | "swing"
   | "slide"
   | "spring"
   | "zip"
+  | "gymPullUp"
+  | "gymBars"
+  | "gymBench"
+  | "gymWalker"
+  | "gymBike"
   | "stumpCrab"
   | "stumpSnail"
   | "stumpStarfish";
 
-/** One of each — hire office, toilets, rose beds. */
+/** One of each — hire office, toilets, rose beds, memorial fountain. */
 export const UNIQUE_PLACEABLES: readonly PlaceableId[] = [
   "boathouse",
   "toilets",
+  "emanuelFountain",
   "roseGarden",
 ];
 
 /**
- * Anything you can stamp more than once: cafés, bus stops, play kit, and
- * carved stump ornaments.
+ * Anything you can stamp more than once: cafés, bus stops, play kit, outdoor
+ * gym stations, and carved stump ornaments.
  */
 export const MULTI_PLACEABLES: readonly PlaceableId[] = [
   "cafe",
@@ -54,6 +61,11 @@ export const MULTI_PLACEABLES: readonly PlaceableId[] = [
   "slide",
   "spring",
   "zip",
+  "gymPullUp",
+  "gymBars",
+  "gymBench",
+  "gymWalker",
+  "gymBike",
   "stumpCrab",
   "stumpSnail",
   "stumpStarfish",

@@ -6,20 +6,24 @@ import * as THREE from "three";
  * lower and slower off Solent way, and now and then the Spitfire, in from
  * the east along the seafront and away over the Island — that one you hear.
  *
- * Heights sit under the camera far plane and above the cloud deck. Ground fog
- * is switched off on the meshes (same trick as the clouds) so a sunny sky
- * still shows the airframe at the head of the trail.
+ * Heights sit under the camera far plane (2500) and above the cloud deck.
+ * Ground fog is switched off on the meshes (same trick as the clouds) so a
+ * sunny sky still shows the airframe at the head of the trail.
  */
 
 export type PlaneKind = "jet" | "light" | "spitfire";
 
 let nextPlaneId = 1;
 
-/** Cruising height, and how far out either side they come from. */
-const CRUISE_Y = 420;
+/**
+ * Cruising height, and how far out either side they come from.
+ * Jets sit high and small so they read as airliners, not models on a stick;
+ * keep height + half-crossing under the camera far clip with room for trails.
+ */
+const CRUISE_Y = 720;
 const LOW_Y = 280;
 const FIGHTER_Y = 85;
-const CROSSING = 1400;
+const CROSSING = 1200;
 
 /** They look slow from the ground; this is the ground-speed that reads right. */
 const CRUISE_SPEED = 42;
@@ -30,8 +34,8 @@ const FIGHTER_SPEED = 58;
 const ISLAND_WAY = new THREE.Vector2(-0.93, -0.37).normalize();
 
 /** How long a bit of contrail hangs about before it's spread out and gone. */
-const TRAIL_LIFE = 20;
-const TRAIL_EVERY = 0.28;
+const TRAIL_LIFE = 18;
+const TRAIL_EVERY = 0.32;
 
 /** Sky props skip ground fog so they stay readable past the park haze. */
 const SKY_FOG = false;
@@ -138,9 +142,9 @@ export class Plane {
     );
     // Mesh nose sits on local −Z; travel is (+sin, +cos), so face the other way.
     this.group.rotation.y = this.heading + Math.PI;
-    // Big enough to read as an aeroplane from three hundred metres down.
+    // Small high silhouette — big scale made them look like toys at mid-height.
     this.group.scale.setScalar(
-      this.kind === "jet" ? 5.2 : this.kind === "light" ? 2.2 : 1.5,
+      this.kind === "jet" ? 2.8 : this.kind === "light" ? 2.2 : 1.5,
     );
     scene.add(this.group);
   }
@@ -349,18 +353,19 @@ export class Plane {
 
     const here = this.group.position;
     const across = new THREE.Vector3(Math.cos(this.heading), 0, -Math.sin(this.heading));
+    const span = 3.8 * this.group.scale.x;
     for (const side of [-1, 1]) {
       const material = this.material.clone();
       material.opacity = 0.42 * (1 - sky);
-      const puff = new THREE.Mesh(new THREE.SphereGeometry(7.5, 6, 5), material);
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(4.2, 6, 5), material);
       puff.position
         .copy(here)
-        .addScaledVector(across, side * 7)
+        .addScaledVector(across, side * span)
         .add(
           new THREE.Vector3(
-            -Math.sin(this.heading) * 12,
+            -Math.sin(this.heading) * 7,
             -1,
-            -Math.cos(this.heading) * 12,
+            -Math.cos(this.heading) * 7,
           ),
         );
       this.scene.add(puff);

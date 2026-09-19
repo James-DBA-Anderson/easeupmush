@@ -66,6 +66,8 @@ export class MiniMap {
   private originZ = 0;
   /** Player look yaw (radians) — turns the chevron only. */
   private heading = 0;
+  /** Hard pulse after a mission starts (seconds). */
+  private missionThrobLeft = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     const dpr = Math.min(window.devicePixelRatio, 2);
@@ -355,7 +357,15 @@ export class MiniMap {
     ctx.fillText("N", cx, cy - 12);
   }
 
+  /** Flash mission pins hard when a radio job kicks off. */
+  public pulseMissions(seconds = 9): void {
+    this.missionThrobLeft = Math.max(this.missionThrobLeft, seconds);
+  }
+
   public update(delta: number, data: MapData): void {
+    if (this.missionThrobLeft > 0) {
+      this.missionThrobLeft = Math.max(0, this.missionThrobLeft - delta);
+    }
     this.since += delta;
     if (this.since < REFRESH) return;
     this.since = 0;
@@ -435,25 +445,36 @@ export class MiniMap {
     spots: ReadonlyArray<{ x: number; z: number }>,
   ): void {
     const ctx = this.ctx;
-    const pulse = 0.55 + Math.sin(performance.now() * 0.007) * 0.45;
+    const hot = this.missionThrobLeft > 0;
+    const speed = hot ? 0.016 : 0.007;
+    const pulse =
+      (hot ? 0.4 : 0.55) + Math.sin(performance.now() * speed) * (hot ? 0.6 : 0.45);
     ctx.save();
     for (const spot of spots) {
       const [sx, sy] = this.toScreen(spot.x, spot.z);
-      const ring = 7 + pulse * 4;
+      const ring = (hot ? 10 : 7) + pulse * (hot ? 8 : 4);
 
       ctx.beginPath();
       ctx.arc(sx, sy, ring, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255, 40, 40, ${0.25 + pulse * 0.35})`;
-      ctx.lineWidth = 2.2;
+      ctx.strokeStyle = `rgba(255, 40, 40, ${0.25 + pulse * (hot ? 0.55 : 0.35)})`;
+      ctx.lineWidth = hot ? 3 : 2.2;
       ctx.stroke();
 
+      if (hot) {
+        ctx.beginPath();
+        ctx.arc(sx, sy, ring * 1.35, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255, 80, 60, ${0.12 + pulse * 0.2})`;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+
       ctx.beginPath();
-      ctx.arc(sx, sy, 4.2, 0, Math.PI * 2);
+      ctx.arc(sx, sy, hot ? 5 : 4.2, 0, Math.PI * 2);
       ctx.fillStyle = "#1a0505";
       ctx.fill();
 
       ctx.beginPath();
-      ctx.arc(sx, sy, 3.2, 0, Math.PI * 2);
+      ctx.arc(sx, sy, hot ? 4 : 3.2, 0, Math.PI * 2);
       ctx.fillStyle = `rgba(255, 55, 45, ${0.85 + pulse * 0.15})`;
       ctx.fill();
       ctx.strokeStyle = "rgba(255, 230, 180, 0.95)";
@@ -462,9 +483,9 @@ export class MiniMap {
 
       // Small tip mark so it reads as a pin, not another person dot.
       ctx.beginPath();
-      ctx.moveTo(sx, sy - 9 - pulse);
-      ctx.lineTo(sx + 3.2, sy - 3.5);
-      ctx.lineTo(sx - 3.2, sy - 3.5);
+      ctx.moveTo(sx, sy - (hot ? 12 : 9) - pulse);
+      ctx.lineTo(sx + (hot ? 4 : 3.2), sy - 3.5);
+      ctx.lineTo(sx - (hot ? 4 : 3.2), sy - 3.5);
       ctx.closePath();
       ctx.fillStyle = "#ff2e28";
       ctx.fill();

@@ -66,6 +66,7 @@ class ParkAudioEngine {
   private lanceGain: GainNode | null = null;
   private lanceNodes: { stop: () => void }[] = [];
   private lanceOn = false;
+  private lanceHeavy = false;
 
   private swanGain: GainNode | null = null;
   private swanNodes: { stop: () => void }[] = [];
@@ -128,6 +129,8 @@ class ParkAudioEngine {
     delta: number,
     opts: {
       hosing: boolean;
+      /** Van heavy reel — louder, thicker wash. */
+      heavyHose?: boolean;
       swanAngry: boolean;
       gullsNear: number;
       ducksNear: number;
@@ -150,7 +153,7 @@ class ParkAudioEngine {
       return;
     }
 
-    this.setLance(opts.hosing);
+    this.setLance(opts.hosing, !!opts.heavyHose);
     this.setSwanHiss(opts.swanAngry);
     this.setPedalling(opts.pedalling ?? 0);
     this.syncFlyovers(opts.flyovers ?? [], listener, delta);
@@ -1237,11 +1240,34 @@ class ParkAudioEngine {
     this.pedalTickRate?.setTargetAtTime(rate, t, 0.1);
   }
 
-  private setLance(on: boolean): void {
-    if (on === this.lanceOn) return;
-    this.lanceOn = on;
+  private setLance(on: boolean, heavy = false): void {
     if (!this.ctx || !this.master) return;
     const t = this.ctx.currentTime;
+
+    // Rebuild the loop when swapping between lance and the van reel.
+    if (on && this.lanceOn && heavy !== this.lanceHeavy) {
+      if (this.lanceGain) {
+        this.lanceGain.gain.cancelScheduledValues(t);
+        this.lanceGain.gain.setTargetAtTime(0.0001, t, 0.02);
+      }
+      const dying = this.lanceNodes.slice();
+      this.lanceNodes = [];
+      window.setTimeout(() => {
+        for (const n of dying) n.stop();
+      }, 120);
+      this.lanceGain = null;
+      this.lanceOn = false;
+    }
+
+    if (on === this.lanceOn) {
+      if (on && this.lanceGain) {
+        const want = heavy ? 0.48 : 0.22;
+        this.lanceGain.gain.setTargetAtTime(want, t, 0.08);
+      }
+      return;
+    }
+    this.lanceOn = on;
+    this.lanceHeavy = heavy;
 
     if (!on) {
       if (this.lanceGain) {
@@ -1262,25 +1288,25 @@ class ParkAudioEngine {
     gain.connect(this.master);
     this.lanceGain = gain;
 
-    // White hiss through a high bandpass — pressure washer bite.
-    const hiss = this.loopNoise(0.55, 4200, 0.7);
+    // White hiss — heavy reel is lower, thicker, angrier.
+    const hiss = this.loopNoise(heavy ? 0.85 : 0.55, heavy ? 3200 : 4200, 0.7);
     const bp = this.ctx.createBiquadFilter();
     bp.type = "bandpass";
-    bp.frequency.value = 2800;
-    bp.Q.value = 0.7;
+    bp.frequency.value = heavy ? 1600 : 2800;
+    bp.Q.value = heavy ? 0.55 : 0.7;
     hiss.out.connect(bp);
     bp.connect(gain);
     this.lanceNodes.push(hiss);
 
-    // Low pump throb underneath.
+    // Low pump throb underneath — heavy has a bigger motor.
     const pump = this.ctx.createOscillator();
     pump.type = "sawtooth";
-    pump.frequency.value = 55;
+    pump.frequency.value = heavy ? 38 : 55;
     const pg = this.ctx.createGain();
-    pg.gain.value = 0.08;
+    pg.gain.value = heavy ? 0.2 : 0.08;
     const pf = this.ctx.createBiquadFilter();
     pf.type = "lowpass";
-    pf.frequency.value = 180;
+    pf.frequency.value = heavy ? 260 : 180;
     pump.connect(pf);
     pf.connect(pg);
     pg.connect(gain);
@@ -1295,11 +1321,37 @@ class ParkAudioEngine {
       },
     });
 
+    if (heavy) {
+      // Extra mid roar so the van hose reads as a different tool.
+      const roar = this.ctx.createOscillator();
+      roar.type = "square";
+      roar.frequency.value = 72;
+      const rg = this.ctx.createGain();
+      rg.gain.value = 0.06;
+      const rf = this.ctx.createBiquadFilter();
+      rf.type = "bandpass";
+      rf.frequency.value = 420;
+      rf.Q.value = 1.2;
+      roar.connect(rf);
+      rf.connect(rg);
+      rg.connect(gain);
+      roar.start();
+      this.lanceNodes.push({
+        stop: () => {
+          try {
+            roar.stop();
+          } catch {
+            /* already */
+          }
+        },
+      });
+    }
+
     // Slight flutter so it doesn't sit dead flat.
     const flutter = this.ctx.createOscillator();
     const fg = this.ctx.createGain();
-    flutter.frequency.value = 18;
-    fg.gain.value = 0.025;
+    flutter.frequency.value = heavy ? 12 : 18;
+    fg.gain.value = heavy ? 0.04 : 0.025;
     flutter.connect(fg);
     fg.connect(gain.gain);
     flutter.start();
@@ -1313,8 +1365,9 @@ class ParkAudioEngine {
       },
     });
 
+    const peak = heavy ? 0.48 : 0.22;
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.22, t + 0.08);
+    gain.gain.exponentialRampToValueAtTime(peak, t + 0.08);
   }
 
   private setSwanHiss(on: boolean): void {

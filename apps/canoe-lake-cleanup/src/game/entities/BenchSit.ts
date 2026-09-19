@@ -14,8 +14,12 @@ import { Face } from "./Face";
 import { Grumble } from "../effects/Grumble";
 
 const COATS = [0x2f4f7f, 0x8b3a3a, 0x3f6b4a, 0x5a4a7a, 0x2b2b33, 0xb06a2c, 0xd8c8a0];
+const ELDER_COATS = [0x6b5a4a, 0x3a4a5a, 0x5a4a58, 0x8a7a68, 0x2f3a48, 0x7a5a4a];
 const TROUSERS = [0x2b3038, 0x4a4a52, 0x6b5a44, 0x3a5a6a];
+const ELDER_TROUSERS = [0x3a3834, 0x4a4840, 0x5a5248];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
+const ELDER_SKIN = [0xe8c4a8, 0xd4b090, 0xc4a078];
+const HAIR = [0xe8e4dc, 0xc8c4bc, 0xa8a49c, 0xd0c8b0];
 
 /** Local hip height on the standing figure — sunk so the seat meets it. */
 const HIP_Y = 0.92;
@@ -31,6 +35,16 @@ const CHAT = [
   "LOVELY SPOT THIS",
   "HEARD ABOUT THE FOX?",
   "KEEPS YOU YOUNG",
+];
+
+const ELDER_CHAT = [
+  "LOVELY ROSES",
+  "REMINDS ME OF MUM",
+  "NICE TO SIT",
+  "PROPER GARDEN THIS",
+  "COME HERE EVERY WEEK",
+  "SMELLS LOVELY",
+  "QUIET OUT HERE",
 ];
 
 const PHONE_CHAT = [
@@ -134,7 +148,10 @@ export class BenchSit {
   constructor(scene: THREE.Scene, seat: BenchSeat, pastime: Pastime) {
     this.scene = scene;
     this.seat = seat;
-    this.linger = 70 + Math.random() * 140;
+    this.linger =
+      seat.crowd === "elder"
+        ? 120 + Math.random() * 180
+        : 70 + Math.random() * 140;
 
     const faceX = Math.sin(seat.yaw);
     const faceZ = Math.cos(seat.yaw);
@@ -177,7 +194,15 @@ export class BenchSit {
           ),
         );
       this.guests.push(
-        this.buildGuest(start, approach, sit, seat.yaw, exit, pastime),
+        this.buildGuest(
+          start,
+          approach,
+          sit,
+          seat.yaw,
+          exit,
+          pastime,
+          seat.crowd === "elder",
+        ),
       );
     }
   }
@@ -349,7 +374,9 @@ export class BenchSit {
                 ? BOOK_CHAT
                 : guest.pastime === "feed"
                   ? FEED_CHAT
-                  : CHAT;
+                  : this.seat.crowd === "elder"
+                    ? ELDER_CHAT
+                    : CHAT;
           this.say(guest, lines);
         }
       }
@@ -399,25 +426,28 @@ export class BenchSit {
     faceYaw: number,
     exit: THREE.Vector3,
     pastime: Pastime,
+    elder = false,
   ): Guest {
     const pick = <T>(list: readonly T[]): T =>
       list[Math.floor(Math.random() * list.length)]!;
     const coat = new THREE.MeshStandardMaterial({
-      color: pick(COATS),
+      color: pick(elder ? ELDER_COATS : COATS),
       roughness: 0.9,
     });
     const legMat = new THREE.MeshStandardMaterial({
-      color: pick(TROUSERS),
+      color: pick(elder ? ELDER_TROUSERS : TROUSERS),
       roughness: 0.9,
     });
     const skin = new THREE.MeshStandardMaterial({
-      color: pick(SKIN),
+      color: pick(elder ? ELDER_SKIN : SKIN),
       roughness: 0.8,
     });
 
     const group = new THREE.Group();
     group.position.copy(start);
     group.rotation.y = Math.atan2(approach.x - start.x, approach.z - start.z);
+    // Older folk a touch shorter / rounder.
+    if (elder) group.scale.set(1.02, 0.94, 1.02);
     this.scene.add(group);
 
     const hips = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.18, 0.22), legMat);
@@ -425,7 +455,10 @@ export class BenchSit {
     hips.castShadow = true;
     group.add(hips);
 
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.55, 0.24), coat);
+    const torso = new THREE.Mesh(
+      new THREE.BoxGeometry(elder ? 0.46 : 0.42, elder ? 0.52 : 0.55, 0.26),
+      coat,
+    );
     torso.position.y = 1.28;
     torso.castShadow = true;
     group.add(torso);
@@ -435,6 +468,19 @@ export class BenchSit {
     group.add(head);
     const face = new Face(skin);
     head.add(face.group);
+
+    if (elder) {
+      const hair = new THREE.Mesh(
+        new THREE.SphereGeometry(0.17, 8, 6),
+        new THREE.MeshStandardMaterial({
+          color: pick(HAIR),
+          roughness: 0.95,
+        }),
+      );
+      hair.position.set(0, 0.12, -0.02);
+      hair.scale.set(1.05, 0.7, 1.1);
+      head.add(hair);
+    }
 
     const legs: THREE.Group[] = [];
     const arms: THREE.Group[] = [];

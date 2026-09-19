@@ -1,6 +1,13 @@
 import * as THREE from "three";
 import { Grumble } from "../effects/Grumble";
 import { stepWalk } from "../world/blocking";
+import { nearestShore, outwardAt } from "../world/lake";
+import {
+  emptyRoute,
+  routeAim,
+  setRouteToward,
+  type LoopRoute,
+} from "../world/pathRoute";
 import { groundHeight } from "../world/terrain";
 import {
   flowerBeds,
@@ -82,6 +89,8 @@ export class Gardener {
   private tendRestoreIn = 0;
   /** Soften repeat anger so every footfall isn't a fresh chase. */
   private angerCool = 0;
+  /** Lakeside loop when beds sit on opposite shores. */
+  private route: LoopRoute = emptyRoute();
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -174,10 +183,12 @@ export class Gardener {
     if (this.job === "toBed") {
       if (!this.bed) {
         this.job = "idle";
+        this.route.ready = false;
         return;
       }
       const edge = this.tendSpot(this.bed);
-      if (this.walkToward(edge, delta, 2.4)) {
+      if (this.walkRouted(edge, delta, 2.4, 14)) {
+        this.route.ready = false;
         this.job = "tend";
         this.timer = 5.5 + Math.random() * 4;
         this.tendRestoreIn = 1.2;
@@ -261,6 +272,7 @@ export class Gardener {
     this.swingReady = false;
     this.swingCool = 0.35;
     this.shoutIn = 0;
+    this.route.ready = false;
     this.say(lines[Math.floor(Math.random() * lines.length)]!);
   }
 
@@ -271,6 +283,7 @@ export class Gardener {
       this.job = "idle";
       this.hunt = null;
       this.swingReady = false;
+      this.route.ready = false;
       this.timer = 1;
       return;
     }
@@ -285,7 +298,11 @@ export class Gardener {
     this.faceToward(aim);
 
     if (gap > 1.45) {
-      this.walkToward(aim, delta, 4.8);
+      // Re-path when the quarry has moved off the current lakeside plan.
+      if (!this.route.ready || Math.random() < delta * 0.35) {
+        setRouteToward(this.route, here.x, here.z, aim.x, aim.z);
+      }
+      this.walkRouted(aim, delta, 4.8, 6);
       this.rake.visible = true;
       this.arms[0]!.rotation.x = -1.1;
       this.arms[1]!.rotation.x = -1.35;
@@ -342,6 +359,35 @@ export class Gardener {
     this.bedIdx = (this.bedIdx + 1) % beds.length;
     this.bed = beds[this.bedIdx]!;
     this.job = "toBed";
+    const here = this.group.position;
+    const edge = this.tendSpot(this.bed);
+    setRouteToward(this.route, here.x, here.z, edge.x, edge.z);
+  }
+
+  /**
+   * Prefer the lakeside loop toward a goal; peel onto grass once close.
+   * Returns true once arrived.
+   */
+  private walkRouted(
+    at: THREE.Vector3,
+    delta: number,
+    pace: number,
+    peelAt: number,
+  ): boolean {
+    const here = this.group.position;
+    const aim = routeAim(
+      this.route,
+      here.x,
+      here.z,
+      at.x,
+      at.z,
+      peelAt,
+    );
+    if (aim) {
+      this.walkToward(new THREE.Vector3(aim.x, 0, aim.y), delta, pace);
+      return Math.hypot(at.x - here.x, at.z - here.z) < 0.5;
+    }
+    return this.walkToward(at, delta, pace);
   }
 
   private tendSpot(bed: FlowerBed): THREE.Vector3 {
@@ -385,14 +431,40 @@ export class Gardener {
       return true;
     }
     const step = Math.min(gap, pace * delta);
-    const landed = stepWalk(
+    const self = { x: here.x, z: here.z };
+    let landed = stepWalk(
       here.x,
       here.z,
       (dx / gap) * step,
       (dz / gap) * step,
       0.35,
-      { x: here.x, z: here.z },
+      self,
     );
+    // Straight into the water? Skirt the shore instead of stalling on the bank.
+    if (Math.hypot(landed.x - here.x, landed.z - here.z) < 0.001 && step > 0) {
+      const out = outwardAt(nearestShore(here.x, here.z));
+      const tx = -out.y;
+      const tz = out.x;
+      const prefer = dx * tx + dz * tz >= 0 ? 1 : -1;
+      landed = stepWalk(
+        here.x,
+        here.z,
+        tx * prefer * step,
+        tz * prefer * step,
+        0.35,
+        self,
+      );
+      if (Math.hypot(landed.x - here.x, landed.z - here.z) < 0.001) {
+        landed = stepWalk(
+          here.x,
+          here.z,
+          out.x * step,
+          out.y * step,
+          0.35,
+          self,
+        );
+      }
+    }
     here.x = landed.x;
     here.z = landed.z;
     this.group.rotation.y = Math.atan2(dx, dz);

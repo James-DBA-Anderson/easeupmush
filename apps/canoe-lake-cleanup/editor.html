@@ -214,20 +214,30 @@
       overflow: hidden;
     }
     #workspace.place-open {
-      grid-template-columns: 280px 1fr;
+      grid-template-columns: 240px 1fr 300px;
     }
-    #place-panel {
+    #place-panel,
+    #place-preview-panel {
       display: none;
       flex-direction: column;
       gap: 10px;
       padding: 10px;
       background: var(--ribbon);
-      border-right: 1px solid #0006;
       min-height: 0;
       overflow: auto;
     }
-    #workspace.place-open #place-panel { display: flex; }
-    #place-panel h2 {
+    #place-panel {
+      border-right: 1px solid #0006;
+    }
+    #place-preview-panel {
+      border-left: 1px solid #0006;
+    }
+    #workspace.place-open #place-panel,
+    #workspace.place-open #place-preview-panel {
+      display: flex;
+    }
+    #place-panel h2,
+    #place-preview-panel h2 {
       font-size: 11px;
       letter-spacing: 0.08em;
       color: var(--muted);
@@ -328,7 +338,8 @@
     }
     #walk-overlay[hidden] { display: none !important; }
     body.walk-mode #stage .zoom-dock { display: none; }
-    body.walk-mode #workspace.place-open #place-panel {
+    body.walk-mode #workspace.place-open #place-panel,
+    body.walk-mode #workspace.place-open #place-preview-panel {
       background: #1e2a22f2;
       box-shadow: 0 8px 28px #000a;
       z-index: 25;
@@ -494,6 +505,7 @@
               <button type="button" role="menuitem" data-debug-from="start">Start of shift</button>
               <button type="button" role="menuitem" data-debug-from="picnic">Picnic raid</button>
               <button type="button" role="menuitem" data-debug-from="geese">Geese inbound</button>
+              <button type="button" role="menuitem" data-debug-from="swanboat">Stolen swanboat</button>
               <button type="button" role="menuitem" data-debug-from="fire">Grass fire</button>
               <button type="button" role="menuitem" data-debug-from="racers">Boy racers</button>
               <button type="button" role="menuitem" data-debug-from="rebels">Rebel raid</button>
@@ -661,7 +673,7 @@
           <div class="ribbon-pane" data-for="place">
             <div class="ribbon-group">
               <span class="group-label">Buildings &amp; kit</span>
-              <p class="ribbon-hint"><span class="swatch" style="background:var(--place)"></span>Pick from the side catalog. Unique hire buildings select in place; cafés, bus stops and play kit stamp on empty clicks. Yaw in the preview (or Shift-drag).</p>
+              <p class="ribbon-hint"><span class="swatch" style="background:var(--place)"></span>Pick from the list on the left. Unique hire buildings select in place; cafés, bus stops and play kit stamp on empty clicks. Yaw in the preview on the right (or Shift-drag).</p>
             </div>
           </div>
 
@@ -746,16 +758,6 @@
       <aside id="place-panel">
         <h2>PLACE</h2>
         <div id="place-catalog"></div>
-        <div class="preview-wrap">
-          <canvas id="place-preview"></canvas>
-        </div>
-        <div class="place-controls">
-          <label class="hint">Yaw
-            <input type="range" id="place-yaw" min="-180" max="180" value="0" />
-            <span class="val" id="place-yaw-val">0°</span>
-          </label>
-          <span class="hint">Drag preview to orbit · scroll to zoom · Shift-drag to set yaw · click map to place kit</span>
-        </div>
       </aside>
       <div id="stage">
         <canvas id="view"></canvas>
@@ -780,6 +782,19 @@
           <span class="val" id="zoom-val">1.80×</span>
         </label>
       </div>
+      <aside id="place-preview-panel">
+        <h2>PREVIEW</h2>
+        <div class="preview-wrap">
+          <canvas id="place-preview"></canvas>
+        </div>
+        <div class="place-controls">
+          <label class="hint">Yaw
+            <input type="range" id="place-yaw" min="-180" max="180" value="0" />
+            <span class="val" id="place-yaw-val">0°</span>
+          </label>
+          <span class="hint">Drag preview to orbit · scroll to zoom · Shift-drag to set yaw · click map to place kit</span>
+        </div>
+      </aside>
     </div>
 
     <footer>

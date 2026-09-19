@@ -12,6 +12,8 @@ export interface BenchSeat {
   x: number;
   z: number;
   yaw: number;
+  /** Rose-garden seats — older visitors with a book or a natter. */
+  crowd?: "elder";
 }
 
 /** Path / lawn benches available to daytime sitters (not play-park strips). */
@@ -48,14 +50,21 @@ export function placeBench(
   x: number,
   z: number,
   yaw: number,
-  opts?: { sitters?: boolean },
+  opts?: { sitters?: boolean; crowd?: "elder" },
 ): THREE.Group {
   const bench = buildBench();
   bench.position.set(x, groundHeight(x, z), z);
   bench.rotation.y = yaw;
   scene.add(bench);
   addProp(benchFootprint(x, z, yaw));
-  if (opts?.sitters) sitterBenches.push({ x, z, yaw });
+  if (opts?.sitters) {
+    sitterBenches.push({
+      x,
+      z,
+      yaw,
+      ...(opts.crowd ? { crowd: opts.crowd } : {}),
+    });
+  }
   return bench;
 }
 

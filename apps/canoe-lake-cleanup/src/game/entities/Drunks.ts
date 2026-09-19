@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { distanceToShore, isInLake, PATH_OUTER } from "../world/lake";
-import { insidePark, parkGates } from "../world/fence";
+import { insidePark } from "../world/fence";
 import { stepWalk } from "../world/blocking";
+import { gateOutside, nearestGate } from "../world/pathRoute";
 import { Grumble } from "../effects/Grumble";
 
 const COATS = [0x2a2a32, 0x3a3a44, 0x4a3a2a, 0x1e2a38, 0x5a2a2a, 0x2f4a3a];
@@ -65,11 +66,9 @@ export class Drunks {
     this.scene = scene;
     this.home.set(spot.x, 0, spot.y);
 
-    const gates = parkGates();
-    const gate =
-      gates[Math.floor(Math.random() * Math.max(1, gates.length))] ??
-      new THREE.Vector2(spot.x, spot.y - 80);
-    this.exit.set(gate.x, 0, gate.y);
+    const gate = nearestGate(spot.x, spot.y);
+    const outside = gateOutside(gate, 10);
+    this.exit.set(outside.x, 0, outside.y);
 
     const count = 2 + Math.floor(Math.random() * 2);
     for (let i = 0; i < count; i++) {
@@ -82,15 +81,12 @@ export class Drunks {
       this.guests.push(this.buildGuest(stand));
     }
 
-    // Walk in from outside toward the spot.
-    const away = new THREE.Vector3(
-      this.home.x - this.exit.x,
+    // Walk in from outside the nearest gate.
+    this.root.position.set(
+      outside.x + (Math.random() - 0.5) * 2,
       0,
-      this.home.z - this.exit.z,
+      outside.y + (Math.random() - 0.5) * 2,
     );
-    if (away.lengthSq() < 1) away.set(0, 0, 1);
-    away.normalize();
-    this.root.position.copy(this.home).addScaledVector(away, -22);
 
     scene.add(this.root);
   }

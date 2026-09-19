@@ -99,6 +99,8 @@ export class Weather {
   private blend = 1;
   private holdFor = 40;
   private held = 0;
+  /** Picnic / grass-fire first — no wet weather until Game unlocks it. */
+  private rainAllowed = false;
 
   private rain: THREE.LineSegments;
   private rainSpeeds: Float32Array;
@@ -183,12 +185,35 @@ export class Weather {
     // One step along the British ladder — no leaping from cloudy into drizzle
     // (that left rain hanging under a still-bright sky).
     const step = Math.random() < 0.5 ? -1 : 1;
-    const target = THREE.MathUtils.clamp(at + step, 0, ORDER.length - 1);
+    let target = THREE.MathUtils.clamp(at + step, 0, ORDER.length - 1);
+    if (!this.rainAllowed) {
+      const dryCap = ORDER.indexOf("overcast");
+      target = Math.min(target, dryCap);
+    }
     this.kind = this.next;
     this.next = ORDER[target]!;
     this.blend = 0;
     this.held = 0;
     this.holdFor = 45 + Math.random() * 90;
+  }
+
+  /**
+   * Hold off drizzle/downpour until the early radio jobs (picnic + grass fire)
+   * are done — blue skies for the hose work.
+   */
+  public setRainAllowed(allowed: boolean): void {
+    if (this.rainAllowed === allowed) return;
+    this.rainAllowed = allowed;
+    if (allowed) return;
+    // Snap any wet blend back to overcast so rain doesn't linger.
+    const dryCap = ORDER.indexOf("overcast");
+    if (ORDER.indexOf(this.kind) > dryCap) this.kind = "overcast";
+    if (ORDER.indexOf(this.next) > dryCap) this.next = "overcast";
+    if (this.preset(this.kind).rain > 0 || this.preset(this.next).rain > 0) {
+      this.kind = "overcast";
+      this.next = "cloudy";
+      this.blend = 1;
+    }
   }
 
   public update(delta: number, sky: SkyState): void {
@@ -251,6 +276,7 @@ export class Weather {
    * lightly cloudy sky while weather is blending.
    */
   private rainAmount(): number {
+    if (!this.rainAllowed) return 0;
     const rain = this.mix("rain");
     if (rain < 0.01) return 0;
     const cover = this.mix("cover");

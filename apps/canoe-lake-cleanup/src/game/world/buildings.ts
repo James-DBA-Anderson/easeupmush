@@ -521,18 +521,20 @@ function roadStrip(
     asphalt.rotateY(yaw);
     asphalt.translate(mx, gy + 0.04, mz);
     yard.add(ASPHALT, asphalt);
+  }
 
-    // Dashed white centre line, slightly proud of the tarmac.
-    let walked = MARK_GAP * 0.5;
-    while (walked + MARK_DASH < seg) {
-      const cx = x0 + ux * (walked + MARK_DASH / 2);
-      const cz = z0 + uz * (walked + MARK_DASH / 2);
-      const dash = new THREE.BoxGeometry(MARK_DASH, 0.04, 0.22);
-      dash.rotateY(yaw);
-      dash.translate(cx, gy + 0.14, cz);
-      yard.add(ROAD_MARK, dash);
-      walked += MARK_DASH + MARK_GAP;
-    }
+  // Dashes along the full run — not per asphalt chunk (chunks are shorter
+  // than one dash, so per-chunk painting used to draw nothing).
+  let walked = MARK_GAP * 0.35;
+  while (walked + MARK_DASH < len) {
+    const cx = ax + ux * (walked + MARK_DASH / 2);
+    const cz = az + uz * (walked + MARK_DASH / 2);
+    const gy = groundHeight(cx, cz);
+    const dash = new THREE.BoxGeometry(MARK_DASH, 0.05, 0.28);
+    dash.rotateY(yaw);
+    dash.translate(cx, gy + 0.15, cz);
+    yard.add(ROAD_MARK, dash);
+    walked += MARK_DASH + MARK_GAP;
   }
 }
 
