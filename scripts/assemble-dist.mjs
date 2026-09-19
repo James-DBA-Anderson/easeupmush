@@ -8,6 +8,7 @@ const siteDist = resolve(root, "apps/site/dist");
 const gameDist = resolve(root, "apps/pompey-punch-up/dist");
 const monDist = resolve(root, "apps/pompeymon/dist");
 const canoeDist = resolve(root, "apps/canoe-lake-cleanup/dist");
+const bunDist = resolve(root, "apps/bunsterstons/dist");
 
 if (!existsSync(siteDist)) {
   console.error("Missing apps/site/dist — run site build first.");
@@ -23,6 +24,10 @@ if (!existsSync(monDist)) {
 }
 if (!existsSync(canoeDist)) {
   console.error("Missing apps/canoe-lake-cleanup/dist — run game build first.");
+  process.exit(1);
+}
+if (!existsSync(bunDist)) {
+  console.error("Missing apps/bunsterstons/dist — run game build first.");
   process.exit(1);
 }
 
@@ -44,6 +49,13 @@ const canoeOut = resolve(dist, "games/canoe-lake-cleanup");
 mkdirSync(canoeOut, { recursive: true });
 cpSync(canoeDist, canoeOut, { recursive: true });
 
+// Bunsterstons ships unlisted — only the back room links to it.
+const bunOut = resolve(dist, "games/bunsterstons");
+mkdirSync(bunOut, { recursive: true });
+cpSync(bunDist, bunOut, { recursive: true });
+
 writeFileSync(resolve(dist, "CNAME"), "easeupmush.com\n");
 
-console.log("Assembled dist/ (site + games/pompey-punch-up + games/pompeymon + games/canoe-lake-cleanup)");
+console.log(
+  "Assembled dist/ (site + games/pompey-punch-up + games/pompeymon + games/canoe-lake-cleanup + games/bunsterstons)",
+);

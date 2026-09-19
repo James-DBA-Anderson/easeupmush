@@ -42,6 +42,16 @@ const kids = [
     },
     shell: true,
   }),
+  spawn("npm run dev -w @easeupmush/bunsterstons", {
+    cwd: root,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      GAME_BASE: "/games/bunsterstons/",
+      BROWSER: "none",
+    },
+    shell: true,
+  }),
 ];
 
 function shutDown(code = 0) {

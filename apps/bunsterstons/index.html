@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <title>Bunsterstons and Chippy</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --pink: #ff6bb5;
+        --orange: #ff8a2b;
+        --green: #5ecf4a;
+        --ink: #2a1a2e;
+        --cream: #fff8ef;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--cream);
+        font-family: "Fredoka", system-ui, sans-serif;
+        color: var(--ink);
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      #game {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      #hud {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 10;
+      }
+
+      .hud-top {
+        position: absolute;
+        top: 1.1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.35rem;
+        width: min(420px, 86vw);
+      }
+
+      .progress {
+        width: 100%;
+        height: 18px;
+        border: 3px solid var(--green);
+        border-radius: 999px;
+        background: #fff;
+        overflow: hidden;
+        box-shadow: 0 2px 0 #0002;
+      }
+
+      .progress__fill {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, var(--orange), #ffd23a);
+        transition: width 0.18s ease-out;
+      }
+
+      .carrot-count {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 1.35rem;
+        font-weight: 700;
+        color: var(--orange);
+        text-shadow: 0 1px 0 #fff;
+      }
+
+      .carrot-count svg {
+        width: 1.35rem;
+        height: 1.35rem;
+      }
+
+      .level-title {
+        position: absolute;
+        top: 4.6rem;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: clamp(2rem, 6vw, 3.2rem);
+        font-weight: 700;
+        color: #ff7a2e;
+        -webkit-text-stroke: 3px #e82020;
+        paint-order: stroke fill;
+        letter-spacing: 0.02em;
+        text-shadow: 0 3px 0 #0001;
+        transition: opacity 0.75s ease, visibility 0.75s ease;
+      }
+
+      .play-as {
+        position: absolute;
+        top: 8.1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #6a4a70;
+        background: #fffc;
+        padding: 0.25rem 0.75rem;
+        border-radius: 999px;
+        border: 2px solid #ffb8d9;
+        white-space: nowrap;
+        transition: opacity 0.75s ease, visibility 0.75s ease;
+      }
+
+      .target {
+        position: absolute;
+        top: 1.1rem;
+        right: 1.2rem;
+        text-align: right;
+        line-height: 1.15;
+      }
+
+      .target__label {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: var(--orange);
+      }
+
+      .target__row {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.35rem;
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: var(--ink);
+      }
+
+      .target__row svg {
+        width: 1.5rem;
+        height: 1.5rem;
+      }
+
+      .target__sub {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #6a4a70;
+      }
+
+      .hint {
+        position: absolute;
+        bottom: 1.1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #6a4a70;
+        background: #fffc;
+        padding: 0.35rem 0.85rem;
+        border-radius: 999px;
+        border: 2px solid #ffb8d9;
+        transition: opacity 0.75s ease, visibility 0.75s ease;
+      }
+
+      .level-title.faded,
+      .play-as.faded,
+      .hint.faded {
+        opacity: 0;
+        visibility: hidden;
+      }
+
+      #win {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: none;
+        place-items: center;
+        background: #2a1a2e88;
+        pointer-events: auto;
+      }
+
+      #win.on {
+        display: grid;
+      }
+
+      .win-card {
+        background: var(--cream);
+        border: 4px solid var(--pink);
+        border-radius: 1.25rem;
+        padding: 1.75rem 2.25rem;
+        text-align: center;
+        box-shadow: 0 12px 0 #ff6bb544;
+        max-width: 90vw;
+      }
+
+      .win-card h1 {
+        font-size: clamp(1.8rem, 5vw, 2.6rem);
+        color: #ff7a2e;
+        -webkit-text-stroke: 2px #e82020;
+        paint-order: stroke fill;
+        margin-bottom: 0.5rem;
+      }
+
+      .win-card p {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin-bottom: 1rem;
+      }
+
+      .win-card kbd {
+        font-family: inherit;
+        background: #ffe0f0;
+        border: 2px solid var(--pink);
+        border-radius: 0.4rem;
+        padding: 0.1rem 0.45rem;
+      }
+
+      .win-actions {
+        display: none;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+        justify-content: center;
+        margin-top: 0.35rem;
+      }
+
+      .win-actions button {
+        font-family: inherit;
+        font-weight: 700;
+        font-size: 1.05rem;
+        color: var(--ink);
+        background: #ffe0f0;
+        border: 3px solid var(--pink);
+        border-radius: 999px;
+        padding: 0.55rem 1.25rem;
+        pointer-events: auto;
+        touch-action: manipulation;
+      }
+
+      .win-actions button:active {
+        transform: scale(0.96);
+      }
+
+      #win-next {
+        background: linear-gradient(90deg, var(--orange), #ffd23a);
+        border-color: #e82020;
+        color: #2a1a2e;
+      }
+
+      body.touch-ui #win-actions-desktop {
+        display: none;
+      }
+
+      body.touch-ui .win-actions {
+        display: flex;
+      }
+
+      body.level-clear #mobile-controls {
+        display: none !important;
+      }
+
+      html.touch-ui,
+      body.touch-ui {
+        touch-action: none;
+      }
+
+      body.touch-ui .hint {
+        bottom: auto;
+        top: 10.6rem;
+        font-size: 0.8rem;
+        padding: 0.25rem 0.65rem;
+      }
+
+      body.touch-ui .target {
+        top: 0.7rem;
+        right: 0.7rem;
+        font-size: 0.9rem;
+      }
+
+      body.touch-ui .target__row {
+        font-size: 1.25rem;
+      }
+
+      #mobile-controls {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 30;
+        pointer-events: none;
+      }
+
+      #mobile-controls.visible,
+      body.touch-ui #mobile-controls {
+        display: block;
+      }
+
+      .mobile-stick {
+        position: absolute;
+        left: max(1rem, env(safe-area-inset-left));
+        bottom: max(1.1rem, env(safe-area-inset-bottom));
+        width: min(28vw, 132px);
+        height: min(28vw, 132px);
+        border-radius: 50%;
+        background: rgba(42, 26, 46, 0.28);
+        border: 3px solid rgba(255, 255, 255, 0.55);
+        pointer-events: auto;
+        touch-action: none;
+      }
+
+      .mobile-stick.active {
+        background: rgba(42, 26, 46, 0.42);
+        border-color: rgba(255, 255, 255, 0.85);
+      }
+
+      .mobile-stick-knob {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 42%;
+        height: 42%;
+        border-radius: 50%;
+        background: rgba(255, 248, 239, 0.9);
+        border: 3px solid #fff;
+        transform: translate(-50%, -50%);
+        box-shadow: 0 2px 8px #0004;
+      }
+
+      .mobile-actions {
+        position: absolute;
+        right: max(1rem, env(safe-area-inset-right));
+        bottom: max(1.1rem, env(safe-area-inset-bottom));
+        display: grid;
+        grid-template-columns: auto auto;
+        gap: 0.55rem;
+        align-items: end;
+        pointer-events: none;
+      }
+
+      .mobile-btn {
+        width: min(18vw, 78px);
+        height: min(18vw, 78px);
+        border-radius: 50%;
+        border: 3px solid rgba(255, 255, 255, 0.7);
+        background: rgba(255, 107, 181, 0.55);
+        color: #fff;
+        font-family: inherit;
+        font-weight: 700;
+        font-size: clamp(0.7rem, 2.6vw, 0.95rem);
+        letter-spacing: 0.02em;
+        pointer-events: auto;
+        touch-action: none;
+        box-shadow: 0 3px 0 #0002;
+      }
+
+      .mobile-btn.active {
+        transform: scale(0.94);
+        background: rgba(255, 107, 181, 0.85);
+        border-color: #fff;
+      }
+
+      #mobile-jump {
+        background: rgba(94, 207, 74, 0.55);
+      }
+
+      #mobile-jump.active {
+        background: rgba(94, 207, 74, 0.85);
+      }
+
+      #mobile-sprint {
+        width: min(14vw, 62px);
+        height: min(14vw, 62px);
+        font-size: clamp(0.6rem, 2.2vw, 0.8rem);
+        background: rgba(255, 138, 43, 0.55);
+        margin-bottom: 0.35rem;
+      }
+
+      #mobile-sprint.active {
+        background: rgba(255, 138, 43, 0.85);
+      }
+
+      #mobile-attack {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+        align-self: center;
+        background: rgba(232, 32, 32, 0.55);
+      }
+
+      #mobile-attack.active {
+        background: rgba(232, 32, 32, 0.85);
+      }
+
+      @media (max-height: 420px) and (orientation: landscape) {
+        .mobile-stick {
+          width: 96px;
+          height: 96px;
+          bottom: 0.6rem;
+          left: 0.8rem;
+        }
+
+        .mobile-btn {
+          width: 58px;
+          height: 58px;
+          font-size: 0.7rem;
+        }
+
+        #mobile-sprint {
+          width: 48px;
+          height: 48px;
+        }
+
+        body.touch-ui .hint {
+          top: 7.8rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <div id="hud">
+      <div class="hud-top">
+        <div class="progress" aria-hidden="true">
+          <div class="progress__fill" id="progress-fill"></div>
+        </div>
+        <div class="carrot-count">
+          <span id="carrot-count">0/50</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="#3a9a2a" d="M12 2c1.2 2.2.4 3.8-.6 4.6 1.4-.2 2.8.4 3.6 1.4-1.6.2-2.8 1-3.4 2.2-.4-1.4-1.4-2.4-2.8-2.8.8-1 1.8-2.2 3.2-5.4z" />
+            <path fill="#ff8a2b" d="M10.2 8.4c2.2 2.6 5.6 8.2 4.2 11.2-1.6 3.4-6.4 1.2-8.2-2.4-1.8-3.6.8-7.2 4-8.8z" />
+          </svg>
+        </div>
+      </div>
+
+      <div class="level-title" id="level-title">Level 1</div>
+      <p class="play-as" id="play-as">Playing as Bunsterstons</p>
+
+      <div class="target">
+        <div class="target__label">Carrots</div>
+        <div class="target__row">
+          <span>50</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="#3a9a2a" d="M12 2c1.2 2.2.4 3.8-.6 4.6 1.4-.2 2.8.4 3.6 1.4-1.6.2-2.8 1-3.4 2.2-.4-1.4-1.4-2.4-2.8-2.8.8-1 1.8-2.2 3.2-5.4z" />
+            <path fill="#ff8a2b" d="M10.2 8.4c2.2 2.6 5.6 8.2 4.2 11.2-1.6 3.4-6.4 1.2-8.2-2.4-1.8-3.6.8-7.2 4-8.8z" />
+          </svg>
+        </div>
+        <div class="target__sub">Target</div>
+      </div>
+
+      <p class="hint">WASD move · Space jump · Shift sprint</p>
+    </div>
+
+    <div id="mobile-controls" aria-hidden="true">
+      <div class="mobile-stick" id="mobile-stick">
+        <div class="mobile-stick-knob" id="mobile-stick-knob"></div>
+      </div>
+      <div class="mobile-actions">
+        <button type="button" class="mobile-btn" id="mobile-sprint">Sprint</button>
+        <button type="button" class="mobile-btn" id="mobile-attack">Attack</button>
+        <button type="button" class="mobile-btn" id="mobile-jump">Jump</button>
+      </div>
+    </div>
+
+    <div id="win" role="dialog" aria-labelledby="win-title">
+      <div class="win-card">
+        <h1 id="win-title">Level 1 clear!</h1>
+        <p id="win-body">You got all the carrots. Nice one.</p>
+        <p id="win-actions-desktop">
+          Press <kbd>Enter</kbd> for the next level · <kbd>R</kbd> to replay
+        </p>
+        <div class="win-actions" id="win-actions-mobile">
+          <button type="button" id="win-next">Next level</button>
+          <button type="button" id="win-replay">Replay</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

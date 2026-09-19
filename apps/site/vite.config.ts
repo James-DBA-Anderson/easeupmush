@@ -22,6 +22,16 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
+      "/games/canoe-lake-cleanup": {
+        target: "http://127.0.0.1:5304",
+        changeOrigin: true,
+        ws: true,
+      },
+      "/games/bunsterstons": {
+        target: "http://127.0.0.1:5305",
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   preview: {
