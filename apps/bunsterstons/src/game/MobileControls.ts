@@ -27,7 +27,7 @@ export class MobileControls {
   private knob: HTMLElement;
   private media: MediaQueryList;
   private enabled = false;
-  private onChange: ((enabled: boolean) => void) | null;
+  private onChange: ((enabled: boolean) => void) | null = null;
 
   private touchId: number | null = null;
   private moveX = 0;
@@ -41,7 +41,6 @@ export class MobileControls {
   };
 
   constructor(onChange?: (enabled: boolean) => void) {
-    this.onChange = onChange ?? null;
     this.root = document.getElementById("mobile-controls")!;
     this.stick = document.getElementById("mobile-stick")!;
     this.knob = document.getElementById("mobile-stick-knob")!;
@@ -61,7 +60,9 @@ export class MobileControls {
     this.media.addEventListener("change", this.onLayout);
     window.addEventListener("orientationchange", this.onLayout);
     window.addEventListener("resize", this.onLayout);
+    // Apply before wiring onChange so Game isn't called mid-construction.
     this.applyLayout();
+    this.onChange = onChange ?? null;
   }
 
   public isEnabled(): boolean {

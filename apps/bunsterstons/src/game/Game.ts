@@ -108,6 +108,7 @@ export class Game {
       this.syncHud();
       this.syncMobileChrome();
     });
+    this.syncHud();
     this.syncMobileChrome();
     this.revealIntroChrome();
     this.bindWinButtons();
@@ -115,7 +116,6 @@ export class Game {
     window.addEventListener("resize", this.onResize);
     window.addEventListener("keydown", this.onKey);
     window.addEventListener("keyup", this.onKeyUp);
-    this.syncHud();
   }
 
   public start(): void {
