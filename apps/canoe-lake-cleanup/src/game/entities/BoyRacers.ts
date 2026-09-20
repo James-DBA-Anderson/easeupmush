@@ -34,11 +34,19 @@ interface SteamPuff {
   driftZ: number;
 }
 
+interface Lamp {
+  mat: THREE.MeshBasicMaterial;
+  color: THREE.Color;
+  opacity: number;
+}
+
 interface RacerCar {
   id: number;
   group: THREE.Group;
   materials: THREE.Material[];
   lights: THREE.PointLight[];
+  lightIntensities: number[];
+  lamps: Lamp[];
   wheels: THREE.Object3D[];
   /** Index on the stitched esplanade race line. */
   index: number;
@@ -80,6 +88,7 @@ export class BoyRacers {
   private roarQueued = false;
   private crashQueued = false;
   private gone = false;
+  private flickT = 0;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -227,6 +236,8 @@ export class BoyRacers {
       group: built.group,
       materials: [],
       lights: built.lights,
+      lightIntensities: built.lights.map((l) => l.intensity),
+      lamps: built.lamps,
       wheels: built.wheels,
       index: THREE.MathUtils.clamp(index, 0, Math.max(0, this.line.length - 1)),
       dir,
@@ -391,9 +402,10 @@ export class BoyRacers {
         this.steamFor = 9;
         this.crashVel.multiplyScalar(0.25);
         this.burstSteam(28);
-        for (const light of car.lights) light.intensity = 0.4;
       }
     }
+
+    if (this.wet) this.flickerLamps(car, delta);
 
     if (this.phase === "steaming") {
       this.steamFor -= delta;
@@ -438,6 +450,21 @@ export class BoyRacers {
       if (car.fade >= 1) {
         this.scene.remove(car.group);
       }
+    }
+  }
+
+  /** Shorting electrics once the wreck is in the lake. */
+  private flickerLamps(car: RacerCar, delta: number): void {
+    this.flickT += delta;
+    const buzz = Math.sin(this.flickT * 37.4) * Math.sin(this.flickT * 11.7);
+    const drop = buzz > 0.42 ? 0.04 + Math.random() * 0.14 : 0.45 + Math.random() * 0.55;
+    const m = THREE.MathUtils.clamp(drop, 0.03, 1);
+    for (const lamp of car.lamps) {
+      lamp.mat.color.copy(lamp.color).multiplyScalar(m);
+      lamp.mat.opacity = lamp.opacity * (0.25 + m * 0.75);
+    }
+    for (let i = 0; i < car.lights.length; i++) {
+      car.lights[i]!.intensity = car.lightIntensities[i]! * m;
     }
   }
 
@@ -497,17 +524,19 @@ export class BoyRacers {
   }
 
   /**
-   * Wide-body GT-R / Skyline: long nose, cab-back, boot wing, slammed ride
-   * and neon underglow. Slot picks paint, glow, and light shape.
+   * Wide-body GT-R / Skyline. Every box overlaps its neighbours — cabin sits
+   * on the hull, wing posts span boot to blade, lights sit in the bumpers.
    */
   private buildSkyline(slot: number): {
     group: THREE.Group;
     wheels: THREE.Object3D[];
     lights: THREE.PointLight[];
+    lamps: Lamp[];
   } {
     const group = new THREE.Group();
     const wheels: THREE.Object3D[] = [];
     const lights: THREE.PointLight[] = [];
+    const lamps: Lamp[] = [];
     const paintCol = BODY_PAINTS[slot % BODY_PAINTS.length]!;
     const glowCol = GLOWS[slot % GLOWS.length]!;
     const accentCol = ACCENTS[slot % ACCENTS.length]!;
@@ -532,7 +561,7 @@ export class BoyRacers {
       roughness: 0.12,
       metalness: 0.45,
       transparent: true,
-      opacity: 0.62,
+      opacity: 0.55,
     });
     const tyre = new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 1 });
     const hub = new THREE.MeshStandardMaterial({
@@ -550,172 +579,127 @@ export class BoyRacers {
       roughness: 0.22,
       metalness: 0.85,
     });
-    const glow = new THREE.MeshBasicMaterial({
-      color: glowCol,
-      transparent: true,
-      opacity: 0.9,
-      depthWrite: false,
-    });
-    const head = new THREE.MeshBasicMaterial({ color: 0xfff4dc });
-    const tail = new THREE.MeshBasicMaterial({ color: 0xff1a1a });
-    const indicator = new THREE.MeshBasicMaterial({ color: 0xff9a2a });
     const plate = new THREE.MeshStandardMaterial({
       color: 0xe8e4c8,
       roughness: 0.7,
     });
 
-    const length = 4.72;
-    const width = 1.92;
-    const ride = 0.16;
+    const length = 4.6;
+    const width = 1.88;
+    // Hull centre / height chosen so cabin, boot and bumpers all bite into it.
+    const hullY = 0.4;
+    const hullH = 0.36;
 
-    addBox(group, paint, length * 0.96, 0.28, width * 0.9, 0.06, ride + 0.32, 0, true);
-    addBox(group, paint, length * 0.72, 0.16, width * 1.04, 0.02, ride + 0.38, 0, true);
+    addBox(group, paint, length * 0.94, hullH, width * 0.86, 0.04, hullY, 0, true);
+    addBox(group, paint, length * 0.7, 0.2, width * 1.02, 0, hullY + 0.02, 0, true);
 
-    const nose = addBox(
-      group,
-      paint,
-      length * 0.42,
-      0.2,
-      width * 0.86,
-      length * 0.22,
-      ride + 0.44,
-      0,
-      true,
-    );
-    nose.rotation.z = -0.08;
+    // Bonnet — sits on the hull, overlapping the cabin scuttle.
+    addBox(group, paint, length * 0.4, 0.12, width * 0.84, length * 0.18, hullY + 0.2, 0, true);
+    addBox(group, carbon, 0.62, 0.05, width * 0.5, length * 0.16, hullY + 0.26, 0);
+    addBox(group, dark, 0.2, 0.04, 0.26, length * 0.18, hullY + 0.29, 0.18);
+    addBox(group, dark, 0.2, 0.04, 0.26, length * 0.18, hullY + 0.29, -0.18);
 
-    const cabin = addBox(
-      group,
-      paint,
-      length * 0.34,
-      0.36,
-      width * 0.82,
-      -0.28,
-      ride + 0.78,
-      0,
-      true,
-    );
-    cabin.rotation.z = 0.04;
+    // Cabin planted on the hull (bottom 0.49, hull top 0.58).
+    const cabinY = 0.72;
+    addBox(group, paint, length * 0.42, 0.46, width * 0.8, -0.3, cabinY, 0, true);
+    addBox(group, paint, length * 0.36, 0.08, width * 0.74, -0.36, cabinY + 0.24, 0, true);
+    addBox(group, glass, 0.06, 0.28, width * 0.68, -0.08, cabinY + 0.04, 0);
+    addBox(group, glass, 0.36, 0.22, 0.05, -0.28, cabinY + 0.02, width * 0.38);
+    addBox(group, glass, 0.36, 0.22, 0.05, -0.28, cabinY + 0.02, -width * 0.38);
+    addBox(group, glass, 0.06, 0.24, width * 0.64, -0.94, cabinY + 0.02, 0);
 
-    addBox(group, glass, 0.04, 0.3, width * 0.72, length * 0.08, ride + 0.82, 0);
-    const screen = addBox(
-      group,
-      glass,
-      0.62,
-      0.04,
-      width * 0.7,
-      0.02,
-      ride + 0.94,
-      0,
-    );
-    screen.rotation.z = 0.52;
-    addBox(group, glass, 0.42, 0.22, 0.04, -0.22, ride + 0.8, width * 0.4);
-    addBox(group, glass, 0.42, 0.22, 0.04, -0.22, ride + 0.8, -width * 0.4);
-    addBox(group, glass, 0.04, 0.24, width * 0.68, -0.92, ride + 0.82, 0);
+    // Boot deck — bites the cabin rear and the hull.
+    const bootX = -1.2;
+    const bootY = hullY + 0.14;
+    addBox(group, paint, 1.2, 0.16, width * 0.82, bootX, bootY, 0, true);
 
-    addBox(group, carbon, 0.7, 0.05, width * 0.55, length * 0.16, ride + 0.56, 0);
-    addBox(group, dark, 0.22, 0.04, 0.28, length * 0.18, ride + 0.59, 0.22);
-    addBox(group, dark, 0.22, 0.04, 0.28, length * 0.18, ride + 0.59, -0.22);
+    addBox(group, dark, length * 0.68, 0.1, 0.09, -0.04, hullY - 0.12, width * 0.46);
+    addBox(group, dark, length * 0.68, 0.1, 0.09, -0.04, hullY - 0.12, -width * 0.46);
 
-    addBox(group, paint, 0.95, 0.12, width * 0.84, -length * 0.28, ride + 0.52, 0, true);
-
-    const skirtY = ride + 0.18;
-    addBox(group, dark, length * 0.7, 0.08, 0.08, -0.05, skirtY, width * 0.48);
-    addBox(group, dark, length * 0.7, 0.08, 0.08, -0.05, skirtY, -width * 0.48);
-
-    addBox(group, dark, 0.42, 0.16, width * 1.04, length * 0.48, ride + 0.18, 0);
-    addBox(group, dark, 0.28, 0.1, 0.62, length * 0.5, ride + 0.22, 0);
-    addBox(group, dark, 0.16, 0.1, 0.22, length * 0.5, ride + 0.2, 0.42);
-    addBox(group, dark, 0.16, 0.1, 0.22, length * 0.5, ride + 0.2, -0.42);
-    addBox(group, dark, length * 0.18, 0.04, width * 1.06, length * 0.46, ride + 0.08, 0);
-
-    addBox(group, dark, 0.34, 0.18, width * 1.02, -length * 0.48, ride + 0.18, 0);
+    const bumperY = hullY - 0.08;
+    addBox(group, dark, 0.32, 0.24, width * 0.98, length * 0.46, bumperY, 0);
+    addBox(group, dark, 0.22, 0.1, 0.7, length * 0.5, bumperY + 0.02, 0);
+    addBox(group, dark, 0.18, 0.08, width * 1.0, length * 0.44, bumperY - 0.1, 0);
+    addBox(group, dark, 0.3, 0.22, width * 0.96, -length * 0.46, bumperY, 0);
     for (let i = -2; i <= 2; i++) {
-      addBox(group, dark, 0.08, 0.1, 0.04, -length * 0.52, ride + 0.1, i * 0.16);
+      addBox(group, dark, 0.1, 0.1, 0.05, -length * 0.5, bumperY - 0.06, i * 0.15);
     }
 
-    const wingZ = width * 0.42;
-    addBox(group, carbon, 0.16, 0.05, width * 1.02, -length * 0.44, ride + 0.92, 0);
-    addBox(group, carbon, 0.05, 0.12, 0.08, -length * 0.4, ride + 0.84, wingZ);
-    addBox(group, carbon, 0.05, 0.12, 0.08, -length * 0.4, ride + 0.84, -wingZ);
-    addBox(group, carbon, 0.04, 0.16, 0.22, -length * 0.5, ride + 0.88, wingZ);
-    addBox(group, carbon, 0.04, 0.16, 0.22, -length * 0.5, ride + 0.88, -wingZ);
-    addBox(group, dark, 0.06, 0.28, 0.05, -length * 0.42, ride + 0.7, wingZ * 0.72);
-    addBox(group, dark, 0.06, 0.28, 0.05, -length * 0.42, ride + 0.7, -wingZ * 0.72);
+    // Wing: posts span boot top to blade so nothing hangs in space.
+    const wingX = bootX - 0.28;
+    const wingY = bootY + 0.28;
+    const postH = 0.32;
+    const postY = bootY + postH * 0.5;
+    const postZ = width * 0.3;
+    addBox(group, carbon, 0.18, 0.06, width * 0.92, wingX, wingY, 0);
+    addBox(group, carbon, 0.05, 0.14, 0.2, wingX - 0.06, wingY + 0.04, postZ);
+    addBox(group, carbon, 0.05, 0.14, 0.2, wingX - 0.06, wingY + 0.04, -postZ);
+    addBox(group, dark, 0.07, postH, 0.07, wingX + 0.04, postY, postZ);
+    addBox(group, dark, 0.07, postH, 0.07, wingX + 0.04, postY, -postZ);
 
-    const mirrorArm = (side: number) => {
-      addBox(group, dark, 0.08, 0.04, 0.18, 0.18, ride + 0.72, side * width * 0.48);
-      addBox(group, dark, 0.12, 0.07, 0.18, 0.2, ride + 0.74, side * (width * 0.56));
-    };
-    mirrorArm(1);
-    mirrorArm(-1);
+    const mirrorZ = width * 0.42;
+    addBox(group, dark, 0.1, 0.06, 0.16, 0.12, cabinY, mirrorZ);
+    addBox(group, dark, 0.12, 0.08, 0.16, 0.16, cabinY + 0.02, mirrorZ + 0.1);
+    addBox(group, dark, 0.1, 0.06, 0.16, 0.12, cabinY, -mirrorZ);
+    addBox(group, dark, 0.12, 0.08, 0.16, 0.16, cabinY + 0.02, -mirrorZ - 0.1);
 
     const roundLights = slot % 2 === 0;
     for (const side of [-1, 1] as const) {
       if (roundLights) {
-        for (const inset of [0.12, 0.32]) {
-          const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.06, 10), head);
+        for (const inset of [0.1, 0.26]) {
+          const lamp = addLamp(
+            group,
+            lamps,
+            new THREE.CylinderGeometry(0.07, 0.07, 0.07, 10),
+            0xfff4dc,
+            1,
+          );
           lamp.rotation.z = Math.PI / 2;
-          lamp.position.set(length * 0.5, ride + 0.36, side * (width * 0.22 + inset * 0.35));
-          group.add(lamp);
+          lamp.position.set(length * 0.47, bumperY + 0.06, side * (width * 0.2 + inset));
         }
       } else {
-        addBox(group, head, 0.06, 0.08, 0.36, length * 0.5, ride + 0.36, side * width * 0.28);
+        addLampBox(group, lamps, 0.07, 0.08, 0.34, length * 0.47, bumperY + 0.06, side * width * 0.26, 0xfff4dc, 1);
       }
-      addBox(group, indicator, 0.05, 0.05, 0.08, length * 0.49, ride + 0.32, side * width * 0.48);
-      addBox(group, tail, 0.05, 0.1, 0.38, -length * 0.5, ride + 0.38, side * width * 0.28);
-      addBox(group, tail, 0.04, 0.04, 0.16, -length * 0.5, ride + 0.28, side * width * 0.22);
+      addLampBox(group, lamps, 0.05, 0.05, 0.08, length * 0.46, bumperY + 0.02, side * width * 0.46, 0xff9a2a, 1);
+      addLampBox(group, lamps, 0.06, 0.1, 0.36, -length * 0.47, bumperY + 0.06, side * width * 0.26, 0xff1a1a, 1);
+      addLampBox(group, lamps, 0.05, 0.04, 0.16, -length * 0.47, bumperY - 0.02, side * width * 0.2, 0xff1a1a, 1);
     }
 
-    addBox(group, chrome, 0.14, 0.05, 0.36, -length * 0.51, ride + 0.16, 0.18);
-    addBox(group, chrome, 0.14, 0.05, 0.36, -length * 0.51, ride + 0.16, -0.18);
+    addBox(group, chrome, 0.16, 0.06, 0.34, -length * 0.5, bumperY - 0.04, 0.16);
+    addBox(group, chrome, 0.16, 0.06, 0.34, -length * 0.5, bumperY - 0.04, -0.16);
+    addBox(group, plate, 0.04, 0.12, 0.34, length * 0.5, bumperY, 0);
+    addBox(group, plate, 0.04, 0.12, 0.34, -length * 0.5, bumperY + 0.02, 0);
 
-    addBox(group, plate, 0.04, 0.12, 0.36, length * 0.51, ride + 0.24, 0);
-    addBox(group, plate, 0.04, 0.12, 0.36, -length * 0.51, ride + 0.26, 0);
-
-    addBox(group, glow, length * 0.9, 0.035, width * 0.92, 0, 0.05, 0);
-    addBox(group, glow, length * 0.78, 0.03, 0.05, 0, 0.07, width * 0.5);
-    addBox(group, glow, length * 0.78, 0.03, 0.05, 0, 0.07, -width * 0.5);
-    const halo = new THREE.Mesh(
-      new THREE.PlaneGeometry(length * 1.12, width * 1.42),
-      new THREE.MeshBasicMaterial({
-        color: glowCol,
-        transparent: true,
-        opacity: 0.32,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      }),
-    );
-    halo.rotation.x = -Math.PI / 2;
-    halo.position.y = 0.025;
-    halo.renderOrder = 1;
-    group.add(halo);
+    // Belly / sill glow — on the hull, not a separate floating pad.
+    addLampBox(group, lamps, length * 0.86, 0.04, width * 0.8, 0, hullY - 0.16, 0, glowCol, 0.9);
+    addLampBox(group, lamps, length * 0.72, 0.04, 0.05, 0, hullY - 0.14, width * 0.48, glowCol, 0.85);
+    addLampBox(group, lamps, length * 0.72, 0.04, 0.05, 0, hullY - 0.14, -width * 0.48, glowCol, 0.85);
 
     const glowLight = new THREE.PointLight(glowCol, 3.6, 13, 2);
-    glowLight.position.set(0, 0.22, 0);
+    glowLight.position.set(0, hullY - 0.05, 0);
     group.add(glowLight);
     lights.push(glowLight);
 
-    const wheelX = length * 0.33;
-    const wheelZ = width * 0.54;
+    const wheelX = length * 0.32;
+    const wheelZ = width * 0.52;
     for (const lx of [-wheelX, wheelX]) {
       for (const lz of [-wheelZ, wheelZ]) {
         const hubGroup = new THREE.Group();
         hubGroup.position.set(lx, 0.32, lz);
         const tyreMesh = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.34, 0.34, 0.26, 12),
+          new THREE.CylinderGeometry(0.33, 0.33, 0.26, 12),
           tyre,
         );
         tyreMesh.rotation.x = Math.PI / 2;
         hubGroup.add(tyreMesh);
         const rim = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.2, 0.2, 0.28, 10),
+          new THREE.CylinderGeometry(0.19, 0.19, 0.28, 10),
           hub,
         );
         rim.rotation.x = Math.PI / 2;
         hubGroup.add(rim);
         for (let s = 0; s < 5; s++) {
-          const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.28, 0.035), hub);
+          const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.26, 0.035), hub);
           spoke.rotation.x = Math.PI / 2;
           spoke.rotation.z = (s / 5) * Math.PI;
           hubGroup.add(spoke);
@@ -723,7 +707,7 @@ export class BoyRacers {
         const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.3, 8), chrome);
         cap.rotation.x = Math.PI / 2;
         hubGroup.add(cap);
-        const cal = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.18), caliper);
+        const cal = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.16), caliper);
         cal.position.set(0, 0.02, lz > 0 ? 0.02 : -0.02);
         hubGroup.add(cal);
         group.add(hubGroup);
@@ -731,10 +715,7 @@ export class BoyRacers {
       }
     }
 
-    addBox(group, dark, 0.08, 0.14, 0.36, -0.15, ride + 0.58, 0.18);
-    addBox(group, dark, 0.08, 0.14, 0.36, -0.15, ride + 0.58, -0.18);
-
-    return { group, wheels, lights };
+    return { group, wheels, lights, lamps };
   }
 }
 
@@ -753,6 +734,42 @@ function addBox(
   mesh.position.set(x, y, z);
   mesh.castShadow = cast;
   parent.add(mesh);
+  return mesh;
+}
+
+function addLamp(
+  parent: THREE.Object3D,
+  lamps: Lamp[],
+  geometry: THREE.BufferGeometry,
+  color: number,
+  opacity: number,
+): THREE.Mesh {
+  const mat = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity,
+    depthWrite: opacity >= 0.85,
+  });
+  lamps.push({ mat, color: new THREE.Color(color), opacity });
+  const mesh = new THREE.Mesh(geometry, mat);
+  parent.add(mesh);
+  return mesh;
+}
+
+function addLampBox(
+  parent: THREE.Object3D,
+  lamps: Lamp[],
+  w: number,
+  h: number,
+  d: number,
+  x: number,
+  y: number,
+  z: number,
+  color: number,
+  opacity: number,
+): THREE.Mesh {
+  const mesh = addLamp(parent, lamps, new THREE.BoxGeometry(w, h, d), color, opacity);
+  mesh.position.set(x, y, z);
   return mesh;
 }
 
