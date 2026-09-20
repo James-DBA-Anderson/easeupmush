@@ -1,0 +1,37 @@
+{
+  "name": "@easeupmush/dynamic-image-gen",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local 2D sprite generator for game asset creation.",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite",
+    "dev:api": "tsx server/index.ts",
+    "dev:img": ".venv/bin/python server/diffusers_worker.py",
+    "setup:img": "python3 -m venv .venv && .venv/bin/pip install -U pip && .venv/bin/pip install torch==2.2.2 --index-url https://download.pytorch.org/whl/cpu && .venv/bin/pip install -r requirements.txt",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "start": "tsx server/index.ts"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "concurrently": "^9.2.1",
+    "oxlint": "^1.75.0",
+    "tsx": "^4.20.5",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0"
+  }
+}

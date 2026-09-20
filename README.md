@@ -10,6 +10,8 @@ apps/
   pompey-punch-up/      # Southsea brawler
 shared/
   phraseology.json      # Pompey slang — all games + /mush/phraseology/
+tools/
+  dynamic-image-gen/    # local sprite generator for asset creation
 ```
 
 ## Play / develop
@@ -72,3 +74,16 @@ Push to `main` to redeploy, or run `npm run deploy` locally (needs `wrangler` lo
 Hungover on Southsea beach. Mean lads pile out of a car. Phaser 3 + TypeScript doodle brawler — see that app’s README for controls and design notes.
 
 To add another game later: create `apps/<slug>/`, build it with `GAME_BASE=/games/<slug>/`, and copy into `dist/games/<slug>/` from `scripts/assemble-dist.mjs`.
+
+## Tools
+
+### [Dynamic image gen](tools/dynamic-image-gen/)
+
+Local Spritebench UI for generating 2D character sprites. Not part of the site build.
+
+```bash
+npm run assets          # → http://localhost:5173
+npm run setup:assets    # once, Intel Mac / CPU Diffusers fallback
+```
+
+On Apple Silicon, pull an Ollama image model first (`ollama pull x/flux2-klein:4b`). Generated PNGs go to `tools/dynamic-image-gen/generated/` (gitignored).
