@@ -180,7 +180,7 @@ const LINES: Record<Callout, readonly string[]> = {
   racers: [
     "Boy racers on the esplanade again — Skylines hammering it up and down. Keep clear of the road.",
     "Reports of modified cars racing the seafront. Loud as you like. Watch the esplanade.",
-    "PCSO Grant: two GTs thrashing Eastney Esplanade. If one of them bottles it, you'll know about it.",
+    "PCSO Grant: Skylines thrashing Eastney Esplanade end to end. If one of them bottles it, you'll know about it.",
   ],
   geese: [
     "Radar's picked up a flock of geese inbound from the north. Get back to the van — heavy hose in the load bay.",
