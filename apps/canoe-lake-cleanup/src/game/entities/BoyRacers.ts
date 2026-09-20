@@ -5,20 +5,25 @@ import {
   type RoadGraph,
 } from "../world/buildings";
 import { groundHeight } from "../world/terrain";
-import { isInLake, WATER_Y } from "../world/lake";
+import { isInLake, nearestShore, WATER_Y } from "../world/lake";
 
 /** UK left lane offset. */
 const LANE = ROAD_WIDTH * 0.22;
 /** Esplanade race speed — proper boy-racer pace. */
-const RACE_SPEED = 26;
-/** How many mid-esplanade blasts before one of them bottles it. */
+const RACE_SPEED = 28;
+/** Mid-park blasts before one of them bottles it (longer seafront run). */
 const PASSES_BEFORE_CRASH = 4;
-/** South stretch of road[0] in the authored level (Eastney Esplanade). */
-const ESPLANADE_FROM = 8;
-const ESPLANADE_TO = 16;
+/**
+ * South of this Z is the seafront. Used to stitch Eastney Esplanade plus the
+ * western parade roads into one long up-and-down race line.
+ */
+const ESPLANADE_SOUTH_OF = -72;
+/** Don't hop back inland off the seafront while stitching the race line. */
+const ESPLANADE_MAX_Z = -48;
 
-const BODY_PAINTS = [0x1a1c22, 0xc8ccd2, 0x6b1020, 0x0e3a5c] as const;
+const BODY_PAINTS = [0x12141a, 0xc5c9ce, 0x6e101c, 0x0c3558] as const;
 const GLOWS = [0xff2ec8, 0x22e0ff, 0xb8ff2a, 0xff6a1a] as const;
+const ACCENTS = [0x2a2c32, 0x1a1c22, 0x241014, 0x0a2230] as const;
 
 interface SteamPuff {
   mesh: THREE.Mesh;
@@ -29,10 +34,21 @@ interface SteamPuff {
   driftZ: number;
 }
 
+interface Lamp {
+  mat: THREE.MeshBasicMaterial;
+  color: THREE.Color;
+  opacity: number;
+}
+
 interface RacerCar {
   id: number;
   group: THREE.Group;
   materials: THREE.Material[];
+  lights: THREE.PointLight[];
+  lightIntensities: number[];
+  lamps: Lamp[];
+  wheels: THREE.Object3D[];
+  /** Index on the stitched esplanade race line. */
   index: number;
   dir: 1 | -1;
   progress: number;
@@ -54,7 +70,8 @@ export type RacerPhase = "racing" | "crashing" | "steaming" | "done";
  */
 export class BoyRacers {
   private scene: THREE.Scene;
-  private graph: RoadGraph;
+  /** West→east seafront polyline (Eastney Esplanade + linked south roads). */
+  private line: { x: number; z: number }[] = [];
   private cars: RacerCar[] = [];
   private steam: SteamPuff[] = [];
   private phase: RacerPhase = "racing";
@@ -71,21 +88,25 @@ export class BoyRacers {
   private roarQueued = false;
   private crashQueued = false;
   private gone = false;
+  private flickT = 0;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
     const graph = getRoadGraph();
-    if (!graph || !graph.roads[0] || graph.roads[0]!.length <= ESPLANADE_TO) {
+    this.line = graph ? stitchEsplanadeLine(graph) : [];
+    if (this.line.length < 2) {
       this.phase = "done";
       this.gone = true;
-      this.graph = graph ?? { roads: [], linksAt: () => [] };
       return;
     }
-    this.graph = graph;
 
-    // Two Skylines, staggered, racing the same stretch.
-    this.cars.push(this.spawnCar(ESPLANADE_FROM, 1, 0));
-    this.cars.push(this.spawnCar(ESPLANADE_FROM + 1, 1, 1.8));
+    const mid = nearestLineIndex(this.line, 20, -117);
+    // Pack blasting both ways so they actually use the long seafront.
+    this.cars.push(this.spawnCar(mid, -1, 0, 0));
+    this.cars.push(this.spawnCar(Math.max(0, mid - 1), -1, 2.4, 1));
+    this.cars.push(
+      this.spawnCar(Math.min(this.line.length - 2, mid + 1), 1, 1.2, 2),
+    );
   }
 
   public getPhase(): RacerPhase {
@@ -171,7 +192,9 @@ export class BoyRacers {
 
     if (this.phase === "racing") {
       this.updateRacing(delta);
-      if (this.passes >= PASSES_BEFORE_CRASH) this.beginCrash();
+      if (this.passes >= PASSES_BEFORE_CRASH && this.carOnLakeFront()) {
+        this.beginCrash();
+      }
     } else if (this.phase === "crashing" || this.phase === "steaming") {
       this.updateCrash(delta);
     }
@@ -201,28 +224,41 @@ export class BoyRacers {
     this.gone = true;
   }
 
-  private spawnCar(index: number, dir: 1 | -1, gap: number): RacerCar {
+  private spawnCar(
+    index: number,
+    dir: 1 | -1,
+    gap: number,
+    slot: number,
+  ): RacerCar {
+    const built = this.buildSkyline(slot);
     const car: RacerCar = {
       id: nextRacerId++,
-      group: this.buildSkyline(this.cars.length),
+      group: built.group,
       materials: [],
-      index,
+      lights: built.lights,
+      lightIntensities: built.lights.map((l) => l.intensity),
+      lamps: built.lamps,
+      wheels: built.wheels,
+      index: THREE.MathUtils.clamp(index, 0, Math.max(0, this.line.length - 1)),
       dir,
-      progress: Math.min(0.35, gap * 0.08),
-      speed: RACE_SPEED + Math.random() * 3,
+      progress: Math.min(0.42, gap * 0.07),
+      speed: RACE_SPEED + slot * 1.4 + Math.random() * 2.2,
       midSide: 0,
       fading: false,
       fade: 0,
       crashed: false,
     };
-    // Collect materials from the group for fade.
     car.group.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       if (!mesh.isMesh) return;
-      const mat = mesh.material as THREE.Material;
-      if (mat) car.materials.push(mat);
+      const mat = mesh.material;
+      if (Array.isArray(mat)) {
+        for (const m of mat) car.materials.push(m);
+      } else if (mat) {
+        car.materials.push(mat);
+      }
     });
-    this.placeOnRoad(car, car.progress);
+    this.placeOnLine(car, car.progress);
     car.midSide = Math.sign(car.group.position.x) || 1;
     this.scene.add(car.group);
     return car;
@@ -232,6 +268,7 @@ export class BoyRacers {
     for (const car of this.cars) {
       if (car.fading || car.crashed) continue;
       this.advanceOnEsplanade(car, delta);
+      this.spinWheels(car, delta);
 
       const side = Math.sign(car.group.position.x) || car.midSide;
       if (side !== 0 && side !== car.midSide) {
@@ -247,10 +284,17 @@ export class BoyRacers {
     }
   }
 
+  private spinWheels(car: RacerCar, delta: number): void {
+    const spin = (car.speed * delta) / 0.34;
+    for (const wheel of car.wheels) {
+      wheel.rotation.z -= spin;
+    }
+  }
+
   private advanceOnEsplanade(car: RacerCar, delta: number): void {
-    const pts = this.graph.roads[0]!;
+    const pts = this.line;
     let next = car.index + car.dir;
-    if (next < ESPLANADE_FROM || next > ESPLANADE_TO) {
+    if (next < 0 || next >= pts.length) {
       car.dir = car.dir === 1 ? -1 : 1;
       next = car.index + car.dir;
       car.progress = 0;
@@ -264,16 +308,12 @@ export class BoyRacers {
       car.index = next;
       return;
     }
-    this.placeOnRoad(car, car.progress);
+    this.placeOnLine(car, car.progress);
   }
 
-  private placeOnRoad(car: RacerCar, t: number): void {
-    const pts = this.graph.roads[0]!;
-    const next = THREE.MathUtils.clamp(
-      car.index + car.dir,
-      ESPLANADE_FROM,
-      ESPLANADE_TO,
-    );
+  private placeOnLine(car: RacerCar, t: number): void {
+    const pts = this.line;
+    const next = THREE.MathUtils.clamp(car.index + car.dir, 0, pts.length - 1);
     const a = pts[car.index]!;
     const b = pts[next] ?? a;
     const x = a.x + (b.x - a.x) * t;
@@ -293,28 +333,46 @@ export class BoyRacers {
     car.group.rotation.x = 0;
   }
 
+  /** Still on the seafront in front of the lake — safe to peel into the water. */
+  private carOnLakeFront(): RacerCar | null {
+    const live = this.cars.filter((c) => !c.fading && !c.crashed);
+    for (const car of live) {
+      const { x, z } = car.group.position;
+      if (x > -90 && x < 95 && z < -88 && z > -165) return car;
+    }
+    return null;
+  }
+
   private beginCrash(): void {
+    const pick = this.carOnLakeFront();
     const live = this.cars.filter((c) => !c.fading);
-    if (live.length === 0) {
+    if (!pick && live.length === 0) {
       this.phase = "done";
       return;
     }
-    this.crashCar = live[Math.floor(Math.random() * live.length)]!;
+    this.crashCar = pick ?? live[Math.floor(Math.random() * live.length)]!;
     this.crashCar.crashed = true;
     this.phase = "crashing";
 
-    // Others peel off and fade.
     for (const car of this.cars) {
       if (car === this.crashCar) continue;
       car.fading = true;
     }
 
     const at = this.crashCar.group.position;
-    // Drive north into the lake from the esplanade.
+    const aimX = THREE.MathUtils.clamp(at.x + (Math.random() - 0.5) * 12, -55, 60);
+    let aimZ = -48;
+    for (let z = -78; z < 30; z += 3) {
+      if (isInLake(aimX, z)) {
+        aimZ = z;
+        break;
+      }
+    }
+    const shore = nearestShore(aimX, aimZ);
     this.crashAim.set(
-      THREE.MathUtils.clamp(at.x + (Math.random() - 0.5) * 18, -50, 55),
+      THREE.MathUtils.lerp(aimX, shore.x, 0.35),
       0,
-      -62 + Math.random() * 10,
+      aimZ,
     );
     const dx = this.crashAim.x - at.x;
     const dz = this.crashAim.z - at.z;
@@ -330,13 +388,11 @@ export class BoyRacers {
     if (this.phase === "crashing") {
       car.group.position.x += this.crashVel.x * delta;
       car.group.position.z += this.crashVel.z * delta;
-      car.group.position.y = groundHeight(
-        car.group.position.x,
-        car.group.position.z,
-      ) + 0.02;
-      // Nose-down wobble as it leaves the road.
+      car.group.position.y =
+        groundHeight(car.group.position.x, car.group.position.z) + 0.02;
       car.group.rotation.x = Math.min(0.35, car.group.rotation.x + delta * 0.4);
       car.group.rotation.z += Math.sin(performance.now() * 0.02) * delta * 0.4;
+      this.spinWheels(car, delta);
 
       if (!this.wet && isInLake(car.group.position.x, car.group.position.z)) {
         this.wet = true;
@@ -348,6 +404,8 @@ export class BoyRacers {
         this.burstSteam(28);
       }
     }
+
+    if (this.wet) this.flickerLamps(car, delta);
 
     if (this.phase === "steaming") {
       this.steamFor -= delta;
@@ -386,9 +444,27 @@ export class BoyRacers {
           (mat as THREE.MeshStandardMaterial).depthWrite = a > 0.2;
         }
       }
+      for (const light of car.lights) {
+        light.intensity *= Math.max(0, 1 - delta * 1.4);
+      }
       if (car.fade >= 1) {
         this.scene.remove(car.group);
       }
+    }
+  }
+
+  /** Shorting electrics once the wreck is in the lake. */
+  private flickerLamps(car: RacerCar, delta: number): void {
+    this.flickT += delta;
+    const buzz = Math.sin(this.flickT * 37.4) * Math.sin(this.flickT * 11.7);
+    const drop = buzz > 0.42 ? 0.04 + Math.random() * 0.14 : 0.45 + Math.random() * 0.55;
+    const m = THREE.MathUtils.clamp(drop, 0.03, 1);
+    for (const lamp of car.lamps) {
+      lamp.mat.color.copy(lamp.color).multiplyScalar(m);
+      lamp.mat.opacity = lamp.opacity * (0.25 + m * 0.75);
+    }
+    for (let i = 0; i < car.lights.length; i++) {
+      car.lights[i]!.intensity = car.lightIntensities[i]! * m;
     }
   }
 
@@ -447,159 +523,354 @@ export class BoyRacers {
     }
   }
 
-  /** Long, low GT-R / Skyline silhouette with neon underglow. */
-  private buildSkyline(slot: number): THREE.Group {
+  /**
+   * Wide-body GT-R / Skyline. Every box overlaps its neighbours — cabin sits
+   * on the hull, wing posts span boot to blade, lights sit in the bumpers.
+   */
+  private buildSkyline(slot: number): {
+    group: THREE.Group;
+    wheels: THREE.Object3D[];
+    lights: THREE.PointLight[];
+    lamps: Lamp[];
+  } {
     const group = new THREE.Group();
+    const wheels: THREE.Object3D[] = [];
+    const lights: THREE.PointLight[] = [];
+    const lamps: Lamp[] = [];
+    const paintCol = BODY_PAINTS[slot % BODY_PAINTS.length]!;
+    const glowCol = GLOWS[slot % GLOWS.length]!;
+    const accentCol = ACCENTS[slot % ACCENTS.length]!;
+
     const paint = new THREE.MeshStandardMaterial({
-      color: BODY_PAINTS[slot % BODY_PAINTS.length]!,
-      roughness: 0.32,
-      metalness: 0.45,
-    });
-    const glass = new THREE.MeshStandardMaterial({
-      color: 0x1a2228,
-      roughness: 0.25,
-      metalness: 0.35,
+      color: paintCol,
+      roughness: 0.28,
+      metalness: 0.62,
     });
     const dark = new THREE.MeshStandardMaterial({
-      color: 0x0c0c0e,
-      roughness: 0.7,
+      color: 0x0a0a0c,
+      roughness: 0.55,
+      metalness: 0.25,
+    });
+    const carbon = new THREE.MeshStandardMaterial({
+      color: accentCol,
+      roughness: 0.42,
+      metalness: 0.35,
+    });
+    const glass = new THREE.MeshStandardMaterial({
+      color: 0x12181e,
+      roughness: 0.12,
+      metalness: 0.45,
+      transparent: true,
+      opacity: 0.55,
     });
     const tyre = new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 1 });
     const hub = new THREE.MeshStandardMaterial({
-      color: 0xd0d4d8,
-      roughness: 0.35,
-      metalness: 0.7,
+      color: 0xd8dce0,
+      roughness: 0.28,
+      metalness: 0.82,
     });
-    const glowCol = GLOWS[slot % GLOWS.length]!;
-    const glow = new THREE.MeshBasicMaterial({
-      color: glowCol,
-      transparent: true,
-      opacity: 0.85,
-      depthWrite: false,
+    const caliper = new THREE.MeshStandardMaterial({
+      color: 0xb01018,
+      roughness: 0.45,
+      metalness: 0.35,
+    });
+    const chrome = new THREE.MeshStandardMaterial({
+      color: 0xc8ccd0,
+      roughness: 0.22,
+      metalness: 0.85,
+    });
+    const plate = new THREE.MeshStandardMaterial({
+      color: 0xe8e4c8,
+      roughness: 0.7,
     });
 
     const length = 4.6;
-    const width = 1.85;
-    const ride = 0.22;
+    const width = 1.88;
+    // Hull centre / height chosen so cabin, boot and bumpers all bite into it.
+    const hullY = 0.4;
+    const hullH = 0.36;
 
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(length, 0.42, width),
-      paint,
-    );
-    body.position.y = ride + 0.28;
-    body.castShadow = true;
-    group.add(body);
+    addBox(group, paint, length * 0.94, hullH, width * 0.86, 0.04, hullY, 0, true);
+    addBox(group, paint, length * 0.7, 0.2, width * 1.02, 0, hullY + 0.02, 0, true);
 
-    // Long nose / short cabin — Skyline-ish proportions.
-    const cabin = new THREE.Mesh(
-      new THREE.BoxGeometry(length * 0.36, 0.38, width * 0.88),
-      paint,
-    );
-    cabin.position.set(-0.35, ride + 0.72, 0);
-    cabin.castShadow = true;
-    group.add(cabin);
+    // Bonnet — sits on the hull, overlapping the cabin scuttle.
+    addBox(group, paint, length * 0.4, 0.12, width * 0.84, length * 0.18, hullY + 0.2, 0, true);
+    addBox(group, carbon, 0.62, 0.05, width * 0.5, length * 0.16, hullY + 0.26, 0);
+    addBox(group, dark, 0.2, 0.04, 0.26, length * 0.18, hullY + 0.29, 0.18);
+    addBox(group, dark, 0.2, 0.04, 0.26, length * 0.18, hullY + 0.29, -0.18);
 
-    const windscreen = new THREE.Mesh(
-      new THREE.BoxGeometry(0.05, 0.3, width * 0.78),
-      glass,
-    );
-    windscreen.position.set(length * 0.05, ride + 0.75, 0);
-    group.add(windscreen);
+    // Cabin planted on the hull (bottom 0.49, hull top 0.58).
+    const cabinY = 0.72;
+    addBox(group, paint, length * 0.42, 0.46, width * 0.8, -0.3, cabinY, 0, true);
+    addBox(group, paint, length * 0.36, 0.08, width * 0.74, -0.36, cabinY + 0.24, 0, true);
+    addBox(group, glass, 0.06, 0.28, width * 0.68, -0.08, cabinY + 0.04, 0);
+    addBox(group, glass, 0.36, 0.22, 0.05, -0.28, cabinY + 0.02, width * 0.38);
+    addBox(group, glass, 0.36, 0.22, 0.05, -0.28, cabinY + 0.02, -width * 0.38);
+    addBox(group, glass, 0.06, 0.24, width * 0.64, -0.94, cabinY + 0.02, 0);
 
-    const boot = new THREE.Mesh(
-      new THREE.BoxGeometry(0.55, 0.12, width * 0.86),
-      paint,
-    );
-    boot.position.set(-length * 0.32, ride + 0.52, 0);
-    group.add(boot);
+    // Boot deck — bites the cabin rear and the hull.
+    const bootX = -1.2;
+    const bootY = hullY + 0.14;
+    addBox(group, paint, 1.2, 0.16, width * 0.82, bootX, bootY, 0, true);
 
-    // Boot spoiler.
-    const spoiler = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 0.08, width * 0.92),
-      dark,
-    );
-    spoiler.position.set(-length * 0.42, ride + 0.78, 0);
-    group.add(spoiler);
-    const spoilerPostL = new THREE.Mesh(
-      new THREE.BoxGeometry(0.06, 0.22, 0.06),
-      dark,
-    );
-    spoilerPostL.position.set(-length * 0.4, ride + 0.62, width * 0.32);
-    group.add(spoilerPostL);
-    const spoilerPostR = spoilerPostL.clone();
-    spoilerPostR.position.z = -width * 0.32;
-    group.add(spoilerPostR);
+    addBox(group, dark, length * 0.68, 0.1, 0.09, -0.04, hullY - 0.12, width * 0.46);
+    addBox(group, dark, length * 0.68, 0.1, 0.09, -0.04, hullY - 0.12, -width * 0.46);
 
-    const bumperF = new THREE.Mesh(
-      new THREE.BoxGeometry(0.35, 0.2, width * 1.02),
-      dark,
-    );
-    bumperF.position.set(length * 0.48, ride + 0.2, 0);
-    group.add(bumperF);
-
-    const bumperR = new THREE.Mesh(
-      new THREE.BoxGeometry(0.28, 0.2, width * 1.02),
-      dark,
-    );
-    bumperR.position.set(-length * 0.48, ride + 0.2, 0);
-    group.add(bumperR);
-
-    // Underglow strips.
-    const under = new THREE.Mesh(
-      new THREE.BoxGeometry(length * 0.92, 0.04, width * 0.95),
-      glow,
-    );
-    under.position.y = 0.06;
-    under.renderOrder = 2;
-    group.add(under);
-
-    const glowHalo = new THREE.Mesh(
-      new THREE.PlaneGeometry(length * 1.05, width * 1.35),
-      new THREE.MeshBasicMaterial({
-        color: glowCol,
-        transparent: true,
-        opacity: 0.28,
-        depthWrite: false,
-      }),
-    );
-    glowHalo.rotation.x = -Math.PI / 2;
-    glowHalo.position.y = 0.03;
-    glowHalo.renderOrder = 1;
-    group.add(glowHalo);
-
-    // Headlights / tails.
-    const head = new THREE.MeshBasicMaterial({ color: 0xfff2c8 });
-    const tail = new THREE.MeshBasicMaterial({ color: 0xff2020 });
-    for (const side of [-1, 1]) {
-      const h = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.22), head);
-      h.position.set(length * 0.5, ride + 0.32, side * width * 0.32);
-      group.add(h);
-      const t = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.28), tail);
-      t.position.set(-length * 0.5, ride + 0.32, side * width * 0.32);
-      group.add(t);
+    const bumperY = hullY - 0.08;
+    addBox(group, dark, 0.32, 0.24, width * 0.98, length * 0.46, bumperY, 0);
+    addBox(group, dark, 0.22, 0.1, 0.7, length * 0.5, bumperY + 0.02, 0);
+    addBox(group, dark, 0.18, 0.08, width * 1.0, length * 0.44, bumperY - 0.1, 0);
+    addBox(group, dark, 0.3, 0.22, width * 0.96, -length * 0.46, bumperY, 0);
+    for (let i = -2; i <= 2; i++) {
+      addBox(group, dark, 0.1, 0.1, 0.05, -length * 0.5, bumperY - 0.06, i * 0.15);
     }
+
+    // Wing: posts span boot top to blade so nothing hangs in space.
+    const wingX = bootX - 0.28;
+    const wingY = bootY + 0.28;
+    const postH = 0.32;
+    const postY = bootY + postH * 0.5;
+    const postZ = width * 0.3;
+    addBox(group, carbon, 0.18, 0.06, width * 0.92, wingX, wingY, 0);
+    addBox(group, carbon, 0.05, 0.14, 0.2, wingX - 0.06, wingY + 0.04, postZ);
+    addBox(group, carbon, 0.05, 0.14, 0.2, wingX - 0.06, wingY + 0.04, -postZ);
+    addBox(group, dark, 0.07, postH, 0.07, wingX + 0.04, postY, postZ);
+    addBox(group, dark, 0.07, postH, 0.07, wingX + 0.04, postY, -postZ);
+
+    const mirrorZ = width * 0.42;
+    addBox(group, dark, 0.1, 0.06, 0.16, 0.12, cabinY, mirrorZ);
+    addBox(group, dark, 0.12, 0.08, 0.16, 0.16, cabinY + 0.02, mirrorZ + 0.1);
+    addBox(group, dark, 0.1, 0.06, 0.16, 0.12, cabinY, -mirrorZ);
+    addBox(group, dark, 0.12, 0.08, 0.16, 0.16, cabinY + 0.02, -mirrorZ - 0.1);
+
+    const roundLights = slot % 2 === 0;
+    for (const side of [-1, 1] as const) {
+      if (roundLights) {
+        for (const inset of [0.1, 0.26]) {
+          const lamp = addLamp(
+            group,
+            lamps,
+            new THREE.CylinderGeometry(0.07, 0.07, 0.07, 10),
+            0xfff4dc,
+            1,
+          );
+          lamp.rotation.z = Math.PI / 2;
+          lamp.position.set(length * 0.47, bumperY + 0.06, side * (width * 0.2 + inset));
+        }
+      } else {
+        addLampBox(group, lamps, 0.07, 0.08, 0.34, length * 0.47, bumperY + 0.06, side * width * 0.26, 0xfff4dc, 1);
+      }
+      addLampBox(group, lamps, 0.05, 0.05, 0.08, length * 0.46, bumperY + 0.02, side * width * 0.46, 0xff9a2a, 1);
+      addLampBox(group, lamps, 0.06, 0.1, 0.36, -length * 0.47, bumperY + 0.06, side * width * 0.26, 0xff1a1a, 1);
+      addLampBox(group, lamps, 0.05, 0.04, 0.16, -length * 0.47, bumperY - 0.02, side * width * 0.2, 0xff1a1a, 1);
+    }
+
+    addBox(group, chrome, 0.16, 0.06, 0.34, -length * 0.5, bumperY - 0.04, 0.16);
+    addBox(group, chrome, 0.16, 0.06, 0.34, -length * 0.5, bumperY - 0.04, -0.16);
+    addBox(group, plate, 0.04, 0.12, 0.34, length * 0.5, bumperY, 0);
+    addBox(group, plate, 0.04, 0.12, 0.34, -length * 0.5, bumperY + 0.02, 0);
+
+    // Belly / sill glow — on the hull, not a separate floating pad.
+    addLampBox(group, lamps, length * 0.86, 0.04, width * 0.8, 0, hullY - 0.16, 0, glowCol, 0.9);
+    addLampBox(group, lamps, length * 0.72, 0.04, 0.05, 0, hullY - 0.14, width * 0.48, glowCol, 0.85);
+    addLampBox(group, lamps, length * 0.72, 0.04, 0.05, 0, hullY - 0.14, -width * 0.48, glowCol, 0.85);
+
+    const glowLight = new THREE.PointLight(glowCol, 3.6, 13, 2);
+    glowLight.position.set(0, hullY - 0.05, 0);
+    group.add(glowLight);
+    lights.push(glowLight);
 
     const wheelX = length * 0.32;
     const wheelZ = width * 0.52;
     for (const lx of [-wheelX, wheelX]) {
       for (const lz of [-wheelZ, wheelZ]) {
-        const wheel = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.36, 0.36, 0.28, 10),
+        const hubGroup = new THREE.Group();
+        hubGroup.position.set(lx, 0.32, lz);
+        const tyreMesh = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.33, 0.33, 0.26, 12),
           tyre,
         );
-        wheel.rotation.x = Math.PI / 2;
-        wheel.position.set(lx, 0.36, lz);
-        group.add(wheel);
-        const cap = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.16, 0.16, 0.3, 8),
+        tyreMesh.rotation.x = Math.PI / 2;
+        hubGroup.add(tyreMesh);
+        const rim = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.19, 0.19, 0.28, 10),
           hub,
         );
+        rim.rotation.x = Math.PI / 2;
+        hubGroup.add(rim);
+        for (let s = 0; s < 5; s++) {
+          const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.26, 0.035), hub);
+          spoke.rotation.x = Math.PI / 2;
+          spoke.rotation.z = (s / 5) * Math.PI;
+          hubGroup.add(spoke);
+        }
+        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.3, 8), chrome);
         cap.rotation.x = Math.PI / 2;
-        cap.position.set(lx, 0.36, lz);
-        group.add(cap);
+        hubGroup.add(cap);
+        const cal = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.16), caliper);
+        cal.position.set(0, 0.02, lz > 0 ? 0.02 : -0.02);
+        hubGroup.add(cal);
+        group.add(hubGroup);
+        wheels.push(hubGroup);
       }
     }
 
-    return group;
+    return { group, wheels, lights, lamps };
   }
+}
+
+function addBox(
+  parent: THREE.Object3D,
+  material: THREE.Material,
+  w: number,
+  h: number,
+  d: number,
+  x: number,
+  y: number,
+  z: number,
+  cast = false,
+): THREE.Mesh {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+  mesh.position.set(x, y, z);
+  mesh.castShadow = cast;
+  parent.add(mesh);
+  return mesh;
+}
+
+function addLamp(
+  parent: THREE.Object3D,
+  lamps: Lamp[],
+  geometry: THREE.BufferGeometry,
+  color: number,
+  opacity: number,
+): THREE.Mesh {
+  const mat = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity,
+    depthWrite: opacity >= 0.85,
+  });
+  lamps.push({ mat, color: new THREE.Color(color), opacity });
+  const mesh = new THREE.Mesh(geometry, mat);
+  parent.add(mesh);
+  return mesh;
+}
+
+function addLampBox(
+  parent: THREE.Object3D,
+  lamps: Lamp[],
+  w: number,
+  h: number,
+  d: number,
+  x: number,
+  y: number,
+  z: number,
+  color: number,
+  opacity: number,
+): THREE.Mesh {
+  const mesh = addLamp(parent, lamps, new THREE.BoxGeometry(w, h, d), color, opacity);
+  mesh.position.set(x, y, z);
+  return mesh;
+}
+
+function nearestLineIndex(
+  line: ReadonlyArray<{ x: number; z: number }>,
+  x: number,
+  z: number,
+): number {
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < line.length; i++) {
+    const p = line[i]!;
+    const d = (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/**
+ * Walk the parade graph from the westernmost seafront vertex, staying on
+ * south roads, so the racers use Eastney Esplanade and the linked western
+ * parade instead of a short mid-park bounce.
+ */
+function stitchEsplanadeLine(
+  graph: RoadGraph,
+): { x: number; z: number }[] {
+  const fallback = fallbackEsplanade(graph);
+  type Node = { road: number; index: number; x: number; z: number };
+  const nodes: Node[] = [];
+  graph.roads.forEach((pts, road) => {
+    pts.forEach((p, index) => {
+      if (p.z < ESPLANADE_SOUTH_OF) nodes.push({ road, index, x: p.x, z: p.z });
+    });
+  });
+  if (nodes.length < 2) return fallback;
+
+  const used = new Set<string>();
+  const key = (road: number, index: number) => `${road}:${index}`;
+  let current = nodes.reduce((a, b) => (a.x < b.x ? a : b));
+  const line: { x: number; z: number }[] = [{ x: current.x, z: current.z }];
+  used.add(key(current.road, current.index));
+
+  for (let guard = 0; guard < 120; guard++) {
+    const pts = graph.roads[current.road]!;
+    const candidates: { node: Node; east: number }[] = [];
+
+    for (const ni of [current.index - 1, current.index + 1]) {
+      if (ni < 0 || ni >= pts.length) continue;
+      if (used.has(key(current.road, ni))) continue;
+      const p = pts[ni]!;
+      if (p.z > ESPLANADE_MAX_Z) continue;
+      candidates.push({
+        node: { road: current.road, index: ni, x: p.x, z: p.z },
+        east: p.x - current.x,
+      });
+    }
+
+    for (const link of graph.linksAt(current.road, current.index)) {
+      if (used.has(key(link.road, link.index))) continue;
+      const p = graph.roads[link.road]?.[link.index];
+      if (!p || p.z > ESPLANADE_MAX_Z) continue;
+      candidates.push({
+        node: { road: link.road, index: link.index, x: p.x, z: p.z },
+        east: p.x - current.x,
+      });
+    }
+
+    if (candidates.length === 0) break;
+    const eastward = candidates.filter((c) => c.east > 1.2);
+    eastward.sort((a, b) => b.east - a.east);
+    candidates.sort((a, b) => b.east - a.east);
+    const pick = (eastward[0] ?? candidates[0])!;
+    const dist = Math.hypot(pick.node.x - current.x, pick.node.z - current.z);
+    current = pick.node;
+    used.add(key(current.road, current.index));
+    if (dist > 2.2) line.push({ x: current.x, z: current.z });
+  }
+
+  return line.length >= 2 ? line : fallback;
+}
+
+/** Road 0's southern run — old 8–16 stretch — if the graph has no seafront. */
+function fallbackEsplanade(
+  graph: RoadGraph,
+): { x: number; z: number }[] {
+  const pts = graph.roads[0];
+  if (!pts || pts.length < 2) return [];
+  const south = pts
+    .map((p, i) => ({ p, i }))
+    .filter(({ p }) => p.z < ESPLANADE_SOUTH_OF);
+  if (south.length >= 2) {
+    const from = south[0]!.i;
+    const to = south[south.length - 1]!.i;
+    const lo = Math.min(from, to);
+    const hi = Math.max(from, to);
+    return pts.slice(lo, hi + 1).map((p) => ({ x: p.x, z: p.z }));
+  }
+  const lo = Math.min(8, pts.length - 1);
+  const hi = Math.min(16, pts.length - 1);
+  return pts.slice(lo, hi + 1).map((p) => ({ x: p.x, z: p.z }));
 }
