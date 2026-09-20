@@ -1,6 +1,6 @@
 # Bunsterstons and Chippy
 
-3D platformer — two characters take turns.
+3D platformer — two characters take turns. Pompey slang, if you need it, lives in `shared/phraseology.json`.
 
 - **Bunsterstons** (pink bunny) — odd levels (collect carrots)
 - **Chippy** (guinea pig) — even levels

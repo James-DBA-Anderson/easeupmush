@@ -249,6 +249,16 @@ body {
   color: var(--muted);
 }
 
+.games__lede a {
+  color: var(--foam);
+  text-decoration: none;
+}
+
+.games__lede a:hover {
+  color: var(--sodium-hot);
+  text-decoration: underline;
+}
+
 .feature {
   display: grid;
   gap: 1.25rem;

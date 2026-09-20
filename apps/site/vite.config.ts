@@ -1,10 +1,11 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
 import { appVersionPlugin } from "../../scripts/app-version.mjs";
+import { phraseologyPagePlugin } from "../../scripts/phraseology-page.mjs";
 
 export default defineConfig({
   base: "/",
-  plugins: [appVersionPlugin()],
+  plugins: [appVersionPlugin(), phraseologyPagePlugin()],
   server: {
     port: 5300,
     strictPort: true,

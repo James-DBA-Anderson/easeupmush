@@ -8,6 +8,8 @@ This is a **monorepo** — the marketing site plus games that ship under it.
 apps/
   site/                 # easeupmush.com homepage
   pompey-punch-up/      # Southsea brawler
+shared/
+  phraseology.json      # Pompey slang — all games + /mush/phraseology/
 ```
 
 ## Play / develop
@@ -29,7 +31,7 @@ Production URLs after deploy:
 | `/games/pompey-punch-up/` | Pompey Punch-Up |
 | `/games/pompey-punch-up/debug.html` | Debug arena |
 | `/mush/` | Back room — unlisted homepage with the in-progress games. Reached by clicking the logo on `/about/` |
-| `/mush/phraseology/` | Pompey phraseology reference |
+| `/mush/phraseology/` | Pompey phraseology reference (generated from `shared/phraseology.json`) |
 | `/games/pompeymon/` | Pompeymon (unlisted, linked from the back room only) |
 
 To try the full assembled site locally (homepage + Play link):

@@ -8,7 +8,7 @@
 
 Clock on at the cleaner van after a heavy overnight tip on the paving. Hose droppings and graffiti, jab litter and overflowing bins with the picker, keep the cleanliness meter up, and deal with scripted missions as the 24‑minute day cycle runs from 06:00 round to the next morning.
 
-The park is busy: swans (and cygnets), mallards, gulls, dogs, cyclists, BBQ parties, crabbing kids, foxes at night, and a phone full of Pompey depot texts.
+The park is busy: swans (and cygnets), mallards, gulls, dogs, cyclists, BBQ parties, crabbing kids, foxes at night, and a phone full of Pompey depot texts. Slang is the shared glossary in `shared/phraseology.json`.
 
 ## Scripted missions
 

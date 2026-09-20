@@ -12,21 +12,7 @@ This document is the design foundation **and** a map of what the build actually 
 
 Patrol Canoe Lake Gardens with council kit. Mute swans (and foxes, gulls, litterbugs) keep making work. Keep cleanliness up through a compressed day, answer radio jobs, and try not to get pecked into an early clock‑off.
 
-**Tone:** Light-hearted frustration. PowerWash Simulator meets bird chaos — swans are proper menacing, speech bubbles and depot texts lean on Pompey phraseology where it fits.
-
-### Pompey phraseology
-
-| Phrase | Meaning |
-| --- | --- |
-| Hanging | Badly hung over |
-| Sweet as nut | OK; also that something is very good |
-| Cop the needle / copped | Annoyed, had enough; took a hit of something |
-| Grub | Food |
-| Slash | Urinate |
-| Lay out | Threaten to flatten someone — "I'll lay 'im out, mush" |
-| Scummer | Someone from Southampton |
-| Clued up | Knowledgeable |
-| Burn | Cigarette — "let's have a burn on that then, mush" |
+**Tone:** Light-hearted frustration. PowerWash Simulator meets bird chaos — swans are proper menacing, speech bubbles and depot texts lean on Pompey phraseology where it fits. Glossary: `shared/phraseology.json` (`@easeupmush/phraseology`); site page `/mush/phraseology/`.
 
 ## Setting: Canoe Lake, Southsea
 

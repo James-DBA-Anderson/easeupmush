@@ -8,6 +8,8 @@ You wake up on the beach after a messy night out. A car pulls up. Mean lads pile
 
 **Art direction:** thick marker lines and wonky humour, but closer to SOR2 side-on sprites than stick figures — walk cycles, limp limbs, bloodied faces, chalk-red damage on the portrait.
 
+Dialogue uses Pompey slang — `shared/phraseology.json` (`@easeupmush/phraseology`).
+
 ---
 
 ## Play

@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@easeupmush/phraseology": "*",
     "phaser": "^3.88.2"
   },
   "devDependencies": {

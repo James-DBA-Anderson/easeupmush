@@ -5,7 +5,8 @@
   "description": "Ease Up Mush — browser games from Pompey for Pompey.",
   "type": "module",
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "shared"
   ],
   "scripts": {
     "dev": "node scripts/dev.mjs",
