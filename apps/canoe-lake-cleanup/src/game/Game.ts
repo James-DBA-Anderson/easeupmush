@@ -2724,6 +2724,17 @@ export class Game {
       this.racerHourWas = 22;
       this.clockOn({ quiet: true });
       this.beginRacerMission();
+      // Stand on the south lawn looking at the esplanade — the van is the
+      // wrong side of the park for this job.
+      const tip = getMissionSpot("racers");
+      const standX = THREE.MathUtils.clamp(tip.x, -90, 90);
+      const standZ = Math.min(-96, tip.z + 18);
+      this.player.takeOverFromIntro(
+        standX,
+        1.7 + groundHeight(standX, standZ),
+        standZ,
+        Math.PI,
+      );
     } else if (from === "rebels") {
       this.dayCycle.setHour(1.1);
       this.picnicRaidDone = true;
@@ -3513,7 +3524,7 @@ export class Game {
     this.callouts.raise("racers", this.dayCycle.clockFace(), tip);
     this.messages.send(
       "PCSO GRANT",
-      "Skylines on the esplanade — underglow, full chat. They'll do a few passes. Stay off the road.",
+      "Skylines on the esplanade — underglow, full chat. They're hammering it up and down the seafront. Stay off the road.",
       this.dayCycle.clockFace(),
       12,
     );
