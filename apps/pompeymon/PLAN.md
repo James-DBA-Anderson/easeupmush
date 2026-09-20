@@ -74,7 +74,11 @@ Portrait mobile: grey Game Boy-style control deck. Slide a finger across the D-p
 
 ### Pompey phraseology
 
-Street talk uses the shared glossary in `shared/phraseology.json` (`@easeupmush/phraseology`). The back-room page `/mush/phraseology/` is generated from that file.
+Street talk uses the shared glossary in `shared/phraseology.json` (`@easeupmush/phraseology`). The back-room page `/mush/phraseology/` is generated from that file. Voice notes below are Pompeymon-only — do not put them back in the shared glossary.
+
+**th → f:** Drunks and thicker lads replace **th** with **f** in speech — *fink*, *nuffin*, *wiv*, *portsmuth*. Not every street voice: nans, Sir, Choke and Mum stay clearer. Examples: *“I aint never been to portsmuth before.”* *“Who's that mush fink he is?”*
+
+**Who uses what:** **Steve** (2nd Avenue) is a dense lad — **cushty**, **init**, **beard**, **fings**. Street lads and trainers lean **mush** / **geezer** plus fight talk (**decked**, **copped**). Kay, the give-way bloke and the bus lad **squinny**; Tom's challenge takes a rare **dinlo**; Gaz and Mick **bang out**; Lee and Kay **bang out of order**; Gaz and Ryan **batter**; Dave, Mick and Ryan take losses with **ease up mush**; Dave and Mick **shant** and **cushty**, and Dave takes a win or a hiding with **shant on**; older nans and 80s voices get a rare **lakes**; denser lads get **beard**, **chore**, **dane tane**, **init** and **chuffed**.
 
 Talking to an NPC again cycles their `more` lines before looping back to the opener, so nobody repeats themselves straight away. Whoever's named on the current page bobs on the spot while they talk, so you can tell who's speaking. Keep lines short for the MsgBox.
 

@@ -9,12 +9,10 @@ const MARKER = "<!-- PHRASEOLOGY -->";
 
 /**
  * @typedef {{ phrase: string, meaning: string }} Phrase
- * @typedef {{ title: string, body: string }} Note
  * @typedef {{
  *   lede: string[],
  *   phrasesHeading: string,
  *   phrases: Phrase[],
- *   notes: Note[],
  * }} Phraseology
  */
 
@@ -55,17 +53,6 @@ function renderPhraseology(data) {
     )
     .join("\n");
 
-  const notes = data.notes
-    .map(
-      (note) => `        <section class="about__section">
-          <h2>${escapeHtml(note.title)}</h2>
-          <p>
-            ${inline(note.body)}
-          </p>
-        </section>`,
-    )
-    .join("\n\n");
-
   return `        <section class="about__section">
 ${lede}
         </section>
@@ -83,9 +70,7 @@ ${lede}
 ${rows}
             </tbody>
           </table>
-        </section>
-
-${notes}`;
+        </section>`;
 }
 
 function isPhraseologyPage(html) {
