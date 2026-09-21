@@ -1,14 +1,17 @@
 {
-  "name": "@easeupmush/phraseology",
+  "name": "@easeupmush/shared",
   "version": "0.1.0",
   "private": true,
-  "description": "Shared Pompey slang glossary. Site page: /mush/phraseology/",
+  "description": "Shared utilities for Ease Up Mush games",
   "type": "module",
-  "types": "./phraseology.d.ts",
   "exports": {
-    ".": {
+    "./phraseology": {
       "types": "./phraseology.d.ts",
       "default": "./phraseology.json"
+    },
+    "./ply-pipeline": {
+      "types": "./ply-pipeline.d.ts",
+      "default": "./ply-pipeline.ts"
     }
   }
 }
