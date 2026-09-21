@@ -12,7 +12,7 @@ import {
   decimatePly, 
   centerAndScale,
   toJSON 
-} from '../shared/ply-pipeline.mjs';
+} from './src/parser.mjs';
 
 const args = process.argv.slice(2);
 

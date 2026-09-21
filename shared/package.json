@@ -8,10 +8,6 @@
     "./phraseology": {
       "types": "./phraseology.d.ts",
       "default": "./phraseology.json"
-    },
-    "./ply-pipeline": {
-      "types": "./ply-pipeline.d.ts",
-      "default": "./ply-pipeline.ts"
     }
   }
 }

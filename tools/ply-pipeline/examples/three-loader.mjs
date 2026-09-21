@@ -4,7 +4,7 @@
  */
 
 import * as THREE from 'three';
-import { parsePly, optimizeForThreeJs, centerAndScale, decimatePly } from '@easeupmush/shared/ply-pipeline';
+import { parsePly, optimizeForThreeJs, centerAndScale, decimatePly } from '../src/parser.mjs';
 
 /**
  * Simple PLY point cloud loader

@@ -2,6 +2,8 @@
 
 Your uploaded Scaniverse PLY file has been successfully processed and a complete pipeline tool has been created!
 
+**Location:** `tools/ply-pipeline/`
+
 ## ✅ What Was Built
 
 1. **Full PLY Parser** - Handles ASCII and binary formats, traditional meshes and Gaussian splats
@@ -26,19 +28,19 @@ Scaniverse_2026-09-20_225706_844f.ply
 
 ```bash
 # Analyze any PLY file
-node tools/ply-cli.mjs info scan.ply
+node tools/ply-pipeline/cli.mjs info scan.ply
 
 # Reduce to 25% for web performance
-node tools/ply-cli.mjs decimate 0.25 scan.ply
+node tools/ply-pipeline/cli.mjs decimate 0.25 scan.ply
 
 # Center and scale to 10 units
-node tools/ply-cli.mjs center 10 scan.ply
+node tools/ply-pipeline/cli.mjs center 10 scan.ply
 ```
 
 ### In Your Three.js Game
 
 ```javascript
-import { PlyPointCloudLoader } from '@easeupmush/shared/ply-loader-example';
+import { PlyPointCloudLoader } from '../../tools/ply-pipeline/examples/three-loader.mjs';
 
 // Load as point cloud
 const pointCloud = await PlyPointCloudLoader.load('/assets/scan.ply', {
@@ -53,7 +55,7 @@ scene.add(pointCloud);
 ### Advanced: Multiple LOD Levels
 
 ```javascript
-import { PlyLODLoader } from '@easeupmush/shared/ply-loader-example';
+import { PlyLODLoader } from '../../tools/ply-pipeline/examples/three-loader.mjs';
 
 const lodLoader = new PlyLODLoader('/assets/scan.ply');
 const lod = await lodLoader.load(); // Creates 3 LOD levels automatically
@@ -87,7 +89,7 @@ scene.add(lod);
 
 ```javascript
 // In your Game.ts or world setup
-import { loadScannedParkAsset } from '@easeupmush/shared/ply-loader-example';
+import { loadScannedParkAsset } from '../../tools/ply-pipeline/examples/three-loader.mjs';
 
 async initScannedAssets() {
   // Add Victorian benches around the lake
@@ -102,9 +104,9 @@ async initScannedAssets() {
 
 ## 📚 Documentation
 
-- **Full API docs**: `shared/PLY_PIPELINE.md`
-- **Examples**: `shared/ply-loader-example.mjs`
-- **Package info**: `shared/README.md`
+- **Full API docs**: `tools/ply-pipeline/README.md`
+- **Examples**: `tools/ply-pipeline/examples/three-loader.mjs`
+- **Source**: `tools/ply-pipeline/src/parser.mjs`
 
 ## 🔧 API Functions
 
@@ -115,7 +117,7 @@ import {
   decimatePly,        // Reduce vertex count
   centerAndScale,     // Center at origin and scale
   generateStats,      // Get human-readable stats
-} from '@easeupmush/shared/ply-pipeline';
+} from './tools/ply-pipeline/src/parser.mjs';
 ```
 
 ## 🎯 Performance Tips

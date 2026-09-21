@@ -2,6 +2,8 @@
 
 A comprehensive tool for processing PLY files (3D point clouds and meshes) for Three.js browser games.
 
+**Location:** `tools/ply-pipeline/`
+
 ## Features
 
 - ✅ Parse PLY files (both ASCII and binary formats)
@@ -15,11 +17,14 @@ A comprehensive tool for processing PLY files (3D point clouds and meshes) for T
 
 ## Installation
 
-The pipeline is available as a shared module:
+The pipeline is available in the tools directory:
 
 ```javascript
 // In your Three.js app
-import { parsePly, optimizeForThreeJs } from '@easeupmush/shared/ply-pipeline';
+import { parsePly, optimizeForThreeJs } from '../../tools/ply-pipeline/src/parser.mjs';
+
+// Or use the Three.js loader helpers
+import { PlyPointCloudLoader } from '../../tools/ply-pipeline/examples/three-loader.mjs';
 ```
 
 ## CLI Tool
@@ -28,16 +33,16 @@ Quick analysis and processing from the command line:
 
 ```bash
 # Show file statistics
-node tools/ply-cli.mjs info scan.ply
+node tools/ply-pipeline/cli.mjs info scan.ply
 
 # Decimate to 25% of original vertices
-node tools/ply-cli.mjs decimate 0.25 scan.ply
+node tools/ply-pipeline/cli.mjs decimate 0.25 scan.ply
 
 # Center and scale to size 10
-node tools/ply-cli.mjs center 10 scan.ply
+node tools/ply-pipeline/cli.mjs center 10 scan.ply
 
 # Optimize for Three.js (outputs JSON)
-node tools/ply-cli.mjs optimize scan.ply > optimized.json
+node tools/ply-pipeline/cli.mjs optimize scan.ply > optimized.json
 ```
 
 ## JavaScript API
@@ -46,7 +51,7 @@ node tools/ply-cli.mjs optimize scan.ply > optimized.json
 
 ```javascript
 import { readFileSync } from 'fs';
-import { parsePly, generateStats } from '@easeupmush/shared/ply-pipeline';
+import { parsePly, generateStats } from './tools/ply-pipeline/src/parser.mjs';
 
 // Load and parse
 const buffer = readFileSync('scan.ply').buffer;
@@ -60,7 +65,7 @@ console.log(generateStats(plyData));
 
 ```javascript
 import * as THREE from 'three';
-import { parsePly, optimizeForThreeJs, centerAndScale } from '@easeupmush/shared/ply-pipeline';
+import { parsePly, optimizeForThreeJs, centerAndScale } from './tools/ply-pipeline/src/parser.mjs';
 
 async function loadPlyAsPoints(url) {
   // Fetch the PLY file
@@ -104,7 +109,7 @@ scene.add(pointCloud);
 ### Decimation for Web Performance
 
 ```javascript
-import { parsePly, decimatePly, optimizeForThreeJs } from '@easeupmush/shared/ply-pipeline';
+import { parsePly, decimatePly, optimizeForThreeJs } from './tools/ply-pipeline/src/parser.mjs';
 
 async function loadOptimizedPly(url, decimationFactor = 0.5) {
   const response = await fetch(url);
@@ -201,7 +206,7 @@ Add scanned assets to your Canoe Lake game:
 
 ```javascript
 // In world/scannedAssets.ts
-import { parsePly, optimizeForThreeJs, centerAndScale } from '@easeupmush/shared/ply-pipeline';
+import { parsePly, optimizeForThreeJs, centerAndScale } from '../../tools/ply-pipeline/src/parser.mjs';
 
 export async function loadScannedBench() {
   const response = await fetch('/assets/scans/bench-victorian.ply');
@@ -266,7 +271,12 @@ Source: Created with Scaniverse - https://scaniverse.com
 
 ## Contributing
 
-The pipeline is in `shared/ply-pipeline.mjs` (JavaScript) with type definitions in `shared/ply-pipeline.d.ts`.
+The pipeline is in `tools/ply-pipeline/`:
+- `src/parser.mjs` - Main parser implementation (JavaScript)
+- `src/parser.ts` - TypeScript version with full types
+- `src/parser.d.ts` - Type definitions
+- `cli.mjs` - Command-line interface
+- `examples/three-loader.mjs` - Three.js integration examples
 
 ## License
 
