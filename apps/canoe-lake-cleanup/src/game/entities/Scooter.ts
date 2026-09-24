@@ -319,7 +319,7 @@ export class Scooter {
   }
 
   /** Heavy hose blast knocks them clear off the scooter. */
-  public knockOff(from: THREE.Vector3): void {
+  public knockOff(_from: THREE.Vector3): void {
     this.reactToSpray(["ARGH!", "I'M OFF!", "WHOA!", "YOU WHAT?!"], true);
     this.ticketLeft = 0;
     this.anger = 0;
