@@ -318,6 +318,16 @@ export class Scooter {
     return first;
   }
 
+  /** Heavy hose blast knocks them clear off the scooter. */
+  public knockOff(from: THREE.Vector3): void {
+    this.reactToSpray(["ARGH!", "I'M OFF!", "WHOA!", "YOU WHAT?!"], true);
+    this.ticketLeft = 0;
+    this.anger = 0;
+    this.ramLeft = 0;
+    this.wet = 0;
+    this.fouled = 0;
+  }
+
   /** Filthy bounce spray — worse. Returns true on a fresh fouling. */
   public foul(): boolean {
     const first = this.fouled <= 0;
