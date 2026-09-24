@@ -11,6 +11,7 @@ const FROM_VALUES: readonly DebugFrom[] = [
   "fire",
   "racers",
   "rebels",
+  "pigeons",
 ] as const;
 
 export function isDebugFrom(v: unknown): v is DebugFrom {
@@ -40,4 +41,5 @@ export const DEBUG_FROM_LABELS: Record<DebugFrom, string> = {
   fire: "Grass fire",
   racers: "Boy racers",
   rebels: "Rebel raid",
+  pigeons: "Wire birds",
 };
