@@ -405,6 +405,41 @@ export function roostPerchesNear(
   return out;
 }
 
+/**
+ * Pick the two northernmost wire sections (highest Z values) for the pigeons mission.
+ * North end of the lake has positive Z coordinates.
+ */
+export function roostPerchesNorth(
+  count: number,
+  sections: readonly (readonly THREE.Vector3[])[],
+): THREE.Vector3[] {
+  if (count <= 0) return [];
+
+  const ranked = sections
+    .filter((sec) => sec.length > 0)
+    .map((sec) => {
+      let cz = 0;
+      for (const p of sec) {
+        cz += p.z;
+      }
+      cz /= sec.length;
+      return { sec, cz };
+    })
+    .sort((a, b) => b.cz - a.cz);
+
+  const pick = ranked.slice(0, Math.min(2, ranked.length));
+  if (pick.length === 0) return [];
+
+  const out: THREE.Vector3[] = [];
+  const firstShare = pick.length === 1 ? count : Math.ceil(count / 2);
+  const shares = pick.length === 1 ? [count] : [firstShare, count - firstShare];
+
+  for (let i = 0; i < pick.length; i++) {
+    out.push(...packSection(pick[i]!.sec, shares[i]!));
+  }
+  return out;
+}
+
 /** Consecutive cluster on a span; interpolate if the flock outnumbers bulbs. */
 function packSection(
   sec: readonly THREE.Vector3[],

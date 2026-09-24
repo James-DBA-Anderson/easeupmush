@@ -71,7 +71,7 @@ import { placeBench, clearSitterBenches, sitterBenchSeats } from "./world/bench"
 import { plantTrees, updateTrees, updateFlowerBeds, sprayFlowerBed, flowerBeds } from "./world/trees";
 import { buildSurrounds, lightWindows } from "./world/buildings";
 import { buildFairyLights, lightFairyBulbs, fairyLightSections } from "./world/fairyLights";
-import { WireBird, roostPerchesNear } from "./entities/WireBird";
+import { WireBird, roostPerchesNear, roostPerchesNorth } from "./entities/WireBird";
 import { buildFencing, parkGates } from "./world/fence";
 import {
   buildParkBuildings,
@@ -344,6 +344,12 @@ export class Game {
   private gooseHeavyArmed = false;
   private gooseFlock: GooseFlock | null = null;
   private rearDoorOpen = 0;
+
+  /** Mission 7 — pigeons perching on wires at the north end. */
+  private pigeonMissionStarted = false;
+  private pigeonMissionDone = false;
+  private pigeonMissionBirds: WireBird[] = [];
+  private pigeonHourWas = -1;
 
   private health = HEALTH_MAX;
   private sincePecked = HEAL_DELAY;
@@ -1487,6 +1493,80 @@ export class Game {
       this.gooseFlock.dispose();
       this.gooseFlock = null;
     }
+  }
+
+  /** Mission 7 — pigeons perching on wires at the north end. */
+  private updatePigeonMission(delta: number): void {
+    const hour = this.dayCycle.hour;
+
+    if (
+      !this.pigeonMissionStarted &&
+      !this.pigeonMissionDone &&
+      this.onDuty &&
+      this.pigeonHourWas >= 0 &&
+      missionWindowOpen("pigeons", hour)
+    ) {
+      this.startPigeonMission();
+    }
+
+    this.pigeonHourWas = hour;
+
+    if (this.pigeonMissionBirds.length === 0) return;
+
+    for (let i = this.pigeonMissionBirds.length - 1; i >= 0; i--) {
+      const bird = this.pigeonMissionBirds[i]!;
+      bird.update(delta);
+      const drop = bird.claimDrop();
+      if (drop && !isInLake(drop.x, drop.z)) {
+        this.addDropping(drop, "gull");
+      }
+      if (bird.isGone()) {
+        bird.dispose();
+        this.pigeonMissionBirds.splice(i, 1);
+      }
+    }
+
+    if (
+      this.pigeonMissionStarted &&
+      !this.pigeonMissionDone &&
+      this.pigeonMissionBirds.length === 0
+    ) {
+      this.pigeonMissionDone = true;
+      this.cleaned += 1;
+      this.score += 60 * this.multiplier();
+      this.updateHUD();
+      this.messages.send(
+        "DEPOT",
+        "Wire birds cleared off the lights. Nice hosing.",
+        this.dayCycle.clockFace(),
+        12,
+      );
+    }
+  }
+
+  private startPigeonMission(): void {
+    if (this.pigeonMissionStarted || this.pigeonMissionDone) return;
+    if (!missionWindowOpen("pigeons", this.dayCycle.hour)) return;
+    
+    this.pigeonMissionStarted = true;
+
+    const spot = getMissionSpot("pigeons");
+    const roost = roostPerchesNorth(PIGEON_FLOCK, fairyLightSections());
+    if (roost.length === 0) return;
+
+    for (let i = 0; i < roost.length; i++) {
+      this.pigeonMissionBirds.push(new WireBird(this.scene, roost[i]!, i));
+    }
+
+    this.announceMission("pigeons");
+    this.callouts.raise("jobs", this.dayCycle.clockFace(), { x: spot.x, z: spot.z });
+    this.missionArrow.point({ x: spot.x, y: 0, z: spot.z });
+    this.messages.send(
+      "DEPOT",
+      "Caller says there's pigeons all over the north-end fairy lights. Get up there with the hose.",
+      this.dayCycle.clockFace(),
+      18,
+    );
   }
 
   /** Walk-up at the van rear — third-person take the heavy hose. */
@@ -2750,6 +2830,14 @@ export class Game {
       this.rebelHourWas = 1;
       this.clockOn({ quiet: true });
       this.beginRebelMission();
+    } else if (from === "pigeons") {
+      this.dayCycle.setHour(12);
+      this.picnicRaidDone = true;
+      this.gooseMissionDone = true;
+      this.swanboatMissionDone = true;
+      this.pigeonHourWas = 11;
+      this.clockOn({ quiet: true });
+      this.startPigeonMission();
     }
 
     this.applyTimeAndWeather(0);
@@ -4452,6 +4540,7 @@ export class Game {
     this.updateFeederRush(delta);
     this.updatePicnicRaid(delta);
     this.updateGooseMission(delta);
+    this.updatePigeonMission(delta);
     this.updatePedaloBirdHits();
     this.updateEveningClearout(delta);
     this.puddles.update(delta, this.dayCycle.skyState().sunPosition);
@@ -4616,6 +4705,11 @@ export class Game {
     if (this.boyRacers?.isActive()) {
       const aim = this.boyRacers.aimSpot();
       if (aim) spots.push(aim);
+    }
+
+    if (this.pigeonMissionStarted && !this.pigeonMissionDone) {
+      const spot = getMissionSpot("pigeons");
+      spots.push({ x: spot.x, z: spot.z });
     }
 
     return spots;
