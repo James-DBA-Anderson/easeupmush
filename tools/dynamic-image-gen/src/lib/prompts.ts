@@ -77,8 +77,8 @@ export const SIZE_PRESETS = [
   { label: 'Portrait', width: 512, height: 768 },
 ] as const
 
-const NEGATIVE =
-  'photorealistic, photo, 3d render, blurry, low quality, watermark, text, logo, multiple characters, crowd, busy background, scenery, ground shadow blob, cropped limbs, deformed anatomy'
+const SPRITE_NEGATIVE =
+  'photorealistic, photo, 3d render, blurry, low quality, watermark, text, logo, signature, multiple characters, twins, extra limbs, extra fingers, deformed face, mutated hands, cropped, cut off feet, busy background, scenery, landscape, room interior, floor shadow, jpeg artifacts'
 
 export function buildSpritePrompt(input: {
   description: string
@@ -92,18 +92,19 @@ export function buildSpritePrompt(input: {
   const facing = FACINGS[input.facing].prompt
   const pose = POSES[input.pose].prompt
   const bg = input.transparentHint
-    ? 'isolated character on solid flat pure magenta (#FF00FF) background for chroma key, no shadows on background'
-    : 'isolated character on solid flat light gray background, no scenery, no floor shadow'
+    ? 'plain solid chroma-key green background, even lighting, no cast shadows'
+    : 'plain solid off-white background, no scenery, no floor'
 
   return [
-    '2D game character sprite sheet frame, single character only, full body visible head to toe, centered composition',
+    'single 2D game character, full body head to feet, centered, character concept art',
     style,
     description,
     `${facing}, ${pose}`,
     bg,
-    'clean readable silhouette, game-ready asset, consistent lighting',
-    `Avoid: ${NEGATIVE}`,
+    'clear silhouette, one character only',
   ]
     .filter(Boolean)
-    .join('. ')
+    .join(', ')
 }
+
+export { SPRITE_NEGATIVE }

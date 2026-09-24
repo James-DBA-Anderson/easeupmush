@@ -273,6 +273,24 @@
         max-width: 90vw;
       }
 
+      #win-scan-wrap {
+        display: none;
+        width: min(72vw, 280px);
+        height: min(72vw, 280px);
+        margin: 0.35rem auto 0.85rem;
+      }
+
+      #win.congrats #win-scan-wrap:not([hidden]) {
+        display: block;
+      }
+
+      #win-scan {
+        width: 100%;
+        height: 100%;
+        display: block;
+        border-radius: 1rem;
+      }
+
       .win-card h1 {
         font-size: clamp(1.8rem, 5vw, 2.6rem);
         color: #ff7a2e;
@@ -570,6 +588,9 @@
     <div id="win" role="dialog" aria-labelledby="win-title">
       <div class="win-card">
         <p class="win-eyebrow" id="win-eyebrow">You did it</p>
+        <div id="win-scan-wrap" hidden>
+          <canvas id="win-scan" width="280" height="280" aria-hidden="true"></canvas>
+        </div>
         <h1 id="win-title">Level 1 clear!</h1>
         <p id="win-body">You got all the carrots. Nice one.</p>
         <p id="win-actions-desktop">

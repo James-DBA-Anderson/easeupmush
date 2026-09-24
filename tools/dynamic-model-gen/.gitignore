@@ -1,0 +1,16 @@
+logs
+*.log
+node_modules
+dist
+dist-ssr
+*.local
+generated
+.venv
+.DS_Store
+__pycache__
+*.pyc
+.huggingface
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.sw?

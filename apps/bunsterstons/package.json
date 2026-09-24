@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
+    "dependencies": {
     "@easeupmush/phraseology": "*",
     "three": "^0.170.0"
   },

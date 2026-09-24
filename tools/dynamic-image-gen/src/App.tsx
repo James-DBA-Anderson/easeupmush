@@ -14,6 +14,7 @@ import {
   type ArtStyle,
   type Facing,
   type Pose,
+  SPRITE_NEGATIVE,
 } from './lib/prompts'
 import './App.css'
 
@@ -86,6 +87,7 @@ function App() {
       const result = await generateSprite(
         {
           prompt,
+          negativePrompt: SPRITE_NEGATIVE,
           width: size.width,
           height: size.height,
           seed: seed.trim() ? Number(seed) : undefined,
@@ -112,7 +114,7 @@ function App() {
   const statusLabel = !health
     ? 'Checking backends…'
     : health.diffusers?.loading
-      ? 'Downloading SD-Turbo…'
+      ? 'Downloading DreamShaper…'
       : health.backend === 'ollama' && health.ollama?.hasImageModel
         ? `Ready · Ollama · ${health.model}`
         : health.backend === 'diffusers' && health.diffusers?.ready

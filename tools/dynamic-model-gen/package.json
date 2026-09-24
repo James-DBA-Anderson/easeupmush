@@ -1,15 +1,16 @@
 {
-  "name": "@easeupmush/dynamic-image-gen",
+  "name": "@easeupmush/dynamic-model-gen",
   "private": true,
   "version": "0.1.0",
-  "description": "Local 2D sprite generator for game asset creation.",
+  "description": "Local 3D game model generator and editor.",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:web": "vite",
-    "dev:api": "tsx server/index.ts",
-    "dev:img": ".venv/bin/python server/diffusers_worker.py",
-    "setup:img": "node scripts/setup-img.mjs",
+    "dev:api": "tsx watch server/index.ts",
+    "dev:3d": ".venv/bin/python server/shap_e_worker.py",
+    "setup:3d": "node scripts/setup-3d.mjs",
+    "setup:ollama": "node scripts/setup-ollama.mjs",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
@@ -19,7 +20,10 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "three": "^0.170.0",
+    "three-bvh-csg": "^0.0.16",
+    "three-mesh-bvh": "^0.8.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
@@ -27,6 +31,7 @@
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.170.0",
     "@vitejs/plugin-react": "^6.0.4",
     "concurrently": "^9.2.1",
     "oxlint": "^1.75.0",

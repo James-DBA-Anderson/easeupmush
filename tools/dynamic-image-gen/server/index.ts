@@ -18,6 +18,10 @@ app.use(cors())
 app.use(express.json({ limit: '2mb' }))
 app.use('/generated', express.static(OUTPUT_DIR))
 
+app.get('/', (_req, res) => {
+  res.redirect(302, 'http://localhost:5173/')
+})
+
 type GenerateBody = {
   prompt?: string
   model?: string
@@ -25,6 +29,7 @@ type GenerateBody = {
   height?: number
   steps?: number
   seed?: number
+  negativePrompt?: string
 }
 
 type Backend = 'ollama' | 'diffusers'
@@ -65,7 +70,7 @@ app.get('/api/health', async (_req, res) => {
     model:
       active === 'ollama'
         ? OLLAMA_MODEL
-        : (diffusers.model ?? 'stabilityai/sd-turbo'),
+        : (diffusers.model ?? 'Lykon/dreamshaper-8'),
     note:
       os.arch() !== 'arm64'
         ? 'Ollama image gen needs Apple Silicon. Using Diffusers (SD-Turbo) on this Intel Mac.'
@@ -120,7 +125,15 @@ app.post('/api/generate', async (req, res) => {
         seed,
       })
     } else {
-      await streamDiffusers({ res, prompt, width, height, steps, seed })
+      await streamDiffusers({
+        res,
+        prompt,
+        negativePrompt: body.negativePrompt,
+        width,
+        height,
+        steps,
+        seed,
+      })
     }
   } catch (error) {
     res.write(
@@ -218,6 +231,7 @@ async function streamOllama(args: {
 async function streamDiffusers(args: {
   res: express.Response
   prompt: string
+  negativePrompt?: string
   width: number
   height: number
   steps?: number
@@ -228,9 +242,10 @@ async function streamDiffusers(args: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       prompt: args.prompt,
+      negative_prompt: args.negativePrompt,
       width: args.width,
       height: args.height,
-      steps: Math.min(args.steps ?? 4, 8),
+      steps: Math.min(args.steps ?? 22, 30),
       seed: args.seed,
     }),
     // First run may download weights + CPU inference can take several minutes
@@ -284,7 +299,7 @@ async function streamDiffusers(args: {
       if (parsed.type === 'done' && parsed.image) {
         await finishImage(args.res, {
           imageBase64: parsed.image,
-          model: parsed.model ?? 'stabilityai/sd-turbo',
+          model: parsed.model ?? 'Lykon/dreamshaper-8',
           width: parsed.width ?? args.width,
           height: parsed.height ?? args.height,
           seed: parsed.seed ?? args.seed ?? null,

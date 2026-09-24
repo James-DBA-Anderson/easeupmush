@@ -12,6 +12,7 @@ export default defineConfig({
     port: 5305,
     strictPort: true,
     host: true,
+    allowedHosts: true,
     open: underSite ? false : true,
   },
   preview: {

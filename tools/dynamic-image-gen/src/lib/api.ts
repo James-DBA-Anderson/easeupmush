@@ -30,6 +30,7 @@ export type GenerateParams = {
   steps?: number
   seed?: number
   model?: string
+  negativePrompt?: string
 }
 
 export type GenerateProgress = {

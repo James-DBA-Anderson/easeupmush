@@ -2,11 +2,18 @@ import * as THREE from "three";
 import { Character } from "./Character";
 
 /**
- * Chippy — round guinea pig: white / yellow / black body, white head stripe.
+ * Chippy — fat stumpy sausage: head, white, yellow, black in equal quarters.
  * Climbs gates. Even-numbered levels.
  */
+/** Extra width / squat — length is in the capsule itself. */
+const BODY_SX = 1.18;
+const BODY_SY = 0.92;
+const BODY_SZ = 1;
+const SAUSAGE_R = 0.4;
+const SAUSAGE_CYL = 0.14;
+
 export class Chippy extends Character {
-  protected readonly radius = 0.42;
+  protected readonly radius = 0.48;
   protected readonly height = 0.72;
 
   private ears: THREE.Group[] = [];
@@ -77,7 +84,7 @@ export class Chippy extends Character {
     this.root.rotation.z = 0;
     this.body.rotation.x = 0.25 * coil - 0.55 * strike;
     this.body.rotation.z = 0;
-    this.body.scale.set(1 + strike * 0.06, 1, 1 + coil * 0.05);
+    this.setBodyScale(1 + strike * 0.06, 1, 1 + coil * 0.05);
 
     this.head.rotation.x = 0.35 * coil - 0.75 * strike;
     this.head.rotation.y = 0;
@@ -88,47 +95,45 @@ export class Chippy extends Character {
 
     this.legs[0]!.rotation.x = -0.4 - strike * 0.5;
     this.legs[1]!.rotation.x = -0.4 - strike * 0.5;
-    this.legs[0]!.position.set(-0.2, -0.1, 0.3);
-    this.legs[1]!.position.set(0.2, -0.1, 0.3);
+    this.legs[0]!.position.set(-0.22, -0.1, 0.22);
+    this.legs[1]!.position.set(0.22, -0.1, 0.22);
     this.legs[2]!.rotation.x = 0.35 + coil * 0.4;
     this.legs[3]!.rotation.x = 0.35 + coil * 0.4;
-    this.legs[2]!.position.set(-0.22, -0.14, -0.26);
-    this.legs[3]!.position.set(0.22, -0.14, -0.26);
+    this.legs[2]!.position.set(-0.24, -0.14, -0.26);
+    this.legs[3]!.position.set(0.24, -0.14, -0.26);
   }
 
   /** Scramble up the bars — body vertical, belly to the gate, head up. */
   private poseClimb(t: number, moving: boolean): void {
-    const amp = moving ? 1 : 0.35;
-    const reach = Math.sin(t) * 0.7 * amp;
-    const bob = Math.abs(Math.sin(t * 0.5)) * 0.04 * amp;
+    const amp = moving ? 1 : 0.4;
+    const reach = Math.sin(t) * 0.85 * amp;
+    const bob = Math.abs(Math.sin(t * 0.5)) * 0.05 * amp;
 
     // Tip upright against the wall (local +Z → world up, belly into the bars).
-    this.root.rotation.x = -Math.PI / 2 + 0.08;
-    this.root.rotation.z = Math.sin(t * 0.5) * 0.06 * amp;
+    this.root.rotation.x = -Math.PI / 2 + 0.18;
+    this.root.rotation.z = Math.sin(t * 0.5) * 0.1 * amp;
     this.root.position.y = bob;
-    // Nudge into the face so paws meet the bars.
-    this.root.position.z = 0.22;
+    this.root.position.z = 0.28;
 
-    this.body.rotation.x = Math.sin(t * 0.5) * 0.06 * amp;
+    this.body.rotation.x = Math.sin(t * 0.5) * 0.08 * amp;
     this.body.rotation.z = 0;
-    this.body.scale.set(1, 1, 1);
+    this.setBodyScale();
 
-    this.head.rotation.x = -0.15 + Math.sin(t * 1.2) * 0.1;
-    this.head.rotation.y = Math.sin(t * 0.7) * 0.12;
-    this.head.rotation.z = Math.sin(t) * 0.08;
+    this.head.rotation.x = -0.22 + Math.sin(t * 1.4) * 0.12;
+    this.head.rotation.y = Math.sin(t * 0.7) * 0.1;
+    this.head.rotation.z = Math.sin(t) * 0.1;
     this.snoot.scale.setScalar(1);
-    this.mouth.scale.set(1, 1.05, 1);
-    this.wiggleEars(0.15 + Math.abs(reach) * 0.12);
+    this.mouth.scale.set(1, 1.1, 1);
+    this.wiggleEars(0.2 + Math.abs(reach) * 0.16);
 
-    // Front paws reach up the bars; back paws push.
-    this.legs[0]!.rotation.x = -0.9 + reach;
-    this.legs[0]!.position.set(-0.2, -0.02 + Math.max(0, reach) * 0.08, 0.32);
-    this.legs[1]!.rotation.x = -0.9 - reach;
-    this.legs[1]!.position.set(0.2, -0.02 + Math.max(0, -reach) * 0.08, 0.32);
-    this.legs[2]!.rotation.x = 0.55 - reach * 0.45;
-    this.legs[2]!.position.set(-0.22, -0.14, -0.22);
-    this.legs[3]!.rotation.x = 0.55 + reach * 0.45;
-    this.legs[3]!.position.set(0.22, -0.14, -0.22);
+    this.legs[0]!.rotation.x = -1.05 + reach;
+    this.legs[0]!.position.set(-0.22, -0.02 + Math.max(0, reach) * 0.1, 0.24);
+    this.legs[1]!.rotation.x = -1.05 - reach;
+    this.legs[1]!.position.set(0.22, -0.02 + Math.max(0, -reach) * 0.1, 0.24);
+    this.legs[2]!.rotation.x = 0.7 - reach * 0.5;
+    this.legs[2]!.position.set(-0.24, -0.12, -0.24);
+    this.legs[3]!.rotation.x = 0.7 + reach * 0.5;
+    this.legs[3]!.position.set(0.24, -0.12, -0.24);
   }
 
   protected poseIdle(t: number): void {
@@ -139,7 +144,7 @@ export class Chippy extends Character {
     this.root.rotation.z = 0;
     this.body.rotation.x = 0;
     this.body.rotation.z = Math.sin(t * 0.5) * 0.02;
-    this.body.scale.set(1, 1 + breath * 0.08, 1);
+    this.setBodyScale(1, 1 + breath * 0.08, 1);
     this.head.rotation.x = -0.1 + Math.sin(t * 0.6) * 0.04;
     this.head.rotation.y = 0;
     this.head.rotation.z = Math.sin(t * 0.45) * 0.03;
@@ -157,7 +162,7 @@ export class Chippy extends Character {
     this.root.rotation.z = 0;
     this.body.rotation.x = 0.06;
     this.body.rotation.z = Math.sin(t * 0.4) * 0.05;
-    this.body.scale.set(1, 1 + breath * 0.1, 1);
+    this.setBodyScale(1, 1 + breath * 0.1, 1);
 
     this.head.rotation.y = Math.sin(t * 0.5) * 0.65;
     this.head.rotation.x = -0.05 + Math.sin(t * 1.8) * 0.18;
@@ -186,7 +191,7 @@ export class Chippy extends Character {
     this.root.rotation.z = 0;
     this.body.rotation.x = leanZ + wobble * 0.4;
     this.body.rotation.z = -leanX + wobble2;
-    this.body.scale.set(1, 1, 1);
+    this.setBodyScale();
 
     this.head.rotation.x = -0.1 - leanZ * 0.5 + Math.sin(t * 6) * 0.1;
     this.head.rotation.y = Math.sin(t * 4) * 0.2 * a;
@@ -213,7 +218,7 @@ export class Chippy extends Character {
     this.root.rotation.z = -lean * 0.12;
     this.body.rotation.x = -0.04 * amp;
     this.body.rotation.z = Math.sin(t) * 0.06 - lean * 0.3;
-    this.body.scale.set(1, 1, 1);
+    this.setBodyScale();
     this.head.rotation.x = -0.15 + Math.sin(t * 2) * 0.08;
     this.head.rotation.y = lean * 0.5;
     this.head.rotation.z = Math.sin(t) * 0.08 + lean * 0.15;
@@ -232,7 +237,7 @@ export class Chippy extends Character {
     this.root.rotation.z = -lean * 0.1;
     this.body.rotation.x = rising ? -0.25 : 0.15;
     this.body.rotation.z = -lean * 0.22;
-    this.body.scale.set(1, 1, 1);
+    this.setBodyScale();
     this.head.rotation.x = rising ? -0.35 : 0.05;
     this.head.rotation.y = lean * 0.4;
     this.head.rotation.z = lean * 0.12;
@@ -247,7 +252,7 @@ export class Chippy extends Character {
 
   private plantLegs(a: number, b: number): void {
     const restY = -0.16;
-    const restX = [-0.22, 0.22, -0.24, 0.24];
+    const restX = [-0.24, 0.24, -0.26, 0.26];
     const phases = [a, b, b, a];
     for (let i = 0; i < 4; i++) {
       const leg = this.legs[i]!;
@@ -272,10 +277,6 @@ export class Chippy extends Character {
       color: 0x1a1214,
       roughness: 0.95,
     });
-    const yellow = new THREE.MeshStandardMaterial({
-      color: 0xffc933,
-      roughness: 0.7,
-    });
     const red = new THREE.MeshStandardMaterial({
       color: 0xe82020,
       roughness: 0.55,
@@ -289,49 +290,43 @@ export class Chippy extends Character {
       roughness: 0.6,
     });
 
-    // Rounder loaf: white chest → yellow middle → black rump.
-    this.body = new THREE.Mesh(new THREE.SphereGeometry(0.36, 18, 14), yellow);
-    this.body.scale.set(1.05, 0.82, 1.15);
-    this.body.position.set(0, 0.06, 0);
+    // Fat stumpy sausage along Z: black rump → yellow → white chest.
+    const bodyLen = SAUSAGE_CYL + SAUSAGE_R * 2;
+    const bodyGeo = new THREE.CapsuleGeometry(SAUSAGE_R, SAUSAGE_CYL, 10, 24);
+    bodyGeo.rotateX(-Math.PI / 2);
+    this.paintSausage(bodyGeo);
+    this.body = new THREE.Mesh(
+      bodyGeo,
+      new THREE.MeshStandardMaterial({
+        roughness: 0.72,
+        vertexColors: true,
+      }),
+    );
+    this.setBodyScale();
+    this.body.position.set(0, 0.08, 0);
     this.body.castShadow = true;
     this.root.add(this.body);
 
-    const chest = new THREE.Mesh(new THREE.SphereGeometry(0.3, 14, 12), white);
-    chest.scale.set(1.0, 0.85, 0.95);
-    chest.position.set(0, 0.05, 0.32);
-    chest.castShadow = true;
-    this.root.add(chest);
-
-    const rump = new THREE.Mesh(new THREE.SphereGeometry(0.3, 14, 12), black);
-    rump.scale.set(1.05, 0.8, 0.95);
-    rump.position.set(0, 0.05, -0.34);
-    rump.castShadow = true;
-    this.root.add(rump);
-
     this.head = new THREE.Group();
-    this.head.position.set(0, 0.2, 0.52);
+    // Front quarter of the whole length (head / white / yellow / black).
+    this.head.position.set(0, 0.14, bodyLen * 0.5 + 0.06);
     this.root.add(this.head);
 
-    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.3, 14, 12), black);
-    skull.scale.set(1.05, 0.95, 1.1);
+    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.3, 18, 14), black);
+    skull.scale.set(1.12, 1.02, 1.05);
     skull.castShadow = true;
     this.head.add(skull);
 
-    // White stripe across the top of the head.
-    const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 0.08, 0.42),
-      white,
-    );
-    stripe.position.set(0, 0.22, 0.02);
-    stripe.rotation.x = -0.15;
+    const stripe = new THREE.Mesh(this.faceBlazeGeometry(), white);
+    stripe.castShadow = true;
     this.head.add(stripe);
 
-    this.snoot = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), black);
+    this.snoot = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), white);
     this.snoot.scale.set(0.95, 0.75, 1.1);
     this.snoot.position.set(0, -0.05, 0.26);
     this.head.add(this.snoot);
 
-    this.mouth = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.05, 0.04), red);
+    this.mouth = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.035, 0.04), red);
     this.mouth.position.set(0, -0.12, 0.3);
     this.head.add(this.mouth);
 
@@ -374,10 +369,10 @@ export class Chippy extends Character {
     }
 
     const legSpecs: Array<{ x: number; z: number }> = [
-      { x: -0.22, z: 0.28 },
-      { x: 0.22, z: 0.28 },
-      { x: -0.24, z: -0.28 },
-      { x: 0.24, z: -0.28 },
+      { x: -0.24, z: 0.22 },
+      { x: 0.24, z: 0.22 },
+      { x: -0.26, z: -0.26 },
+      { x: 0.26, z: -0.26 },
     ];
     for (const spec of legSpecs) {
       const leg = new THREE.Group();
@@ -402,5 +397,80 @@ export class Chippy extends Character {
 
     this.wiggleEars(0);
     this.plantLegs(0, 0);
+  }
+
+  /**
+   * White blaze: wide at the muzzle, tapering to a point on the crown.
+   */
+  private faceBlazeGeometry(): THREE.BufferGeometry {
+    const left = new THREE.Vector3(-0.13, -0.11, 0.28);
+    const right = new THREE.Vector3(0.13, -0.11, 0.28);
+    const crown = new THREE.Vector3(0, 0.31, -0.02);
+    const n = new THREE.Vector3()
+      .crossVectors(right.clone().sub(left), crown.clone().sub(left))
+      .normalize();
+    if (n.dot(left) < 0) n.negate();
+    const outer = 0.02;
+    const inner = -0.006;
+    const top = [left, right, crown].map((p) =>
+      p.clone().addScaledVector(n, outer),
+    );
+    const bot = [left, right, crown].map((p) =>
+      p.clone().addScaledVector(n, inner),
+    );
+    const verts: number[] = [];
+    for (const p of [...top, ...bot]) verts.push(p.x, p.y, p.z);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    geo.setIndex([
+      0, 1, 2, 5, 4, 3, 0, 3, 4, 0, 4, 1, 1, 4, 5, 1, 5, 2, 2, 5, 3, 2, 3, 0,
+    ]);
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  private setBodyScale(mx = 1, my = 1, mz = 1): void {
+    this.body.scale.set(BODY_SX * mx, BODY_SY * my, BODY_SZ * mz);
+  }
+
+  /**
+   * Equal thirds of the sausage: black rump, yellow middle, white chest.
+   * (Head is the remaining quarter of the whole character.)
+   */
+  private paintSausage(geo: THREE.BufferGeometry): void {
+    const pos = geo.attributes.position;
+    let zMin = Infinity;
+    let zMax = -Infinity;
+    for (let i = 0; i < pos.count; i++) {
+      const z = pos.getZ(i);
+      if (z < zMin) zMin = z;
+      if (z > zMax) zMax = z;
+    }
+    const span = zMax - zMin || 1;
+    const colors = new Float32Array(pos.count * 3);
+    const black = new THREE.Color(0x1a1214);
+    const yellow = new THREE.Color(0xffc933);
+    const white = new THREE.Color(0xfff8ef);
+    const c = new THREE.Color();
+    const edge = 0.035;
+    for (let i = 0; i < pos.count; i++) {
+      const t = (pos.getZ(i) - zMin) / span;
+      if (t < 1 / 3 - edge) c.copy(black);
+      else if (t < 1 / 3 + edge) {
+        c.lerpColors(black, yellow, this.smoothstep((t - (1 / 3 - edge)) / (edge * 2)));
+      } else if (t < 2 / 3 - edge) c.copy(yellow);
+      else if (t < 2 / 3 + edge) {
+        c.lerpColors(yellow, white, this.smoothstep((t - (2 / 3 - edge)) / (edge * 2)));
+      } else c.copy(white);
+      colors[i * 3] = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
+    }
+    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  }
+
+  private smoothstep(x: number): number {
+    const t = THREE.MathUtils.clamp(x, 0, 1);
+    return t * t * (3 - 2 * t);
   }
 }

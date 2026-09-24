@@ -4,8 +4,10 @@ import * as THREE from "three";
 export class CameraRig {
   private camera: THREE.PerspectiveCamera;
   private offset = new THREE.Vector3(9.5, 8.2, 11.5);
+  private climbOffset = new THREE.Vector3(10.5, 4.4, 9.2);
   private look = new THREE.Vector3();
   private pos = new THREE.Vector3();
+  private climbing = false;
 
   constructor(camera: THREE.PerspectiveCamera) {
     this.camera = camera;
@@ -18,10 +20,13 @@ export class CameraRig {
     this.camera.lookAt(this.look);
   }
 
-  public update(target: THREE.Vector3, delta: number): void {
-    const desired = target.clone().add(this.offset);
-    const lookAt = target.clone().add(new THREE.Vector3(0, 1.1, 0));
-    const t = 1 - Math.exp(-4.5 * delta);
+  public update(target: THREE.Vector3, delta: number, climbing = false): void {
+    this.climbing = climbing;
+    const off = this.climbing ? this.climbOffset : this.offset;
+    const lookLift = this.climbing ? 0.35 : 1.1;
+    const desired = target.clone().add(off);
+    const lookAt = target.clone().add(new THREE.Vector3(0, lookLift, 0));
+    const t = 1 - Math.exp((this.climbing ? -6 : -4.5) * delta);
     this.pos.lerp(desired, t);
     this.look.lerp(lookAt, t);
     this.camera.position.copy(this.pos);

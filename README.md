@@ -87,3 +87,13 @@ npm run setup:assets    # once, Intel Mac / CPU Diffusers fallback
 ```
 
 On Apple Silicon, pull an Ollama image model first (`ollama pull x/flux2-klein:4b`). Generated PNGs go to `tools/dynamic-image-gen/generated/` (gitignored).
+
+### [Dynamic model gen](tools/dynamic-model-gen/)
+
+Local Meshbench UI for generating and editing 3D game models. Not part of the site build.
+
+```bash
+npm run models          # → http://localhost:5174
+npm run setup:ollama    # once, Ollama + qwen2.5 for AI layouts
+npm run setup:models    # optional Shap-E venv
+```

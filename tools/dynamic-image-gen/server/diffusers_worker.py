@@ -15,12 +15,21 @@ import uvicorn
 from diffusers import AutoPipelineForText2Image
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-MODEL_ID = os.environ.get("DIFFUSERS_MODEL", "stabilityai/sd-turbo")
+MODEL_ID = os.environ.get("DIFFUSERS_MODEL", "Lykon/dreamshaper-8")
 DEVICE = "cpu"
 DTYPE = torch.float32
+TURBO = "turbo" in MODEL_ID.lower()
+DEFAULT_STEPS = 4 if TURBO else 22
+MAX_STEPS = 8 if TURBO else 30
+DEFAULT_CFG = 0.0 if TURBO else 7.0
+DEFAULT_NEGATIVE = (
+    "photorealistic, photo, 3d render, blurry, low quality, watermark, text, "
+    "logo, multiple characters, extra limbs, deformed face, mutated hands, "
+    "cropped, busy background, scenery"
+)
 
 app = FastAPI(title="Spritebench Diffusers")
 app.add_middleware(
@@ -38,9 +47,10 @@ _loading = False
 
 class GenerateRequest(BaseModel):
     prompt: str = Field(min_length=1)
+    negative_prompt: Optional[str] = None
     width: int = Field(default=512, ge=256, le=1024)
     height: int = Field(default=512, ge=256, le=1024)
-    steps: int = Field(default=4, ge=1, le=8)
+    steps: int = Field(default=DEFAULT_STEPS, ge=1, le=30)
     seed: Optional[int] = Field(default=None, ge=0)
 
 
@@ -57,8 +67,12 @@ def get_pipe():
             pipe = AutoPipelineForText2Image.from_pretrained(
                 MODEL_ID,
                 torch_dtype=DTYPE,
+                safety_checker=None,
+                requires_safety_checker=False,
             )
             pipe.to(DEVICE)
+            if hasattr(pipe, "enable_attention_slicing"):
+                pipe.enable_attention_slicing()
             pipe.set_progress_bar_config(disable=True)
             _pipe = pipe
             _load_error = None
@@ -76,18 +90,33 @@ def run_generation(body: GenerateRequest) -> dict:
     pipe = get_pipe()
     width = body.width - (body.width % 8)
     height = body.height - (body.height % 8)
+    if not TURBO:
+        width = min(width, 768)
+        height = min(height, 768)
     generator = None
     if body.seed is not None:
         generator = torch.Generator(device=DEVICE).manual_seed(body.seed)
 
-    result = pipe(
-        prompt=body.prompt,
-        num_inference_steps=body.steps,
-        guidance_scale=0.0,
-        width=width,
-        height=height,
-        generator=generator,
-    )
+    steps = body.steps
+    if TURBO:
+        steps = min(max(steps, 1), MAX_STEPS)
+        cfg = DEFAULT_CFG
+    else:
+        steps = min(max(steps, 15), MAX_STEPS)
+        cfg = DEFAULT_CFG
+
+    kwargs = {
+        "prompt": body.prompt,
+        "num_inference_steps": steps,
+        "guidance_scale": cfg,
+        "width": width,
+        "height": height,
+        "generator": generator,
+    }
+    if not TURBO:
+        kwargs["negative_prompt"] = body.negative_prompt or DEFAULT_NEGATIVE
+
+    result = pipe(**kwargs)
     image = result.images[0]
     buf = io.BytesIO()
     image.save(buf, format="PNG")
@@ -105,6 +134,15 @@ def run_generation(body: GenerateRequest) -> dict:
 @app.on_event("startup")
 async def preload_model() -> None:
     asyncio.create_task(asyncio.to_thread(get_pipe))
+
+
+@app.get("/", response_class=HTMLResponse)
+def root():
+    return """<!doctype html>
+<title>Spritebench worker</title>
+<p>This is the Diffusers worker, not the app.</p>
+<p>Open the UI at <a href="http://localhost:5173">http://localhost:5173</a></p>
+"""
 
 
 @app.get("/health")

@@ -21,7 +21,9 @@ const COYOTE = 0.1;
 const JUMP_BUFFER = 0.12;
 const BORED_AFTER = 5;
 const EDGE_ZONE = 0.65;
-const CLIMB_SPEED = 6.8;
+const CLIMB_SPEED = 8.4;
+/** Ignore walk / re-grab for a beat after cresting the lip. */
+const MOUNT_LOCK = 0.38;
 
 /**
  * Shared third-person controller — subclasses supply mesh + animation.
@@ -65,10 +67,15 @@ export abstract class Character {
   private boundMinZ = -10;
   private boundMaxZ = 10;
   protected climbing = false;
+  private mountLock = 0;
 
   /** Chippy can scale climb zones; bunny cannot. */
   protected get canClimb(): boolean {
     return false;
+  }
+
+  public isClimbing(): boolean {
+    return this.climbing;
   }
 
   protected abstract readonly radius: number;
@@ -93,6 +100,28 @@ export abstract class Character {
 
   public get position(): THREE.Vector3 {
     return this.group.position;
+  }
+
+  public get bodyRadius(): number {
+    return this.radius;
+  }
+
+  /** Shove from a collision (Ken). Ignored while climbing. */
+  public applyBump(dx: number, dz: number): void {
+    if (this.climbing) return;
+    if (Math.abs(dx) < 1e-6 && Math.abs(dz) < 1e-6) return;
+    this.group.position.x = THREE.MathUtils.clamp(
+      this.group.position.x + dx,
+      this.boundMinX,
+      this.boundMaxX,
+    );
+    this.group.position.z = THREE.MathUtils.clamp(
+      this.group.position.z + dz,
+      this.boundMinZ,
+      this.boundMaxZ,
+    );
+    this.vel.x += dx * 12;
+    this.vel.z += dz * 12;
   }
 
   public dispose(): void {
@@ -140,6 +169,7 @@ export abstract class Character {
     this.edgeLocalZ = 0;
     this.balancePhase = 0;
     this.climbing = false;
+    this.mountLock = 0;
     this.attackTimer = 0;
     this.attackHitSpent = false;
     this.attackHeld = false;
@@ -226,24 +256,36 @@ export abstract class Character {
       delta,
     );
 
-    const zone = this.canClimb
-      ? this.findClimbZone(this.group.position, climbZones)
-      : null;
-    this.climbing = zone != null && (holdUp || holdDown || this.climbing);
+    this.mountLock = Math.max(0, this.mountLock - delta);
+
+    const zone =
+      this.canClimb && this.mountLock <= 0
+        ? this.findClimbZone(this.group.position, climbZones)
+        : null;
+    const approachSide = zone
+      ? Math.sign(zone.x - this.group.position.x) || 1
+      : 1;
+    const intoWall = zone ? wishX * approachSide : 0;
+    const wantGrab = zone != null && (holdUp || intoWall > 0.22);
+    this.climbing = zone != null && (wantGrab || this.climbing);
 
     if (this.climbing && zone) {
-      // Stick to the gate face; W/S climb, A/D slide along the bars.
+      // Stick to the gate face. W/S (stick up/down) climb; A/D (stick left/right)
+      // shuffle along the bars. Into-the-wall is only for grabbing, not steering.
       let climbDir = 0;
       if (holdUp) climbDir += 1;
       if (holdDown) climbDir -= 1;
-      let slide = ix;
-      if (Math.abs(slide) < 0.12) slide = 0;
-      else slide = Math.sign(slide) * Math.min(1, Math.abs(slide));
+
+      let slide = 0;
+      if (Math.abs(ix) > 0.12) {
+        const along =
+          Math.abs(this.camRight.z) > 0.2 ? Math.sign(this.camRight.z) : 1;
+        slide = Math.sign(ix) * Math.min(1, Math.abs(ix)) * along;
+      }
 
       const wantJump =
         this.virtJump || this.keys.has("Space") || this.keys.has("KeyJ");
 
-      // Face into the gate while climbing.
       const towardGate = zone.x - this.group.position.x;
       this.facing = this.dampAngle(
         this.facing,
@@ -253,10 +295,11 @@ export abstract class Character {
       );
       this.group.rotation.y = this.facing;
 
-      // Crest the lip → climb onto the top pad (stand on it, don't fling).
-      const cresting = this.group.position.y >= zone.y1 - 0.55;
+      // Crest the lip → vault onto the top pad.
+      const cresting = this.group.position.y >= zone.y1 - 0.28;
       if (cresting && climbDir > 0) {
         this.climbing = false;
+        this.mountLock = MOUNT_LOCK;
         const mountZ = THREE.MathUtils.clamp(
           this.group.position.z,
           zone.z - zone.halfD + this.radius,
@@ -264,15 +307,15 @@ export abstract class Character {
         );
         const padTop = zone.y1 + 0.1;
         this.group.position.set(
-          zone.x + 0.75,
-          padTop + this.height * 0.5,
+          zone.x + 0.9,
+          padTop + this.height * 0.5 + 0.06,
           mountZ,
         );
-        this.vel.set(2.2, 0.5, 0);
+        this.vel.set(2.6, 1.8, 0);
         this.facing = Math.atan2(1, 0);
         this.group.rotation.y = this.facing;
-        this.onGround = true;
-        this.coyote = COYOTE;
+        this.onGround = false;
+        this.coyote = 0;
         this.hopPhase += delta * 10;
         this.lastInputAt = this.time;
         this.boredPhase = 0;
@@ -281,7 +324,6 @@ export abstract class Character {
         return;
       }
 
-      // Jump off the face while mid-climb (not at the crest).
       if (wantJump && !this.jumpLocked) {
         this.climbing = false;
         const away = Math.sign(this.group.position.x - zone.x) || -1;
@@ -296,54 +338,56 @@ export abstract class Character {
       }
       if (!wantJump) this.jumpLocked = false;
 
-      const faceX = zone.x - this.radius * 0.55;
-      this.vel.x = (faceX - this.group.position.x) * 12;
-      this.vel.z = slide * CLIMB_SPEED * 0.8;
-      this.vel.y = climbDir * CLIMB_SPEED;
-      this.onGround = false;
-      this.coyote = 0;
-      this.hopPhase += delta * (climbDir !== 0 || slide !== 0 ? 14 : 6);
-
-      if (holdUp || holdDown || slide !== 0 || wantJump) {
-        this.lastInputAt = this.time;
-        this.boredPhase = 0;
-      }
-
-      // Drop off the latch if the player stops input while near the ground.
-      if (
-        climbDir === 0 &&
-        slide === 0 &&
-        !wantJump &&
-        this.group.position.y <= zone.y0 + 0.55
-      ) {
+      // Drop only when asking to go down at the bottom — hang still otherwise.
+      if (holdDown && this.group.position.y <= zone.y0 + 0.4) {
         this.climbing = false;
-      }
+        this.vel.y = Math.min(this.vel.y, -1);
+        this.vel.x = -approachSide * 2.2;
+      } else {
+        const faceX = zone.x - approachSide * this.radius * 0.55;
+        this.vel.x = (faceX - this.group.position.x) * 14;
+        this.vel.z = slide * CLIMB_SPEED;
+        this.vel.y = climbDir * CLIMB_SPEED;
+        this.onGround = false;
+        this.coyote = 0;
+        this.hopPhase += delta * (climbDir !== 0 || slide !== 0 ? 16 : 5);
 
-      const next = this.group.position.clone();
-      next.x += this.vel.x * delta;
-      next.z += this.vel.z * delta;
-      next.y += this.vel.y * delta;
-      next.y = THREE.MathUtils.clamp(next.y, zone.y0 + 0.12, zone.y1 - 0.05);
-      next.z = THREE.MathUtils.clamp(
-        next.z,
-        zone.z - zone.halfD + this.radius * 0.2,
-        zone.z + zone.halfD - this.radius * 0.2,
-      );
-      if (Math.abs(next.x - zone.x) > zone.halfW + this.radius + 0.5) {
-        this.climbing = false;
+        if (holdUp || holdDown || slide !== 0 || wantJump || intoWall > 0.22) {
+          this.lastInputAt = this.time;
+          this.boredPhase = 0;
+        }
+
+        const next = this.group.position.clone();
+        next.x += this.vel.x * delta;
+        next.z += this.vel.z * delta;
+        next.y += this.vel.y * delta;
+        next.y = THREE.MathUtils.clamp(next.y, zone.y0 + 0.12, zone.y1 - 0.02);
+        next.z = THREE.MathUtils.clamp(
+          next.z,
+          zone.z - zone.halfD + this.radius * 0.2,
+          zone.z + zone.halfD - this.radius * 0.2,
+        );
+        if (Math.abs(next.x - zone.x) > zone.halfW + this.radius + 0.5) {
+          this.climbing = false;
+        }
+        next.x = THREE.MathUtils.clamp(next.x, this.boundMinX, this.boundMaxX);
+        next.z = THREE.MathUtils.clamp(next.z, this.boundMinZ, this.boundMaxZ);
+        this.group.position.copy(next);
+        this.edgeAmount = 0;
+        this.animate(delta, climbDir !== 0 || slide !== 0, false, false);
+        return;
       }
-      next.x = THREE.MathUtils.clamp(next.x, this.boundMinX, this.boundMaxX);
-      next.z = THREE.MathUtils.clamp(next.z, this.boundMinZ, this.boundMaxZ);
-      this.group.position.copy(next);
-      this.edgeAmount = 0;
-      this.animate(delta, climbDir !== 0 || slide !== 0, false, false);
-      return;
     }
 
     this.climbing = false;
 
     const accel = this.onGround ? ACCEL_GROUND : ACCEL_AIR;
-    if (moving) {
+    const locked = this.mountLock > 0;
+    if (locked) {
+      // Keep the vault toward the pad; don't walk back into the bars.
+      this.vel.x = THREE.MathUtils.damp(this.vel.x, 2.4, 8, delta);
+      this.vel.z = THREE.MathUtils.damp(this.vel.z, 0, FRICTION, delta);
+    } else if (moving) {
       this.vel.x = THREE.MathUtils.damp(this.vel.x, wishX * speed, accel, delta);
       this.vel.z = THREE.MathUtils.damp(this.vel.z, wishZ * speed, accel, delta);
     } else {
@@ -368,16 +412,6 @@ export abstract class Character {
     else this.coyote = Math.max(0, this.coyote - delta);
     this.jumpBuffer = Math.max(0, this.jumpBuffer - delta);
 
-    // Auto-grab climb zone when jumping into / against it.
-    if (
-      this.canClimb &&
-      !this.onGround &&
-      zone == null &&
-      this.findClimbZone(this.group.position, climbZones)
-    ) {
-      this.climbing = true;
-    }
-
     if (this.jumpBuffer > 0 && this.coyote > 0) {
       this.vel.y = JUMP_V;
       this.onGround = false;
@@ -386,7 +420,7 @@ export abstract class Character {
       gameAudio.jump();
     }
 
-    if (!wantJump && this.vel.y > 0) {
+    if (!locked && !wantJump && this.vel.y > 0) {
       this.vel.y *= Math.pow(JUMP_CUT, delta * 12);
     }
 
@@ -403,19 +437,18 @@ export abstract class Character {
     this.resolveLowCeilings(next, platforms);
     next.y += this.vel.y * delta;
 
-    // Grab gate if we bump into a climb zone mid-air / against the bars.
-    if (this.canClimb) {
+    // Grab when jumping / walking into the bars — not merely standing nearby.
+    if (this.canClimb && this.mountLock <= 0) {
       const grab = this.findClimbZone(next, climbZones);
-      if (
-        grab &&
-        (holdUp ||
-          holdDown ||
-          this.vel.x > 0.35 ||
-          next.x > grab.x - grab.halfW - 0.5)
-      ) {
-        this.climbing = true;
-        this.vel.y = Math.max(0, this.vel.y * 0.2);
-        next.x = grab.x - this.radius * 0.55;
+      if (grab) {
+        const nx = Math.sign(grab.x - next.x) || 1;
+        const pushingIn = this.vel.x * nx > 0.45 || intoWall > 0.22 || holdUp;
+        if (pushingIn) {
+          this.climbing = true;
+          this.vel.y = Math.max(0, this.vel.y * 0.15);
+          this.vel.x = 0;
+          next.x = grab.x - nx * this.radius * 0.55;
+        }
       }
     }
 

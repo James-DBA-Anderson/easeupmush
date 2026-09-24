@@ -4,6 +4,7 @@ import { Bunsterstons } from "./Bunsterstons";
 import { CameraRig } from "./CameraRig";
 import type { Character } from "./Character";
 import { Chippy } from "./Chippy";
+import { CongratsScan } from "./CongratsScan";
 import { MobileControls } from "./MobileControls";
 import {
   characterDisplayName,
@@ -50,6 +51,7 @@ export class Game {
   private targetValueEl: HTMLElement | null;
   private targetSubEl: HTMLElement | null;
   private hintEl: HTMLElement | null;
+  private congratsScan: CongratsScan | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -196,7 +198,7 @@ export class Game {
         if (
           this.level.combatUpdate(
             delta,
-            this.player.position,
+            this.player,
             this.player.consumeAttackHit(),
           )
         ) {
@@ -219,7 +221,8 @@ export class Game {
       }
     }
 
-    this.camRig.update(this.player.position, delta);
+    this.camRig.update(this.player.position, delta, this.player.isClimbing());
+    this.congratsScan?.update(delta);
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -239,6 +242,7 @@ export class Game {
           "Press <kbd>R</kbd> to play again · <kbd>Enter</kbd> for Level 1";
       }
       if (this.winNextBtn) this.winNextBtn.textContent = "Level 1";
+      this.showCongratsScan();
     } else {
       this.winTitleEl.textContent = `Level ${this.levelNum} clear!`;
       if (this.level.targetCarrots > 0) {
@@ -266,6 +270,7 @@ export class Game {
     this.camRig.snapTo(this.player.position);
     this.winEl.classList.remove("on", "congrats");
     document.body.classList.remove("level-clear");
+    this.congratsScan?.hide();
     this.syncHud();
     this.revealIntroChrome();
   }
@@ -288,6 +293,7 @@ export class Game {
     this.camRig.snapTo(this.player.position);
     this.winEl.classList.remove("on", "congrats");
     document.body.classList.remove("level-clear");
+    this.congratsScan?.hide();
     this.syncHud();
     this.syncMobileChrome();
     this.lastHudPhase = isLevel2(this.level) ? this.level.phase : "";
@@ -338,8 +344,8 @@ export class Game {
         if (this.targetSubEl) this.targetSubEl.textContent = "Climb over";
         if (this.hintEl) {
           this.hintEl.textContent = touch
-            ? "Climb the gate · up at the top to mount · jump down to the boat"
-            : "Hold W to climb · keep up at the top to mount · jump down to the boat";
+            ? "Walk into the gate or hold up to climb · keep up at the top"
+            : "Walk into the gate or hold W to climb · keep up at the top to hop on";
         }
       }
       return;
@@ -400,9 +406,15 @@ export class Game {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.congratsScan?.resize();
     this.syncHud();
     this.syncMobileChrome();
   };
+
+  private showCongratsScan(): void {
+    if (!this.congratsScan) this.congratsScan = new CongratsScan();
+    this.congratsScan.show();
+  }
 
   private onKey = (ev: KeyboardEvent): void => {
     if (ev.code === "KeyR" || ev.key === "r" || ev.key === "R") {

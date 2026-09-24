@@ -1,10 +1,10 @@
-# torch is installed from the CPU wheel index in scripts/setup-img.mjs
+# torch is installed from the CPU wheel index in scripts/setup-3d.mjs
 numpy<2
 diffusers==0.29.2
 transformers==4.41.2
 accelerate==0.31.0
 safetensors
-pillow
+trimesh
 fastapi
 uvicorn
 pydantic

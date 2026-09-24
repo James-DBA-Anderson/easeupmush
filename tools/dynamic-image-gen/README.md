@@ -25,7 +25,7 @@ PNGs land in `generated/` (gitignored). Download from the UI, then drop them int
 | Machine | Backend | Model |
 | --- | --- | --- |
 | Apple Silicon Mac | [Ollama](https://ollama.com) image gen | `x/flux2-klein:4b` (FLUX.2 Klein, Apache 2.0) |
-| Intel Mac / CPU | Hugging Face Diffusers | `stabilityai/sd-turbo` (fast small SD) |
+| Intel Mac / CPU | Hugging Face Diffusers | `Lykon/dreamshaper-8` (SD 1.5, ~22 steps) |
 
 Ollama’s image generation is currently **Apple Silicon only**. On Intel Macs the app uses Diffusers. If the Python venv is missing, the UI still starts and uses Ollama when it is available.
 
@@ -43,7 +43,7 @@ From the monorepo root:
 npm run setup:assets
 ```
 
-First generation downloads SD-Turbo (~2.5GB) from Hugging Face.
+First generation downloads DreamShaper 8 (~4GB) from Hugging Face. CPU runs take a couple of minutes per image.
 
 ## Stack
 

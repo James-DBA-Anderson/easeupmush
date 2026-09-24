@@ -11,6 +11,8 @@ export class Ken {
   private readonly home: THREE.Vector3;
   private _alive = true;
   private onDeck = true;
+  readonly radius = 0.92;
+  private readonly mass = 2.8;
 
   /** Boat deck half-extents (world). */
   deckMinX = 6.5;
@@ -91,6 +93,45 @@ export class Ken {
     (this.body.material as THREE.MeshStandardMaterial).color.setHex(0xff6644);
     gameAudio.knock();
     return true;
+  }
+
+  /**
+   * Keep Ken from occupying another body. Returns the XZ shove for the other.
+   * Ken is heavier, so Chippy / bunny get most of the bump.
+   */
+  public bumpAgainst(
+    other: THREE.Vector3,
+    otherRadius: number,
+    otherMass = 1,
+  ): THREE.Vector3 {
+    const push = new THREE.Vector3();
+    let dx = other.x - this.group.position.x;
+    let dz = other.z - this.group.position.z;
+    const min = this.radius + otherRadius;
+    let d = Math.hypot(dx, dz);
+    if (d < 1e-4) {
+      dx = 1;
+      dz = 0;
+      d = 1;
+    }
+    if (d >= min) return push;
+
+    const overlap = min - d;
+    const nx = dx / d;
+    const nz = dz / d;
+    const inv = 1 / (this.mass + otherMass);
+    const kenShare = otherMass * inv;
+    const otherShare = this.mass * inv;
+    this.group.position.x -= nx * overlap * kenShare;
+    this.group.position.z -= nz * overlap * kenShare;
+    push.set(nx * overlap * otherShare, 0, nz * overlap * otherShare);
+
+    const into = this.vel.x * nx + this.vel.z * nz;
+    if (into > 0) {
+      this.vel.x -= into * nx;
+      this.vel.z -= into * nz;
+    }
+    return push;
   }
 
   public update(

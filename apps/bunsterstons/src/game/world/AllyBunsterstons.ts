@@ -19,6 +19,30 @@ export class AllyBunsterstons {
     return this.group.position;
   }
 
+  readonly radius = 0.42;
+
+  public applyBump(
+    dx: number,
+    dz: number,
+    bounds?: { minX: number; maxX: number; minZ: number; maxZ: number },
+  ): void {
+    if (Math.abs(dx) < 1e-6 && Math.abs(dz) < 1e-6) return;
+    this.group.position.x += dx;
+    this.group.position.z += dz;
+    if (bounds) {
+      this.group.position.x = THREE.MathUtils.clamp(
+        this.group.position.x,
+        bounds.minX,
+        bounds.maxX,
+      );
+      this.group.position.z = THREE.MathUtils.clamp(
+        this.group.position.z,
+        bounds.minZ,
+        bounds.maxZ,
+      );
+    }
+  }
+
   public reset(x: number, y: number, z: number): void {
     this.group.position.set(x, y, z);
     this.punchCooldown = 0;
@@ -39,7 +63,7 @@ export class AllyBunsterstons {
     const dz = target.z - this.group.position.z;
     const dist = Math.hypot(dx, dz) || 1;
     const speed = 5.8;
-    if (dist > 0.85) {
+    if (dist > 1.4) {
       this.group.position.x += (dx / dist) * speed * delta;
       this.group.position.z += (dz / dist) * speed * delta;
     }

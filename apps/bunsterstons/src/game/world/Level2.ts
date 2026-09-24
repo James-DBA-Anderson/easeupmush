@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { Character } from "../Character";
 import type { ClimbZone, Platform, Solid } from "../types";
 import type { Carrot } from "./Carrot";
 import { addFlowers } from "./flowers";
@@ -86,9 +87,10 @@ export class Level2 implements Level {
 
   public combatUpdate(
     delta: number,
-    playerPos: THREE.Vector3,
+    player: Character,
     attackHit: boolean,
   ): boolean {
+    const playerPos = player.position;
     if (
       !this.battleStarted &&
       playerPos.x > 8.5 &&
@@ -107,6 +109,21 @@ export class Level2 implements Level {
     ) {
       // Bunny taps are soft — Chippy's headbutt does the real shove.
       this.ken.knock(this.ally.position, 2.8, false);
+    }
+
+    for (let i = 0; i < 2; i++) {
+      const chippyPush = this.ken.bumpAgainst(
+        player.position,
+        player.bodyRadius,
+        1,
+      );
+      player.applyBump(chippyPush.x, chippyPush.z);
+      const bunnyPush = this.ken.bumpAgainst(
+        this.ally.position,
+        this.ally.radius,
+        0.85,
+      );
+      this.ally.applyBump(bunnyPush.x, bunnyPush.z, this.deckBounds);
     }
 
     if (attackHit) {
@@ -353,7 +370,7 @@ export class Level2 implements Level {
       z: 0,
       y0: 0,
       y1: this.gateTopY,
-      halfW: 1.15,
+      halfW: 1.45,
       halfD: 2.55,
     });
   }
