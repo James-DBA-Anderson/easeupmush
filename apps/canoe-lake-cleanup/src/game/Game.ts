@@ -1730,6 +1730,11 @@ export class Game {
     for (const scooter of this.scooters) {
       if (!scooter.soakedBy(point)) continue;
       const dry = !scooter.isSoaked();
+      if (heavy) {
+        scooter.knockOff(this.camera.position);
+        if (dry) this.complain();
+        return true;
+      }
       if (dirty) {
         scooter.splatter(point);
         if (scooter.foul() || dry) this.complain();
