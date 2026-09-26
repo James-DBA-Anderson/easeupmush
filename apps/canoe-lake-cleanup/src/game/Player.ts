@@ -525,7 +525,12 @@ export class Player {
         // Spray stick: hold draws the tool; push past the deadzone to hose (or jab).
         const held = this.mobileControls.isSprayHeld();
         const aim = this.mobileControls.getSprayAim();
-        if (this.tool === "picker") {
+        
+        // Check if near a pedalo first - holding spray stick should allow boarding
+        if (held && aim === null && !isPedaloHired() && 
+            pedaloInReach(this.camera.position.x, this.camera.position.z)) {
+          this.togglePedalo();
+        } else if (this.tool === "picker") {
           if (held) this.use(true);
         } else if (held) {
           // Empty-handed or still drawing — same as the old fire button.

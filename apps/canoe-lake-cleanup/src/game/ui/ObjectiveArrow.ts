@@ -41,6 +41,11 @@ export class ObjectiveArrow {
     this.root.classList.add("throbbing");
   }
 
+  /** Lock the arrow to a specific point. */
+  public point(target: { x: number; y?: number; z: number }): void {
+    this.locked = { x: target.x, z: target.z };
+  }
+
   /**
    * `spots` are targets for this arrow. `heading` is the player's yaw.
    */

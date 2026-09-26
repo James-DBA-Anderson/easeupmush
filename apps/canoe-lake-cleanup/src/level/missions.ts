@@ -5,7 +5,8 @@ export type MissionId =
   | "swanboat"
   | "fire"
   | "rebels"
-  | "racers";
+  | "racers"
+  | "pigeons";
 
 export const MISSION_IDS: readonly MissionId[] = [
   "picnic",
@@ -14,6 +15,7 @@ export const MISSION_IDS: readonly MissionId[] = [
   "fire",
   "rebels",
   "racers",
+  "pigeons",
 ] as const;
 
 export const MISSION_LABELS: Record<MissionId, string> = {
@@ -23,6 +25,7 @@ export const MISSION_LABELS: Record<MissionId, string> = {
   fire: "Grass fire",
   rebels: "Rebel raid",
   racers: "Boy racers",
+  pigeons: "Wire birds",
 };
 
 /**
@@ -59,6 +62,7 @@ export const DEFAULT_MISSION_SPOTS: readonly MissionSpot[] = [
   { id: "fire", x: 118, z: -28, start: 15, end: 19.5 },
   { id: "racers", x: 20, z: -117, start: 22, end: 1 },
   { id: "rebels", x: 10, z: -150, start: 1, end: 6 },
+  { id: "pigeons", x: -40, z: 75, start: 11, end: 16 },
 ];
 
 export function isMissionId(v: unknown): v is MissionId {

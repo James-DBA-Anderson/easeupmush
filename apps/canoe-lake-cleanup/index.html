@@ -320,23 +320,7 @@
     }
 
     #compass {
-      position: absolute;
-      top: 148px;
-      left: 50%;
-      transform: translateX(-50%);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 2px;
-      padding: 6px 12px 7px;
-      background: rgba(0, 0, 0, 0.5);
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      border-radius: 8px;
-      color: #f4efe4;
-      pointer-events: none;
-      z-index: 11;
-      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
-      min-width: 72px;
+      display: none;
     }
 
     #compass .compass-rose {
@@ -946,10 +930,7 @@
     }
 
     body.touch-ui #compass {
-      top: 78px;
-      padding: 3px 8px 4px;
-      min-width: 56px;
-      border-radius: 6px;
+      display: none;
     }
 
     body.touch-ui #mission-banner {
@@ -968,24 +949,9 @@
       border-radius: 7px;
     }
 
-    body.touch-ui #compass .compass-rose {
-      width: 20px;
-      height: 20px;
-    }
-
-    body.touch-ui #compass .compass-needle {
-      margin: -7px 0 0 -3.5px;
-      border-left-width: 3.5px;
-      border-right-width: 3.5px;
-      border-bottom-width: 10px;
-      transform-origin: 50% 8.5px;
-    }
-
-    body.touch-ui #compass .compass-bearing {
-      font-size: 12px;
-      letter-spacing: 0.08em;
-    }
-
+    body.touch-ui #compass .compass-rose,
+    body.touch-ui #compass .compass-needle,
+    body.touch-ui #compass .compass-bearing,
     body.touch-ui #compass .compass-name {
       display: none;
     }
@@ -998,8 +964,8 @@
     }
 
     body.touch-ui #minimap {
-      width: 90px;
-      height: 54px;
+      width: 160px;
+      height: 96px;
     }
 
     body.touch-ui #clock-panel {
