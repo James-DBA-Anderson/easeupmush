@@ -13,8 +13,9 @@ The deployment workflow (`.github/workflows/deploy.yml`) performs:
 1. **Checkout**: Fetches the repository code
 2. **Setup**: Installs Node.js 22 and npm dependencies
 3. **Build**: Runs `npm run build` to compile all apps into `dist/`
-4. **Deploy**: Uses `cf deploy` to publish to Cloudflare Pages
-5. **Output**: Displays deployment URL
+4. **Prepare**: Writes `.cloudflare/output` from `dist/` so `cf deploy` can target the assembled site
+5. **Deploy**: Uses `cf deploy --prebuilt` to publish that output
+6. **Output**: Displays deployment URL
 
 ## Required GitHub Secrets
 
@@ -122,6 +123,12 @@ Check the GitHub Actions logs for specific error messages from the `cf deploy` c
 ### `Unknown argument: json`
 
 `cf deploy` does not accept `--json`. Generated API commands such as `cf workers get` print JSON on stdout by default; the deploy workflow uses that after a successful deploy to record the Worker URL.
+
+### Workspace root / application detection
+
+`cf deploy` without `--prebuilt` runs framework detection in the current directory. This repo is an npm workspace, so that detection fails at the root. The site that should go live is the assembled `dist/` (homepage plus games), not a single workspace package such as `apps/site`.
+
+After `npm run build`, `scripts/write-cf-output.mjs` copies `dist/` into `.cloudflare/output/v0`, and `cf deploy --prebuilt` uploads that.
 
 ## Migration from Wrangler
 

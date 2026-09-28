@@ -31,10 +31,14 @@ jobs:
       - name: Build site
         run: npm run build
 
-      # `cf deploy` does not accept --json. Generated API commands print JSON
-      # on stdout by default, so capture the Worker record after deploy.
+      # `cf deploy` without --prebuilt runs workspace autoconfig at the repo
+      # root and fails. The deployable app is assembled dist/, not a workspace
+      # package. --prebuilt uploads that output and still has no --json flag.
+      - name: Prepare Cloudflare build output
+        run: node scripts/write-cf-output.mjs
+
       - name: Deploy to Cloudflare
-        run: npx cf deploy
+        run: npx cf deploy --prebuilt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
