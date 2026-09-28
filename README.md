@@ -52,20 +52,19 @@ npm run preview      # local production preview on :4299
 
 ### Cloudflare (easeupmush.com)
 
-Domain DNS stays on Cloudflare. Deploy with **Workers / Pages** connected to this repo.
+Domain DNS stays on Cloudflare. Automated deployment via GitHub Actions using the new **cf CLI**.
 
-Build settings:
+Deployment is triggered automatically on every push to `main`. The GitHub Actions workflow:
+1. Installs dependencies
+2. Builds the site (`npm run build`)
+3. Deploys to Cloudflare Pages using `cf deploy`
 
-| Setting | Value |
-|---------|--------|
-| Build command | `npm run build` |
-| Deploy / output | uses `wrangler.jsonc` → `./dist` |
-| Root directory | `/` (repo root) |
-| Node version | `22` (`NODE_VERSION=22`) |
+Configuration is in `cloudflare.config.ts` which specifies:
+- Project name: `easeupmush`
+- Assets directory: `./dist`
+- Compatibility date: `2026-08-15`
 
-`wrangler.jsonc` at the repo root tells Cloudflare this is a static site assembled into `dist/`, so it does **not** run workspace autoconfig (which fails on npm workspaces).
-
-Push to `main` to redeploy, or run `npm run deploy` locally (needs `wrangler` login).
+Manual deployment is also available: run `npm run deploy` locally (requires `CLOUDFLARE_API_TOKEN` environment variable).
 
 ## Games
 
