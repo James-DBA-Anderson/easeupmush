@@ -299,6 +299,7 @@ function taggable(
   turn: number,
   width: number,
   centreY: number,
+  site?: Wall["site"],
 ): void {
   const back = new THREE.Vector3(Math.sin(at.yaw), 0, Math.cos(at.yaw));
   const side = new THREE.Vector3(back.z, 0, -back.x);
@@ -309,6 +310,7 @@ function taggable(
     yaw: at.yaw + turn,
     width,
     height: centreY * 2,
+    site,
   });
 }
 
@@ -474,8 +476,8 @@ function boatHouse(scene: THREE.Scene): void {
     yaw: at.yaw,
   });
 
-  taggable(at, 0, DEEP / 2 + 0.1, 0, WIDE, 1.4);
-  taggable(at, WIDE / 2 + 0.1, 0, Math.PI / 2, DEEP, 1.4);
+  taggable(at, 0, DEEP / 2 + 0.1, 0, WIDE, 1.4, "boathouse");
+  taggable(at, WIDE / 2 + 0.1, 0, Math.PI / 2, DEEP, 1.4, "boathouse");
 
   boatHouseAt = { x: at.x, z: at.z, yaw: at.yaw };
   moorPedalos(scene, at);
@@ -824,7 +826,7 @@ function placeCafe(
     }
   }
 
-  taggable(at, 0, DEEP / 2 + 0.1, 0, WIDE, 1.5);
+  taggable(at, 0, DEEP / 2 + 0.1, 0, WIDE, 1.5, "cafe");
 
   scene.add(group);
   solids.push({
@@ -992,9 +994,9 @@ function toilets(scene: THREE.Scene): void {
   // Tagged faces — long rear (esplanade) and the two curved ends.
   const halfSpan = midR * Math.sin(ARC / 2);
   const backOut = midR * (1 - Math.cos(ARC / 2)) + DEEP / 2 + 0.15;
-  taggable(at, 0, backOut, 0, halfSpan * 2.1, 1.4);
-  taggable(at, halfSpan + 0.2, DEEP * 0.15, Math.PI / 2 - ARC / 4, DEEP, 1.4);
-  taggable(at, -halfSpan - 0.2, DEEP * 0.15, -Math.PI / 2 + ARC / 4, DEEP, 1.4);
+  taggable(at, 0, backOut, 0, halfSpan * 2.1, 1.4, "toilets");
+  taggable(at, halfSpan + 0.2, DEEP * 0.15, Math.PI / 2 - ARC / 4, DEEP, 1.4, "toilets");
+  taggable(at, -halfSpan - 0.2, DEEP * 0.15, -Math.PI / 2 + ARC / 4, DEEP, 1.4, "toilets");
 
   scene.add(group);
 }

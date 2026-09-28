@@ -5,6 +5,7 @@ export type DebugFrom = "start" | MissionId;
 
 const FROM_VALUES: readonly DebugFrom[] = [
   "start",
+  "graffiti",
   "picnic",
   "geese",
   "swanboat",
@@ -35,6 +36,7 @@ export function debugPlayUrl(from: DebugFrom): string {
 
 export const DEBUG_FROM_LABELS: Record<DebugFrom, string> = {
   start: "Start of shift",
+  graffiti: "Tagged overnight",
   picnic: "Picnic raid",
   geese: "Geese inbound",
   swanboat: "Stolen swanboat",

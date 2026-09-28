@@ -111,7 +111,11 @@ export class Picnic {
   private complained = false;
   private shoutCool = 0;
 
-  constructor(scene: THREE.Scene, at: THREE.Vector2) {
+  constructor(
+    scene: THREE.Scene,
+    at: THREE.Vector2,
+    opts?: { seated?: boolean },
+  ) {
     this.scene = scene;
     const gy = PATH_Y + groundHeight(at.x, at.y);
     this.spot = new THREE.Vector3(at.x, gy, at.y);
@@ -150,6 +154,17 @@ export class Picnic {
       );
       this.guests.push(this.buildGuest(start, seat, gate, leave));
     }
+
+    if (opts?.seated) {
+      for (const guest of this.guests) {
+        guest.phase = "settled";
+        guest.group.position.x = guest.seat.x;
+        guest.group.position.z = guest.seat.z;
+        this.faceCentre(guest);
+        this.sitPose(guest);
+      }
+      this.settled = true;
+    }
   }
 
   public getPosition(): THREE.Vector3 {
@@ -185,6 +200,16 @@ export class Picnic {
       pts.push({ x: g.group.position.x, z: g.group.position.z });
     }
     return pts;
+  }
+
+  /** Someone's actually sat on the blanket. */
+  public hasSitters(): boolean {
+    return !this.gone && this.guests.some((g) => g.phase === "settled");
+  }
+
+  /** Don't pack up for at least this long (they're mid-row with the gulls). */
+  public stayFor(seconds: number): void {
+    this.linger = Math.max(this.linger, seconds);
   }
 
   /** True while the blanket's out and there's still something to steal. */

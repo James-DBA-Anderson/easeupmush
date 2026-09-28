@@ -1,7 +1,8 @@
 import * as THREE from "three";
 
 /** What gets sprayed on the back of the toilet block round here. */
-const TAGS = ["your mum", "PFC", "657", "ease up mush"] as const;
+export const TAGS = ["your mum", "PFC", "657", "ease up mush"] as const;
+export type Tag = (typeof TAGS)[number];
 const INKS = ["#e0332f", "#2f6fd8", "#1f1f26", "#f0e6c8", "#3f9f5f"];
 
 const TEX_W = 512;
@@ -19,6 +20,8 @@ export interface Wall {
   yaw: number;
   width: number;
   height: number;
+  /** Which building it's on, for jobs that hit particular places. */
+  site?: "boathouse" | "cafe" | "toilets";
 }
 
 /** A tag sprayed on a wall — the lance carves fading streaks through the paint. */
@@ -44,7 +47,7 @@ export class Graffiti {
   private localDir = new THREE.Vector3();
   private invQuat = new THREE.Quaternion();
 
-  constructor(scene: THREE.Scene, wall: Wall) {
+  constructor(scene: THREE.Scene, wall: Wall, word?: Tag) {
     this.scene = scene;
 
     // Fit entirely on the wall — never overhang the brickwork.
@@ -60,7 +63,7 @@ export class Graffiti {
     this.canvas.width = TEX_W;
     this.canvas.height = TEX_H;
     this.ctx = this.canvas.getContext("2d", { willReadFrequently: true })!;
-    this.paintTag();
+    this.paintTag(word);
 
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.magFilter = THREE.LinearFilter;
@@ -220,13 +223,13 @@ export class Graffiti {
     this.rinse = 0;
   }
 
-  private paintTag(): void {
+  private paintTag(chosen?: Tag): void {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, TEX_W, TEX_H);
     this.mask.fill(0);
 
     const ink = INKS[Math.floor(Math.random() * INKS.length)]!;
-    const word = TAGS[Math.floor(Math.random() * TAGS.length)]!;
+    const word = chosen ?? TAGS[Math.floor(Math.random() * TAGS.length)]!;
     const short = word.length <= 4;
 
     // Game canvas is CSS-flipped on X; paint mirrored so tags read forwards.

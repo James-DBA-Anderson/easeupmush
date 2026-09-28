@@ -376,16 +376,22 @@ export class PlayVisit {
   public noticeHelicopter(id: number, at: THREE.Vector3): void {
     for (const kid of this.kids) {
       if (!kid.group.visible || kid.phase === "leaving") continue;
+      if (kid.heliWave > 0 && kid.heliWavedId === id) {
+        kid.group.rotation.y = Math.atan2(
+          at.x - kid.group.position.x,
+          at.z - kid.group.position.z,
+        );
+        continue;
+      }
       if (kid.soakStun > 0 || kid.heliWave > 0) continue;
       if (kid.heliWavedId === id) continue;
       const gap = Math.hypot(
         at.x - kid.group.position.x,
         at.z - kid.group.position.z,
       );
-      if (gap > 130) continue;
+      if (gap > 220) continue;
       kid.heliWavedId = id;
-      if (Math.random() > 0.65) continue;
-      kid.heliWave = 5 + Math.random() * 2.5;
+      kid.heliWave = 9 + Math.random() * 4;
       kid.heliWavePhase = Math.random() * Math.PI * 2;
       kid.face.setMood("pleased");
       kid.group.rotation.y = Math.atan2(

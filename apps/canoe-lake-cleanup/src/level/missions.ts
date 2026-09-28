@@ -1,5 +1,6 @@
 /** Built-in scripted jobs the game already wires up. */
 export type MissionId =
+  | "graffiti"
   | "picnic"
   | "geese"
   | "swanboat"
@@ -9,6 +10,7 @@ export type MissionId =
   | "pigeons";
 
 export const MISSION_IDS: readonly MissionId[] = [
+  "graffiti",
   "picnic",
   "geese",
   "swanboat",
@@ -19,6 +21,7 @@ export const MISSION_IDS: readonly MissionId[] = [
 ] as const;
 
 export const MISSION_LABELS: Record<MissionId, string> = {
+  graffiti: "Tagged overnight",
   picnic: "Picnic raid",
   geese: "Geese inbound",
   swanboat: "Stolen swanboat",
@@ -56,13 +59,14 @@ export const MISSION_SHIFT_START = 6;
 
 /** Sensible fallbacks matching the old hard-coded spawn / aim / hours. */
 export const DEFAULT_MISSION_SPOTS: readonly MissionSpot[] = [
-  { id: "picnic", x: 140, z: -10, start: 9.5, end: 17 },
-  { id: "geese", x: 0, z: -8, start: 10, end: 18 },
-  { id: "swanboat", x: 95, z: 40, start: 12.5, end: 15 },
-  { id: "fire", x: 118, z: -28, start: 15, end: 19.5 },
+  { id: "graffiti", x: 97, z: 35, start: 6, end: 12 },
+  { id: "picnic", x: 140, z: -10, start: 11.5, end: 16 },
+  { id: "geese", x: 0, z: -8, start: 13.5, end: 18 },
+  { id: "swanboat", x: 95, z: 40, start: 15, end: 18 },
+  { id: "fire", x: 118, z: -28, start: 17, end: 20 },
   { id: "racers", x: 20, z: -117, start: 22, end: 1 },
   { id: "rebels", x: 10, z: -150, start: 1, end: 6 },
-  { id: "pigeons", x: -40, z: 75, start: 11, end: 16 },
+  { id: "pigeons", x: -40, z: 75, start: 9.5, end: 13 },
 ];
 
 export function isMissionId(v: unknown): v is MissionId {

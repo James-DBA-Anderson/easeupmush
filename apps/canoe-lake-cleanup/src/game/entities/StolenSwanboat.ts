@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { Grumble } from "../effects/Grumble";
 import { parkGates } from "../world/fence";
 import { stepWalk } from "../world/blocking";
+import { gateOutside } from "../world/pathRoute";
 import {
   isInLake,
   nearestShore,
@@ -44,8 +45,8 @@ const TAUNTS = [
 const ABANDON_LINES = ["SHE'S GOING!", "OUT OUT OUT", "LEG IT"];
 
 /** Hose flecks — needs a long, hard wash before she goes under. */
-const FLOOD_SPRAY = 0.00085;
-const FLOOD_HEAVY = 0.0017;
+const FLOOD_SPRAY = 0.000425;
+const FLOOD_HEAVY = 0.00085;
 
 /** Full sprint on foot. */
 const RUN = 5.2;
@@ -85,6 +86,9 @@ export class StolenSwanboat {
   private boatIndex = -1;
   private target = new THREE.Vector3();
   private exit = new THREE.Vector3();
+  /** Just outside the exit gate — they vanish once they're through. */
+  private beyond = new THREE.Vector3();
+  private throughGate = false;
   private shoreAim = new THREE.Vector3();
   /** Mooring / hatch — where they aim when nicking a boat. */
   private raft = new THREE.Vector3(95, 0, 40);
@@ -103,6 +107,7 @@ export class StolenSwanboat {
   private throwIn = 4 + Math.random() * 4;
   private pathIndex = 0;
   private pathDir: 1 | -1 = 1;
+  private pathGoalIndex = 0;
   private pathReady = false;
 
   constructor(scene: THREE.Scene) {
@@ -294,6 +299,7 @@ export class StolenSwanboat {
     const cw = (goalI - best + n) % n;
     const ccw = (best - goalI + n) % n;
     this.pathDir = cw <= ccw ? 1 : -1;
+    this.pathGoalIndex = goalI;
     this.pathReady = true;
   }
 
@@ -323,6 +329,11 @@ export class StolenSwanboat {
     const n = PATH_LOOP.length;
     const node = PATH_LOOP[this.pathIndex]!;
     if (Math.hypot(node.x - lead.x, node.y - lead.z) < 2.4) {
+      // Path's as close as it gets — cut across the grass the rest of the way.
+      if (this.pathIndex === this.pathGoalIndex) {
+        this.pathReady = false;
+        return false;
+      }
       this.pathIndex = (this.pathIndex + this.pathDir + n) % n;
     }
     const next = PATH_LOOP[this.pathIndex]!;
@@ -460,6 +471,9 @@ export class StolenSwanboat {
     // Nearest way out from where they hit the bank.
     const gate = this.nearestGate(this.shoreAim.x, this.shoreAim.z);
     this.exit.set(gate.x, 0, gate.y);
+    const outside = gateOutside(gate, 10);
+    this.beyond.set(outside.x, 0, outside.y);
+    this.throughGate = false;
     this.phase = "wading";
     this.pathReady = false;
     this.say(ABANDON_LINES[Math.floor(Math.random() * ABANDON_LINES.length)]!);
@@ -479,7 +493,18 @@ export class StolenSwanboat {
   }
 
   private runOff(delta: number): void {
-    if (this.runPathThenGoal(this.exit, delta, 14)) {
+    if (!this.throughGate) {
+      if (this.runPathThenGoal(this.exit, delta, 14)) this.throughGate = true;
+      return;
+    }
+    let allOut = true;
+    this.lads.forEach((lad, i) => {
+      const aim = this.beyond
+        .clone()
+        .add(new THREE.Vector3((i - 0.5) * 0.9, 0, 0));
+      if (!this.walkRaw(lad, aim, delta, RUN)) allOut = false;
+    });
+    if (allOut) {
       this.cleared = true;
       this.phase = "done";
       this.gone = true;

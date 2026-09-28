@@ -1749,6 +1749,11 @@ export class Person {
    */
   public noticeHelicopter(id: number, at: THREE.Vector3): void {
     if (!this.kid) return;
+    // Already waving — keep eyes (and the arm) on it as it goes over.
+    if (this.heliWave && this.heliWavedId === id) {
+      this.gawpAt.copy(at);
+      return;
+    }
     if (this.heliWavedId === id) return;
     if (
       this.dunk > 0 ||
@@ -1765,13 +1770,10 @@ export class Person {
 
     const here = this.group.position;
     const gap = Math.hypot(at.x - here.x, at.z - here.z);
-    if (gap > 110) return;
+    if (gap > 220) return;
 
     this.heliWavedId = id;
-    // Not every family looks up — about half do.
-    if (Math.random() > 0.55) return;
-
-    this.gawpLeft = 5.5 + Math.random() * 2.5;
+    this.gawpLeft = 9 + Math.random() * 4;
     this.gawpCool = 10;
     this.gawpAt.copy(at);
     this.heliWave = true;

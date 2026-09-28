@@ -13,7 +13,7 @@ import { Squirrel } from "./entities/Squirrel";
 import { Footprint } from "./entities/Footprint";
 import { Plane } from "./entities/Plane";
 import { Helicopter } from "./entities/Helicopter";
-import { Graffiti } from "./entities/Graffiti";
+import { Graffiti, TAGS, type Tag, type Wall } from "./entities/Graffiti";
 import { Drunks, drunkSpots } from "./entities/Drunks";
 import { RebelRaid } from "./entities/RebelRaid";
 import { BoyRacers } from "./entities/BoyRacers";
@@ -116,6 +116,19 @@ const OVERNIGHT_ARC_FRAC = 0.38;
 const OPENING_CLEAR_FRAC = 0.8;
 /** How long the NW feeder rush runs after the opening tip is cleared. */
 const FEEDER_RUSH_FOR = 150;
+/** Tagged-overnight job: how long before the feeder rush comes in regardless. */
+const GRAFFITI_MISSION_FOR = 300;
+/** Breather between the graffiti job and the feeder rush. */
+const FEEDER_AFTER_GRAFFITI = 30;
+/** Tags on walls in view wait this long for the player to glance away. */
+const GRAFFITI_HIDE_FOR = 6;
+/**
+ * Quiet time (seconds, i.e. shift minutes) after one daytime job before the
+ * next may start, so the day's missions don't pile on top of each other.
+ */
+const MISSION_GAP = 50;
+/** A job left running this long (e.g. ignored geese) stops holding up the next. */
+const MISSION_HOLD_MAX = 150;
 /** Pigeons bunched on the two fairy-light spans nearest the feeders. */
 const PIGEON_FLOCK = 18;
 /** Pedalo bird kills before a revenge V-formation flies in. */
@@ -164,13 +177,27 @@ const MAX_FOOTBALL = 1;
  */
 const PEOPLE_PEAK = 16;
 
-/** Room on the water for a few more birds than the resident flock, and a
- * floor so the lake never empties out. */
-const FLOCK_LIMIT = 22;
+/**
+ * A quiet lake at clock-on that fills up as the day goes: room on the water
+ * by hour (cygnets count), topping out for the evening rush, and a floor so
+ * the lake never empties out.
+ */
+const FLOCK_BY_HOUR: ReadonlyArray<readonly [number, number]> = [
+  [0, 22],
+  [5.5, 22],
+  [6, 10],
+  [9, 14],
+  [12, 18],
+  [15, 21],
+  [17, 22],
+  [24, 22],
+];
 const FLOCK_FLOOR = 12;
 
+/** Adults on the water when the shift starts. */
+const SWANS_TO_START = 6;
 /** Families of cygnets on the water, each behind a mother worth avoiding. */
-const BROODS = 2;
+const BROODS = 1;
 
 /** Mallards on the water, and gulls working the park from above. */
 const DUCKS_TO_START = 9;
@@ -277,7 +304,6 @@ export class Game {
   private stolenSwanboat: StolenSwanboat | null = null;
   private swanboatMissionStarted = false;
   private swanboatMissionDone = false;
-  private swanboatHourWas = -1;
 
   /** The player's view, worked out afresh each frame. */
   private view = new THREE.Frustum();
@@ -325,6 +351,13 @@ export class Game {
   private overnightTotal = 0;
   private overnightCleared = 0;
   private secondEventDone = false;
+  private graffitiMissionStarted = false;
+  private graffitiMissionDone = false;
+  private graffitiMissionLeft = 0;
+  private graffitiMissionTags: Graffiti[] = [];
+  /** Walls still to be tagged — they go up once the player looks away. */
+  private graffitiPending: { wall: Wall; word: Tag }[] = [];
+  private feederIn = -1;
   /** NW feeders radio mission — birds lay the next mess, nothing teleports in. */
   private feederRushLeft = 0;
   private feederTip: { x: number; z: number } | null = null;
@@ -333,9 +366,14 @@ export class Game {
   private picnicRaidActive = false;
   private picnicRaidDone = false;
   private picnicRaidTip: { x: number; z: number } | null = null;
+  private picnicRaidParty: Picnic | null = null;
   private picnicRaidLeft = 0;
   /** Seconds with no divers — mission clears after a short hold. */
   private picnicRaidClear = 0;
+  /** Seconds since the last daytime job wrapped up (see {@link MISSION_GAP}). */
+  private missionQuietFor = MISSION_GAP;
+  private missionBusyFor = 0;
+  private missionsWere = 0;
   /** Mission 4 — radar geese inbound; heavy hose from the van. */
   private gooseMissionPending = 0;
   private gooseMissionStarted = false;
@@ -741,17 +779,25 @@ export class Game {
       this.swans.splice(i, 1);
     }
 
-    if (this.swans.length < FLOCK_LIMIT) {
+    const cap = this.flockCap();
+    const short = cap - this.swans.length;
+    if (short > 0) {
       this.nextArrival -= delta;
       if (this.nextArrival <= 0) {
-        this.nextArrival = 45 + Math.random() * 75;
+        // Catch up quickly if the clock has jumped ahead of the flock.
+        this.nextArrival =
+          short >= 6
+            ? 8 + Math.random() * 8
+            : short >= 3
+              ? 25 + Math.random() * 25
+              : 45 + Math.random() * 75;
         const swan = new Swan(new THREE.Vector3(0, 0, 0), this.scene);
         swan.flyIn();
         this.swans.push(swan);
       }
     }
 
-    if (this.swans.length <= FLOCK_FLOOR) return;
+    if (this.swans.length <= Math.min(FLOCK_FLOOR, cap - 1)) return;
     this.nextDeparture -= delta;
     if (this.nextDeparture > 0) return;
 
@@ -763,8 +809,21 @@ export class Game {
     leaving[Math.floor(Math.random() * leaving.length)]?.flyAway();
   }
 
+  /** How many swans the lake has room for at this hour. */
+  private flockCap(): number {
+    const hour = this.dayCycle.hour;
+    for (let i = 1; i < FLOCK_BY_HOUR.length; i++) {
+      const [h1, n1] = FLOCK_BY_HOUR[i]!;
+      if (hour > h1) continue;
+      const [h0, n0] = FLOCK_BY_HOUR[i - 1]!;
+      const t = h1 > h0 ? (hour - h0) / (h1 - h0) : 1;
+      return Math.round(n0 + (n1 - n0) * t);
+    }
+    return FLOCK_BY_HOUR[FLOCK_BY_HOUR.length - 1]![1];
+  }
+
   private spawnSwans(): void {
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < SWANS_TO_START; i++) {
       const spot = waterSpot();
       this.swans.push(
         new Swan(new THREE.Vector3(spot.x, 0, spot.y), this.scene),
@@ -1131,7 +1190,99 @@ export class Game {
     if (this.overnightCleared / this.overnightTotal < OPENING_CLEAR_FRAC) {
       return;
     }
-    this.startSecondEvent();
+    this.startGraffitiMission();
+  }
+
+  /**
+   * Mission 2: the cafés and the boat house have been tagged overnight. Every
+   * tag we've got goes up somewhere; the feeder rush follows once they're off.
+   */
+  private startGraffitiMission(): void {
+    if (this.graffitiMissionStarted || this.secondEventDone) return;
+    this.graffitiMissionStarted = true;
+
+    const walls = taggableWalls().filter(
+      (w) => w.site === "cafe" || w.site === "boathouse",
+    );
+    if (walls.length === 0 || !missionWindowOpen("graffiti", this.dayCycle.hour)) {
+      this.graffitiMissionDone = true;
+      this.startSecondEvent();
+      return;
+    }
+
+    // A wall that's already got a tag on it keeps that one.
+    const fresh = walls.filter((wall) => {
+      const have = this.graffiti.find((tag) => {
+        if (tag.isClean()) return false;
+        const at = tag.getPosition();
+        return Math.hypot(at.x - wall.x, at.z - wall.z) < wall.width / 2 + 0.5;
+      });
+      if (have) this.graffitiMissionTags.push(have);
+      return !have;
+    });
+    const words = [...TAGS].sort(() => Math.random() - 0.5);
+    this.graffitiPending = fresh.map((wall, i) => ({
+      wall,
+      word: words[i % words.length]!,
+    }));
+    this.graffitiMissionLeft = GRAFFITI_MISSION_FOR;
+    this.placeMissionTags();
+
+    this.messages.send(
+      "CAFÉ",
+      "Someone's had the cafés and the boat house overnight — tags all over. Get them off before we open up.",
+      this.dayCycle.clockFace(),
+      14,
+    );
+    this.announceMission("graffiti");
+  }
+
+  /** Put up queued tags — out of view straight off, the rest after a beat. */
+  private placeMissionTags(): void {
+    const waited =
+      GRAFFITI_MISSION_FOR - this.graffitiMissionLeft >= GRAFFITI_HIDE_FOR;
+    this.graffitiPending = this.graffitiPending.filter(({ wall, word }) => {
+      if (!waited && this.inShot(wall.x, wall.z, wall.y)) return true;
+      const tag = new Graffiti(this.scene, wall, word);
+      this.graffiti.push(tag);
+      this.graffitiMissionTags.push(tag);
+      return false;
+    });
+  }
+
+  private updateGraffitiMission(delta: number): void {
+    if (this.feederIn > 0) {
+      this.feederIn -= delta;
+      if (this.feederIn <= 0) this.startSecondEvent();
+    }
+    if (!this.graffitiMissionStarted || this.graffitiMissionDone) return;
+
+    this.placeMissionTags();
+    this.graffitiMissionLeft -= delta;
+    const cleared =
+      this.graffitiPending.length === 0 &&
+      this.graffitiMissionTags.every((tag) => tag.isClean());
+    if (!cleared && this.graffitiMissionLeft > 0) return;
+
+    this.graffitiMissionDone = true;
+    // Anything still pending never went up — don't leave it queued.
+    this.graffitiPending = [];
+    if (cleared) {
+      this.cleaned += 1;
+      this.comboRun = this.comboLeft > 0 ? this.comboRun + 1 : 1;
+      this.comboLeft = COMBO_WINDOW;
+      this.score += 100 * this.multiplier();
+      this.updateHUD();
+      this.messages.send(
+        "CAFÉ",
+        "Walls look spotless — cheers. Kettle's on if you want one.",
+        this.dayCycle.clockFace(),
+        12,
+      );
+      this.callouts.raise("praise", this.dayCycle.clockFace());
+    }
+    this.graffitiMissionTags = [];
+    this.feederIn = FEEDER_AFTER_GRAFFITI;
   }
 
   /**
@@ -1172,8 +1323,6 @@ export class Game {
     }
 
     this.callouts.raise("jobs", this.dayCycle.clockFace(), marked);
-
-    this.startPigeonMission();
   }
 
   private updateFeederRush(delta: number): void {
@@ -1247,19 +1396,23 @@ export class Game {
     const prefer = getMissionSpot("picnic");
     const preferAt = new THREE.Vector3(prefer.x, 0, prefer.z);
     let picnic = this.picnics
-      .filter((p) => p.isRaidable())
+      .filter((p) => p.isRaidable() && p.hasSitters())
       .sort(
         (a, b) =>
           a.getPosition().distanceTo(preferAt) -
           b.getPosition().distanceTo(preferAt),
       )[0];
     if (!picnic) {
-      const spot = this.freeLawnGatherSpotNear(prefer.x, prefer.z, 16);
+      const spot =
+        this.freeLawnGatherSpotNear(prefer.x, prefer.z, 16) ??
+        this.freeLawnGatherSpotNear(prefer.x, prefer.z, 8, { allowInShot: true });
       if (spot) {
-        picnic = new Picnic(this.scene, spot);
+        picnic = new Picnic(this.scene, spot, { seated: true });
         this.picnics.push(picnic);
       }
     }
+    picnic?.stayFor(this.picnicRaidLeft + 20);
+    this.picnicRaidParty = picnic ?? null;
     const at =
       picnic?.getPosition() ?? new THREE.Vector3(prefer.x, 0, prefer.z);
     this.picnicRaidTip = { x: at.x, z: at.z };
@@ -1284,7 +1437,7 @@ export class Game {
       !this.picnicRaidDone &&
       !this.picnicRaidActive &&
       this.secondEventDone &&
-      this.feederRushLeft <= 0 &&
+      this.missionsQuiet() &&
       missionWindowOpen("picnic", this.dayCycle.hour)
     ) {
       this.startPicnicRaid();
@@ -1293,8 +1446,11 @@ export class Game {
     this.picnicRaidLeft -= delta;
 
     const tip = this.picnicRaidTip;
-    // Prefer a raidable blanket; fall back to nearest picnic on the tip.
-    let picnic = this.picnics.find((p) => p.isRaidable());
+    // Stick with the party the gulls picked; only look elsewhere if it's gone.
+    let picnic: Picnic | undefined =
+      this.picnicRaidParty && !this.picnicRaidParty.isDone()
+        ? this.picnicRaidParty
+        : this.picnics.find((p) => p.isRaidable() && p.hasSitters());
     if (!picnic && tip) {
       picnic = this.picnics
         .filter((p) => !p.isDone())
@@ -1331,6 +1487,7 @@ export class Game {
     ) {
       this.picnicRaidActive = false;
       this.picnicRaidTip = null;
+      this.picnicRaidParty = null;
       this.picnicRaidClear = 0;
       if (!this.gooseMissionStarted && !this.gooseMissionDone) {
         this.gooseMissionPending = 12;
@@ -1392,6 +1549,7 @@ export class Game {
       this.picnicRaidDone &&
       !this.picnicRaidActive &&
       this.gooseMissionPending <= 0 &&
+      this.missionsQuiet() &&
       missionWindowOpen("geese", this.dayCycle.hour)
     ) {
       this.startGooseMission();
@@ -1455,6 +1613,45 @@ export class Game {
       this.callouts.raise("praise", this.dayCycle.clockFace());
       this.gooseFlock.dispose();
       this.gooseFlock = null;
+    }
+  }
+
+  /** Daytime jobs (feeder rush through the grass fire) still on. */
+  private missionsActive(): number {
+    return [
+      this.graffitiMissionStarted && !this.graffitiMissionDone,
+      this.feederRushLeft > 0,
+      this.pigeonMissionStarted && !this.pigeonMissionDone,
+      this.picnicRaidActive,
+      this.gooseMissionStarted && !this.gooseMissionDone,
+      this.swanboatMissionStarted && !this.swanboatMissionDone,
+      this.grassFire !== null,
+    ].filter(Boolean).length;
+  }
+
+  /** Nothing on (or it's dragged on too long), and it's been quiet long enough. */
+  private missionsQuiet(): boolean {
+    return this.missionQuietFor >= MISSION_GAP;
+  }
+
+  private updateMissionPacing(delta: number): void {
+    const active = this.missionsActive();
+    // A fresh job gets its own hold, even if an old one was left running.
+    if (active === 0 || active > this.missionsWere) this.missionBusyFor = 0;
+    if (active > 0) this.missionBusyFor += delta;
+    this.missionsWere = active;
+    const holding = this.missionBusyFor > 0 && this.missionBusyFor < MISSION_HOLD_MAX;
+    if (holding) this.missionQuietFor = 0;
+    else this.missionQuietFor += delta;
+
+    if (
+      !this.pigeonMissionStarted &&
+      !this.pigeonMissionDone &&
+      this.secondEventDone &&
+      this.missionsQuiet() &&
+      missionWindowOpen("pigeons", this.dayCycle.hour)
+    ) {
+      this.startPigeonMission();
     }
   }
 
@@ -2573,7 +2770,7 @@ export class Game {
       const pct = Math.round(this.player.heavyTankFraction() * 100);
       this.instructionsElement.innerHTML = mobile
         ? `Heavy hose — ${pct}% tank | Spray to fire | Knock down the geese`
-        : `HEAVY HOSE — ${pct}% tank left | Click: Spray | WASD: Move | ESC: Unlock mouse`;
+        : `HEAVY HOSE — ${pct}% tank left | Click: Spray | 2 / Q: Litter picker | WASD: Move | ESC: Unlock mouse`;
       return;
     }
     if (
@@ -2710,7 +2907,9 @@ export class Game {
     }
 
     // Mission jumps skip the overnight / feeder chain.
-    this.secondEventDone = true;
+    this.secondEventDone = from !== "graffiti";
+    this.graffitiMissionStarted = from !== "graffiti";
+    this.graffitiMissionDone = from !== "graffiti";
     for (const pile of this.overnightPiles) {
       const i = this.droppings.indexOf(pile);
       if (i >= 0) {
@@ -2724,23 +2923,27 @@ export class Game {
     this.feederRushLeft = 0;
     this.callouts.unlockTrouble();
 
-    if (from === "picnic") {
-      this.dayCycle.setHour(10.5);
+    if (from === "graffiti") {
+      this.dayCycle.setHour(7);
+      this.clockOn({ quiet: true });
+      this.startGraffitiMission();
+    } else if (from === "picnic") {
+      this.dayCycle.setHour(12);
       this.clockOn({ quiet: true });
       this.startPicnicRaid();
     } else if (from === "geese") {
-      this.dayCycle.setHour(11.5);
+      this.dayCycle.setHour(14);
       this.picnicRaidDone = true;
       this.clockOn({ quiet: true });
       this.startGooseMission();
     } else if (from === "swanboat") {
-      this.dayCycle.setHour(12.75);
+      this.dayCycle.setHour(15.5);
       this.picnicRaidDone = true;
       this.gooseMissionDone = true;
       this.clockOn({ quiet: true });
       this.beginSwanboatMission();
     } else if (from === "fire") {
-      this.dayCycle.setHour(16);
+      this.dayCycle.setHour(17.5);
       this.picnicRaidDone = true;
       this.gooseMissionDone = true;
       this.swanboatMissionDone = true;
@@ -2781,7 +2984,7 @@ export class Game {
       this.clockOn({ quiet: true });
       this.beginRebelMission();
     } else if (from === "pigeons") {
-      this.dayCycle.setHour(12);
+      this.dayCycle.setHour(10);
       this.picnicRaidDone = true;
       this.gooseMissionDone = true;
       this.swanboatMissionDone = true;
@@ -2816,6 +3019,16 @@ export class Game {
     }
     this.showTool("hose");
     this.player.pickStartingTool();
+  }
+
+  /** Any rubbish or full bin within picker reach, whichever way they face. */
+  public rubbishNear(from: THREE.Vector3): boolean {
+    const near = (at: THREE.Vector3) =>
+      Math.hypot(at.x - from.x, at.z - from.z) <= PICKER_SIGHT;
+    return (
+      this.litter.some((piece) => !piece.isTaken() && near(piece.getPosition())) ||
+      this.bins.some((bin) => bin.isFull() && near(bin.getPosition()))
+    );
   }
 
   /**
@@ -2862,7 +3075,7 @@ export class Game {
 
     // Whatever's already in their hands wins, so they don't stand there
     // swapping back and forth over a bin next to a mess.
-    if (holding === "heavyHose") return "heavyHose";
+    if (holding === "heavyHose") return spike && !lance ? "picker" : "heavyHose";
     if (holding === "picker" && spike) return "picker";
     if (holding === "hose" && lance) return "hose";
     if (spike) return "picker";
@@ -3331,6 +3544,7 @@ export class Game {
     if (
       !this.fireMissionDone &&
       !this.grassFire &&
+      this.missionsQuiet() &&
       missionWindowOpen("fire", hour)
     ) {
       const prefer = getMissionSpot("fire");
@@ -3412,25 +3626,20 @@ export class Game {
   }
 
   /**
-   * Early afternoon: lads nick a swan pedalo. Hire one, chase, hose the hull
+   * Mid-afternoon: lads nick a swan pedalo. Hire one, chase, hose the hull
    * until she sinks — they abandon, wade out, and run off.
    */
   private updateSwanboatMission(delta: number): void {
     const hour = this.dayCycle.hour;
-    const open = missionWindowOpen("swanboat", hour);
-    const wasOpen =
-      this.swanboatHourWas < 0
-        ? false
-        : missionWindowOpen("swanboat", this.swanboatHourWas);
     if (
       !this.swanboatMissionStarted &&
       !this.swanboatMissionDone &&
-      open &&
-      !wasOpen
+      this.secondEventDone &&
+      this.missionsQuiet() &&
+      missionWindowOpen("swanboat", hour)
     ) {
       this.beginSwanboatMission();
     }
-    this.swanboatHourWas = hour;
 
     if (!this.stolenSwanboat) return;
     const player = this.camera.position;
@@ -4487,6 +4696,7 @@ export class Game {
     bobPedalos(this.elapsed, delta);
     this.updateDroppings(delta);
     this.updateFeederRush(delta);
+    this.updateMissionPacing(delta);
     this.updatePicnicRaid(delta);
     this.updateGooseMission(delta);
     this.updatePigeonMission(delta);
@@ -4503,6 +4713,7 @@ export class Game {
     this.updateSquirrels(delta, scraps);
     this.updateBins(delta);
     this.updateGraffiti(delta);
+    this.updateGraffitiMission(delta);
     this.refreshWalkCrowd();
     this.updateDrunks(delta);
     this.watchForAttacks();
@@ -4618,6 +4829,17 @@ export class Game {
   private eventMissionSpots(): { x: number; z: number }[] {
     if (!this.onDuty) return [];
     const spots: { x: number; z: number }[] = [];
+
+    if (this.graffitiMissionStarted && !this.graffitiMissionDone) {
+      for (const tag of this.graffitiMissionTags) {
+        if (tag.isClean()) continue;
+        const at = tag.getPosition();
+        spots.push({ x: at.x, z: at.z });
+      }
+      for (const { wall } of this.graffitiPending) {
+        spots.push({ x: wall.x, z: wall.z });
+      }
+    }
 
     if (this.picnicRaidActive && this.picnicRaidTip) {
       spots.push(this.picnicRaidTip);

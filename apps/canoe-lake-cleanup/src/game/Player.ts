@@ -40,8 +40,8 @@ const PICKER_REACH = 2;
 
 /** How long a tool takes to come up or go down. */
 const SWAP_TIME = 0.28;
-/** How long with nothing worth doing in front of them before it's put away. */
-const STOW_AFTER = 4;
+/** How long with no rubbish about before the picker goes back for the jet. */
+const PICKER_PUT_AWAY = 2;
 /** Picking a tool by hand holds off the automatic swapping for a bit. */
 const MANUAL_HOLD = 10;
 
@@ -221,7 +221,7 @@ export class Player {
         this.pickTool("picker", true);
         break;
       case "KeyQ":
-        this.pickTool(this.wanted === "hose" ? "picker" : "hose", true);
+        this.pickTool(this.wanted === "picker" ? "hose" : "picker", true);
         break;
       case "KeyE":
         event.preventDefault();
@@ -253,9 +253,8 @@ export class Player {
    */
   private pickTool(tool: Tool | null, byHand = false): void {
     if (!this.game.hasClockedOn() && tool !== null) return;
-    if (this.heavyTank > 0 && this.tool === "heavyHose" && tool !== "heavyHose") {
-      return;
-    }
+    // While the heavy reel's still got water, it's the hose on their belt.
+    if (this.heavyTank > 0 && tool === "hose") tool = "heavyHose";
     if (byHand) this.manual = MANUAL_HOLD;
     if (tool === this.wanted) return;
     this.wanted = tool;
@@ -360,10 +359,24 @@ export class Player {
 
   /**
    * Watches what they're looking at and has the right thing in their hands
-   * for it, so the shift runs without fiddling with the number keys. Left
-   * alone with nothing to do, they put it away.
+   * for it, so the shift runs without fiddling with the number keys. The jet
+   * is what they hold by default; the picker goes back once the rubbish is done.
    */
   private readTheJob(delta: number): void {
+    if (this.wanted === "picker") {
+      this.idle = this.game.rubbishNear(this.camera.position)
+        ? 0
+        : this.idle + delta;
+      if (this.idle > PICKER_PUT_AWAY) {
+        this.idle = 0;
+        this.manual = 0;
+        this.pickTool("hose");
+        return;
+      }
+    } else {
+      this.idle = 0;
+    }
+
     if (this.manual > 0) {
       this.manual -= delta;
       return;
@@ -375,16 +388,7 @@ export class Player {
       .normalize();
     const job = this.game.jobInSight(this.camera.position, forward, this.wanted);
 
-    if (job) {
-      this.idle = 0;
-      this.pickTool(job);
-      return;
-    }
-
-    // Nothing in front of them. Give it a moment in case they're just
-    // turning round, then put it away.
-    this.idle += delta;
-    if (this.idle > STOW_AFTER) this.pickTool(null);
+    if (job) this.pickTool(job);
   }
 
   private onKeyUp(event: KeyboardEvent): void {
