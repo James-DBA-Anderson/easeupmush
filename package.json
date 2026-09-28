@@ -22,10 +22,15 @@
     "build": "npm run build -w @easeupmush/site && GAME_BASE=/games/pompey-punch-up/ npm run build -w @easeupmush/pompey-punch-up && GAME_BASE=/games/pompeymon/ npm run build -w @easeupmush/pompeymon && GAME_BASE=/games/canoe-lake-cleanup/ npm run build -w @easeupmush/canoe-lake-cleanup && GAME_BASE=/games/bunsterstons/ npm run build -w @easeupmush/bunsterstons && node scripts/assemble-dist.mjs",
     "preview": "vite preview --config vite.preview.config.ts",
     "site": "npm run build && npm run preview",
-    "deploy": "npm run build && npx wrangler deploy",
+    "deploy": "npm run build && npx cf deploy",
     "typecheck": "npm run typecheck -w @easeupmush/pompey-punch-up"
   },
   "devDependencies": {
-    "vite": "^6.2.2"
+    "@cloudflare/vite-plugin": "^1.62.0",
+    "vite": "^6.2.2",
+    "wrangler": "^4.143.0"
+  },
+  "dependencies": {
+    "cf": "^1.0.0-beta.5"
   }
 }
