@@ -1,0 +1,13 @@
+{
+  "name": "easeupmush-deploy",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare deploy target for the prebuilt ../dist site. Kept outside the root npm workspaces because `cf deploy` refuses to run at a workspace root.",
+  "scripts": {
+    "deploy": "cf deploy"
+  },
+  "devDependencies": {
+    "cf": "^1.0.0-beta.5",
+    "wrangler": "^4.143.0"
+  }
+}

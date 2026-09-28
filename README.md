@@ -57,12 +57,11 @@ Domain DNS stays on Cloudflare. Automated deployment via GitHub Actions using th
 Deployment is triggered automatically on every push to `main`. The GitHub Actions workflow:
 1. Installs dependencies
 2. Builds the site (`npm run build`)
-3. Deploys to Cloudflare Pages using `cf deploy`
+3. Deploys to Cloudflare using `cf deploy`, run from `deploy/` because `cf` won't run at a workspace root
 
-Configuration is in `cloudflare.config.ts` which specifies:
-- Project name: `easeupmush`
-- Assets directory: `./dist`
-- Compatibility date: `2026-08-15`
+Configuration is in `deploy/`:
+- `cloudflare.config.ts`: Worker name `easeupmush`, compatibility date `2026-08-15`
+- `wrangler.config.ts`: assets directory `../dist`
 
 Manual deployment is also available: run `npm run deploy` locally (requires `CLOUDFLARE_API_TOKEN` environment variable).
 

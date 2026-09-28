@@ -24,6 +24,9 @@ jobs:
         with:
           node-version: "22"
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            deploy/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -31,15 +34,23 @@ jobs:
       - name: Build site
         run: npm run build
 
+      # cf refuses to run at an npm workspace root, so deploy from deploy/,
+      # which has its own install and points its assets at ../dist.
+      - name: Install deploy tooling
+        working-directory: deploy
+        run: npm ci
+
       # `cf deploy` does not accept --json. Generated API commands print JSON
       # on stdout by default, so capture the Worker record after deploy.
       - name: Deploy to Cloudflare
+        working-directory: deploy
         run: npx cf deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Output deployment URL
+        working-directory: deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

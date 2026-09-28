@@ -13,10 +13,10 @@ The deployment workflow (`.github/workflows/deploy.yml`) performs:
 1. **Checkout**: Fetches the repository code
 2. **Setup**: Installs Node.js 22 and npm dependencies
 3. **Build**: Runs `npm run build` to compile all apps into `dist/`
-4. **Deploy**: Uses `cf deploy` to publish to Cloudflare Pages
+4. **Deploy**: Runs `npm ci` and then `cf deploy` inside `deploy/` to publish to Cloudflare
 5. **Output**: Displays deployment URL
 
-The `cf deploy` command reads the `cloudflare.config.ts` configuration to deploy the pre-built `dist/` directory.
+`cf deploy` refuses to run at the root of an npm workspace, so the deploy config lives in `deploy/`. That folder is a standalone package (not one of the workspaces) with its own lockfile for `cf` and `wrangler`, and it deploys the pre-built `../dist` directory.
 
 ## Required GitHub Secrets
 
@@ -74,7 +74,7 @@ npm run deploy
 
 ## Configuration
 
-The deployment is configured via `cloudflare.config.ts`:
+The Worker is configured via `deploy/cloudflare.config.ts`:
 
 ```typescript
 import { defineConfig } from "cf/config";
@@ -83,18 +83,31 @@ export default defineConfig({
   worker: {
     name: "easeupmush",
     compatibilityDate: "2026-08-15",
-    assets: {
-      directory: "./dist",
-    },
   },
+});
+```
+
+The static assets folder is not a `cloudflare.config.ts` key (`worker.assets.directory` is rejected). It is set in the tooling config `deploy/wrangler.config.ts`:
+
+```typescript
+import { defineWranglerConfig } from "wrangler/experimental-config";
+
+export default defineWranglerConfig({
+  assetsDirectory: "../dist",
 });
 ```
 
 ### Key Settings
 
-- **name**: The project name on Cloudflare Pages (`easeupmush`)
+- **name**: The Worker name on Cloudflare (`easeupmush`)
 - **compatibilityDate**: The Cloudflare Workers compatibility date
-- **assets.directory**: The built static assets directory (`./dist`)
+- **assetsDirectory**: The built static assets directory (`../dist`, relative to `deploy/`)
+
+To check a deploy without uploading, run `npm run build && npm ci --prefix deploy && npm run deploy --prefix deploy -- --dry-run`.
+
+### "run in the root of a workspace"
+
+This is the error you get if `cf deploy` is run from the repo root. Run it from `deploy/` instead.
 
 ## Cloudflare Free Tier
 
@@ -130,7 +143,7 @@ Check the GitHub Actions logs for specific error messages from the `cf deploy` c
 This project was migrated from the legacy Wrangler configuration:
 
 - ❌ Old: `wrangler.jsonc` (JSONC format)
-- ✅ New: `cloudflare.config.ts` (TypeScript format)
+- ✅ New: `deploy/cloudflare.config.ts` + `deploy/wrangler.config.ts` (TypeScript format)
 
 The new `cf` CLI offers:
 - TypeScript-based configuration with type safety
