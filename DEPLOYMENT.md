@@ -13,8 +13,10 @@ The deployment workflow (`.github/workflows/deploy.yml`) performs:
 1. **Checkout**: Fetches the repository code
 2. **Setup**: Installs Node.js 22 and npm dependencies
 3. **Build**: Runs `npm run build` to compile all apps into `dist/`
-4. **Deploy**: Uses `cf deploy` to publish to Cloudflare Pages
+4. **Deploy**: Uses `cf deploy --prebuilt` to publish to Cloudflare Pages
 5. **Output**: Displays deployment URL
+
+> **Note**: The `--prebuilt` flag is required because this is an npm workspace. Without it, the cf CLI would attempt to auto-detect which project to deploy and would fail when run from the workspace root. With `--prebuilt`, cf uses the `cloudflare.config.ts` configuration to deploy the pre-built `dist/` directory.
 
 ## Required GitHub Secrets
 
