@@ -1,10 +1,10 @@
 import * as THREE from "three";
 import { getRoadGraph, ROAD_WIDTH } from "./buildings";
 import { isBlocked } from "./blocking";
-import { isOnPath, pathPolylines } from "./lake";
+import { isInLake, isOnPath, pathPolylines } from "./lake";
 import { busStopSpots } from "./park";
 import { addProp, type Footprint } from "./collision";
-import { insidePark } from "./fence";
+import { atRailings, insidePark } from "./fence";
 import { groundHeight } from "./terrain";
 
 /** White council Transit — parked by the bus stop at the top of the path. */
@@ -59,8 +59,10 @@ const VAN_LEN = 5.4;
 const VAN_WIDE = 2.05;
 /** Eye in the driver's seat (UK right-hand drive). */
 const SEAT_LOCAL = new THREE.Vector3(0.55, 1.42, -0.38);
-/** Stand just outside the driver's door. */
-const EXIT_LOCAL = new THREE.Vector3(0.15, 0, -1.55);
+/** Stand just outside the kerb-side (left, +Z) cab door, park side. */
+const EXIT_LOCAL = new THREE.Vector3(1.15, 0, 1.65);
+/** Threshold in the middle of the cab door opening, so the get-out clears the pillars. */
+const DOORWAY_LOCAL = new THREE.Vector3(1.2, 0, VAN_WIDE * 0.46);
 
 export interface CleanerVanPose {
   x: number;
@@ -71,6 +73,9 @@ export interface CleanerVanPose {
   seatZ: number;
   /** World facing while seated — along the road, away from the park. */
   seatYaw: number;
+  /** Middle of the cab door opening, passed through on the way out. */
+  doorX: number;
+  doorZ: number;
   exitX: number;
   exitZ: number;
   /** Face the path after hopping out. */
@@ -79,14 +84,14 @@ export interface CleanerVanPose {
   pathX: number;
   pathZ: number;
   pathYaw: number;
-  /** Waypoints from the door around the nose to the path. */
+  /** Waypoints from the door, through a gate, to the handoff spot. */
   walkVia: ReadonlyArray<{ x: number; z: number }>;
 }
 
 let pose: CleanerVanPose | null = null;
 let mesh: THREE.Group | null = null;
-/** Driver's door — hinged at the front edge, opens outward. */
-let driverDoor: THREE.Group | null = null;
+/** Kerb-side cab door — hinged at the front edge, opens outward. */
+let kerbDoor: THREE.Group | null = null;
 /** Barn doors on the load bay — heavy hose lives inside. */
 let rearDoorL: THREE.Group | null = null;
 let rearDoorR: THREE.Group | null = null;
@@ -115,24 +120,23 @@ export function hoseStandWorld(): { x: number; z: number; yaw: number } | null {
 }
 
 /**
- * Footpath after collecting the heavy hose — hatch, around the kerb side,
- * then the same gate run used by the shift intro.
+ * Footpath after collecting the heavy hose — hatch, then through a gate back
+ * to the spot the shift intro hands off on.
  */
 export function hoseWalkVia(): { x: number; z: number }[] | null {
   if (!pose) return null;
   const hatch = rearHatchWorld()!;
-  const corner = localToWorld(
-    pose.x,
-    pose.z,
-    pose.yaw,
-    -VAN_LEN * 0.28,
-    EXIT_LOCAL.z - 0.35,
+  const target = pose;
+  const route = findWalkRoute(
+    hatch,
+    { x: pose.x, z: pose.z, yaw: pose.yaw },
+    (x, z) => Math.hypot(x - target.pathX, z - target.pathZ) < 0.8,
   );
-  return [
-    { x: hatch.x, z: hatch.z },
-    { x: corner.x, z: corner.z },
-    ...pose.walkVia.map((p) => ({ x: p.x, z: p.z })),
-  ];
+  if (!route) {
+    return [{ x: hatch.x, z: hatch.z }, ...pose.walkVia];
+  }
+  route[route.length - 1] = { x: pose.pathX, z: pose.pathZ };
+  return route;
 }
 
 /** Show / hide the reel prop in the load bay (taken during the hose pickup). */
@@ -162,12 +166,12 @@ export function nearHeavyHosePickup(x: number, z: number): boolean {
   return Math.hypot(x - pose.x, z - pose.z) < 12;
 }
 
-/** 0 shut → 1 open (~70°). */
-export function setDriverDoorOpen(amount: number): void {
-  if (!driverDoor) return;
+/** Kerb-side cab door: 0 shut → 1 open (~70°). */
+export function setKerbDoorOpen(amount: number): void {
+  if (!kerbDoor) return;
   const t = Math.max(0, Math.min(1, amount));
-  // Right-hand door (local −Z): negative Y swings the panel out.
-  driverDoor.rotation.y = -t * 1.2;
+  // Left-hand door (local +Z): positive Y swings the panel out.
+  kerbDoor.rotation.y = t * 1.2;
 }
 
 /** Load-bay barn doors — 0 shut, 1 wide open. */
@@ -188,7 +192,7 @@ export function buildCleanerVan(scene: THREE.Scene): CleanerVanPose | null {
   if (mesh) {
     scene.remove(mesh);
     mesh = null;
-    driverDoor = null;
+    kerbDoor = null;
     rearDoorL = null;
     rearDoorR = null;
     heavyHoseProp = null;
@@ -199,7 +203,7 @@ export function buildCleanerVan(scene: THREE.Scene): CleanerVanPose | null {
   mesh.position.set(pose.x, groundHeight(pose.x, pose.z), pose.z);
   mesh.rotation.y = pose.yaw;
   scene.add(mesh);
-  setDriverDoorOpen(0);
+  setKerbDoorOpen(0);
   setRearDoorsOpen(0);
 
   addProp({
@@ -251,19 +255,31 @@ function resolvePose(): CleanerVanPose | null {
 
   const seat = localToWorld(x, z, yaw, SEAT_LOCAL.x, SEAT_LOCAL.z);
   const exit = localToWorld(x, z, yaw, EXIT_LOCAL.x, EXIT_LOCAL.z);
+  const door = localToWorld(x, z, yaw, DOORWAY_LOCAL.x, DOORWAY_LOCAL.z);
 
-  const arrive = pathArriveNear(tip, exit.x, exit.z);
-  const pathYaw = Math.atan2(
-    arrive.faceX - arrive.x,
-    arrive.faceZ - arrive.z,
-  );
-
-  // Walk around the nose on a gentle arc (lake side), then follow the path
-  // through the gate onto walkable park paving.
-  const around = localToWorld(x, z, yaw, VAN_LEN * 0.2, EXIT_LOCAL.z - 0.55);
-  const nose = localToWorld(x, z, yaw, VAN_LEN * 0.62, -VAN_WIDE * 0.55);
-  const clear = localToWorld(x, z, yaw, VAN_LEN * 0.72, -VAN_WIDE * 1.15);
-  const exitYaw = Math.atan2(around.x - exit.x, around.z - exit.z);
+  // Nearest spot the player can stand on inside the park, reached on foot
+  // through a gate rather than over the railings.
+  const route = findWalkRoute(exit, { x, z, yaw }, playableSpot);
+  let walkVia: { x: number; z: number }[];
+  let pathX: number;
+  let pathZ: number;
+  let pathYaw: number;
+  if (route && route.length >= 2) {
+    walkVia = route.slice(1);
+    const end = route[route.length - 1]!;
+    const prev = route[route.length - 2]!;
+    pathX = end.x;
+    pathZ = end.z;
+    pathYaw = Math.atan2(end.x - prev.x, end.z - prev.z);
+  } else {
+    const arrive = pathArriveNear(tip, exit.x, exit.z);
+    walkVia = [...arrive.via, { x: arrive.x, z: arrive.z }];
+    pathX = arrive.x;
+    pathZ = arrive.z;
+    pathYaw = Math.atan2(arrive.faceX - arrive.x, arrive.faceZ - arrive.z);
+  }
+  const first = walkVia[0] ?? { x: pathX, z: pathZ };
+  const exitYaw = Math.atan2(first.x - exit.x, first.z - exit.z);
 
   return {
     x,
@@ -273,20 +289,237 @@ function resolvePose(): CleanerVanPose | null {
     seatY: groundHeight(x, z) + SEAT_LOCAL.y,
     seatZ: seat.z,
     seatYaw: yaw,
+    doorX: door.x,
+    doorZ: door.z,
     exitX: exit.x,
     exitZ: exit.z,
     exitYaw,
-    pathX: arrive.x,
-    pathZ: arrive.z,
+    pathX,
+    pathZ,
     pathYaw,
-    walkVia: [
-      { x: around.x, z: around.z },
-      { x: nose.x, z: nose.z },
-      { x: clear.x, z: clear.z },
-      ...arrive.via,
-      { x: arrive.x, z: arrive.z },
-    ],
+    walkVia,
   };
+}
+
+const ROUTE_CELL = 0.5;
+const ROUTE_REACH = 70;
+/** Keep the route this far off the railings so the spline never grazes them. */
+const RAIL_CLEAR = 0.6;
+/** Handoff spot sits this far inside the fence, not pinned in the gateway. */
+const ARRIVE_CLEAR = 1.8;
+
+function railsWithin(x: number, z: number, r: number): boolean {
+  if (atRailings(x, z)) return true;
+  for (let a = 0; a < 8; a++) {
+    const t = (a / 8) * Math.PI * 2;
+    if (atRailings(x + Math.cos(t) * r, z + Math.sin(t) * r)) return true;
+  }
+  return false;
+}
+
+/** Where the player may stand once first-person takes over (see Player.canStand). */
+function playableSpot(x: number, z: number): boolean {
+  if (!insidePark(x, z) || isInLake(x, z) || isBlocked(x, z, 0.6)) {
+    return false;
+  }
+  if (railsWithin(x, z, ARRIVE_CLEAR)) return false;
+  // Gateways have no railings, so also demand clear park all round.
+  for (let a = 0; a < 8; a++) {
+    const t = (a / 8) * Math.PI * 2;
+    const px = x + Math.cos(t) * ARRIVE_CLEAR;
+    const pz = z + Math.sin(t) * ARRIVE_CLEAR;
+    if (!insidePark(px, pz)) return false;
+  }
+  return true;
+}
+
+/**
+ * Shortest on-foot route from `from` to the first spot passing `goal`,
+ * steering round the parked van, buildings, props, the lake, and the fence
+ * (gateways only). Returned points are ~1 m apart for a tight spline.
+ */
+function findWalkRoute(
+  from: { x: number; z: number },
+  van: { x: number; z: number; yaw: number },
+  goal: (x: number, z: number) => boolean,
+): { x: number; z: number }[] | null {
+  const cos = Math.cos(van.yaw);
+  const sin = Math.sin(van.yaw);
+  const inVan = (x: number, z: number) => {
+    const dx = x - van.x;
+    const dz = z - van.z;
+    const lx = dx * cos - dz * sin;
+    const lz = dx * sin + dz * cos;
+    return (
+      Math.abs(lx) < VAN_LEN * 0.5 + 0.45 &&
+      Math.abs(lz) < VAN_WIDE * 0.5 + 0.45
+    );
+  };
+  const open = (x: number, z: number) =>
+    !inVan(x, z) &&
+    !isInLake(x, z) &&
+    !isBlocked(x, z, 0.45) &&
+    !railsWithin(x, z, RAIL_CLEAR);
+
+  const span = Math.ceil(ROUTE_REACH / ROUTE_CELL);
+  const side = span * 2 + 1;
+  const key = (ix: number, iz: number) => (iz + span) * side + (ix + span);
+  const worldX = (ix: number) => from.x + ix * ROUTE_CELL;
+  const worldZ = (iz: number) => from.z + iz * ROUTE_CELL;
+
+  const passCache = new Map<number, boolean>();
+  const passable = (ix: number, iz: number) => {
+    if (Math.abs(ix) > span || Math.abs(iz) > span) return false;
+    if (ix === 0 && iz === 0) return true;
+    const k = key(ix, iz);
+    let v = passCache.get(k);
+    if (v === undefined) {
+      v = open(worldX(ix), worldZ(iz));
+      passCache.set(k, v);
+    }
+    return v;
+  };
+
+  const cost = new Map<number, number>();
+  const cameFrom = new Map<number, number>();
+  const heap = new MinHeap();
+  cost.set(key(0, 0), 0);
+  heap.push(key(0, 0), 0);
+  let reached = -1;
+  const steps: [number, number, number][] = [
+    [1, 0, 1],
+    [-1, 0, 1],
+    [0, 1, 1],
+    [0, -1, 1],
+    [1, 1, Math.SQRT2],
+    [1, -1, Math.SQRT2],
+    [-1, 1, Math.SQRT2],
+    [-1, -1, Math.SQRT2],
+  ];
+
+  while (heap.size > 0) {
+    const [k, d] = heap.pop()!;
+    if (d > (cost.get(k) ?? Infinity)) continue;
+    const ix = (k % side) - span;
+    const iz = Math.floor(k / side) - span;
+    if (goal(worldX(ix), worldZ(iz))) {
+      reached = k;
+      break;
+    }
+    for (const [sx, sz, w] of steps) {
+      const nx = ix + sx;
+      const nz = iz + sz;
+      if (!passable(nx, nz)) continue;
+      // No squeezing diagonally past a post.
+      if (sx !== 0 && sz !== 0 && (!passable(ix + sx, iz) || !passable(ix, iz + sz))) {
+        continue;
+      }
+      const nk = key(nx, nz);
+      const nd = d + w * ROUTE_CELL;
+      if (nd < (cost.get(nk) ?? Infinity)) {
+        cost.set(nk, nd);
+        cameFrom.set(nk, k);
+        heap.push(nk, nd);
+      }
+    }
+  }
+  if (reached < 0) return null;
+
+  const cells: { x: number; z: number }[] = [];
+  for (let k: number | undefined = reached; k !== undefined; k = cameFrom.get(k)) {
+    const ix = (k % side) - span;
+    const iz = Math.floor(k / side) - span;
+    cells.push({ x: worldX(ix), z: worldZ(iz) });
+  }
+  cells.reverse();
+  cells[0] = { x: from.x, z: from.z };
+
+  // String-pull: keep only the corners needed to stay clear.
+  const clearLine = (a: { x: number; z: number }, b: { x: number; z: number }) => {
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    const n = Math.max(1, Math.ceil(len / 0.2));
+    for (let i = 1; i < n; i++) {
+      const t = i / n;
+      if (!open(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t)) return false;
+    }
+    return true;
+  };
+  const corners = [cells[0]!];
+  let at = 0;
+  while (at < cells.length - 1) {
+    let next = at + 1;
+    for (let j = cells.length - 1; j > at + 1; j--) {
+      if (clearLine(cells[at]!, cells[j]!)) {
+        next = j;
+        break;
+      }
+    }
+    corners.push(cells[next]!);
+    at = next;
+  }
+
+  // Resample so the Catmull-Rom can't bow out across the railings.
+  const out = [corners[0]!];
+  for (let i = 1; i < corners.length; i++) {
+    const a = corners[i - 1]!;
+    const b = corners[i]!;
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    const n = Math.max(1, Math.round(len / 1.0));
+    for (let s = 1; s <= n; s++) {
+      const t = s / n;
+      out.push({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
+    }
+  }
+  return out;
+}
+
+class MinHeap {
+  private keys: number[] = [];
+  private pri: number[] = [];
+
+  public get size(): number {
+    return this.keys.length;
+  }
+
+  public push(k: number, p: number): void {
+    this.keys.push(k);
+    this.pri.push(p);
+    let i = this.keys.length - 1;
+    while (i > 0) {
+      const up = (i - 1) >> 1;
+      if (this.pri[up]! <= this.pri[i]!) break;
+      this.swap(i, up);
+      i = up;
+    }
+  }
+
+  public pop(): [number, number] | undefined {
+    if (this.keys.length === 0) return undefined;
+    const top: [number, number] = [this.keys[0]!, this.pri[0]!];
+    const lastK = this.keys.pop()!;
+    const lastP = this.pri.pop()!;
+    if (this.keys.length > 0) {
+      this.keys[0] = lastK;
+      this.pri[0] = lastP;
+      let i = 0;
+      for (;;) {
+        const l = i * 2 + 1;
+        const r = l + 1;
+        let m = i;
+        if (l < this.keys.length && this.pri[l]! < this.pri[m]!) m = l;
+        if (r < this.keys.length && this.pri[r]! < this.pri[m]!) m = r;
+        if (m === i) break;
+        this.swap(i, m);
+        i = m;
+      }
+    }
+    return top;
+  }
+
+  private swap(a: number, b: number): void {
+    [this.keys[a], this.keys[b]] = [this.keys[b]!, this.keys[a]!];
+    [this.pri[a], this.pri[b]] = [this.pri[b]!, this.pri[a]!];
+  }
 }
 
 /**
@@ -597,74 +830,53 @@ function buildMesh(): THREE.Group {
   roof.castShadow = true;
   van.add(roof);
 
-  // Passenger (+Z) wall — full run.
-  const passWall = new THREE.Mesh(
-    new THREE.BoxGeometry(VAN_LEN * 0.88, roofY - floorY, wall),
-    BODY,
-  );
-  passWall.position.set(-0.08, (floorY + roofY) / 2, halfW);
-  passWall.castShadow = true;
-  van.add(passWall);
-
-  // Driver (−Z) wall: load bay up to the door's rear edge, then sill /
-  // header / A-pillar so the open hole matches the door panel.
+  // Both side walls: load bay up to the cab door's rear edge, then sill /
+  // header / pillars so the door hole matches the panel.
   const loadFront = doorRearX + frame;
   const loadLen = loadFront - (tail + wall);
-  const driveLoad = new THREE.Mesh(
-    new THREE.BoxGeometry(loadLen, roofY - floorY, wall),
-    BODY,
-  );
-  driveLoad.position.set(
-    (loadFront + tail + wall) / 2,
-    (floorY + roofY) / 2,
-    -halfW,
-  );
-  driveLoad.castShadow = true;
-  van.add(driveLoad);
-
-  // B-pillar strip at the rear of the door (overlaps the panel slightly).
-  const bPillar = new THREE.Mesh(
-    new THREE.BoxGeometry(0.1, roofY - floorY, wall),
-    BODY,
-  );
-  bPillar.position.set(doorRearX + frame * 0.5, (floorY + roofY) / 2, -halfW);
-  bPillar.castShadow = true;
-  van.add(bPillar);
-
-  // A-pillar / hinge strip ahead of the door.
-  const aPillar = new THREE.Mesh(
-    new THREE.BoxGeometry(0.12, roofY - floorY, wall),
-    BODY,
-  );
-  aPillar.position.set(doorHingeX + 0.04, (floorY + roofY) / 2, -halfW);
-  aPillar.castShadow = true;
-  van.add(aPillar);
-
-  // Sill under the door.
   const sillH = Math.max(0.08, doorBot - floorY + frame);
-  const sill = new THREE.Mesh(
-    new THREE.BoxGeometry(DOOR_W - frame * 2, sillH, wall),
-    BODY,
-  );
-  sill.position.set(
-    doorHingeX - DOOR_W * 0.5,
-    floorY + sillH * 0.5,
-    -halfW,
-  );
-  van.add(sill);
-
-  // Header above the door.
   const headH = Math.max(0.06, roofY - doorTop + frame);
-  const header = new THREE.Mesh(
-    new THREE.BoxGeometry(DOOR_W - frame * 2, headH, wall),
-    BODY,
-  );
-  header.position.set(
-    doorHingeX - DOOR_W * 0.5,
-    roofY - headH * 0.5,
-    -halfW,
-  );
-  van.add(header);
+  for (const sz of [-halfW, halfW]) {
+    const load = new THREE.Mesh(
+      new THREE.BoxGeometry(loadLen, roofY - floorY, wall),
+      BODY,
+    );
+    load.position.set((loadFront + tail + wall) / 2, (floorY + roofY) / 2, sz);
+    load.castShadow = true;
+    van.add(load);
+
+    // B-pillar strip at the rear of the door (overlaps the panel slightly).
+    const bPillar = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, roofY - floorY, wall),
+      BODY,
+    );
+    bPillar.position.set(doorRearX + frame * 0.5, (floorY + roofY) / 2, sz);
+    bPillar.castShadow = true;
+    van.add(bPillar);
+
+    // A-pillar / hinge strip ahead of the door.
+    const aPillar = new THREE.Mesh(
+      new THREE.BoxGeometry(0.12, roofY - floorY, wall),
+      BODY,
+    );
+    aPillar.position.set(doorHingeX + 0.04, (floorY + roofY) / 2, sz);
+    aPillar.castShadow = true;
+    van.add(aPillar);
+
+    const sill = new THREE.Mesh(
+      new THREE.BoxGeometry(DOOR_W - frame * 2, sillH, wall),
+      BODY,
+    );
+    sill.position.set(doorHingeX - DOOR_W * 0.5, floorY + sillH * 0.5, sz);
+    van.add(sill);
+
+    const header = new THREE.Mesh(
+      new THREE.BoxGeometry(DOOR_W - frame * 2, headH, wall),
+      BODY,
+    );
+    header.position.set(doorHingeX - DOOR_W * 0.5, roofY - headH * 0.5, sz);
+    van.add(header);
+  }
 
   // Rear frame — barn doors fill the opening.
   const rearFrame = new THREE.Mesh(
@@ -759,21 +971,17 @@ function buildMesh(): THREE.Group {
   cab.castShadow = true;
   van.add(cab);
 
-  // Council stripe along both sides (passenger full; driver on load bay).
+  // Council stripe along the load bay on both sides.
   const stripeH = 0.2;
   const stripeY = ride + 1.05;
-  const passStripe = new THREE.Mesh(
-    new THREE.BoxGeometry(VAN_LEN * 0.86, stripeH, 0.04),
-    TRIM,
-  );
-  passStripe.position.set(-0.08, stripeY, halfW + 0.02);
-  van.add(passStripe);
-  const driveStripe = new THREE.Mesh(
-    new THREE.BoxGeometry(loadLen * 0.95, stripeH, 0.04),
-    TRIM,
-  );
-  driveStripe.position.set(driveLoad.position.x, stripeY, -halfW - 0.02);
-  van.add(driveStripe);
+  for (const sz of [-halfW - 0.02, halfW + 0.02]) {
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(loadLen * 0.95, stripeH, 0.04),
+      TRIM,
+    );
+    stripe.position.set((loadFront + tail + wall) / 2, stripeY, sz);
+    van.add(stripe);
+  }
 
   // Windscreen.
   const screen = new THREE.Mesh(
@@ -783,48 +991,43 @@ function buildMesh(): THREE.Group {
   screen.position.set(nose - 0.02, ride + 1.75, 0);
   van.add(screen);
 
-  // Passenger-side window.
-  const passPane = new THREE.Mesh(
-    new THREE.BoxGeometry(VAN_LEN * 0.28, 0.4, 0.05),
-    GLASS,
-  );
-  passPane.position.set(VAN_LEN * 0.16, ride + 1.7, halfW + 0.01);
-  van.add(passPane);
-
   // ── Cabin interior (visible through the open door) ──────────────────
-  addCabinInterior(van, floorY, halfW, cabBack, nose);
+  addCabinInterior(van, floorY, halfW, cabBack, nose, doorRearX);
 
-  // Driver's door — hinge at the forward edge on the right (−Z).
-  const door = new THREE.Group();
-  door.position.set(doorHingeX, doorY, -halfW);
-  const doorPanel = new THREE.Mesh(
-    new THREE.BoxGeometry(DOOR_W, DOOR_H, 0.07),
-    BODY,
-  );
-  doorPanel.position.set(-DOOR_W * 0.5, 0, 0);
-  doorPanel.castShadow = true;
-  door.add(doorPanel);
-  // Inner door card — reads when the door swings open.
-  const doorCard = new THREE.Mesh(
-    new THREE.BoxGeometry(DOOR_W - 0.1, DOOR_H - 0.15, 0.04),
-    CABIN,
-  );
-  doorCard.position.set(-DOOR_W * 0.5, -0.02, 0.05);
-  door.add(doorCard);
-  const doorWin = new THREE.Mesh(
-    new THREE.BoxGeometry(0.55, 0.38, 0.05),
-    GLASS,
-  );
-  doorWin.position.set(-DOOR_W * 0.38, 0.28, -0.02);
-  door.add(doorWin);
-  const handle = new THREE.Mesh(
-    new THREE.BoxGeometry(0.12, 0.04, 0.05),
-    BUMPER,
-  );
-  handle.position.set(-DOOR_W * 0.81, 0.05, -0.05);
-  door.add(handle);
-  van.add(door);
-  driverDoor = door;
+  // Cab doors — hinged at the forward edge. Driver (right, −Z) stays shut;
+  // the cleaner hops out the kerb side (left, +Z), toward the park.
+  for (const out of [-1, 1] as const) {
+    const door = new THREE.Group();
+    door.position.set(doorHingeX, doorY, out * halfW);
+    const doorPanel = new THREE.Mesh(
+      new THREE.BoxGeometry(DOOR_W, DOOR_H, 0.07),
+      BODY,
+    );
+    doorPanel.position.set(-DOOR_W * 0.5, 0, 0);
+    doorPanel.castShadow = true;
+    door.add(doorPanel);
+    // Inner door card — reads when the door swings open.
+    const doorCard = new THREE.Mesh(
+      new THREE.BoxGeometry(DOOR_W - 0.1, DOOR_H - 0.15, 0.04),
+      CABIN,
+    );
+    doorCard.position.set(-DOOR_W * 0.5, -0.02, -out * 0.05);
+    door.add(doorCard);
+    const doorWin = new THREE.Mesh(
+      new THREE.BoxGeometry(0.55, 0.38, 0.05),
+      GLASS,
+    );
+    doorWin.position.set(-DOOR_W * 0.38, 0.28, out * 0.02);
+    door.add(doorWin);
+    const handle = new THREE.Mesh(
+      new THREE.BoxGeometry(0.12, 0.04, 0.05),
+      BUMPER,
+    );
+    handle.position.set(-DOOR_W * 0.81, 0.05, out * 0.05);
+    door.add(handle);
+    van.add(door);
+    if (out === 1) kerbDoor = door;
+  }
 
   // Bumpers + lights.
   for (const [lx, front] of [
@@ -878,6 +1081,7 @@ function addCabinInterior(
   halfW: number,
   cabBack: number,
   nose: number,
+  doorRearX: number,
 ): void {
   // Cab floor mat.
   const mat = new THREE.Mesh(
@@ -974,11 +1178,14 @@ function addCabinInterior(
   column.position.set(nose - 0.42, floorY + 0.95, SEAT_LOCAL.z);
   van.add(column);
 
-  // Inner passenger wall lining (reads through the aperture).
-  const innerPass = new THREE.Mesh(
-    new THREE.BoxGeometry(nose - cabBack - 0.2, 1.2, 0.04),
-    LINING,
-  );
-  innerPass.position.set((nose + cabBack) / 2 - 0.05, floorY + 0.7, halfW - 0.06);
-  van.add(innerPass);
+  // Inner passenger wall lining behind the kerb door (reads through the aperture).
+  const liningLen = doorRearX - cabBack;
+  if (liningLen > 0.1) {
+    const innerPass = new THREE.Mesh(
+      new THREE.BoxGeometry(liningLen, 1.2, 0.04),
+      LINING,
+    );
+    innerPass.position.set((doorRearX + cabBack) / 2, floorY + 0.7, halfW - 0.06);
+    van.add(innerPass);
+  }
 }

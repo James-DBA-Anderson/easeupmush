@@ -4,7 +4,7 @@ import { parkAudio } from "../audio/ParkAudio";
 import { groundHeight } from "../world/terrain";
 import {
   getCleanerVanPose,
-  setDriverDoorOpen,
+  setKerbDoorOpen,
   type CleanerVanPose,
 } from "../world/cleanerVan";
 
@@ -20,19 +20,26 @@ type Phase =
 
 const HOLD_FOR = 0.45;
 const DOOR_FOR = 0.55;
-const EXIT_FOR = 0.9;
+const EXIT_FOR = 1.1;
 const CLOSE_FOR = 0.55;
-const WALK_SPEED = 2.85;
+const RUN_SPEED = 5.4;
+/** Metres to get up to pace from the door, and to pull up at the handoff. */
+const RUN_UP = 1.6;
+const PULL_UP = 2.2;
 const SWING_FOR = 1.15;
 const EYE = 1.7;
 /** Camera follow spring — higher = snappier, lower = creamier. */
 const CAM_FOLLOW = 5.5;
 const CAM_LOOK = 6.5;
+/** Tighter lens for the get-out, relaxing back to the game FOV on the run. */
+const SHOT_ZOOM = 0.68;
+const ZOOM_OUT_FOR = 1.4;
 const YAW_FOLLOW = 7.5;
 
 /**
- * Opening beat: third-person get-out, walk onto the path, then the camera
- * settles into the cleaner’s eyes for the shift.
+ * Opening beat: third-person get-out from the kerb-side door, a run through
+ * the nearest gate into the park, then the camera settles into the
+ * cleaner’s eyes for the shift.
  */
 export class ShiftIntro {
   private scene: THREE.Scene;
@@ -62,6 +69,9 @@ export class ShiftIntro {
   private look = new THREE.Vector3();
   private lookTarget = new THREE.Vector3();
   private tmp = new THREE.Vector3();
+  private shotPos = new THREE.Vector3();
+  private baseFov = 75;
+  private setFov = -1;
 
   constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
     this.scene = scene;
@@ -95,18 +105,14 @@ export class ShiftIntro {
     this.walkCurve = null;
     this.footBeat = -1;
 
-    // Seed the follow rig so the first frame isn't a pop from spawn.
-    const vanYaw = this.van.yaw;
-    this.follow.set(
-      this.van.x - Math.cos(vanYaw) * 5.2,
-      this.van.seatY + 1.15,
-      this.van.z + Math.sin(vanYaw) * 5.2,
-    );
-    this.look.set(this.van.seatX, this.van.seatY - 0.1, this.van.seatZ);
-    this.lookTarget.copy(this.look);
+    this.baseFov = this.camera.fov;
+    this.applyZoom(1);
+    // Seed the rig on the get-out shot so the first frame isn't a pop.
+    this.doorShot(this.follow, this.lookTarget, 0);
+    this.look.copy(this.lookTarget);
     this.camera.position.copy(this.follow);
     this.camera.lookAt(this.look);
-    setDriverDoorOpen(0);
+    setKerbDoorOpen(0);
     return true;
   }
 
@@ -124,13 +130,13 @@ export class ShiftIntro {
 
     if (this.phase === "await") {
       this.seatAvatar();
-      this.frameCamera(delta, 4.8, 1.2, 1.35);
+      this.frameDoorShot(delta, 0);
       return;
     }
 
     if (this.phase === "hold") {
       this.seatAvatar();
-      this.frameCamera(delta, 4.8, 1.2, 1.35);
+      this.frameDoorShot(delta, 0);
       if (this.age >= HOLD_FOR) {
         this.phase = "door";
         this.age = 0;
@@ -141,9 +147,9 @@ export class ShiftIntro {
 
     if (this.phase === "door") {
       const t = Math.min(1, this.age / DOOR_FOR);
-      setDriverDoorOpen(easeInOut(t));
+      setKerbDoorOpen(easeInOut(t));
       this.seatAvatar();
-      this.frameCamera(delta, 4.6, 2.2, 1.2);
+      this.frameDoorShot(delta, 0.2 * t);
       if (t >= 1) {
         this.phase = "exit";
         this.age = 0;
@@ -154,9 +160,9 @@ export class ShiftIntro {
     if (this.phase === "exit") {
       const t = Math.min(1, this.age / EXIT_FOR);
       const e = easeInOut(t);
-      setDriverDoorOpen(1);
+      setKerbDoorOpen(1);
       this.poseExit(e);
-      this.frameCamera(delta, 4.4, 2.3, 1.15);
+      this.frameDoorShot(delta, 0.2 + 0.5 * e);
       if (t >= 1) {
         this.phase = "close";
         this.age = 0;
@@ -179,15 +185,15 @@ export class ShiftIntro {
     if (this.phase === "close") {
       const t = Math.min(1, this.age / CLOSE_FOR);
       const e = easeInOut(t);
-      setDriverDoorOpen(1 - e);
+      setKerbDoorOpen(1 - e);
       const [leftArm, rightArm] = this.arms;
       rightArm!.rotation.x = -0.9 * Math.sin(e * Math.PI);
       rightArm!.rotation.z = -0.25 * Math.sin(e * Math.PI);
       leftArm!.rotation.x = 0;
       for (const leg of this.legs) leg.rotation.x = 0;
-      this.frameCamera(delta, 4.5, 2.35, 1.25);
+      this.frameDoorShot(delta, 0.7);
       if (t >= 1) {
-        setDriverDoorOpen(0);
+        setKerbDoorOpen(0);
         parkAudio.vanDoor(false);
         this.beginWalk();
       }
@@ -223,15 +229,16 @@ export class ShiftIntro {
   }
 
   private finish(): void {
+    this.applyZoom(0);
     if (this.avatar) {
       this.scene.remove(this.avatar);
       this.avatar = null;
     }
-    setDriverDoorOpen(0);
+    setKerbDoorOpen(0);
     this.phase = "done";
   }
 
-  /** Build a smooth path around the van and onto the paving. */
+  /** Build a smooth run from the door, through the gate, into the park. */
   private beginWalk(): void {
     if (!this.avatar || !this.van) return;
     this.phase = "walk";
@@ -298,11 +305,16 @@ export class ShiftIntro {
 
   private tickWalk(delta: number): void {
     if (!this.avatar || !this.van || !this.walkCurve) return;
+    this.applyZoom(1 - easeInOut(Math.min(1, this.age / ZOOM_OUT_FOR)));
 
-    // Ease in from the door, ease out onto the path.
-    const u = Math.min(1, this.walkAlong / this.walkLen);
-    const pace = 0.45 + 0.55 * Math.sin(Math.PI * Math.min(1, u * 1.05));
-    const speed = WALK_SPEED * pace;
+    // Break into a run from the door, pull up on arrival.
+    const ramp = Math.min(
+      1,
+      this.walkAlong / RUN_UP,
+      (this.walkLen - this.walkAlong) / PULL_UP,
+    );
+    const pace = 0.3 + 0.7 * easeInOut(Math.max(0, ramp));
+    const speed = RUN_SPEED * pace;
     this.walkAlong = Math.min(this.walkLen, this.walkAlong + speed * delta);
     const t = Math.min(1, this.walkAlong / this.walkLen);
 
@@ -319,10 +331,10 @@ export class ShiftIntro {
       wantYaw = lerpAngle(wantYaw, this.van.pathYaw, (t - 0.88) / 0.12);
     }
     this.walkYaw = lerpAngle(this.walkYaw, wantYaw, 1 - Math.exp(-YAW_FOLLOW * delta));
-    this.avatar.rotation.set(0, this.walkYaw, 0);
+    this.avatar.rotation.set(0.14 * pace, this.walkYaw, 0);
 
-    this.step += delta * speed * 4.0;
-    this.stride(this.step);
+    this.step += delta * speed * 2.0;
+    this.stride(this.step, pace);
     const beat = Math.floor(this.step / Math.PI);
     if (beat !== this.footBeat) {
       this.footBeat = beat;
@@ -337,7 +349,7 @@ export class ShiftIntro {
         this.van.pathZ,
       );
       this.walkYaw = this.van.pathYaw;
-      this.avatar.rotation.y = this.walkYaw;
+      this.avatar.rotation.set(0, this.walkYaw, 0);
       for (const leg of this.legs) leg.rotation.x = 0;
       for (const arm of this.arms) arm.rotation.x = 0;
       this.beginSwing();
@@ -389,6 +401,54 @@ export class ShiftIntro {
       this.camera.quaternion.copy(this.swingToQuat);
       this.finish();
     }
+  }
+
+  /**
+   * Get-out shot: kerb side, just behind the cab door (it hinges at the front
+   * and swings forward, so the opening stays in view), looking into the cab.
+   * `track` 0 frames the door, 1 frames the cleaner's head.
+   */
+  private doorShot(pos: THREE.Vector3, look: THREE.Vector3, track: number): void {
+    const van = this.van!;
+    const cos = Math.cos(van.yaw);
+    const sin = Math.sin(van.yaw);
+    const ground = groundHeight(van.x, van.z);
+    const at = (lx: number, lz: number, y: number, out: THREE.Vector3) =>
+      out.set(van.x + lx * cos + lz * sin, y, van.z - lx * sin + lz * cos);
+    at(-0.2, 3.7, ground + 1.8, pos);
+    at(1.3, 0.9, ground + 1.3, look);
+    if (this.avatar && track > 0) {
+      this.tmp.set(
+        this.avatar.position.x,
+        this.avatar.position.y + 1.25,
+        this.avatar.position.z,
+      );
+      look.lerp(this.tmp, track);
+    }
+  }
+
+  /** 1 = full get-out zoom, 0 = the game's own FOV. */
+  private applyZoom(amount: number): void {
+    // The game resets FOV on resize; pick that up as the new base.
+    if (this.setFov >= 0 && this.camera.fov !== this.setFov) {
+      this.baseFov = this.camera.fov;
+    }
+    const k = Math.max(0, Math.min(1, amount));
+    const fov = this.baseFov * (1 - (1 - SHOT_ZOOM) * k);
+    if (fov !== this.camera.fov) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
+    this.setFov = fov;
+  }
+
+  private frameDoorShot(delta: number, track: number): void {
+    this.applyZoom(1);
+    this.doorShot(this.shotPos, this.lookTarget, track);
+    this.follow.lerp(this.shotPos, 1 - Math.exp(-CAM_FOLLOW * delta));
+    this.camera.position.copy(this.follow);
+    this.look.lerp(this.lookTarget, 1 - Math.exp(-CAM_LOOK * delta));
+    this.camera.lookAt(this.look);
   }
 
   /**
@@ -449,14 +509,27 @@ export class ShiftIntro {
     const y1 = groundHeight(van.exitX, van.exitZ);
     // Ease the step out so it doesn't look like a linear slide.
     const e = easeInOut(t);
-    this.avatar.position.set(
-      THREE.MathUtils.lerp(van.seatX, van.exitX, e),
-      THREE.MathUtils.lerp(y0, y1, e * e),
-      THREE.MathUtils.lerp(van.seatZ, van.exitZ, e),
-    );
+    // Shuffle across the cab to the doorway, then step down onto the kerb.
+    const SPLIT = 0.55;
     const sitFace = Math.atan2(Math.cos(van.yaw), -Math.sin(van.yaw));
-    const standFace = van.exitYaw;
-    this.walkYaw = lerpAngle(sitFace, standFace, e);
+    const outFace = Math.atan2(van.exitX - van.doorX, van.exitZ - van.doorZ);
+    if (e < SPLIT) {
+      const k = e / SPLIT;
+      this.avatar.position.set(
+        THREE.MathUtils.lerp(van.seatX, van.doorX, k),
+        y0,
+        THREE.MathUtils.lerp(van.seatZ, van.doorZ, k),
+      );
+      this.walkYaw = lerpAngle(sitFace, outFace, k);
+    } else {
+      const k = (e - SPLIT) / (1 - SPLIT);
+      this.avatar.position.set(
+        THREE.MathUtils.lerp(van.doorX, van.exitX, k),
+        THREE.MathUtils.lerp(y0, y1, k * k),
+        THREE.MathUtils.lerp(van.doorZ, van.exitZ, k),
+      );
+      this.walkYaw = lerpAngle(outFace, van.exitYaw, k);
+    }
     this.avatar.rotation.y = this.walkYaw;
     this.avatar.rotation.x = THREE.MathUtils.lerp(0.12, 0, e);
     this.legs[0]!.rotation.x = THREE.MathUtils.lerp(-1.15, 0, e);
@@ -469,15 +542,16 @@ export class ShiftIntro {
     }
   }
 
-  private stride(phase: number): void {
-    const swing = Math.sin(phase) * 0.55;
+  /** Jog cycle; `effort` 0 = brisk walk, 1 = full run. */
+  private stride(phase: number, effort = 1): void {
+    const swing = Math.sin(phase) * (0.5 + 0.45 * effort);
     this.legs[0]!.rotation.x = swing;
     this.legs[1]!.rotation.x = -swing;
-    this.arms[0]!.rotation.x = -swing * 0.75;
-    this.arms[1]!.rotation.x = swing * 0.75;
+    this.arms[0]!.rotation.x = -swing * 0.9;
+    this.arms[1]!.rotation.x = swing * 0.9;
     this.avatar!.position.y =
       groundHeight(this.avatar!.position.x, this.avatar!.position.z) +
-      Math.abs(Math.sin(phase)) * 0.04;
+      Math.abs(Math.sin(phase)) * (0.04 + 0.07 * effort);
   }
 
   private buildAvatar(): THREE.Group {
