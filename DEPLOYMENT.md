@@ -121,6 +121,10 @@ Verify your `CLOUDFLARE_ACCOUNT_ID` is correct.
 
 Check the GitHub Actions logs for specific error messages from the `cf deploy` command.
 
+### `Unknown argument: json`
+
+`cf deploy` does not accept `--json`. Generated API commands such as `cf workers get` print JSON on stdout by default; the deploy workflow uses that after a successful deploy to record the Worker URL.
+
 ## Migration from Wrangler
 
 This project was migrated from the legacy Wrangler configuration:
