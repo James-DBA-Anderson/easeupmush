@@ -57,7 +57,8 @@ Domain DNS stays on Cloudflare. Automated deployment via GitHub Actions using th
 Deployment is triggered automatically on every push to `main`. The GitHub Actions workflow:
 1. Installs dependencies
 2. Builds the site (`npm run build`)
-3. Deploys to Cloudflare Pages using `cf deploy`
+3. Writes Cloudflare build output from `dist/`
+4. Deploys with `cf deploy --prebuilt`
 
 Configuration is in `cloudflare.config.ts` which specifies:
 - Project name: `easeupmush`
