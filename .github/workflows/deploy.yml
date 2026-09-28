@@ -19,25 +19,32 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          
+
       - name: Install dependencies
         run: npm ci
-        
+
       - name: Build site
         run: npm run build
-        
-      - name: Deploy to Cloudflare Pages
-        run: npx cf deploy --json > deploy-output.json
+
+      # `cf deploy` does not accept --json. Generated API commands print JSON
+      # on stdout by default, so capture the Worker record after deploy.
+      - name: Deploy to Cloudflare
+        run: npx cf deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          
+
       - name: Output deployment URL
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          NO_COLOR: "1"
         run: |
           echo "Deployment complete!"
-          cat deploy-output.json | jq -r '.url // "Deployment successful"'
+          npx cf workers get easeupmush > deploy-output.json
+          jq -r '.subdomain.url // .url // "Deployment successful"' deploy-output.json
