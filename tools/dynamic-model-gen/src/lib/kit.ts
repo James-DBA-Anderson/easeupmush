@@ -29,6 +29,7 @@ function part(
     rotation: extras?.rotation ?? [0, 0, 0],
     scale,
     color,
+    parent: extras?.parent,
     roughness: extras?.roughness ?? 0.72,
     metalness: extras?.metalness ?? 0.04,
   }
@@ -118,6 +119,110 @@ function dressFromDescription(parts: ModelPart[], description: string, accent: s
   return extra.length ? [...parts, ...extra] : parts
 }
 
+export function looksLikeCat(text: string): boolean {
+  return /\b(cats?|kitten|tabby|tomcat|mogg(?:y|ies)?|calico|siamese|moggy)\b/i.test(text)
+}
+
+function assembleCat(opts: PromptOptions): ModelSpec {
+  const palette = PALETTES[opts.palette].colors
+  const named = parseColours(opts.description)
+  const fur = named[0] ?? (opts.palette === 'candy' ? '#d4893a' : palette[0] ?? '#d4893a')
+  const cream = named[1] ?? '#f3d7b0'
+  const pink = '#e39a96'
+  const iris = opts.palette === 'ocean' ? '#3d8f9a' : '#4a9a4e'
+  const sit = opts.pose === 'sitting'
+  const chibi = opts.style === 'chibi' ? 1 : 0
+  const headSize = (sit ? 0.38 : 0.34) + chibi * 0.08
+  const bodyY = sit ? 0.42 : 0.5
+  const pawH = 0.1
+  const pawR = pawH * 0.5
+  const frontLen = sit ? 0.3 : 0.4
+  const hindLen = sit ? 0.24 : 0.4
+  const frontTilt = sit ? 0.08 : 0.04
+  const hindTilt = sit ? 0.32 : 0.05
+  const hipLocalY = (len: number, tilt: number) => pawR + len * Math.cos(tilt) - bodyY
+  const parts: ModelPart[] = [
+    part('body', 'Body', 'sphere', [0, bodyY, 0], sit ? [0.44, 0.36, 0.44] : [0.34, 0.3, 0.56], fur),
+    part('chest', 'Chest', 'sphere', [0, sit ? 0.08 : 0.04, sit ? 0.12 : 0.18], [0.32, 0.26, 0.28], fur, {
+      parent: 'body',
+    }),
+    part('belly', 'Belly', 'sphere', [0, -0.04, sit ? 0.04 : 0.02], [0.28, 0.2, 0.3], cream, { parent: 'body' }),
+    part('neck', 'Neck', 'sphere', [0, sit ? 0.18 : 0.14, sit ? 0.1 : 0.22], [0.22, 0.18, 0.2], fur, {
+      parent: 'body',
+    }),
+    part(
+      'head',
+      'Head',
+      'sphere',
+      [0, sit ? 0.28 : 0.2, sit ? 0.12 : 0.3],
+      [headSize, headSize * 0.96, headSize * 0.92],
+      fur,
+      { parent: 'body' },
+    ),
+    part('cheek-l', 'Cheek', 'sphere', [-0.1, -0.04, 0.08], [0.13, 0.11, 0.12], fur, { parent: 'head' }),
+    part('cheek-r', 'Cheek', 'sphere', [0.1, -0.04, 0.08], [0.13, 0.11, 0.12], fur, { parent: 'head' }),
+    part('muzzle', 'Muzzle', 'sphere', [0, -0.05, 0.14], [0.15, 0.12, 0.16], cream, { parent: 'head' }),
+    part('nose', 'Nose', 'sphere', [0, 0.03, 0.08], [0.05, 0.04, 0.05], pink, { parent: 'muzzle' }),
+    part('chin', 'Chin', 'sphere', [0, -0.05, 0.04], [0.1, 0.06, 0.09], cream, { parent: 'muzzle' }),
+    part('ear-l', 'Ear', 'cone', [-0.1, headSize * 0.38, -0.02], [0.13, 0.24, 0.09], fur, {
+      parent: 'head',
+      rotation: [0.08, 0, 0.22],
+    }),
+    part('ear-r', 'Ear', 'cone', [0.1, headSize * 0.38, -0.02], [0.13, 0.24, 0.09], fur, {
+      parent: 'head',
+      rotation: [0.08, 0, -0.22],
+    }),
+    part('ear-in-l', 'Inner ear', 'cone', [0, -0.01, 0.02], [0.06, 0.12, 0.03], pink, { parent: 'ear-l' }),
+    part('ear-in-r', 'Inner ear', 'cone', [0, -0.01, 0.02], [0.06, 0.12, 0.03], pink, { parent: 'ear-r' }),
+    part('eye-l', 'Eye', 'sphere', [-0.08, 0.03, 0.13], [0.07, 0.08, 0.05], '#f4f0e6', { parent: 'head' }),
+    part('eye-r', 'Eye', 'sphere', [0.08, 0.03, 0.13], [0.07, 0.08, 0.05], '#f4f0e6', { parent: 'head' }),
+    part('iris-l', 'Iris', 'sphere', [0, 0, 0.022], [0.04, 0.05, 0.022], iris, { parent: 'eye-l' }),
+    part('iris-r', 'Iris', 'sphere', [0, 0, 0.022], [0.04, 0.05, 0.022], iris, { parent: 'eye-r' }),
+    part('pupil-l', 'Pupil', 'sphere', [0, 0, 0.014], [0.016, 0.032, 0.01], '#1a1814', { parent: 'iris-l' }),
+    part('pupil-r', 'Pupil', 'sphere', [0, 0, 0.014], [0.016, 0.032, 0.01], '#1a1814', { parent: 'iris-r' }),
+    part(
+      'tail',
+      'Tail',
+      'capsule',
+      [0, 0.05, sit ? -0.14 : -0.24],
+      [0.1, sit ? 0.34 : 0.4, 0.1],
+      fur,
+      { parent: 'body', rotation: sit ? [0.95, 0.18, 0.28] : [0.9, 0.1, 0.16] },
+    ),
+    part('tail-tip', 'Tail tip', 'sphere', [0, sit ? 0.17 : 0.2, 0], [0.1, 0.1, 0.1], cream, { parent: 'tail' }),
+  ]
+
+  const hindRot: [number, number, number] = [hindTilt, 0, 0]
+  for (const [id, x, z, rot, len] of [
+    ['leg-fl', -0.14, sit ? 0.12 : 0.18, [frontTilt, 0, 0.05] as [number, number, number], frontLen],
+    ['leg-fr', 0.14, sit ? 0.12 : 0.18, [frontTilt, 0, -0.05] as [number, number, number], frontLen],
+    ['leg-bl', -0.14, sit ? -0.1 : -0.16, hindRot, hindLen],
+    ['leg-br', 0.14, sit ? -0.1 : -0.16, hindRot, hindLen],
+  ] as const) {
+    const tilt = rot[0]
+    const hipId = `${id}-hip`
+    parts.push(
+      part(hipId, 'Hip', 'sphere', [x, hipLocalY(len, tilt), z], [0.16, 0.16, 0.16], fur, {
+        parent: 'body',
+        rotation: rot,
+      }),
+      part(id, 'Leg', 'capsule', [0, -len * 0.5, 0], [0.13, len, 0.13], fur, { parent: hipId }),
+      part(`${id}-paw`, 'Paw', 'sphere', [0, -len * 0.5, 0.02], [0.15, pawH, 0.17], cream, { parent: id }),
+    )
+  }
+
+  return finish(
+    {
+      name: opts.description || 'Cat',
+      kind: 'creature',
+      style: opts.style,
+      density: opts.density,
+      parts,
+    },
+    opts,
+  )
+}
+
 function finish(spec: ModelSpec, opts: PromptOptions): ModelSpec {
   const roughness =
     opts.style === 'toy' ? 0.28 : opts.style === 'clay' ? 0.88 : 0.65
@@ -146,6 +251,8 @@ export function assembleKit(opts: PromptOptions, seed = 1): ModelSpec {
   const chibi = opts.style === 'chibi' ? 1 : 0
   const sit = opts.pose === 'sitting' ? 1 : 0
   const action = opts.pose === 'action' ? 1 : 0
+
+  if (looksLikeCat(opts.description)) return assembleCat(opts)
 
   if (opts.kind === 'food') {
     return finish(

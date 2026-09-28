@@ -22,7 +22,7 @@ GLBs and JSON kits land in `generated/` (gitignored). Export from the editor, th
 
 ## Prompt builder
 
-Kind, style, pose, palette, and detail compile into a prompt the same way Spritebench compiles sprite options. Generate builds a mesh you can orbit in the viewport.
+Kind, style, pose, palette, and detail compile into a prompt the same way Spritebench compiles sprite options. Generate asks the local model for nested primitive parts (parent groups, eye/limb recipes) like canoe-lake props, then you can orbit the mesh in the viewport.
 
 ## Edit in place
 

@@ -10,6 +10,8 @@ export type ModelPart = {
   id: string
   label: string
   shape: PartShape
+  /** Parent part id. Position/rotation are local to that part, like canoe-lake groups. */
+  parent?: string
   position: [number, number, number]
   rotation: [number, number, number]
   scale: [number, number, number]

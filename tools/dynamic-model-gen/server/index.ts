@@ -3,7 +3,13 @@ import express from 'express'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { assembleKit, paintFromPrompt, reviseKit } from '../src/lib/kit.ts'
+import { assembleKit, looksLikeCat, paintFromPrompt, reviseKit } from '../src/lib/kit.ts'
+import {
+  breakParentCycles,
+  dropBadParents,
+  expandRecipes,
+  worldOffset,
+} from '../src/lib/recipes.ts'
 import {
   ALTER_MODES,
   MODEL_NEGATIVE,
@@ -258,7 +264,7 @@ app.post('/api/generate', async (req, res) => {
       return
     }
 
-    if (backend === 'shap-e') {
+    if (backend === 'shap-e' && !looksLikeCat(description)) {
       send({ type: 'progress', message: 'Sculpting with Shap-E…' })
       const upstream = await fetch(`${SHAPE_E_URL}/generate`, {
         method: 'POST',
@@ -294,15 +300,16 @@ app.post('/api/generate', async (req, res) => {
 
     send({
       type: 'progress',
-      message:
-        backend === 'ollama'
+      message: looksLikeCat(description)
+        ? 'Building a kit cat from primitives…'
+        : backend === 'ollama'
           ? 'Asking Ollama for a layout (CPU, first call can take a few minutes)…'
           : 'Building mesh from options…',
     })
 
     let spec = assembleKit(opts, seed)
     let used: Backend = 'kit'
-    if (backend === 'ollama' && ollama.model) {
+    if (backend === 'ollama' && ollama.model && !looksLikeCat(description)) {
       try {
         spec = await ollamaSpec(ollama.model, opts, spec, null)
         used = 'ollama'
@@ -386,9 +393,9 @@ function layoutBrief(opts: PromptOptions): string {
     return 'Build a single object (lamp, crate, tool): a base on the ground and 2–5 pieces stacked or attached. No creature limbs.'
   }
   if (opts.kind === 'creature') {
-    return 'Build an animal or monster: body in the middle, head attached above/in front of the body, legs reaching down to y=0, tail optional. Parts must connect.'
+    return 'Build an animal or monster: body as the root, head parented to the body, legs parented to the body reaching toward y=0, tail optional. Use recipes for eyes and mirrored wings/legs.'
   }
-  return 'Build a character: hips/body at centre, head sitting ON TOP of the body (higher y), two ears on the head, two arms on the sides, two legs going DOWN to the ground. The head must not sit on the floor.'
+  return 'Build a character like a canoe-lake prop: body is the root. Head is parented to the body (local y positive). Ears and face sit on the head. Arms and legs are a pair recipe on the body. The head must not sit on the floor.'
 }
 
 function layoutExample(kind: Kind): string {
@@ -401,7 +408,7 @@ function layoutExample(kind: Kind): string {
   if (kind === 'prop') {
     return '{"parts":[{"id":"base","label":"Base","shape":"cylinder","position":[0,0.08,0],"rotation":[0,0,0],"scale":[0.5,0.08,0.5],"color":"#5c4033"},{"id":"stem","label":"Stem","shape":"cylinder","position":[0,0.5,0],"rotation":[0,0,0],"scale":[0.08,0.42,0.08],"color":"#c47a4a"},{"id":"shade","label":"Shade","shape":"cone","position":[0,0.95,0],"rotation":[0,0,0],"scale":[0.48,0.24,0.48],"color":"#ffe066"}]}'
   }
-  return '{"parts":[{"id":"body","label":"Body","shape":"capsule","position":[0,0.72,0],"rotation":[0,0,0],"scale":[0.48,0.55,0.42],"color":"#ff7ab6"},{"id":"head","label":"Head","shape":"sphere","position":[0,1.42,0.04],"rotation":[0,0,0],"scale":[0.38,0.38,0.38],"color":"#ff7ab6"},{"id":"ear-l","label":"Ear","shape":"capsule","position":[-0.16,1.85,-0.02],"rotation":[0.15,0,0.35],"scale":[0.1,0.5,0.08],"color":"#ffe066"},{"id":"ear-r","label":"Ear","shape":"capsule","position":[0.16,1.85,-0.02],"rotation":[0.15,0,-0.35],"scale":[0.1,0.5,0.08],"color":"#ffe066"},{"id":"arm-l","label":"Arm","shape":"capsule","position":[-0.42,0.95,0],"rotation":[0.15,0,0.5],"scale":[0.12,0.36,0.12],"color":"#ff7ab6"},{"id":"arm-r","label":"Arm","shape":"capsule","position":[0.42,0.95,0],"rotation":[0.15,0,-0.5],"scale":[0.12,0.36,0.12],"color":"#ff7ab6"},{"id":"leg-l","label":"Leg","shape":"capsule","position":[-0.2,0.32,0],"rotation":[0,0,0],"scale":[0.14,0.36,0.14],"color":"#ff7ab6"},{"id":"leg-r","label":"Leg","shape":"capsule","position":[0.2,0.32,0],"rotation":[0,0,0],"scale":[0.14,0.36,0.14],"color":"#ff7ab6"}]}'
+  return '{"parts":[{"id":"body","label":"Body","shape":"sphere","position":[0,0.7,0],"rotation":[0,0,0],"scale":[0.7,0.55,1.05],"color":"#9a9a94"},{"id":"head","parent":"body","label":"Head","shape":"sphere","position":[0,0.45,0.72],"rotation":[0,0,0],"scale":[0.32,0.32,0.32],"color":"#1f5c3a"},{"id":"bill","parent":"head","label":"Bill","shape":"box","position":[0,0.02,0.28],"rotation":[0,0,0],"scale":[0.2,0.09,0.32],"color":"#d9b23c"}],"recipes":[{"kind":"eyes","parent":"head","spread":0.14,"y":0.08,"z":0.18,"size":0.05},{"kind":"pair","id":"wing","parent":"body","shape":"sphere","position":[0.5,0.12,0],"scale":[0.14,0.28,0.7],"color":"#4a3a28"}]}'
 }
 
 function ollamaInstruction(
@@ -411,21 +418,23 @@ function ollamaInstruction(
 ): string {
   const subject = (alter?.change || opts.description).trim()
   if (alter) {
-    return `You design 3D models from primitive parts. Return JSON only: {"parts":[...]}
+    return `You design 3D models from primitive parts, like a canoe-lake game prop. Return JSON only: {"parts":[...],"recipes":[...]}
 Rebuild the model so it matches this change: ${subject}
 Action: ${alter.mode}. Scope: ${alter.partId ? `focus on part id "${alter.partId}"` : 'whole model'}.
-Keep a readable ${opts.kind}. Y-up, base at y=0, height about 2. 5–12 parts.
-Each part: id,label,shape,position,rotation,scale,color. Shapes: sphere, box, capsule, cylinder, cone, torus.
+Keep a readable ${opts.kind}. Y-up, base at y=0. 4–10 parts. Parent child parts with "parent":"<id>"; child position is local to the parent.
+Recipes: {"kind":"eyes","parent":"head","spread":0.16,"y":0.08,"z":0.18,"size":0.05} or {"kind":"pair","id":"arm","parent":"body","shape":"capsule","position":[0.4,0.2,0],"scale":[0.12,0.36,0.12],"color":"#rrggbb"}.
+Shapes: sphere, box, capsule, cylinder, cone, torus.
 Current: ${JSON.stringify({ name: draft.name, kind: opts.kind, parts: compactParts(draft.parts).slice(0, 12) })}`
   }
-  return `You design 3D models from primitive parts. Return JSON only: {"parts":[...]}
+  return `You design 3D models from primitive parts, like a canoe-lake game prop (nested groups, not a single blob). Return JSON only: {"parts":[...],"recipes":[...]}
 Build a new model of: ${subject}
 Kind: ${opts.kind}. Style: ${opts.style}. Pose: ${opts.pose}.
 ${layoutBrief(opts)}
 Invent the parts this object actually has. Do not copy a generic mascot if the subject is something else.
-Y-up. Ground at y=0. Height about 1.6–2.2. 5–12 connected parts. Hex colours. Use colours named in the subject.
-Each: {"id":"str","label":"str","shape":"sphere"|"box"|"capsule"|"cylinder"|"cone"|"torus","position":[x,y,z],"rotation":[x,y,z],"scale":[x,y,z],"color":"#rrggbb"}
-Example layout (adapt shapes and colours to the subject, do not copy colours blindly):
+Y-up. Ground at y=0. 4–10 parts. Child parts use "parent":"<id>" and local position (bill on head, not world coords).
+Recipes (optional): eyes on a head, pair for mirrored limbs/wheels/wings.
+Hex colours from the subject. Shapes: sphere, box, capsule, cylinder, cone, torus.
+Example (adapt to the subject):
 ${layoutExample(opts.kind)}`
 }
 
@@ -435,39 +444,50 @@ function groundAndCenter(parts: ModelPart[]): ModelPart[] {
   let cx = 0
   let cz = 0
   for (const part of parts) {
-    minY = Math.min(minY, part.position[1] - Math.abs(part.scale[1]) * 0.5)
-    cx += part.position[0]
-    cz += part.position[2]
+    const [wx, wy, wz] = worldOffset(parts, part)
+    minY = Math.min(minY, wy - Math.abs(part.scale[1]) * 0.5)
+    cx += wx
+    cz += wz
   }
   cx /= parts.length
   cz /= parts.length
   const lift = Number.isFinite(minY) ? -minY : 0
-  return parts.map((part) => ({
-    ...part,
-    position: [
-      part.position[0] - cx,
-      part.position[1] + lift,
-      part.position[2] - cz,
-    ] as [number, number, number],
-  }))
+  return parts.map((part) => {
+    if (part.parent) return part
+    return {
+      ...part,
+      position: [
+        part.position[0] - cx,
+        part.position[1] + lift,
+        part.position[2] - cz,
+      ] as [number, number, number],
+    }
+  })
 }
 
-function finalizeCreated(draft: ModelSpec, parts: ModelPart[], description: string): ModelSpec {
+function finalizeCreated(draft: ModelSpec, parts: ModelPart[], recipes: unknown, description: string): ModelSpec {
   const next = groundAndCenter(
     paintFromPrompt(
-      parts.map((part) => ({
-        ...part,
-        position: [
-          num(part.position[0], 0, -2.4, 2.4),
-          num(part.position[1], 0.5, -0.2, 3.6),
-          num(part.position[2], 0, -2.4, 2.4),
-        ],
-        scale: [
-          num(part.scale[0], 0.3, 0.05, 2.6),
-          num(part.scale[1], 0.3, 0.05, 2.6),
-          num(part.scale[2], 0.3, 0.05, 2.6),
-        ],
-      })),
+      breakParentCycles(
+        dropBadParents(
+          expandRecipes(
+            parts.map((part) => ({
+              ...part,
+              position: [
+                num(part.position[0], 0, -2.4, 2.4),
+                num(part.position[1], 0.5, -0.2, 3.6),
+                num(part.position[2], 0, -2.4, 2.4),
+              ],
+              scale: [
+                num(part.scale[0], 0.3, 0.05, 2.6),
+                num(part.scale[1], 0.3, 0.05, 2.6),
+                num(part.scale[2], 0.3, 0.05, 2.6),
+              ],
+            })),
+            recipes,
+          ),
+        ),
+      ),
       description,
     ),
   )
@@ -494,7 +514,7 @@ async function ollamaSpec(
       stream: true,
       format: 'json',
       keep_alive: '30m',
-      options: { temperature: 0.15, num_predict: 900, num_ctx: 2048 },
+      options: { temperature: 0.15, num_predict: 1100, num_ctx: 2048 },
     }),
     signal: controller.signal,
   })
@@ -508,7 +528,7 @@ async function ollamaSpec(
   const parsed = parseOllamaJson(responseText)
   const parts = sanitizeParts(parsed.parts ?? parsed.model?.parts)
   if (parts.length < 3) throw new Error('Ollama returned no usable parts')
-  return finalizeCreated(draft, parts, alter?.change || opts.description)
+  return finalizeCreated(draft, parts, parsed.recipes, alter?.change || opts.description)
 }
 
 async function readOllamaStream(upstream: Response, controller: AbortController): Promise<string> {
@@ -546,7 +566,8 @@ function jsonLooksComplete(text: string): boolean {
   if (!trimmed.endsWith('}')) return false
   try {
     const parsed = parseOllamaJson(trimmed)
-    return sanitizeParts(parsed.parts ?? parsed.model?.parts).length >= 5
+    const parts = expandRecipes(sanitizeParts(parsed.parts ?? parsed.model?.parts), parsed.recipes)
+    return parts.length >= 4
   } catch {
     return false
   }
@@ -556,6 +577,7 @@ function compactParts(parts: ModelPart[]) {
   return parts.map((p) => ({
     id: p.id,
     label: p.label,
+    parent: p.parent,
     shape: p.shape,
     position: p.position.map((n) => Math.round(n * 100) / 100),
     rotation: p.rotation.map((n) => Math.round(n * 100) / 100),
@@ -564,7 +586,7 @@ function compactParts(parts: ModelPart[]) {
   }))
 }
 
-function parseOllamaJson(text: string): { parts?: unknown; model?: { parts?: unknown } } {
+function parseOllamaJson(text: string): { parts?: unknown; recipes?: unknown; model?: { parts?: unknown } } {
   const trimmed = text.trim()
   const candidates: string[] = []
   if (trimmed) candidates.push(trimmed)
@@ -584,7 +606,7 @@ function parseOllamaJson(text: string): { parts?: unknown; model?: { parts?: unk
         const value = JSON.parse(attempt) as unknown
         if (Array.isArray(value)) return { parts: value }
         if (value && typeof value === 'object') {
-          const rec = value as { parts?: unknown; id?: unknown; shape?: unknown }
+          const rec = value as { parts?: unknown; recipes?: unknown; id?: unknown; shape?: unknown }
           if (Array.isArray(rec.parts)) return rec
           if (rec.id != null || rec.shape != null) return { parts: [rec] }
           return rec
@@ -648,6 +670,7 @@ function sanitizeParts(raw: unknown): ModelPart[] {
       id: String(rec.id ?? `part-${parts.length}`).slice(0, 40),
       label: String(rec.label ?? rec.id ?? 'Part').slice(0, 40),
       shape,
+      parent: rec.parent != null && String(rec.parent).trim() ? String(rec.parent).slice(0, 40) : undefined,
       position: vec3(rec.position, [0, 0.5, 0]),
       rotation: vec3(rec.rotation, [0, 0, 0]),
       scale: vec3(rec.scale, [0.4, 0.4, 0.4], 0.04, 6),

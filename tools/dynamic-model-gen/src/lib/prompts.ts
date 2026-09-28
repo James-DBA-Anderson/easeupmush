@@ -119,6 +119,7 @@ export const MODEL_NEGATIVE =
   'photoreal human, extra limbs, multiple objects, watermark, text, logo, scene, landscape, camera, realistic skin pores'
 
 export const EXAMPLES = [
+  'ginger tabby cat',
   'pink lop-eared bunny in a little waistcoat',
   'fat sausage dog with a yellow belly',
   'lollipop platform with a bite taken out',

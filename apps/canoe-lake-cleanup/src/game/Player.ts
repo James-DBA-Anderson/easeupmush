@@ -163,33 +163,51 @@ export class Player {
   }
 
   private setupEventListeners(): void {
-    document.addEventListener("keydown", (event) => {
-      void parkAudio.unlock();
-      if (this.game.isAwaitingIntroGesture()) this.game.noteIntroGesture();
-      this.onKeyDown(event);
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        void parkAudio.unlock();
+        if (this.game.isAwaitingIntroGesture()) this.game.noteIntroGesture();
+        this.onKeyDown(event);
+      },
+      { capture: true },
+    );
+    document.addEventListener("keyup", (event) => this.onKeyUp(event), {
+      capture: true,
     });
-    document.addEventListener("keyup", (event) => this.onKeyUp(event));
     document.addEventListener("mousedown", (event) => this.onMouseDown(event));
     document.addEventListener("mouseup", (event) => this.onMouseUp(event));
     document.addEventListener("mousemove", (event) => this.onMouseMove(event));
   }
 
+  private typingInField(event: KeyboardEvent): boolean {
+    const el = event.target;
+    if (!(el instanceof HTMLElement)) return false;
+    const tag = el.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+  }
+
   private onKeyDown(event: KeyboardEvent): void {
+    if (this.typingInField(event)) return;
     switch (event.code) {
       case "KeyW":
       case "ArrowUp":
+        event.preventDefault();
         this.moveForward = true;
         break;
       case "KeyS":
       case "ArrowDown":
+        event.preventDefault();
         this.moveBackward = true;
         break;
       case "KeyA":
       case "ArrowLeft":
+        event.preventDefault();
         this.moveLeft = true;
         break;
       case "KeyD":
       case "ArrowRight":
+        event.preventDefault();
         this.moveRight = true;
         break;
       case "ShiftLeft":
@@ -370,21 +388,26 @@ export class Player {
   }
 
   private onKeyUp(event: KeyboardEvent): void {
+    if (this.typingInField(event)) return;
     switch (event.code) {
       case "KeyW":
       case "ArrowUp":
+        event.preventDefault();
         this.moveForward = false;
         break;
       case "KeyS":
       case "ArrowDown":
+        event.preventDefault();
         this.moveBackward = false;
         break;
       case "KeyA":
       case "ArrowLeft":
+        event.preventDefault();
         this.moveLeft = false;
         break;
       case "KeyD":
       case "ArrowRight":
+        event.preventDefault();
         this.moveRight = false;
         break;
       case "ShiftLeft":

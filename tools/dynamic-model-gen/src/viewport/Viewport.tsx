@@ -7,7 +7,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js'
 import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
-import { buildGroupFromSpec, meshFromPart } from '../lib/buildMesh'
+import { buildGroupFromSpec, meshFromPart, partHandle } from '../lib/buildMesh'
 import {
   DEFAULT_KNIFE_SIZE,
   makeKnifeGeometry,
@@ -631,9 +631,10 @@ class ViewportHandle {
     const pos: [number, number, number] = [0, 0.55, 0]
     const selected = this.findPart(this.selectedId)
     if (selected) {
-      pos[0] = selected.position.x + Math.max(0.55, selected.scale.x * 0.7)
-      pos[1] = selected.position.y
-      pos[2] = selected.position.z
+      const handle = partHandle(selected)
+      pos[0] = handle.position.x + Math.max(0.55, selected.scale.x * 0.7)
+      pos[1] = handle.position.y
+      pos[2] = handle.position.z
     } else if (this.modelRoot.children.length) {
       const box = new THREE.Box3().setFromObject(this.modelRoot)
       if (!box.isEmpty() && isFiniteBox(box)) {
@@ -804,7 +805,8 @@ class ViewportHandle {
 
   public ground(): void {
     this.checkpoint()
-    const target = this.findPart(this.selectedId) ?? this.modelRoot
+    const mesh = this.findPart(this.selectedId)
+    const target = mesh ? partHandle(mesh) : this.modelRoot
     target.updateMatrixWorld(true)
     const box = new THREE.Box3().setFromObject(target)
     if (box.isEmpty() || !isFiniteBox(box)) return
@@ -813,7 +815,8 @@ class ViewportHandle {
 
   public recenter(): void {
     this.checkpoint()
-    const target = this.findPart(this.selectedId) ?? this.modelRoot
+    const mesh = this.findPart(this.selectedId)
+    const target = mesh ? partHandle(mesh) : this.modelRoot
     target.updateMatrixWorld(true)
     const box = new THREE.Box3().setFromObject(target)
     if (box.isEmpty() || !isFiniteBox(box)) return
@@ -874,12 +877,19 @@ class ViewportHandle {
       const shape = PART_SHAPES.includes(child.userData.shape as PartShape)
         ? (child.userData.shape as PartShape)
         : prior?.shape ?? guessShape(child)
+      const handle = partHandle(child)
+      const ancestor = handle.parent
+      const parentId =
+        ancestor && ancestor !== this.modelRoot && ancestor.userData.partId
+          ? String(ancestor.userData.partId)
+          : undefined
       parts.push({
         id,
         label: child.name || prior?.label || id,
         shape,
-        position: [child.position.x, child.position.y, child.position.z],
-        rotation: [child.rotation.x, child.rotation.y, child.rotation.z],
+        parent: parentId,
+        position: [handle.position.x, handle.position.y, handle.position.z],
+        rotation: [handle.rotation.x, handle.rotation.y, handle.rotation.z],
         scale: [
           Math.max(0.04, child.scale.x),
           Math.max(0.04, child.scale.y),
@@ -1426,10 +1436,11 @@ class ViewportHandle {
       if (!(child instanceof THREE.Mesh) || !child.userData.partId) return
       const pos = child.geometry.getAttribute('position')
       if (!pos) return
+      const handle = partHandle(child)
       meshes.push({
         partId: String(child.userData.partId),
-        position: [child.position.x, child.position.y, child.position.z],
-        quaternion: [child.quaternion.x, child.quaternion.y, child.quaternion.z, child.quaternion.w],
+        position: [handle.position.x, handle.position.y, handle.position.z],
+        quaternion: [handle.quaternion.x, handle.quaternion.y, handle.quaternion.z, handle.quaternion.w],
         scale: [child.scale.x, child.scale.y, child.scale.z],
         positions: new Float32Array(pos.array as ArrayLike<number>),
       })
@@ -1466,8 +1477,9 @@ class ViewportHandle {
       if (!(child instanceof THREE.Mesh) || !child.userData.partId) return
       const pose = byId.get(String(child.userData.partId))
       if (!pose) return
-      child.position.set(pose.position[0], pose.position[1], pose.position[2])
-      child.quaternion.set(pose.quaternion[0], pose.quaternion[1], pose.quaternion[2], pose.quaternion[3])
+      const handle = partHandle(child)
+      handle.position.set(pose.position[0], pose.position[1], pose.position[2])
+      handle.quaternion.set(pose.quaternion[0], pose.quaternion[1], pose.quaternion[2], pose.quaternion[3])
       child.scale.set(pose.scale[0], pose.scale[1], pose.scale[2])
       const attr = child.geometry.getAttribute('position')
       if (!attr || attr.count * attr.itemSize !== pose.positions.length) return
@@ -1585,7 +1597,7 @@ class ViewportHandle {
     this.transform.enabled = true
     this.transform.setSize(1.65)
     const mesh = this.findPart(this.selectedId)
-    if (mesh) this.transform.attach(mesh)
+    if (mesh) this.transform.attach(this.tool === 'scale' ? mesh : partHandle(mesh))
     else this.transform.detach()
   }
 
