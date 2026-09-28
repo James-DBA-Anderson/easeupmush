@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This repository uses the new Cloudflare `cf` CLI for automated deployments to Cloudflare Pages.
+This repository uses Wrangler for automated deployments to Cloudflare Pages.
 
 ## Automated Deployment
 
@@ -13,7 +13,7 @@ The deployment workflow (`.github/workflows/deploy.yml`) performs:
 1. **Checkout**: Fetches the repository code
 2. **Setup**: Installs Node.js 22 and npm dependencies
 3. **Build**: Runs `npm run build` to compile all apps into `dist/`
-4. **Deploy**: Uses `cf deploy` to publish to Cloudflare Pages
+4. **Deploy**: Uses `wrangler deploy` to publish to Cloudflare Pages
 5. **Output**: Displays deployment URL
 
 ## Required GitHub Secrets
@@ -72,26 +72,22 @@ npm run deploy
 
 ## Configuration
 
-The deployment is configured via `cloudflare.config.ts`:
+The deployment is configured via `wrangler.jsonc`:
 
-```typescript
-import { defineConfig } from "cf/config";
-
-export default defineConfig({
-  worker: {
-    name: "easeupmush",
-    compatibilityDate: "2026-08-15",
-    assets: {
-      directory: "./dist",
-    },
-  },
-});
+```json
+{
+  "name": "easeupmush",
+  "compatibility_date": "2026-08-15",
+  "assets": {
+    "directory": "./dist"
+  }
+}
 ```
 
 ### Key Settings
 
 - **name**: The project name on Cloudflare Pages (`easeupmush`)
-- **compatibilityDate**: The Cloudflare Workers compatibility date
+- **compatibility_date**: The Cloudflare Workers compatibility date
 - **assets.directory**: The built static assets directory (`./dist`)
 
 ## Cloudflare Free Tier
@@ -117,24 +113,23 @@ Verify your `CLOUDFLARE_ACCOUNT_ID` is correct.
 
 ### Build succeeds but deploy fails
 
-Check the GitHub Actions logs for specific error messages from the `cf deploy` command.
+Check the GitHub Actions logs for specific error messages from the `wrangler deploy` command.
 
-## Migration from Wrangler
+## Workspace Compatibility
 
-This project was migrated from the legacy Wrangler configuration:
+This repository is an npm workspace monorepo. The `wrangler.jsonc` file at the root allows Wrangler to deploy from the workspace root without issues. If using the newer `cf` CLI, note that it currently has workspace detection issues and may refuse to deploy from a workspace root (this is a known beta limitation).
 
-- ❌ Old: `wrangler.jsonc` (JSONC format)
-- ✅ New: `cloudflare.config.ts` (TypeScript format)
+## Migration from cf CLI
 
-The new `cf` CLI offers:
-- TypeScript-based configuration with type safety
-- JSON-first output for better CI/CD integration
-- Access to 3,000+ Cloudflare API operations
-- Better agent/automation support
-- Improved error messages and debugging
+This project previously used the new Cloudflare `cf` CLI (beta), but was migrated back to Wrangler due to workspace detection issues. The `cf` CLI currently refuses to deploy from npm workspace roots, which makes it incompatible with this monorepo structure.
+
+- ❌ Old: `cf` CLI (beta) with `cloudflare.config.ts`
+- ✅ Current: `wrangler` with `wrangler.jsonc`
+
+The `cloudflare.config.ts` file is kept for future migration once the `cf` CLI resolves its workspace compatibility issues.
 
 ## Learn More
 
-- [Cloudflare cf CLI announcement](https://blog.cloudflare.com/cloudflare-cf-cli-launch/)
+- [Wrangler documentation](https://developers.cloudflare.com/workers/wrangler/)
 - [Cloudflare Pages documentation](https://developers.cloudflare.com/pages/)
-- [cf CLI GitHub repository](https://github.com/cloudflare/workers-sdk)
+- [Workers SDK GitHub repository](https://github.com/cloudflare/workers-sdk)
