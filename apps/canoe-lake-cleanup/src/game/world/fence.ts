@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { PATH_SPURS } from "./lake";
-import { ROAD_WIDTH, roadGapsAlong } from "./buildings";
+import { PAVEMENT_WIDTH, ROAD_WIDTH, roadGapsAlong } from "./buildings";
 import { DEFAULT_LEVEL } from "../../level/defaultLevel";
 import type { FenceStyle, XZ } from "../../level/types";
 import { groundHeight } from "./terrain";
@@ -417,7 +417,7 @@ function gatesOn(from: THREE.Vector2, to: THREE.Vector2): [number, number][] {
     from.y,
     to.x,
     to.y,
-    ROAD_WIDTH * 0.5 + 1.25,
+    ROAD_WIDTH * 0.5 + PAVEMENT_WIDTH + 1.25,
   )) {
     const start = Math.max(0.4, gs);
     const end = Math.min(length - 0.4, gs + gw);

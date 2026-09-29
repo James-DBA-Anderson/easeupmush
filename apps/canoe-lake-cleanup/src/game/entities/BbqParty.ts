@@ -21,6 +21,7 @@ import {
 import { Face } from "./Face";
 import { Grumble } from "../effects/Grumble";
 import { PATH_Y } from "../world/lake";
+import type { GrassFire } from "../effects/GrassFire";
 
 const COATS = [0x2f4f7f, 0x8b3a3a, 0x3f6b4a, 0x5a4a7a, 0x2b2b33, 0xb06a2c, 0xd8c8a0];
 const TROUSERS = [0x2b3038, 0x4a4a52, 0x6b5a44, 0x3a5a6a];
@@ -46,6 +47,17 @@ const DOUSED = [
   "I'LL LAY YOU OUT, MUSH!",
   "YOU ABSOLUTE MELT!",
   "LOOK WHAT YOU'VE DONE!",
+];
+
+const PANIC = [
+  "FIRE!",
+  "THE GRASS IS ALIGHT!",
+  "GET BACK!",
+  "SOMEONE CALL THE BRIGADE!",
+  "IT'S SPREADING!",
+  "THE BBQ'S GONE UP!",
+  "MIND THE FLAMES!",
+  "WE'RE GOING TO CATCH!",
 ];
 
 /** True if (x,z) sits on the play-park wood chips. */
@@ -143,6 +155,8 @@ interface Guest {
   step: number;
   chatIn: number;
   cook: boolean;
+  /** Angle on the ring they run while the grass is up. */
+  orbit: number;
 }
 
 interface SmokePuff {
@@ -178,12 +192,19 @@ export class BbqParty {
   private shoutCool = 0;
   private complained = false;
   private foe = new THREE.Vector3();
+  private panicking = false;
+  private fire: GrassFire | null = null;
 
-  constructor(scene: THREE.Scene, at: THREE.Vector2) {
+  constructor(
+    scene: THREE.Scene,
+    at: THREE.Vector2,
+    opts?: { planted?: boolean },
+  ) {
     this.scene = scene;
     const gy = PATH_Y + groundHeight(at.x, at.y);
     this.spot = new THREE.Vector3(at.x, gy, at.y);
     this.packUp = 200 + Math.random() * 220;
+    const planted = opts?.planted === true;
 
     this.root.position.copy(this.spot);
     this.buildGrill();
@@ -192,7 +213,7 @@ export class BbqParty {
     this.grill.visible = true;
     scene.add(this.root);
 
-    const party = 2 + Math.floor(Math.random() * 3);
+    const party = planted ? 3 + Math.floor(Math.random() * 2) : 2 + Math.floor(Math.random() * 3);
     const gatePt = nearestGate(this.spot.x, this.spot.z);
     const approach = gateOutside(gatePt, 9);
     const exit = gateOutside(gatePt, 12);
@@ -216,7 +237,13 @@ export class BbqParty {
         0,
         exit.y + (Math.random() - 0.5) * 3,
       );
-      this.guests.push(this.buildGuest(start, stand, gate, leave, i === 0));
+      this.guests.push(
+        this.buildGuest(start, stand, gate, leave, i === 0, planted, ang),
+      );
+    }
+    if (planted) {
+      this.cooking = true;
+      this.grill.visible = true;
     }
   }
 
@@ -229,23 +256,46 @@ export class BbqParty {
   }
 
   /**
-   * Grill's set the grass off — they drop everything and clear out toward
-   * the promenade without finishing their tea.
+   * Grill's set the grass off — they stay on the ring around it, shouting,
+   * as the flames walk out from the kettle.
+   */
+  public panic(fire: GrassFire): void {
+    this.fire = fire;
+    this.panicking = true;
+    this.cooking = true;
+    this.packUp = 1e6;
+    for (const guest of this.guests) {
+      if (guest.phase === "leaving" && !guest.group.visible) continue;
+      guest.phase = "cooking";
+      guest.group.visible = true;
+      guest.orbit = Math.atan2(
+        guest.group.position.z - this.spot.z,
+        guest.group.position.x - this.spot.x,
+      );
+      guest.face.setMood("shocked");
+      this.say(guest, PANIC);
+    }
+  }
+
+  public isPanicking(): boolean {
+    return this.panicking;
+  }
+
+  /**
+   * Fire's out — they finally clear off toward the gate.
    */
   public scarper(): void {
-    if (this.guests.every((g) => g.phase === "leaving")) return;
+    this.panicking = false;
+    this.fire = null;
+    if (this.guests.every((g) => g.phase === "leaving" || !g.group.visible)) {
+      return;
+    }
     this.cooking = false;
     this.packUp = 0;
     for (const guest of this.guests) {
-      if (guest.phase === "leaving") continue;
+      if (guest.phase === "leaving" || !guest.group.visible) continue;
       guest.phase = "leaving";
-      this.say(guest, [
-        "FIRE!",
-        "THE GRASS IS ALIGHT!",
-        "GET BACK!",
-        "SOMEONE CALL THE BRIGADE!",
-        "LEAVE IT!",
-      ]);
+      this.say(guest, PANIC);
     }
   }
 
@@ -303,6 +353,13 @@ export class BbqParty {
 
     for (const guest of this.guests) {
       guest.face.update(delta);
+
+      if (this.panicking && guest.group.visible) {
+        this.runPanic(guest, delta);
+        anyHere = true;
+        anyCooking = true;
+        continue;
+      }
 
       if (guest.phase === "toGate") {
         const gap = this.amble(guest, guest.gate, delta, 1.45);
@@ -380,6 +437,7 @@ export class BbqParty {
     this.updateSmoke(delta);
 
     if (
+      !this.panicking &&
       !anyHere &&
       this.guests.every(
         (g) =>
@@ -493,6 +551,8 @@ export class BbqParty {
     gate: THREE.Vector3,
     exit: THREE.Vector3,
     cook: boolean,
+    planted = false,
+    orbit = 0,
   ): Guest {
     const pick = <T>(list: readonly T[]): T =>
       list[Math.floor(Math.random() * list.length)]!;
@@ -510,9 +570,12 @@ export class BbqParty {
     });
 
     const group = new THREE.Group();
-    group.position.copy(start);
-    group.position.y = PATH_Y + groundHeight(start.x, start.z);
-    group.rotation.y = Math.atan2(gate.x - start.x, gate.z - start.z);
+    const here = planted ? stand : start;
+    group.position.copy(here);
+    group.position.y = PATH_Y + groundHeight(here.x, here.z);
+    group.rotation.y = planted
+      ? Math.atan2(this.spot.x - stand.x, this.spot.z - stand.z)
+      : Math.atan2(gate.x - start.x, gate.z - start.z);
     this.scene.add(group);
 
     const hips = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.18, 0.22), legMat);
@@ -572,11 +635,12 @@ export class BbqParty {
       stand,
       gate,
       exit,
-      phase: "toGate",
+      phase: planted ? "cooking" : "toGate",
       route: emptyRoute(),
       step: Math.random() * Math.PI * 2,
       chatIn: 4 + Math.random() * 10,
       cook,
+      orbit,
     };
   }
 
@@ -690,6 +754,43 @@ export class BbqParty {
     guest.group.position.y =
       this.footY(guest.group.position.x, guest.group.position.z) +
       Math.abs(Math.sin(guest.step * 2)) * 0.03;
+  }
+
+  private runPanic(guest: Guest, delta: number): void {
+    const fire = this.fire;
+    if (!fire || !fire.isBurning()) {
+      this.scarper();
+      return;
+    }
+    const ring = Math.min(11, fire.spreadRadius() + 1.7);
+    guest.orbit += delta * (1.35 + (guest.cook ? 0.25 : 0));
+    const to = new THREE.Vector3(
+      this.spot.x + Math.cos(guest.orbit) * ring,
+      0,
+      this.spot.z + Math.sin(guest.orbit) * ring,
+    );
+    this.amble(guest, to, delta, 2.9);
+    const flame = fire.nearestFlame(guest.group.position) ?? this.spot;
+    guest.group.rotation.y = Math.atan2(
+      flame.x - guest.group.position.x,
+      flame.z - guest.group.position.z,
+    );
+    this.panicPose(guest, delta);
+    guest.chatIn -= delta;
+    if (guest.chatIn <= 0) {
+      guest.chatIn = 3.5 + Math.random() * 6;
+      if (Math.random() < 0.7) this.say(guest, PANIC);
+    }
+  }
+
+  private panicPose(guest: Guest, delta: number): void {
+    guest.step += delta * 9;
+    const flap = Math.sin(guest.step);
+    guest.arms[0]!.rotation.x = -1.55 + flap * 0.45;
+    guest.arms[1]!.rotation.x = -1.35 - flap * 0.4;
+    guest.arms[0]!.rotation.z = 0.45;
+    guest.arms[1]!.rotation.z = -0.5;
+    guest.face.setMood(flap > 0.2 ? "shocked" : "angry");
   }
 
   private plantFeet(guest: Guest): void {

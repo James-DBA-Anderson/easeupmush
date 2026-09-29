@@ -4,9 +4,9 @@ import { insidePark } from "../world/fence";
 import { liveTrees, type LiveTree } from "../world/trees";
 
 const CELL = 1.55;
-const MAX_PATCHES = 90;
+const MAX_PATCHES = 140;
 /** Seconds between spread attempts — lower = walks the green faster. */
-const SPREAD_EVERY = 0.48;
+const SPREAD_EVERY = 0.2;
 /** How close a flame must sit to cook a trunk. */
 const TREE_NEAR = 2.6;
 /** Continuous exposure before the canopy goes up. */
@@ -100,10 +100,16 @@ export class GrassFire {
   constructor(scene: THREE.Scene, at: THREE.Vector3) {
     this.scene = scene;
     this.origin = at.clone();
-    this.ignite(at.x + 1.2, at.z + 0.4, 1);
-    this.ignite(at.x - 0.6, at.z + 1.1, 0.85);
-    this.ignite(at.x + 0.3, at.z - 1.3, 0.7);
-    this.ignite(at.x + 1.8, at.z - 0.5, 0.65);
+    // Ring around the kettle so the BBQ sits in the middle of the blaze.
+    for (let i = 0; i < 8; i++) {
+      const ang = (i / 8) * Math.PI * 2 + Math.random() * 0.2;
+      const rad = 1.9 + Math.random() * 0.45;
+      this.ignite(
+        at.x + Math.cos(ang) * rad,
+        at.z + Math.sin(ang) * rad,
+        0.8 + Math.random() * 0.2,
+      );
+    }
 
     for (const tree of liveTrees()) {
       this.trees.push({
@@ -157,6 +163,19 @@ export class GrassFire {
     if (!this.cleared || !this.everLit) return false;
     this.cleared = false;
     return true;
+  }
+
+  /** How far the flames have walked from the kettle — for folk circling it. */
+  public spreadRadius(): number {
+    let r = 2.2;
+    for (const patch of this.patches) {
+      if (patch.heat < 0.08) continue;
+      r = Math.max(
+        r,
+        Math.hypot(patch.x - this.origin.x, patch.z - this.origin.z) + 1.1,
+      );
+    }
+    return r;
   }
 
   public burningCount(): number {
@@ -224,10 +243,11 @@ export class GrassFire {
 
     this.spreadIn -= delta;
     if (this.spreadIn <= 0 && this.patches.length < MAX_PATCHES) {
-      this.spreadIn = SPREAD_EVERY * (0.55 + Math.random() * 0.55);
+      this.spreadIn = SPREAD_EVERY * (0.45 + Math.random() * 0.4);
       this.trySpread();
-      // Second lick when it's already a serious blaze.
-      if (this.burningCount() > 8 && Math.random() < 0.55) this.trySpread();
+      this.trySpread();
+      if (this.burningCount() > 6) this.trySpread();
+      if (this.burningCount() > 14 && Math.random() < 0.7) this.trySpread();
     }
 
     this.emberAcc += delta;
@@ -630,7 +650,7 @@ export class GrassFire {
   }
 
   private trySpread(): void {
-    const hot = this.patches.filter((p) => p.heat > 0.4 && p.fuel > 0.12);
+    const hot = this.patches.filter((p) => p.heat > 0.28 && p.fuel > 0.1);
     if (hot.length === 0) return;
     const from = hot[Math.floor(Math.random() * hot.length)]!;
     const dirs = [

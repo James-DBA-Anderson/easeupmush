@@ -827,6 +827,7 @@ function placeCafe(
   }
 
   taggable(at, 0, DEEP / 2 + 0.1, 0, WIDE, 1.5, "cafe");
+  taggable(at, WIDE / 2 + 0.1, 0, Math.PI / 2, DEEP, 1.5, "cafe");
 
   scene.add(group);
   solids.push({

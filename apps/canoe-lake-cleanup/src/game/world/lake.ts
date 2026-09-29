@@ -662,8 +662,8 @@ export function buildLake(scene: THREE.Scene): LakeSurface {
   // is world up. (Plain XZ fill leaves the mirror vertical and reflects the
   // far bank onto the near one.)
   const water = new Water(waterMirrorGeometry(fill), {
-    textureWidth: 512,
-    textureHeight: 512,
+    textureWidth: 256,
+    textureHeight: 256,
     waterNormals: waterNormalsTexture(),
     sunDirection: new THREE.Vector3(0.4, 0.8, 0.2).normalize(),
     sunColor: 0xffffff,

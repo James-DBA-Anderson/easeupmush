@@ -13,6 +13,16 @@ const HOVER_HEIGHT = 1.45;
 
 export type ArrowKind = "mess" | "mission";
 
+export type ArrowSpot = {
+  x: number;
+  z: number;
+  /** World hover height; ignored when `hudOnly`. */
+  y?: number;
+  /** Keep the chevron as a compass — don't plant it on the mark. */
+  hudOnly?: boolean;
+  hideWithin?: number;
+};
+
 /**
  * Direction chevron. Yellow (`mess`) tracks dirt and ambient jobs; red
  * (`mission`) is reserved for scripted radio missions.
@@ -53,7 +63,7 @@ export class ObjectiveArrow {
     camera: THREE.PerspectiveCamera,
     player: { x: number; z: number },
     heading: number,
-    spots: ReadonlyArray<{ x: number; z: number }>,
+    spots: ReadonlyArray<ArrowSpot>,
     delta: number,
   ): void {
     if (this.throbLeft > 0) {
@@ -69,7 +79,8 @@ export class ObjectiveArrow {
 
     const gap = Math.hypot(target.x - player.x, target.z - player.z);
     // Missions stay visible until you're right on them; mess hides a bit sooner.
-    const hideWithin = this.kind === "mission" ? 1.2 : HIDE_WITHIN;
+    const hideWithin =
+      target.hideWithin ?? (this.kind === "mission" ? 1.2 : HIDE_WITHIN);
     if (gap < hideWithin) {
       this.root.classList.remove("visible", "hovering");
       return;
@@ -78,11 +89,13 @@ export class ObjectiveArrow {
     this.bob += delta;
 
     // 0 = pure HUD compass, 1 = world hover above the target.
-    const blend = THREE.MathUtils.clamp(
-      1 - (gap - HOVER_RANGE) / (HUD_RANGE - HOVER_RANGE),
-      0,
-      1,
-    );
+    const blend = target.hudOnly
+      ? 0
+      : THREE.MathUtils.clamp(
+          1 - (gap - HOVER_RANGE) / (HUD_RANGE - HOVER_RANGE),
+          0,
+          1,
+        );
     const ease = blend * blend * (3 - 2 * blend);
 
     const width = window.innerWidth;
@@ -113,7 +126,8 @@ export class ObjectiveArrow {
     const turn = Math.atan2(dx * rx + dz * rz, dx * fx + dz * fz);
 
     // Project a point floating above the mark into screen space.
-    const hoverH = this.kind === "mission" ? 1.85 : HOVER_HEIGHT;
+    const hoverH =
+      target.y ?? (this.kind === "mission" ? 1.85 : HOVER_HEIGHT);
     const bobY = Math.sin(this.bob * 3.2) * 0.1;
     this.scratch.set(target.x, hoverH + bobY, target.z);
     this.scratch.project(camera);
@@ -169,8 +183,8 @@ export class ObjectiveArrow {
 
   private pick(
     player: { x: number; z: number },
-    spots: ReadonlyArray<{ x: number; z: number }>,
-  ): { x: number; z: number } | null {
+    spots: ReadonlyArray<ArrowSpot>,
+  ): ArrowSpot | null {
     if (spots.length === 0) {
       this.locked = null;
       return null;
@@ -197,12 +211,12 @@ export class ObjectiveArrow {
         const keepDist = Math.hypot(kept.x - player.x, kept.z - player.z);
         if (keepDist < bestDist * STICKY) {
           this.locked = { x: kept.x, z: kept.z };
-          return this.locked;
+          return kept;
         }
       }
     }
 
     this.locked = { x: best.x, z: best.z };
-    return this.locked;
+    return best;
   }
 }

@@ -461,15 +461,25 @@ export function liveTrees(): ReadonlyArray<LiveTree> {
  * Tip every planting with the park wind. Strength follows the breeze; each
  * tree keeps its own phase so the avenue doesn't flap in lockstep.
  */
-export function updateTrees(time: number, wind: THREE.Vector2): void {
+export function updateTrees(
+  time: number,
+  wind: THREE.Vector2,
+  camera?: THREE.Vector3,
+): void {
   const mag = Math.hypot(wind.x, wind.y);
   if (mag < 0.05) return;
   const nx = wind.x / mag;
   const nz = wind.y / mag;
   // A few m/s is a light breeze; Solent blows harder in the wet.
   const strength = Math.min(1.4, 0.4 + mag * 0.2);
+  const swayReachSq = 90 * 90;
 
   for (const plant of swaying) {
+    if (camera) {
+      const dx = plant.group.position.x - camera.x;
+      const dz = plant.group.position.z - camera.z;
+      if (dx * dx + dz * dz > swayReachSq) continue;
+    }
     const wave = Math.sin(time * plant.rate + plant.phase);
     const gust = Math.sin(time * 0.68 + plant.phase * 1.4);
     const flutter = Math.sin(time * plant.rate * 2.6 + plant.phase * 0.5);

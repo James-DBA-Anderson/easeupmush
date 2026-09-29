@@ -29,6 +29,12 @@ const FIRE_LINES = [
   "PUT IT OUT!",
   "QUICK — THE BUCKET!",
 ];
+const REFILL_LINES = [
+  "MORE WATER!",
+  "I'LL GET SOME MORE!",
+  "BACK TO THE LAKE!",
+  "FILL IT UP!",
+];
 const SOAKED = [
   "OI! WATCH IT!",
   "YOU'RE SOAKING ME!",
@@ -62,7 +68,8 @@ type Phase =
   | "casting"
   | "leaving"
   | "toFire"
-  | "chucking";
+  | "chucking"
+  | "toWater";
 
 /** A kid crouched at the edge with a hand line and a bucket, crabbing. */
 export class Crabber {
@@ -420,44 +427,70 @@ export class Crabber {
    */
   public fightFire(fire: GrassFire, delta: number): void {
     if (this.gone) return;
-    if (this.phase === "leaving" || this.phase === "arriving") return;
 
-    const flame = fire.nearestFlame(this.group.position);
-    if (!flame) {
-      if (this.phase === "toFire" || this.phase === "chucking") {
+    if (!fire.isBurning()) {
+      if (
+        this.phase === "toFire" ||
+        this.phase === "chucking" ||
+        this.phase === "toWater"
+      ) {
         this.resumeCrabbing();
       }
       return;
     }
 
-    const gap = this.group.position.distanceTo(flame);
-    // Too far away to bother — keep crabbing.
-    if (gap > 48 && this.phase !== "toFire" && this.phase !== "chucking") {
-      return;
-    }
+    const flame = fire.nearestFlame(this.group.position);
+    if (!flame) return;
 
-    if (this.phase !== "toFire" && this.phase !== "chucking") {
+    if (
+      this.phase !== "toFire" &&
+      this.phase !== "chucking" &&
+      this.phase !== "toWater"
+    ) {
       this.phase = "toFire";
       this.standPose();
       this.line.visible = false;
       this.crab.visible = false;
-      this.chucksLeft = 3 + Math.floor(Math.random() * 3);
+      this.chucksLeft = 4 + Math.floor(Math.random() * 3);
       this.liftBucket(true);
       this.shout(FIRE_LINES);
     }
 
     this.fireTarget.copy(flame);
 
-    if (this.phase === "toFire") {
-      if (this.amble(this.fireTarget, delta, 3.4) < CHUCK_RANGE) {
-        this.phase = "chucking";
-        this.timer = 0.35;
+    if (this.phase === "toWater") {
+      const bank = nearestShore(this.group.position.x, this.group.position.z);
+      const to = new THREE.Vector3(bank.x, 0, bank.y);
+      if (this.amble(to, delta, 3.8) < 1.15) {
+        this.chucksLeft = 4 + Math.floor(Math.random() * 3);
+        this.phase = "toFire";
+        this.shout(REFILL_LINES);
       }
       this.updateSplashes(delta);
       return;
     }
 
-    // Chucking — swing the bucket and tip water at the fire.
+    if (this.phase === "toFire") {
+      const here = this.group.position;
+      const gap = Math.hypot(flame.x - here.x, flame.z - here.z);
+      let to = this.fireTarget;
+      if (gap < CHUCK_RANGE * 0.65 && gap > 0.05) {
+        const nx = (here.x - flame.x) / gap;
+        const nz = (here.z - flame.z) / gap;
+        to = new THREE.Vector3(
+          flame.x + nx * CHUCK_RANGE,
+          0,
+          flame.z + nz * CHUCK_RANGE,
+        );
+      }
+      if (this.amble(to, delta, 3.8) < CHUCK_RANGE) {
+        this.phase = "chucking";
+        this.timer = 0.28;
+      }
+      this.updateSplashes(delta);
+      return;
+    }
+
     this.timer -= delta;
     this.group.rotation.y = Math.atan2(
       this.fireTarget.x - this.group.position.x,
@@ -470,10 +503,13 @@ export class Crabber {
     if (this.timer <= 0) {
       this.flingWater(fire);
       this.chucksLeft -= 1;
-      if (this.chucksLeft <= 0 || !fire.isBurning()) {
+      if (!fire.isBurning()) {
         this.resumeCrabbing();
+      } else if (this.chucksLeft <= 0) {
+        this.phase = "toWater";
+        this.shout(REFILL_LINES);
       } else {
-        this.timer = 0.55 + Math.random() * 0.25;
+        this.timer = 0.4 + Math.random() * 0.22;
         if (Math.random() < 0.45) this.shout(FIRE_LINES);
       }
     }
@@ -492,7 +528,11 @@ export class Crabber {
       this.sprayTalkCool = Math.max(0, this.sprayTalkCool - delta);
     }
 
-    if (this.phase === "toFire" || this.phase === "chucking") {
+    if (
+      this.phase === "toFire" ||
+      this.phase === "chucking" ||
+      this.phase === "toWater"
+    ) {
       return;
     }
 
@@ -584,8 +624,10 @@ export class Crabber {
   private resumeCrabbing(): void {
     this.liftBucket(false);
     this.standPose();
-    this.phase = "leaving";
     this.chucksLeft = 0;
+    this.line.visible = false;
+    this.crab.visible = false;
+    this.phase = "arriving";
   }
 
   private flingWater(fire: GrassFire): void {

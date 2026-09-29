@@ -215,7 +215,7 @@ function placeSpan(
     new THREE.TubeGeometry(curve, samples * 2, 0.012, 5, false),
     WIRE,
   );
-  tube.castShadow = true;
+  tube.castShadow = false;
   scene.add(tube);
 
   // Tighter spacing so pigeons can line up along the string.

@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { Face } from "../entities/Face";
+import type { Face } from "../entities/Face";
+import { buildWarden } from "../entities/WardenModel";
 import { parkAudio } from "../audio/ParkAudio";
 import { groundHeight } from "../world/terrain";
 import {
@@ -12,6 +13,7 @@ type Phase =
   | "await"
   | "hold"
   | "door"
+  | "sit"
   | "exit"
   | "close"
   | "walk"
@@ -20,7 +22,9 @@ type Phase =
 
 const HOLD_FOR = 0.45;
 const DOOR_FOR = 0.55;
-const EXIT_FOR = 1.1;
+/** Beat after the door is open so you see them sat in the driver's seat. */
+const SIT_FOR = 0.55;
+const EXIT_FOR = 1.4;
 const CLOSE_FOR = 0.55;
 const RUN_SPEED = 5.4;
 /** Metres to get up to pace from the door, and to pull up at the handoff. */
@@ -151,6 +155,17 @@ export class ShiftIntro {
       this.seatAvatar();
       this.frameDoorShot(delta, 0.2 * t);
       if (t >= 1) {
+        this.phase = "sit";
+        this.age = 0;
+      }
+      return;
+    }
+
+    if (this.phase === "sit") {
+      setKerbDoorOpen(1);
+      this.seatAvatar();
+      this.frameDoorShot(delta, 0.35);
+      if (this.age >= SIT_FOR) {
         this.phase = "exit";
         this.age = 0;
       }
@@ -415,15 +430,16 @@ export class ShiftIntro {
     const ground = groundHeight(van.x, van.z);
     const at = (lx: number, lz: number, y: number, out: THREE.Vector3) =>
       out.set(van.x + lx * cos + lz * sin, y, van.z - lx * sin + lz * cos);
-    at(-0.2, 3.7, ground + 1.8, pos);
-    at(1.3, 0.9, ground + 1.3, look);
-    if (this.avatar && track > 0) {
+    at(0.55, 3.15, ground + 1.62, pos);
+    // Driver's seat — they sit here until they shuffle across to the kerb door.
+    at(0.95, -0.32, ground + 1.38, look);
+    if (this.avatar) {
       this.tmp.set(
         this.avatar.position.x,
-        this.avatar.position.y + 1.25,
+        this.avatar.position.y + 1.2,
         this.avatar.position.z,
       );
-      look.lerp(this.tmp, track);
+      look.lerp(this.tmp, 0.55 + 0.45 * Math.min(1, track));
     }
   }
 
@@ -486,41 +502,46 @@ export class ShiftIntro {
 
   private seatAvatar(): void {
     if (!this.avatar || !this.van) return;
+    // Hips on the cushion — the model's hip pivot sits at ~0.91 m.
     this.avatar.position.set(
       this.van.seatX,
-      this.van.seatY - 0.95,
+      this.van.seatY - 0.82,
       this.van.seatZ,
     );
     const vanYaw = this.van.yaw;
     const face = Math.atan2(Math.cos(vanYaw), -Math.sin(vanYaw));
-    this.avatar.rotation.set(0.12, face, 0);
+    this.avatar.rotation.set(0.08, face, 0);
     this.walkYaw = face;
     this.legs[0]!.rotation.x = -1.15;
     this.legs[1]!.rotation.x = -1.05;
-    this.arms[0]!.rotation.x = -0.55;
-    this.arms[1]!.rotation.x = -0.45;
+    this.arms[0]!.rotation.x = -0.45;
+    this.arms[1]!.rotation.x = -0.7;
   }
 
-  /** Slide from seat to the driver’s door. */
+  /** Shuffle from the driver's seat across the cab, then step onto the kerb. */
   private poseExit(t: number): void {
     if (!this.avatar || !this.van) return;
     const van = this.van;
-    const y0 = van.seatY - 0.95;
+    const y0 = van.seatY - 0.82;
     const y1 = groundHeight(van.exitX, van.exitZ);
-    // Ease the step out so it doesn't look like a linear slide.
     const e = easeInOut(t);
-    // Shuffle across the cab to the doorway, then step down onto the kerb.
-    const SPLIT = 0.55;
     const sitFace = Math.atan2(Math.cos(van.yaw), -Math.sin(van.yaw));
     const outFace = Math.atan2(van.exitX - van.doorX, van.exitZ - van.doorZ);
-    if (e < SPLIT) {
-      const k = e / SPLIT;
+    // Turn, slide across to the doorway, then step down.
+    const TURN = 0.18;
+    const SPLIT = 0.62;
+    if (e < TURN) {
+      const k = e / TURN;
+      this.avatar.position.set(van.seatX, y0, van.seatZ);
+      this.walkYaw = lerpAngle(sitFace, outFace, k);
+    } else if (e < SPLIT) {
+      const k = (e - TURN) / (SPLIT - TURN);
       this.avatar.position.set(
         THREE.MathUtils.lerp(van.seatX, van.doorX, k),
         y0,
         THREE.MathUtils.lerp(van.seatZ, van.doorZ, k),
       );
-      this.walkYaw = lerpAngle(sitFace, outFace, k);
+      this.walkYaw = outFace;
     } else {
       const k = (e - SPLIT) / (1 - SPLIT);
       this.avatar.position.set(
@@ -531,13 +552,14 @@ export class ShiftIntro {
       this.walkYaw = lerpAngle(outFace, van.exitYaw, k);
     }
     this.avatar.rotation.y = this.walkYaw;
-    this.avatar.rotation.x = THREE.MathUtils.lerp(0.12, 0, e);
-    this.legs[0]!.rotation.x = THREE.MathUtils.lerp(-1.15, 0, e);
-    this.legs[1]!.rotation.x = THREE.MathUtils.lerp(-1.05, 0, e);
-    this.arms[0]!.rotation.x = THREE.MathUtils.lerp(-0.55, 0, e);
-    this.arms[1]!.rotation.x = THREE.MathUtils.lerp(-0.45, 0, e);
-    if (t > 0.2 && t < 0.65) {
-      const duck = Math.sin(((t - 0.2) / 0.45) * Math.PI);
+    const stand = Math.max(0, (e - TURN) / (1 - TURN));
+    this.avatar.rotation.x = THREE.MathUtils.lerp(0.08, 0, stand);
+    this.legs[0]!.rotation.x = THREE.MathUtils.lerp(-1.15, 0, stand);
+    this.legs[1]!.rotation.x = THREE.MathUtils.lerp(-1.05, 0, stand);
+    this.arms[0]!.rotation.x = THREE.MathUtils.lerp(-0.45, 0, stand);
+    this.arms[1]!.rotation.x = THREE.MathUtils.lerp(-0.7, 0, stand);
+    if (e > SPLIT) {
+      const duck = Math.sin(((e - SPLIT) / (1 - SPLIT)) * Math.PI);
       this.avatar.rotation.x = duck * 0.28;
     }
   }
@@ -555,122 +577,13 @@ export class ShiftIntro {
   }
 
   private buildAvatar(): THREE.Group {
-    const group = new THREE.Group();
-    const coat = new THREE.MeshStandardMaterial({
-      color: 0xc9a227,
-      roughness: 0.85,
-    });
-    const hiVis = new THREE.MeshStandardMaterial({
-      color: 0x2a2a2c,
-      roughness: 0.9,
-    });
-    const legMat = new THREE.MeshStandardMaterial({
-      color: 0x2b3038,
-      roughness: 0.9,
-    });
-    const skin = new THREE.MeshStandardMaterial({
-      color: 0xd9a066,
-      roughness: 0.8,
-    });
-    const shoeMat = new THREE.MeshStandardMaterial({
-      color: 0x2a2420,
-      roughness: 1,
-    });
-
-    const hips = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.18, 0.22), legMat);
-    hips.position.y = 0.92;
-    hips.castShadow = true;
-    group.add(hips);
-
-    const torso = new THREE.Group();
-    torso.position.y = 1.0;
-    group.add(torso);
-
-    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.55, 0.24), coat);
-    chest.position.y = 0.28;
-    chest.castShadow = true;
-    torso.add(chest);
-
-    const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(0.44, 0.08, 0.26),
-      hiVis,
-    );
-    stripe.position.y = 0.22;
-    torso.add(stripe);
-
-    const neck = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.05, 0.06, 0.1, 8),
-      skin,
-    );
-    neck.position.y = 0.6;
-    torso.add(neck);
-
-    const head = new THREE.Group();
-    head.position.y = 0.72;
-    torso.add(head);
-    this.face = new Face(skin);
-    head.add(this.face.group);
-
-    const cap = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.16, 0.17, 0.08, 10),
-      hiVis,
-    );
-    cap.position.y = 0.14;
-    head.add(cap);
-    const peak = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.03, 0.1), hiVis);
-    peak.position.set(0, 0.1, 0.12);
-    head.add(peak);
-
-    for (const side of [-1, 1] as const) {
-      const arm = new THREE.Group();
-      arm.position.set(side * 0.27, 0.48, 0);
-      torso.add(arm);
-      const upper = new THREE.Mesh(
-        new THREE.BoxGeometry(0.11, 0.32, 0.12),
-        coat,
-      );
-      upper.geometry.translate(0, -0.16, 0);
-      upper.castShadow = true;
-      arm.add(upper);
-      const forearm = new THREE.Mesh(
-        new THREE.BoxGeometry(0.1, 0.28, 0.1),
-        coat,
-      );
-      forearm.geometry.translate(0, -0.14, 0);
-      forearm.position.y = -0.32;
-      forearm.castShadow = true;
-      arm.add(forearm);
-      this.arms.push(arm);
-
-      const leg = new THREE.Group();
-      leg.position.set(side * 0.11, 0.92, 0);
-      group.add(leg);
-      const thigh = new THREE.Mesh(
-        new THREE.BoxGeometry(0.14, 0.4, 0.16),
-        legMat,
-      );
-      thigh.geometry.translate(0, -0.2, 0);
-      thigh.castShadow = true;
-      leg.add(thigh);
-      const shin = new THREE.Mesh(
-        new THREE.BoxGeometry(0.12, 0.38, 0.14),
-        legMat,
-      );
-      shin.geometry.translate(0, -0.19, 0);
-      shin.position.y = -0.4;
-      shin.castShadow = true;
-      leg.add(shin);
-      const shoe = new THREE.Mesh(
-        new THREE.BoxGeometry(0.12, 0.07, 0.22),
-        shoeMat,
-      );
-      shoe.position.set(0, -0.4, 0.04);
-      shin.add(shoe);
-      this.legs.push(leg);
-    }
-
-    return group;
+    const rig = buildWarden();
+    this.face = rig.face;
+    this.arms.push(...rig.arms);
+    this.legs.push(...rig.legs);
+    return rig.group;
   }
+
 }
 
 function easeInOut(t: number): number {

@@ -35,7 +35,12 @@ export class Face {
   private smears: THREE.Mesh[] = [];
   private filth = 0;
 
-  constructor(skin: THREE.MeshStandardMaterial, scale = 1) {
+  constructor(
+    skin: THREE.MeshStandardMaterial,
+    scale = 1,
+    /** Hats already cover the pate — skip the hair helmet so it doesn't mask the eyes. */
+    underHat = false,
+  ) {
     const pick = <T>(list: readonly T[]): T =>
       list[Math.floor(Math.random() * list.length)]!;
 
@@ -52,7 +57,16 @@ export class Face {
       color: pick(HAIR),
       roughness: 1,
     });
-    if (Math.random() < 0.85) {
+    if (underHat) {
+      const nape = new THREE.Mesh(
+        new THREE.SphereGeometry(0.1, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.45),
+        hairMat,
+      );
+      nape.position.set(0, -0.02, -0.07);
+      nape.scale.set(0.95, 0.65, 0.7);
+      nape.castShadow = true;
+      this.group.add(nape);
+    } else if (Math.random() < 0.85) {
       const hair = new THREE.Mesh(
         new THREE.SphereGeometry(0.152, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
         hairMat,

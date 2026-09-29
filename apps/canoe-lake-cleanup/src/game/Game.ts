@@ -49,6 +49,7 @@ import {
   offsetShore,
   clearOfLakeRim,
   pickNorthwestPathIndex,
+  northwestScore,
   waterSpot,
   type LakeSurface,
 } from "./world/lake";
@@ -69,7 +70,7 @@ import { parkAudio } from "./audio/ParkAudio";
 import { readDebugBoot, type DebugFrom } from "../level/debugBoot";
 import { placeBench, clearSitterBenches, sitterBenchSeats } from "./world/bench";
 import { plantTrees, updateTrees, updateFlowerBeds, sprayFlowerBed, flowerBeds } from "./world/trees";
-import { buildSurrounds, lightWindows } from "./world/buildings";
+import { buildSurrounds, getBeachOutline, lightWindows } from "./world/buildings";
 import { buildFairyLights, lightFairyBulbs, fairyLightSections } from "./world/fairyLights";
 import { WireBird, roostPerchesNorth } from "./entities/WireBird";
 import { buildFencing, parkGates } from "./world/fence";
@@ -93,8 +94,9 @@ import { Weather } from "./systems/Weather";
 import { Sun } from "./systems/Sun";
 import { MiniMap } from "./ui/MiniMap";
 import { Mugshot } from "./ui/Mugshot";
+import { FaceSplat } from "./ui/FaceSplat";
 import { Messages } from "./ui/Messages";
-import { ObjectiveArrow } from "./ui/ObjectiveArrow";
+import { ObjectiveArrow, type ArrowSpot } from "./ui/ObjectiveArrow";
 import { MissionBanner } from "./ui/MissionBanner";
 import { Compass } from "./ui/Compass";
 import { Callouts } from "./systems/Callouts";
@@ -116,6 +118,8 @@ const OVERNIGHT_ARC_FRAC = 0.38;
 const OPENING_CLEAR_FRAC = 0.8;
 /** How long the NW feeder rush runs after the opening tip is cleared. */
 const FEEDER_RUSH_FOR = 150;
+/** How many bag-feeders should be on the NW stretch when the rush starts. */
+const FEEDERS_ON_RUSH = 5;
 /** Tagged-overnight job: how long before the feeder rush comes in regardless. */
 const GRAFFITI_MISSION_FOR = 300;
 /** Breather between the graffiti job and the feeder rush. */
@@ -321,6 +325,7 @@ export class Game {
   private lake!: LakeSurface;
   private miniMap: MiniMap;
   private mugshot: Mugshot;
+  private faceSplat: FaceSplat;
   private objectiveArrow: ObjectiveArrow;
   private missionArrow: ObjectiveArrow;
   private missionBanner: MissionBanner;
@@ -431,11 +436,16 @@ export class Game {
     this.camera.position.set(0, 1.7, 40);
     this.scene.add(this.camera);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    const dpr = window.devicePixelRatio || 1;
+    // Retina already supersamples; MSAA on top of that is mostly fill-rate.
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: dpr < 1.4,
+      powerPreference: "high-performance",
+    });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(dpr, 1.5));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
     const container = document.getElementById("game-container");
     if (container) {
@@ -499,6 +509,9 @@ export class Game {
     );
     this.mugshot = new Mugshot(
       document.getElementById("mugshot") as HTMLCanvasElement,
+    );
+    this.faceSplat = new FaceSplat(
+      document.getElementById("face-splat") as HTMLCanvasElement,
     );
     this.objectiveArrow = new ObjectiveArrow(
       document.getElementById("objective-arrow")!,
@@ -642,13 +655,21 @@ export class Game {
     this.sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
     this.sunLight.position.set(60, 90, 40);
     this.sunLight.castShadow = true;
-    this.sunLight.shadow.camera.left = -220;
-    this.sunLight.shadow.camera.right = 220;
-    this.sunLight.shadow.camera.top = 220;
-    this.sunLight.shadow.camera.bottom = -220;
+    // Tight box around the player — far scenery still draws, it just isn't
+    // in the shadow map. 2048 across 200m is sharper than 2048 across 440m.
+    const shadowReach = 100;
+    this.sunLight.shadow.camera.left = -shadowReach;
+    this.sunLight.shadow.camera.right = shadowReach;
+    this.sunLight.shadow.camera.top = shadowReach;
+    this.sunLight.shadow.camera.bottom = -shadowReach;
+    this.sunLight.shadow.camera.near = 8;
+    this.sunLight.shadow.camera.far = 420;
     this.sunLight.shadow.mapSize.width = 2048;
     this.sunLight.shadow.mapSize.height = 2048;
+    this.sunLight.shadow.bias = -0.0006;
+    this.sunLight.shadow.normalBias = 0.035;
     this.scene.add(this.sunLight);
+    this.scene.add(this.sunLight.target);
 
     this.sun = new Sun(this.scene, this.sunLight);
   }
@@ -658,7 +679,7 @@ export class Game {
     const sky = this.dayCycle.skyState();
     this.weather.setRainAllowed(this.rainUnlocked());
     this.weather.update(delta, sky);
-    updateTrees(this.elapsed, this.weather.getWind());
+    updateTrees(this.elapsed, this.weather.getWind(), this.camera.position);
     updateFlowerBeds(delta);
 
     const gloom = this.weather.gloom;
@@ -667,7 +688,13 @@ export class Game {
     this.ambientLight.color.copy(sky.sky).lerp(new THREE.Color(0xffffff), 0.78);
     this.sunLight.intensity = sky.sun * (1 - gloom);
     this.sunLight.color.copy(sky.sunColor);
-    this.sunLight.position.copy(sky.sunPosition);
+    const aim = this.camera.position;
+    this.sunLight.target.position.set(aim.x, 0, aim.z);
+    this.sunLight.position.set(
+      aim.x + sky.sunPosition.x,
+      sky.sunPosition.y,
+      aim.z + sky.sunPosition.z,
+    );
     // Soft shadows look wrong under cloud; fade them out with the sun.
     this.sunLight.castShadow = this.sunLight.intensity > 0.2;
     this.sun.update(sky, gloom, this.camera, delta);
@@ -895,7 +922,8 @@ export class Game {
     }
     const span = after[0] - before[0] || 1;
     const t = (hour - before[0]) / span;
-    const target = Math.round(before[1] + (after[1] - before[1]) * t);
+    let target = Math.round(before[1] + (after[1] - before[1]) * t);
+    if (this.feederRushLeft > 0) target += FEEDERS_ON_RUSH;
 
     // Quieter hours mean longer waits between the few who do turn up.
     const gap =
@@ -922,7 +950,11 @@ export class Game {
     // Too many for the hour: peel a few off for the gates, a couple at a time,
     // so closing time looks like people drifting home rather than a stampede.
     this.nextEviction -= delta;
-    const strolling = this.people.filter((person) => person.isStrolling());
+    const strolling = this.people.filter(
+      (person) =>
+        person.isStrolling() &&
+        !(this.feederRushLeft > 0 && person.hasFood()),
+    );
     if (this.nextEviction <= 0 && strolling.length > target) {
       const send = Math.min(2, strolling.length - target);
       for (let i = 0; i < send; i++) {
@@ -1201,8 +1233,12 @@ export class Game {
     if (this.graffitiMissionStarted || this.secondEventDone) return;
     this.graffitiMissionStarted = true;
 
+    // Not the kiosk down on the beach — that's outside the park.
+    const beach = getBeachOutline();
     const walls = taggableWalls().filter(
-      (w) => w.site === "cafe" || w.site === "boathouse",
+      (w) =>
+        (w.site === "cafe" || w.site === "boathouse") &&
+        !(beach && insideOutline(w.x, w.z, beach)),
     );
     if (walls.length === 0 || !missionWindowOpen("graffiti", this.dayCycle.hour)) {
       this.graffitiMissionDone = true;
@@ -1306,13 +1342,15 @@ export class Game {
     setFeederRush(true);
     setSwanFeederRush(true);
 
-    // People already on the stretch get long bags so the pigeons have targets.
+    // Anyone already on the feeding corner gets a bag; then make sure a
+    // handful of feeders are actually there, not just a radio tip on empty path.
     for (const person of this.people) {
       if (person.isGone()) continue;
       const at = person.getPosition();
-      if (Math.hypot(at.x - marked.x, at.z - marked.z) > 55) continue;
+      if (northwestScore(at.x, at.z) < 0.28) continue;
       person.stockForFeederRush();
     }
+    this.seedFeederCrowd();
 
     // Pull circling gulls over the feeding stretch and top the flock up.
     for (const gull of this.gulls) {
@@ -1323,6 +1361,28 @@ export class Game {
     }
 
     this.callouts.raise("jobs", this.dayCycle.clockFace(), marked);
+  }
+
+  /** Drop bag-feeders onto the NW path so the rush is visible, not an empty tip. */
+  private seedFeederCrowd(): void {
+    if (PATH_LOOP.length < 2) return;
+    let have = this.people.filter(
+      (p) => !p.isGone() && p.hasFood() && northwestScore(p.getPosition().x, p.getPosition().z) > 0.22,
+    ).length;
+    while (have < FEEDERS_ON_RUSH) {
+      const idx = pickNorthwestPathIndex();
+      const at = PATH_LOOP[idx]!;
+      if (!this.inShot(at.x, at.y, 1.2)) {
+        const person = new Person(this.scene, idx);
+        person.plantAsFeeder();
+        this.people.push(person);
+      } else {
+        const person = new Person(this.scene, idx, true);
+        person.stockForFeederRush();
+        this.people.push(person);
+      }
+      have += 1;
+    }
   }
 
   private updateFeederRush(delta: number): void {
@@ -2209,6 +2269,7 @@ export class Game {
   public splashFace(dirty: boolean): void {
     this.faceWetLeft = Math.max(this.faceWetLeft, dirty ? 5.5 : 3.2);
     if (dirty) this.faceDirty = true;
+    this.faceSplat.hit(dirty);
   }
 
   /** Nothing for a while and they get their breath back. */
@@ -2948,11 +3009,7 @@ export class Game {
       this.gooseMissionDone = true;
       this.swanboatMissionDone = true;
       this.clockOn({ quiet: true });
-      const spot = getMissionSpot("fire");
-      const at = new THREE.Vector3(spot.x, 0, spot.z);
-      this.grassFire = new GrassFire(this.scene, at);
-      this.callouts.raise("fire", this.dayCycle.clockFace(), spot);
-      this.announceMission("fire");
+      this.beginGrassFire();
     } else if (from === "racers") {
       this.dayCycle.setHour(22.2);
       this.picnicRaidDone = true;
@@ -3536,8 +3593,62 @@ export class Game {
 
   /**
    * Later in the shift a disposable can set the grass off. One fire a day —
-   * hose it before it walks the green.
+   * hose it before it walks the green. Always a BBQ in the middle, folk
+   * panicking round it, and the crab kids running over with buckets.
    */
+  private beginGrassFire(): void {
+    if (this.grassFire || this.fireMissionDone) return;
+
+    const prefer = getMissionSpot("fire");
+    let party = this.bbqs
+      .filter((p) => !p.isDone())
+      .sort((a, b) => {
+        const ap = a.getPosition();
+        const bp = b.getPosition();
+        const ad =
+          (ap.x - prefer.x) * (ap.x - prefer.x) +
+          (ap.z - prefer.z) * (ap.z - prefer.z);
+        const bd =
+          (bp.x - prefer.x) * (bp.x - prefer.x) +
+          (bp.z - prefer.z) * (bp.z - prefer.z);
+        return ad - bd;
+      })[0];
+    if (!party) {
+      party = new BbqParty(
+        this.scene,
+        new THREE.Vector2(prefer.x, prefer.z),
+        { planted: true },
+      );
+      this.bbqs.push(party);
+    }
+
+    const at = party.getPosition();
+    this.grassFire = new GrassFire(this.scene, at);
+    party.panic(this.grassFire);
+    this.rallyCrabbersForFire(at);
+    this.callouts.raise("fire", this.dayCycle.clockFace(), {
+      x: at.x,
+      z: at.z,
+    });
+    this.announceMission("fire");
+  }
+
+  /** Make sure a few crabbing kids are on the nearest bank to run over. */
+  private rallyCrabbersForFire(at: THREE.Vector3): void {
+    const need = 3 - this.crabbers.length;
+    if (need <= 0) return;
+    const bank = nearestShore(at.x, at.z);
+    for (let i = 0; i < need && this.crabbers.length < MAX_CRABBERS; i++) {
+      this.crabbers.push(
+        new Crabber(
+          this.scene,
+          bank,
+          (i - (need - 1) / 2) * 1.15,
+        ),
+      );
+    }
+  }
+
   private updateGrassFire(delta: number): void {
     const hour = this.dayCycle.hour;
 
@@ -3547,37 +3658,7 @@ export class Game {
       this.missionsQuiet() &&
       missionWindowOpen("fire", hour)
     ) {
-      const prefer = getMissionSpot("fire");
-      const cooking = this.bbqs
-        .filter((party) => party.isCooking())
-        .sort((a, b) => {
-          const ap = a.getPosition();
-          const bp = b.getPosition();
-          const ad =
-            (ap.x - prefer.x) * (ap.x - prefer.x) +
-            (ap.z - prefer.z) * (ap.z - prefer.z);
-          const bd =
-            (bp.x - prefer.x) * (bp.x - prefer.x) +
-            (bp.z - prefer.z) * (bp.z - prefer.z);
-          return ad - bd;
-        });
-      if (cooking.length > 0 && Math.random() < delta * 0.012) {
-        const party = cooking[0]!;
-        const at = party.getPosition();
-        this.grassFire = new GrassFire(this.scene, at);
-        party.scarper();
-        this.callouts.raise("fire", this.dayCycle.clockFace(), {
-          x: at.x,
-          z: at.z,
-        });
-        this.announceMission("fire");
-      } else if (cooking.length === 0 && Math.random() < delta * 0.004) {
-        // Authored fire pin — still light even if no BBQ is on.
-        const at = new THREE.Vector3(prefer.x, 0, prefer.z);
-        this.grassFire = new GrassFire(this.scene, at);
-        this.callouts.raise("fire", this.dayCycle.clockFace(), prefer);
-        this.announceMission("fire");
-      }
+      this.beginGrassFire();
     }
 
     if (!this.grassFire) return;
@@ -3616,9 +3697,15 @@ export class Game {
       this.score += 40 * this.multiplier();
       this.updateHUD();
       this.callouts.raise("praise", this.dayCycle.clockFace());
+      for (const party of this.bbqs) {
+        if (party.isPanicking()) party.scarper();
+      }
     }
 
     if (this.grassFire.isDone()) {
+      for (const party of this.bbqs) {
+        if (party.isPanicking()) party.scarper();
+      }
       this.grassFire.dispose();
       this.grassFire = null;
       this.fireMissionDone = true;
@@ -4676,6 +4763,7 @@ export class Game {
       this.faceWetLeft = Math.max(0, this.faceWetLeft - delta);
       if (this.faceWetLeft === 0) this.faceDirty = false;
     }
+    this.faceSplat.update(delta);
     if (this.fireSteamCool > 0) {
       this.fireSteamCool = Math.max(0, this.fireSteamCool - delta);
     }
@@ -4744,7 +4832,40 @@ export class Game {
     this.tickCombo(delta);
     this.applyTimeAndWeather(delta);
 
-    this.miniMap.update(delta, {
+    if (this.miniMap.tick(delta)) this.paintMiniMap();
+    this.mugshot.update(delta, {
+      cleanliness: this.cleanliness,
+      spraying: this.player.isHosing(),
+      raining: this.weather.isWet(),
+      hurt: this.hurtLeft > 0,
+      health: this.health / HEALTH_MAX,
+      swanLook: this.swanInEyeline(),
+      faceWet: this.faceWetLeft > 0,
+      faceDirty: this.faceDirty && this.faceWetLeft > 0,
+    });
+    const heading = this.player.getHeading();
+    this.compass.update(heading);
+    this.objectiveArrow.update(
+      this.camera,
+      this.camera.position,
+      heading,
+      this.objectiveSpots(),
+      delta,
+    );
+    this.missionArrow.update(
+      this.camera,
+      this.camera.position,
+      heading,
+      this.eventMissionSpots(),
+      delta,
+    );
+
+    this.refreshPressureGauge();
+    this.renderer.render(this.scene, this.camera);
+  };
+
+  private paintMiniMap(): void {
+    this.miniMap.draw({
       player: this.camera.position,
       heading: this.player.getHeading(),
       swans: this.swans
@@ -4791,58 +4912,39 @@ export class Game {
           : undefined,
       missions: this.eventMissionSpots(),
     });
-    this.mugshot.update(delta, {
-      cleanliness: this.cleanliness,
-      spraying: this.player.isHosing(),
-      raining: this.weather.isWet(),
-      hurt: this.hurtLeft > 0,
-      health: this.health / HEALTH_MAX,
-      swanLook: this.swanInEyeline(),
-      faceWet: this.faceWetLeft > 0,
-      faceDirty: this.faceDirty && this.faceWetLeft > 0,
-    });
-    const heading = this.player.getHeading();
-    this.compass.update(heading);
-    this.objectiveArrow.update(
-      this.camera,
-      this.camera.position,
-      heading,
-      this.objectiveSpots(),
-      delta,
-    );
-    this.missionArrow.update(
-      this.camera,
-      this.camera.position,
-      heading,
-      this.eventMissionSpots(),
-      delta,
-    );
-
-    this.refreshPressureGauge();
-    this.renderer.render(this.scene, this.camera);
-  };
+  }
 
   /**
    * Red arrow — scripted missions only: picnic dive, geese, grass fire, rebels.
    * Ambient urgencies (drunks, dunks) use the yellow mess arrow.
    */
-  private eventMissionSpots(): { x: number; z: number }[] {
+  private eventMissionSpots(): ArrowSpot[] {
     if (!this.onDuty) return [];
-    const spots: { x: number; z: number }[] = [];
+    const spots: ArrowSpot[] = [];
 
     if (this.graffitiMissionStarted && !this.graffitiMissionDone) {
       for (const tag of this.graffitiMissionTags) {
         if (tag.isClean()) continue;
         const at = tag.getPosition();
-        spots.push({ x: at.x, z: at.z });
+        spots.push({ x: at.x, z: at.z, hudOnly: true });
       }
       for (const { wall } of this.graffitiPending) {
-        spots.push({ x: wall.x, z: wall.z });
+        spots.push({ x: wall.x, z: wall.z, hudOnly: true });
       }
     }
 
     if (this.picnicRaidActive && this.picnicRaidTip) {
       spots.push(this.picnicRaidTip);
+    }
+
+    if (this.feederRushLeft > 0) {
+      for (const person of this.people) {
+        if (person.isGone() || !person.hasFood()) continue;
+        const at = person.getPosition();
+        if (northwestScore(at.x, at.z) < 0.18) continue;
+        spots.push({ x: at.x, z: at.z });
+      }
+      if (spots.length === 0 && this.feederTip) spots.push(this.feederTip);
     }
 
     if (
@@ -4890,9 +4992,9 @@ export class Game {
    * Yellow arrow — dirt, and other jobs that aren't a radio mission
    * (drunks, someone in the drink).
    */
-  private objectiveSpots(): { x: number; z: number }[] {
+  private objectiveSpots(): ArrowSpot[] {
     if (!this.onDuty) return [];
-    const spots: { x: number; z: number }[] = [];
+    const spots: ArrowSpot[] = [];
 
     // Opening tip first — don't send them chasing litter until that wave's done.
     if (!this.secondEventDone && this.overnightPiles.size > 0) {
@@ -4937,8 +5039,10 @@ export class Game {
     }
     for (const tag of this.graffiti) {
       if (tag.isClean()) continue;
+      // Red mission arrow already tracks the tag job — don't double-cover the wall.
+      if (this.graffitiMissionStarted && !this.graffitiMissionDone) continue;
       const at = tag.getPosition();
-      spots.push({ x: at.x, z: at.z });
+      spots.push({ x: at.x, z: at.z, hudOnly: true });
     }
     for (const print of this.footprints) {
       if (!print.isWorthArrow()) continue;
@@ -5022,4 +5126,21 @@ export class Game {
   public isPaused(): boolean {
     return this.paused;
   }
+}
+
+/** Even-odd point-in-polygon on the ground plane. */
+function insideOutline(
+  x: number,
+  z: number,
+  outline: ReadonlyArray<{ x: number; z: number }>,
+): boolean {
+  let inside = false;
+  for (let i = 0, j = outline.length - 1; i < outline.length; j = i++) {
+    const a = outline[i]!;
+    const b = outline[j]!;
+    if (a.z > z !== b.z > z && x < ((b.x - a.x) * (z - a.z)) / (b.z - a.z) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
 }

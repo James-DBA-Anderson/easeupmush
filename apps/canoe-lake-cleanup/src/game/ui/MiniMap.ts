@@ -18,6 +18,7 @@ import {
   getRoadGraph,
   getTerraceRuns,
   ROAD_WIDTH,
+  PAVEMENT_WIDTH,
   HOUSE_DEPTH,
 } from "../world/buildings";
 import { PARK_RING } from "../world/fence";
@@ -27,6 +28,7 @@ const REFRESH = 1 / 15;
 const PATH_COLOUR = "#9a958a";
 const PATH_WIDTH = 4;
 const ROAD_COLOUR = "#4a4e54";
+const PAVEMENT_COLOUR = "#b0ada4";
 const TERRACE_COLOUR = "#7a746c";
 
 interface MapData {
@@ -226,9 +228,11 @@ export class MiniMap {
     const graph = getRoadGraph();
     if (!graph) return;
     const ctx = this.ctx;
-    const width = Math.max(2, ROAD_WIDTH * this.scale);
-    ctx.strokeStyle = ROAD_COLOUR;
-    ctx.lineWidth = width;
+    const paveW = Math.max(
+      3,
+      (ROAD_WIDTH + PAVEMENT_WIDTH * 2) * this.scale,
+    );
+    const tarmacW = Math.max(2, ROAD_WIDTH * this.scale);
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     for (const line of graph.roads) {
@@ -239,6 +243,11 @@ export class MiniMap {
         if (i === 0) ctx.moveTo(sx, sy);
         else ctx.lineTo(sx, sy);
       });
+      ctx.strokeStyle = PAVEMENT_COLOUR;
+      ctx.lineWidth = paveW;
+      ctx.stroke();
+      ctx.strokeStyle = ROAD_COLOUR;
+      ctx.lineWidth = tarmacW;
       ctx.stroke();
     }
   }
@@ -362,17 +371,23 @@ export class MiniMap {
     this.missionThrobLeft = Math.max(this.missionThrobLeft, seconds);
   }
 
-  public update(delta: number, data: MapData): void {
+  /** Tick clocks. True when the canvas should be redrawn this frame. */
+  public tick(delta: number): boolean {
     if (this.missionThrobLeft > 0) {
       this.missionThrobLeft = Math.max(0, this.missionThrobLeft - delta);
     }
     this.since += delta;
-    if (this.since < REFRESH) return;
+    if (this.since < REFRESH) return false;
     this.since = 0;
+    return true;
+  }
+
+  public update(delta: number, data: MapData): void {
+    if (!this.tick(delta)) return;
     this.draw(data);
   }
 
-  private draw(data: MapData): void {
+  public draw(data: MapData): void {
     const ctx = this.ctx;
     this.originX = data.player.x;
     this.originZ = data.player.z;

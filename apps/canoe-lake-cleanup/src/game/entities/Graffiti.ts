@@ -1,7 +1,15 @@
 import * as THREE from "three";
 
 /** What gets sprayed on the back of the toilet block round here. */
-export const TAGS = ["your mum", "PFC", "657", "ease up mush"] as const;
+export const TAGS = [
+  "your mum",
+  "PFC",
+  "657",
+  "ease up mush",
+  "Hilsea Lot",
+  "Phone your mum",
+  "Pompey",
+] as const;
 export type Tag = (typeof TAGS)[number];
 const INKS = ["#e0332f", "#2f6fd8", "#1f1f26", "#f0e6c8", "#3f9f5f"];
 

@@ -29,6 +29,8 @@ const GLASS = new THREE.MeshStandardMaterial({
 });
 const STONE = new THREE.MeshStandardMaterial({ color: 0x8d8577, roughness: 1 });
 const ASPHALT = new THREE.MeshStandardMaterial({ color: 0x1c1c1e, roughness: 0.95 });
+const PAVING = new THREE.MeshStandardMaterial({ color: 0xb6b2a8, roughness: 0.92 });
+const KERB_STONE = new THREE.MeshStandardMaterial({ color: 0xd4cfc4, roughness: 0.88 });
 const ROAD_MARK = new THREE.MeshStandardMaterial({ color: 0xf4f4f0, roughness: 0.85 });
 const TYRE = new THREE.MeshStandardMaterial({ color: 0x0e0e10, roughness: 1 });
 const HUB = new THREE.MeshStandardMaterial({
@@ -75,6 +77,9 @@ const GROUND = new THREE.MeshStandardMaterial({
 export const HOUSE_DEPTH = 9;
 /** Parade road width in metres. */
 export const ROAD_WIDTH = 14;
+/** Footway on each side of the carriageway. */
+export const PAVEMENT_WIDTH = 2.45;
+const KERB_WIDTH = 0.22;
 /** Centre-line dash length / gap. */
 const MARK_DASH = 3.2;
 const MARK_GAP = 3.8;
@@ -521,6 +526,28 @@ function roadStrip(
     asphalt.rotateY(yaw);
     asphalt.translate(mx, gy + 0.04, mz);
     yard.add(ASPHALT, asphalt);
+
+    // Pavement and kerb on both sides — offset along the road normal.
+    const nx = -uz;
+    const nz = ux;
+    for (const side of [-1, 1] as const) {
+      const kerbOff = ROAD_WIDTH * 0.5 + KERB_WIDTH * 0.5;
+      const paveOff = ROAD_WIDTH * 0.5 + KERB_WIDTH + PAVEMENT_WIDTH * 0.5;
+      const kx = mx + nx * kerbOff * side;
+      const kz = mz + nz * kerbOff * side;
+      const px = mx + nx * paveOff * side;
+      const pz = mz + nz * paveOff * side;
+
+      const kerb = new THREE.BoxGeometry(seg, 0.26, KERB_WIDTH);
+      kerb.rotateY(yaw);
+      kerb.translate(kx, gy + 0.14, kz);
+      yard.add(KERB_STONE, kerb);
+
+      const pave = new THREE.BoxGeometry(seg, 0.14, PAVEMENT_WIDTH);
+      pave.rotateY(yaw);
+      pave.translate(px, gy + 0.16, pz);
+      yard.add(PAVING, pave);
+    }
   }
 
   // Dashes along the full run — not per asphalt chunk (chunks are shorter
@@ -862,7 +889,7 @@ function buildTerraces(yard: Yard, rand: () => number): void {
         a[1],
         b[0],
         b[1],
-        ROAD_WIDTH * 0.5 + 1.5,
+        ROAD_WIDTH * 0.5 + PAVEMENT_WIDTH + KERB_WIDTH + 1.2,
       );
       for (const [s0, s1] of freeSpansAlong(length, gaps, 5)) {
         const spanLen = s1 - s0;

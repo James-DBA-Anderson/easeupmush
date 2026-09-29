@@ -7,6 +7,9 @@ import {
   hatchQueueSpot,
   pedaloWorldPos,
 } from "../world/park";
+import { groundHeight } from "../world/terrain";
+import type { Face } from "./Face";
+import { buildBoatman } from "./StaffModel";
 
 const PAY_LINES = [
   "THAT'LL BE A TENNER",
@@ -47,6 +50,7 @@ export class Boatman {
   private group = new THREE.Group();
   private legs: THREE.Group[] = [];
   private arms: THREE.Group[] = [];
+  private face: Face | null = null;
   private stand = new THREE.Vector3();
   private job: Job = "idle";
   private timer = 0;
@@ -142,6 +146,15 @@ export class Boatman {
       this.grumble?.update(delta, this.group.position) === false
         ? null
         : this.grumble;
+    this.face?.update(delta);
+    this.face?.setMood(
+      this.job === "hunt" ? "angry" : this.job === "helping" ? "pleased" : "idle",
+    );
+
+    this.group.position.y = groundHeight(
+      this.group.position.x,
+      this.group.position.z,
+    );
 
     if (this.timer > 0) this.timer -= delta;
     if (this.swingCool > 0) this.swingCool -= delta;
@@ -376,67 +389,12 @@ export class Boatman {
   }
 
   private build(): void {
-    const skin = new THREE.MeshStandardMaterial({
-      color: 0xd9a066,
-      roughness: 0.9,
-    });
-    const jumper = new THREE.MeshStandardMaterial({
-      color: 0x2f5d7a,
-      roughness: 0.85,
-    });
-    const trousers = new THREE.MeshStandardMaterial({
-      color: 0x3a3a42,
-      roughness: 0.9,
-    });
-    const cap = new THREE.MeshStandardMaterial({
-      color: 0xc94f3d,
-      roughness: 0.8,
-    });
-
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.32), jumper);
-    torso.position.y = 1.15;
-    torso.castShadow = true;
-    this.group.add(torso);
-
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.34, 0.32), skin);
-    head.position.y = 1.72;
-    this.group.add(head);
-
-    const hat = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.2, 0.22, 0.14, 8),
-      cap,
-    );
-    hat.position.y = 1.95;
-    this.group.add(hat);
-    const brim = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.28, 0.28, 0.04, 8),
-      cap,
-    );
-    brim.position.y = 1.88;
-    this.group.add(brim);
-
-    for (const side of [-1, 1]) {
-      const leg = new THREE.Group();
-      leg.position.set(side * 0.14, 0.78, 0);
-      const thigh = new THREE.Mesh(
-        new THREE.BoxGeometry(0.16, 0.78, 0.18),
-        trousers,
-      );
-      thigh.position.y = -0.39;
-      leg.add(thigh);
-      this.group.add(leg);
-      this.legs.push(leg);
-
-      const arm = new THREE.Group();
-      arm.position.set(side * 0.32, 1.4, 0);
-      const sleeve = new THREE.Mesh(
-        new THREE.BoxGeometry(0.14, 0.62, 0.14),
-        jumper,
-      );
-      sleeve.position.y = -0.28;
-      arm.add(sleeve);
-      this.group.add(arm);
-      this.arms.push(arm);
+    const rig = buildBoatman();
+    this.face = rig.face;
+    this.arms = rig.arms;
+    this.legs = rig.legs;
+    while (rig.group.children.length > 0) {
+      this.group.add(rig.group.children[0]!);
     }
   }
 }

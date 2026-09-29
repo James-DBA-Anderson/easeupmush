@@ -57,8 +57,10 @@ const LINING = new THREE.MeshStandardMaterial({
 
 const VAN_LEN = 5.4;
 const VAN_WIDE = 2.05;
-/** Eye in the driver's seat (UK right-hand drive). */
-const SEAT_LOCAL = new THREE.Vector3(0.55, 1.42, -0.38);
+/** Driver's seat (UK right-hand drive); the wheel and dials line up on it. */
+const SEAT_LOCAL = new THREE.Vector3(0.95, 1.42, -0.38);
+/** Kerb-side front seat, by the door the cleaner gets out of. */
+const RIDE_SEAT_LOCAL = new THREE.Vector3(0.95, 1.21, 0.38);
 /** Stand just outside the kerb-side (left, +Z) cab door, park side. */
 const EXIT_LOCAL = new THREE.Vector3(1.15, 0, 1.65);
 /** Threshold in the middle of the cab door opening, so the get-out clears the pillars. */
@@ -69,6 +71,7 @@ export interface CleanerVanPose {
   z: number;
   yaw: number;
   seatX: number;
+  /** Top of the seat cushion. */
   seatY: number;
   seatZ: number;
   /** World facing while seated — along the road, away from the park. */
@@ -253,6 +256,7 @@ function resolvePose(): CleanerVanPose | null {
   const x = road.x + fx * along + nx * kerb;
   const z = road.z + fz * along + nz * kerb;
 
+  // Sit in the driver's seat (wheel side); they shuffle across to the kerb door.
   const seat = localToWorld(x, z, yaw, SEAT_LOCAL.x, SEAT_LOCAL.z);
   const exit = localToWorld(x, z, yaw, EXIT_LOCAL.x, EXIT_LOCAL.z);
   const door = localToWorld(x, z, yaw, DOORWAY_LOCAL.x, DOORWAY_LOCAL.z);
@@ -286,7 +290,8 @@ function resolvePose(): CleanerVanPose | null {
     z,
     yaw,
     seatX: seat.x,
-    seatY: groundHeight(x, z) + SEAT_LOCAL.y,
+    // Cushion top — matches the seat mesh at floorY + 0.42 (ride 0.42 + floor 0.28).
+    seatY: groundHeight(x, z) + 1.12,
     seatZ: seat.z,
     seatYaw: yaw,
     doorX: door.x,
@@ -999,25 +1004,28 @@ function buildMesh(): THREE.Group {
   for (const out of [-1, 1] as const) {
     const door = new THREE.Group();
     door.position.set(doorHingeX, doorY, out * halfW);
-    const doorPanel = new THREE.Mesh(
-      new THREE.BoxGeometry(DOOR_W, DOOR_H, 0.07),
-      BODY,
-    );
-    doorPanel.position.set(-DOOR_W * 0.5, 0, 0);
-    doorPanel.castShadow = true;
-    door.add(doorPanel);
+    // Window opening in door-local space (hinge at x = 0, rear edge at −DOOR_W).
+    const win = { x0: -DOOR_W * 0.38 - 0.275, x1: -DOOR_W * 0.38 + 0.275, y0: 0.09, y1: 0.47 };
+    // Skin and inner card are built round the opening so the glass shows the cab.
+    addPanelAround(door, BODY, -DOOR_W, 0, -DOOR_H * 0.5, DOOR_H * 0.5, win, 0.07, 0, true);
     // Inner door card — reads when the door swings open.
-    const doorCard = new THREE.Mesh(
-      new THREE.BoxGeometry(DOOR_W - 0.1, DOOR_H - 0.15, 0.04),
+    addPanelAround(
+      door,
       CABIN,
+      -DOOR_W + 0.05,
+      -0.05,
+      -DOOR_H * 0.5 + 0.055,
+      DOOR_H * 0.5 - 0.095,
+      win,
+      0.04,
+      -out * 0.05,
+      false,
     );
-    doorCard.position.set(-DOOR_W * 0.5, -0.02, -out * 0.05);
-    door.add(doorCard);
     const doorWin = new THREE.Mesh(
-      new THREE.BoxGeometry(0.55, 0.38, 0.05),
+      new THREE.BoxGeometry(win.x1 - win.x0, win.y1 - win.y0, 0.02),
       GLASS,
     );
-    doorWin.position.set(-DOOR_W * 0.38, 0.28, out * 0.02);
+    doorWin.position.set((win.x0 + win.x1) / 2, (win.y0 + win.y1) / 2, 0);
     door.add(doorWin);
     const handle = new THREE.Mesh(
       new THREE.BoxGeometry(0.12, 0.04, 0.05),
@@ -1074,6 +1082,32 @@ function buildMesh(): THREE.Group {
   return van;
 }
 
+/** A flat panel with a rectangular hole, as up to four boxes round the opening. */
+function addPanelAround(
+  parent: THREE.Object3D,
+  mat: THREE.Material,
+  x0: number,
+  x1: number,
+  y0: number,
+  y1: number,
+  hole: { x0: number; x1: number; y0: number; y1: number },
+  depth: number,
+  z: number,
+  shadow: boolean,
+): void {
+  const add = (ax: number, bx: number, ay: number, by: number) => {
+    if (bx - ax < 0.005 || by - ay < 0.005) return;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(bx - ax, by - ay, depth), mat);
+    mesh.position.set((ax + bx) / 2, (ay + by) / 2, z);
+    mesh.castShadow = shadow;
+    parent.add(mesh);
+  };
+  add(x0, x1, y0, Math.min(y1, hole.y0));
+  add(x0, x1, Math.max(y0, hole.y1), y1);
+  add(x0, Math.max(x0, hole.x0), hole.y0, hole.y1);
+  add(Math.min(x1, hole.x1), x1, hole.y0, hole.y1);
+}
+
 /** Seat, dash, wheel, and lining — enough to read as a cab when the door's open. */
 function addCabinInterior(
   van: THREE.Group,
@@ -1128,19 +1162,25 @@ function addCabinInterior(
   seatBase.position.set(SEAT_LOCAL.x, floorY + 0.42, SEAT_LOCAL.z);
   van.add(seatBase);
   const seatBack = new THREE.Mesh(
-    new THREE.BoxGeometry(0.48, 0.55, 0.12),
+    new THREE.BoxGeometry(0.12, 0.55, 0.48),
     SEAT_FABRIC,
   );
-  seatBack.position.set(SEAT_LOCAL.x - 0.18, floorY + 0.72, SEAT_LOCAL.z);
+  seatBack.position.set(SEAT_LOCAL.x - 0.24, floorY + 0.72, SEAT_LOCAL.z);
   van.add(seatBack);
 
-  // Passenger perch (simpler bench).
+  // Kerb-side front seat — where the cleaner rides.
   const passSeat = new THREE.Mesh(
-    new THREE.BoxGeometry(0.42, 0.14, 0.42),
+    new THREE.BoxGeometry(0.48, 0.18, 0.48),
     SEAT_FABRIC,
   );
-  passSeat.position.set(SEAT_LOCAL.x, floorY + 0.4, 0.42);
+  passSeat.position.set(RIDE_SEAT_LOCAL.x, floorY + 0.42, RIDE_SEAT_LOCAL.z);
   van.add(passSeat);
+  const passBack = new THREE.Mesh(
+    new THREE.BoxGeometry(0.12, 0.55, 0.48),
+    SEAT_FABRIC,
+  );
+  passBack.position.set(RIDE_SEAT_LOCAL.x - 0.24, floorY + 0.72, RIDE_SEAT_LOCAL.z);
+  van.add(passBack);
 
   // Dashboard across the nose.
   const dash = new THREE.Mesh(

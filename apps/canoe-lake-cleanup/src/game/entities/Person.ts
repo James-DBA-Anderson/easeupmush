@@ -1518,6 +1518,13 @@ export class Person {
     return this.handfuls > 0;
   }
 
+  /** Put them on the NW stretch with a full bag for the feeder-rush job. */
+  public plantAsFeeder(): void {
+    this.index = pickNorthwestPathIndex();
+    this.stockForFeederRush();
+    if (this.errand === "strolling") this.place();
+  }
+
   /**
    * Throws a handful to a begging swan. They stop to do it, and once the bag
    * is empty it goes away and the swans lose interest.

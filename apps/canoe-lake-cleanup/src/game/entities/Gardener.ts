@@ -17,6 +17,8 @@ import {
 } from "../world/trees";
 import type { Person } from "./Person";
 import type { Dog } from "./Dog";
+import type { Face } from "./Face";
+import { buildGardener } from "./StaffModel";
 
 const TEND_LINES = [
   "THAT'LL DO YOU",
@@ -71,6 +73,7 @@ export class Gardener {
   private legs: THREE.Group[] = [];
   private arms: THREE.Group[] = [];
   private rake: THREE.Group;
+  private face: Face | null = null;
 
   private job: Job = "idle";
   private bed: FlowerBed | null = null;
@@ -148,6 +151,10 @@ export class Gardener {
       this.grumble?.update(delta, this.group.position) === false
         ? null
         : this.grumble;
+    this.face?.update(delta);
+    this.face?.setMood(
+      this.job === "hunt" ? "angry" : this.job === "tend" ? "pleased" : "idle",
+    );
     if (this.timer > 0) this.timer -= delta;
     if (this.swingCool > 0) this.swingCool -= delta;
     if (this.praiseCool > 0) this.praiseCool -= delta;
@@ -541,71 +548,15 @@ export class Gardener {
   }
 
   private build(): void {
-    const skin = new THREE.MeshStandardMaterial({
-      color: 0xd9a066,
-      roughness: 0.9,
-    });
-    const jumper = new THREE.MeshStandardMaterial({
-      color: 0x3d6b3a,
-      roughness: 0.85,
-    });
-    const trousers = new THREE.MeshStandardMaterial({
-      color: 0x4a3a28,
-      roughness: 0.9,
-    });
-    const hat = new THREE.MeshStandardMaterial({
-      color: 0xb8a060,
-      roughness: 0.95,
-    });
-
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.32), jumper);
-    torso.position.y = 1.15;
-    torso.castShadow = true;
-    this.group.add(torso);
-
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.34, 0.32), skin);
-    head.position.y = 1.72;
-    this.group.add(head);
-
-    const brim = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.3, 0.3, 0.04, 10),
-      hat,
-    );
-    brim.position.y = 1.88;
-    this.group.add(brim);
-    const crown = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.18, 0.2, 0.16, 8),
-      hat,
-    );
-    crown.position.y = 1.98;
-    this.group.add(crown);
-
-    for (const side of [-1, 1] as const) {
-      const leg = new THREE.Group();
-      leg.position.set(side * 0.14, 0.78, 0);
-      const thigh = new THREE.Mesh(
-        new THREE.BoxGeometry(0.16, 0.78, 0.18),
-        trousers,
-      );
-      thigh.position.y = -0.39;
-      leg.add(thigh);
-      this.group.add(leg);
-      this.legs.push(leg);
-
-      const arm = new THREE.Group();
-      arm.position.set(side * 0.32, 1.4, 0);
-      const sleeve = new THREE.Mesh(
-        new THREE.BoxGeometry(0.14, 0.62, 0.14),
-        jumper,
-      );
-      sleeve.position.y = -0.28;
-      arm.add(sleeve);
-      this.group.add(arm);
-      this.arms.push(arm);
+    const rig = buildGardener();
+    this.face = rig.face;
+    this.arms = rig.arms;
+    this.legs = rig.legs;
+    while (rig.group.children.length > 0) {
+      this.group.add(rig.group.children[0]!);
     }
-
-    this.rake.position.set(0.12, -0.15, 0.05);
-    this.rake.rotation.z = 0.15;
-    this.arms[1]!.add(this.rake);
+    this.rake.position.set(0.04, -0.08, 0.06);
+    this.rake.rotation.set(0.35, 0.1, 0.25);
+    rig.rightHand.add(this.rake);
   }
 }

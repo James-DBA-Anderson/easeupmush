@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { Face } from "../entities/Face";
+import type { Face } from "../entities/Face";
+import { buildWarden } from "../entities/WardenModel";
 import { parkAudio } from "../audio/ParkAudio";
 import { groundHeight } from "../world/terrain";
 import {
@@ -477,124 +478,13 @@ export class HeavyHoseIntro {
   }
 
   private buildAvatar(): THREE.Group {
-    const group = new THREE.Group();
-    const coat = new THREE.MeshStandardMaterial({
-      color: 0xc9a227,
-      roughness: 0.85,
-    });
-    const hiVis = new THREE.MeshStandardMaterial({
-      color: 0x2a2a2c,
-      roughness: 0.9,
-    });
-    const legMat = new THREE.MeshStandardMaterial({
-      color: 0x2b3038,
-      roughness: 0.9,
-    });
-    const skin = new THREE.MeshStandardMaterial({
-      color: 0xd9a066,
-      roughness: 0.8,
-    });
-    const shoeMat = new THREE.MeshStandardMaterial({
-      color: 0x2a2420,
-      roughness: 1,
-    });
-
-    const hips = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.18, 0.22), legMat);
-    hips.position.y = 0.92;
-    hips.castShadow = true;
-    group.add(hips);
-
-    const torso = new THREE.Group();
-    torso.position.y = 1.0;
-    group.add(torso);
-
-    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.55, 0.24), coat);
-    chest.position.y = 0.28;
-    chest.castShadow = true;
-    torso.add(chest);
-
-    const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(0.44, 0.08, 0.26),
-      hiVis,
-    );
-    stripe.position.y = 0.22;
-    torso.add(stripe);
-
-    const neck = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.05, 0.06, 0.1, 8),
-      skin,
-    );
-    neck.position.y = 0.6;
-    torso.add(neck);
-
-    const head = new THREE.Group();
-    head.position.y = 0.72;
-    torso.add(head);
-    this.face = new Face(skin);
-    head.add(this.face.group);
-
-    const cap = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.16, 0.17, 0.08, 10),
-      hiVis,
-    );
-    cap.position.y = 0.14;
-    head.add(cap);
-    const peak = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.03, 0.1), hiVis);
-    peak.position.set(0, 0.1, 0.12);
-    head.add(peak);
-
-    for (const side of [-1, 1] as const) {
-      const arm = new THREE.Group();
-      arm.position.set(side * 0.27, 0.48, 0);
-      torso.add(arm);
-      const upper = new THREE.Mesh(
-        new THREE.BoxGeometry(0.11, 0.32, 0.12),
-        coat,
-      );
-      upper.geometry.translate(0, -0.16, 0);
-      upper.castShadow = true;
-      arm.add(upper);
-      const forearm = new THREE.Mesh(
-        new THREE.BoxGeometry(0.1, 0.28, 0.1),
-        coat,
-      );
-      forearm.geometry.translate(0, -0.14, 0);
-      forearm.position.y = -0.32;
-      forearm.castShadow = true;
-      arm.add(forearm);
-      this.arms.push(arm);
-    }
-
-    for (const side of [-1, 1] as const) {
-      const leg = new THREE.Group();
-      leg.position.set(side * 0.11, 0.92, 0);
-      group.add(leg);
-      const thigh = new THREE.Mesh(
-        new THREE.BoxGeometry(0.14, 0.4, 0.16),
-        legMat,
-      );
-      thigh.geometry.translate(0, -0.2, 0);
-      thigh.castShadow = true;
-      leg.add(thigh);
-      const shin = new THREE.Mesh(
-        new THREE.BoxGeometry(0.12, 0.38, 0.14),
-        legMat,
-      );
-      shin.geometry.translate(0, -0.19, 0);
-      shin.position.y = -0.4;
-      shin.castShadow = true;
-      leg.add(shin);
-      const shoe = new THREE.Mesh(
-        new THREE.BoxGeometry(0.12, 0.07, 0.22),
-        shoeMat,
-      );
-      shoe.position.set(0, -0.4, 0.04);
-      shin.add(shoe);
-      this.legs.push(leg);
-    }
-
-    return group;
+    const rig = buildWarden();
+    this.face = rig.face;
+    this.arms.push(...rig.arms);
+    this.legs.push(...rig.legs);
+    return rig.group;
   }
+
 }
 
 function easeInOut(t: number): number {
