@@ -18,6 +18,7 @@ import { Drunks, drunkSpots } from "./entities/Drunks";
 import { RebelRaid } from "./entities/RebelRaid";
 import { BoyRacers } from "./entities/BoyRacers";
 import { StolenSwanboat } from "./entities/StolenSwanboat";
+import { ParentPunchUp } from "./entities/ParentPunchUp";
 import { Scooter } from "./entities/Scooter";
 import { TrafficCar } from "./entities/TrafficCar";
 import { RcBoat } from "./entities/RcBoat";
@@ -309,6 +310,11 @@ export class Game {
   private swanboatMissionStarted = false;
   private swanboatMissionDone = false;
 
+  /** After the stolen swan — parents go at it by the play park. */
+  private parentPunchUp: ParentPunchUp | null = null;
+  private punchupMissionStarted = false;
+  private punchupMissionDone = false;
+
   /** The player's view, worked out afresh each frame. */
   private view = new THREE.Frustum();
   private viewMatrix = new THREE.Matrix4();
@@ -404,9 +410,6 @@ export class Game {
    */
   private onDuty = false;
 
-  private cleanlinessElement: HTMLElement;
-  private cleanlinessBar: HTMLElement;
-  private scoreElement: HTMLElement;
   private cleanedElement: HTMLElement;
   private comboElement: HTMLElement;
   private comboValueElement: HTMLElement;
@@ -465,9 +468,6 @@ export class Game {
       this.scene,
     );
 
-    this.cleanlinessElement = document.getElementById("cleanliness-value")!;
-    this.cleanlinessBar = document.getElementById("cleanliness-fill")!;
-    this.scoreElement = document.getElementById("score-value")!;
     this.cleanedElement = document.getElementById("cleaned-value")!;
     this.comboElement = document.getElementById("combo")!;
     this.comboValueElement = document.getElementById("combo-value")!;
@@ -1685,6 +1685,7 @@ export class Game {
       this.picnicRaidActive,
       this.gooseMissionStarted && !this.gooseMissionDone,
       this.swanboatMissionStarted && !this.swanboatMissionDone,
+      this.punchupMissionStarted && !this.punchupMissionDone,
       this.grassFire !== null,
     ].filter(Boolean).length;
   }
@@ -1918,7 +1919,7 @@ export class Game {
 
     // Water hitting a tagged wall carves fading streaks through the paint.
     for (const tag of this.graffiti) {
-      if (!tag.hitBy(point)) continue;
+      if (!tag.hitBy(point, this.camera.position)) continue;
       tag.scrub(point, direction);
       if (tag.claimCredit()) this.creditClean();
       return true;
@@ -1973,6 +1974,7 @@ export class Game {
 
     // Hire swan pedalos — stolen chase floods the hull; otherwise flecks / rinse.
     if (this.stolenSwanboat?.takeSpray(point, heavy)) return true;
+    if (this.parentPunchUp?.takeSpray(point, heavy)) return true;
     if (sprayPedalo(point, dirty)) return true;
 
     // Late drinkers — a blast of the washer and they're off.
@@ -2853,6 +2855,12 @@ export class Game {
         : "Stolen swanboat — E near a hire swan to board, chase them, spray their hull till she sinks";
       return;
     }
+    if (this.parentPunchUp?.isActive()) {
+      this.instructionsElement.innerHTML = mobile
+        ? "Parents punching lumps — hose them till they pack it in"
+        : "Parents punch-up — hose them off each other till they scarper";
+      return;
+    }
     this.instructionsElement.innerHTML = mobile
       ? "Left stick: Move | Look stick: Look | Spray (above look): Aim & fire | Near swan boat: tap spray to board"
       : tool === "picker"
@@ -3003,11 +3011,28 @@ export class Game {
       this.gooseMissionDone = true;
       this.clockOn({ quiet: true });
       this.beginSwanboatMission();
+    } else if (from === "punchup") {
+      this.dayCycle.setHour(16.4);
+      this.picnicRaidDone = true;
+      this.gooseMissionDone = true;
+      this.swanboatMissionDone = true;
+      this.clockOn({ quiet: true });
+      this.beginPunchUpMission();
+      const tip = this.parentPunchUp?.aimSpot() ?? getMissionSpot("punchup");
+      const standX = tip.x - 8;
+      const standZ = tip.z + 6;
+      this.player.takeOverFromIntro(
+        standX,
+        1.7 + groundHeight(standX, standZ),
+        standZ,
+        Math.atan2(tip.x - standX, tip.z - standZ),
+      );
     } else if (from === "fire") {
       this.dayCycle.setHour(17.5);
       this.picnicRaidDone = true;
       this.gooseMissionDone = true;
       this.swanboatMissionDone = true;
+      this.punchupMissionDone = true;
       this.clockOn({ quiet: true });
       this.beginGrassFire();
     } else if (from === "racers") {
@@ -3015,6 +3040,7 @@ export class Game {
       this.picnicRaidDone = true;
       this.gooseMissionDone = true;
       this.swanboatMissionDone = true;
+      this.punchupMissionDone = true;
       this.fireMissionDone = true;
       this.racerHourWas = 22;
       this.clockOn({ quiet: true });
@@ -3035,6 +3061,7 @@ export class Game {
       this.picnicRaidDone = true;
       this.gooseMissionDone = true;
       this.swanboatMissionDone = true;
+      this.punchupMissionDone = true;
       this.fireMissionDone = true;
       this.racerMissionDone = true;
       this.rebelHourWas = 1;
@@ -3045,6 +3072,7 @@ export class Game {
       this.picnicRaidDone = true;
       this.gooseMissionDone = true;
       this.swanboatMissionDone = true;
+      this.punchupMissionDone = true;
       this.clockOn({ quiet: true });
       this.startPigeonMission();
     }
@@ -3797,6 +3825,83 @@ export class Game {
   }
 
   /**
+   * After the stolen swan: parents square up by the play park. Hose them
+   * till they pack it in.
+   */
+  private updatePunchUpMission(delta: number): void {
+    const hour = this.dayCycle.hour;
+    if (
+      !this.punchupMissionStarted &&
+      !this.punchupMissionDone &&
+      this.swanboatMissionDone &&
+      this.missionsQuiet() &&
+      missionWindowOpen("punchup", hour)
+    ) {
+      this.beginPunchUpMission();
+    }
+
+    if (!this.parentPunchUp) return;
+    this.parentPunchUp.update(delta, this.camera.position);
+
+    if (this.parentPunchUp.claimStarted()) {
+      const tip = this.parentPunchUp.aimSpot();
+      this.callouts.raise("punchup", this.dayCycle.clockFace(), tip);
+      this.messages.send(
+        "PARK WARDEN",
+        "They're throwing punches now. Get the washer on them before it really kicks off.",
+        this.dayCycle.clockFace(),
+        12,
+      );
+    }
+
+    const swing = this.parentPunchUp.claimHit();
+    if (swing) this.takeStrike(swing);
+
+    if (this.parentPunchUp.claimComplaint()) {
+      this.complain();
+      this.messages.send(
+        "PARK WARDEN",
+        "Public's filming it. Should've broken that up.",
+        this.dayCycle.clockFace(),
+        10,
+      );
+    }
+
+    if (this.parentPunchUp.claimCleared()) {
+      this.cleaned += 1;
+      this.comboRun = this.comboLeft > 0 ? this.comboRun + 1 : 1;
+      this.comboLeft = COMBO_WINDOW;
+      this.score += 70 * this.multiplier();
+      this.updateHUD();
+      this.messages.send(
+        "PARK WARDEN",
+        "That's them packed off. Kids'll be mortified. Nice work.",
+        this.dayCycle.clockFace(),
+        12,
+      );
+      this.callouts.raise("praise", this.dayCycle.clockFace());
+    }
+
+    if (this.parentPunchUp.isDone()) {
+      this.parentPunchUp.dispose();
+      this.parentPunchUp = null;
+      this.punchupMissionDone = true;
+    }
+  }
+
+  private beginPunchUpMission(): void {
+    this.punchupMissionStarted = true;
+    this.parentPunchUp = new ParentPunchUp(this.scene, getMissionSpot("punchup"));
+    if (this.parentPunchUp.isDone()) {
+      this.parentPunchUp.dispose();
+      this.parentPunchUp = null;
+      this.punchupMissionDone = true;
+      return;
+    }
+    this.announceMission("punchup");
+  }
+
+  /**
    * Ten o'clock: boy racers thrash the esplanade a few times, then one of them
    * loses it and ends up steaming in the lake.
    */
@@ -3998,6 +4103,9 @@ export class Game {
     }
     for (const lot of this.drunks) {
       for (const at of lot.guestPositions()) add(at);
+    }
+    if (this.parentPunchUp) {
+      for (const at of this.parentPunchUp.getPositions()) add(at);
     }
     setWalkCrowd(pts);
   }
@@ -4568,19 +4676,6 @@ export class Game {
   }
 
   private updateHUD(): void {
-    this.cleanlinessElement.textContent = Math.round(
-      this.cleanliness,
-    ).toString();
-    this.cleanlinessBar.style.width = `${this.cleanliness}%`;
-
-    this.cleanlinessBar.classList.remove("warning", "danger");
-    if (this.cleanliness < 30) {
-      this.cleanlinessBar.classList.add("danger");
-    } else if (this.cleanliness < 60) {
-      this.cleanlinessBar.classList.add("warning");
-    }
-
-    this.scoreElement.textContent = this.score.toLocaleString("en-GB");
     this.cleanedElement.textContent = this.cleaned.toString();
     this.complaintsElement.textContent = this.complaints.toString();
     this.complaintsElement.parentElement!.classList.toggle(
@@ -4822,6 +4917,7 @@ export class Game {
     this.updateFootball(delta);
     this.updateGrassFire(delta);
     this.updateSwanboatMission(delta);
+    this.updatePunchUpMission(delta);
     this.updateRacerMission(delta);
     this.updateRebelMission(delta);
     this.updatePlayVisits(delta);
@@ -4886,6 +4982,7 @@ export class Game {
         ...this.playVisits.flatMap((visit) => visit.guestPositions()),
         ...this.football.flatMap((match) => match.guestPositions()),
         ...this.drunks.flatMap((lot) => lot.guestPositions()),
+        ...(this.parentPunchUp?.getPositions() ?? []),
       ],
       cyclists: [
         ...this.cyclists.map((rider) => rider.getPosition()),
@@ -4967,6 +5064,10 @@ export class Game {
     if (this.stolenSwanboat?.isActive()) {
       const aim = this.stolenSwanboat.aimSpot();
       if (aim) spots.push(aim);
+    }
+
+    if (this.parentPunchUp?.isActive()) {
+      spots.push(this.parentPunchUp.aimSpot());
     }
 
     if (this.rebelRaid?.isActive()) {

@@ -11,7 +11,28 @@ export const TAGS = [
   "Pompey",
 ] as const;
 export type Tag = (typeof TAGS)[number];
-const INKS = ["#e0332f", "#2f6fd8", "#1f1f26", "#f0e6c8", "#3f9f5f"];
+const INKS = [
+  "#e0332f",
+  "#2f6fd8",
+  "#1f1f26",
+  "#f0e6c8",
+  "#3f9f5f",
+  "#f2b430",
+  "#d94ec2",
+  "#f27a1a",
+  "#7ec8e8",
+  "#f7f4ec",
+];
+
+type TagStyle = "throwup" | "block3d" | "hollow" | "stencil" | "wild" | "marker";
+const STYLES: readonly TagStyle[] = [
+  "throwup",
+  "block3d",
+  "hollow",
+  "stencil",
+  "wild",
+  "marker",
+];
 
 const TEX_W = 512;
 const TEX_H = 256;
@@ -52,6 +73,7 @@ export class Graffiti {
   private rinse = 0;
   private credited = false;
   private localHit = new THREE.Vector3();
+  private localFrom = new THREE.Vector3();
   private localDir = new THREE.Vector3();
   private invQuat = new THREE.Quaternion();
 
@@ -117,14 +139,26 @@ export class Graffiti {
     return this.mesh.position.clone();
   }
 
-  /** Did a droplet land on the tag? */
-  public hitBy(point: THREE.Vector3): boolean {
+  /**
+   * Did a droplet land on the painted face? `from` is the lance — tags on the
+   * far side of a cafe don't count if you're hosing through the brickwork.
+   */
+  public hitBy(point: THREE.Vector3, from?: THREE.Vector3): boolean {
     this.mesh.worldToLocal(this.localHit.copy(point));
-    return (
-      Math.abs(this.localHit.x) < this.reach.x &&
-      Math.abs(this.localHit.y) < this.reach.y &&
-      Math.abs(this.localHit.z) < this.reach.z
-    );
+    if (
+      Math.abs(this.localHit.x) >= this.reach.x ||
+      Math.abs(this.localHit.y) >= this.reach.y
+    ) {
+      return false;
+    }
+    // Local +Z is out from the brick. Allow a hair into the wall, nothing from
+    // the room behind it.
+    if (this.localHit.z < -0.05 || this.localHit.z > this.reach.z) return false;
+    if (from) {
+      this.mesh.worldToLocal(this.localFrom.copy(from));
+      if (this.localFrom.z < 0.25) return false;
+    }
+    return true;
   }
 
   /**
@@ -237,6 +271,9 @@ export class Graffiti {
     this.mask.fill(0);
 
     const ink = INKS[Math.floor(Math.random() * INKS.length)]!;
+    const style = STYLES[Math.floor(Math.random() * STYLES.length)]!;
+    const rim = contrastRim(ink);
+    const shine = contrastShine(ink);
     const word = chosen ?? TAGS[Math.floor(Math.random() * TAGS.length)]!;
     const short = word.length <= 4;
 
@@ -254,7 +291,7 @@ export class Graffiti {
       TEX_H * 0.5,
       TEX_W * 0.42,
     );
-    haze.addColorStop(0, withAlpha(ink, 0.14));
+    haze.addColorStop(0, withAlpha(ink, style === "stencil" ? 0.08 : 0.14));
     haze.addColorStop(1, withAlpha(ink, 0));
     ctx.fillStyle = haze;
     ctx.fillRect(0, 0, TEX_W, TEX_H);
@@ -264,79 +301,70 @@ export class Graffiti {
     const maxTextW = TEX_W - marginX * 2;
     const maxTextH = TEX_H - marginY * 2;
 
-    // Fat throw-up / bubble style — never sans-serif clean type.
     let size = short ? 118 : word.length > 10 ? 58 : 72;
-    ctx.font = `900 ${size}px "Arial Black", Impact, Haettenschweiler, sans-serif`;
+    const setFont = () => {
+      ctx.font = fontFor(style, size);
+    };
+    setFont();
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     while (size > 28 && ctx.measureText(word).width > maxTextW) {
       size -= 4;
-      ctx.font = `900 ${size}px "Arial Black", Impact, Haettenschweiler, sans-serif`;
+      setFont();
     }
-    // Cap height so tall glyphs stay inside the canvas.
     const approxH = size * 1.15;
     if (approxH > maxTextH) {
       size = Math.floor(maxTextH / 1.15);
-      ctx.font = `900 ${size}px "Arial Black", Impact, Haettenschweiler, sans-serif`;
+      setFont();
     }
 
     const textW = ctx.measureText(word).width;
-    const tilt = (Math.random() - 0.5) * 0.12;
+    const tilt = (Math.random() - 0.5) * (style === "stencil" ? 0.04 : 0.12);
     const cx = TEX_W / 2;
     const cy = TEX_H * (0.5 + (Math.random() - 0.5) * 0.06);
 
     ctx.translate(cx, cy);
     ctx.rotate(tilt);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.miterLimit = 2;
 
-    // Draw letter-by-letter with a slight hand-painted stagger.
     let x = -textW / 2;
+    const jig = style === "stencil" ? 0.4 : style === "marker" ? 2.4 : 1.8;
+    const spin = style === "wild" ? 0.14 : style === "stencil" ? 0.02 : 0.08;
     for (let i = 0; i < word.length; i++) {
       const ch = word[i]!;
       const w = ctx.measureText(ch).width;
-      const jigX = (Math.random() - 0.5) * (short ? 2.5 : 1.8);
-      const jigY = (Math.random() - 0.5) * (short ? 4 : 3);
-      const rot = (Math.random() - 0.5) * 0.08;
+      const jigX = (Math.random() - 0.5) * jig * (short ? 1.3 : 1);
+      const jigY = (Math.random() - 0.5) * jig * (short ? 1.6 : 1.2);
+      const rot = (Math.random() - 0.5) * spin;
 
       ctx.save();
       ctx.translate(x + w / 2 + jigX, jigY);
       ctx.rotate(rot);
-
-      // Outer outline (marker / can edge).
-      ctx.lineJoin = "round";
-      ctx.lineCap = "round";
-      ctx.miterLimit = 2;
-      ctx.lineWidth = short ? size * 0.28 : size * 0.22;
-      ctx.strokeStyle = "#0a0a0c";
-      ctx.strokeText(ch, -w / 2, 0);
-
-      // Colour fill.
-      ctx.lineWidth = short ? size * 0.16 : size * 0.12;
-      ctx.strokeStyle = ink;
-      ctx.strokeText(ch, -w / 2, 0);
-      ctx.fillStyle = ink;
-      ctx.fillText(ch, -w / 2, 0);
-
-      // Soft highlight on the upper edge.
-      ctx.fillStyle = "rgba(255,255,255,0.22)";
-      ctx.fillText(ch, -w / 2 - size * 0.02, -size * 0.04);
-
-      // Paint drips from a couple of letters.
-      if (ch !== " " && Math.random() < (short ? 0.55 : 0.35)) {
-        this.paintDrip(ctx, 0, size * 0.38, ink, size * (0.08 + Math.random() * 0.12));
+      this.paintGlyph(ctx, ch, -w / 2, 0, size, ink, rim, shine, style);
+      if (ch !== " " && style !== "stencil" && Math.random() < (short ? 0.5 : 0.3)) {
+        this.paintDrip(
+          ctx,
+          0,
+          size * 0.38,
+          ink,
+          size * (0.08 + Math.random() * 0.12),
+        );
       }
-
       ctx.restore();
-      x += w * (short ? 1.02 : 0.98);
+      x += w * (short ? 1.02 : style === "wild" ? 0.94 : 0.98);
     }
 
-    // Occasional underline slash / arrow under short tags.
-    if (short && Math.random() < 0.7) {
+    if (short && style !== "stencil" && Math.random() < 0.7) {
       ctx.beginPath();
       ctx.moveTo(-textW * 0.45, size * 0.55);
       ctx.quadraticCurveTo(0, size * 0.72, textW * 0.48, size * 0.5);
+      ctx.strokeStyle = rim;
+      ctx.lineWidth = size * 0.14;
+      ctx.stroke();
       ctx.strokeStyle = ink;
-      ctx.lineWidth = size * 0.08;
-      ctx.lineCap = "round";
+      ctx.lineWidth = size * 0.07;
       ctx.stroke();
     }
 
@@ -352,6 +380,64 @@ export class Graffiti {
     }
     this.paintSum = sum;
     this.paintFull = Math.max(1, sum);
+  }
+
+  private paintGlyph(
+    ctx: CanvasRenderingContext2D,
+    ch: string,
+    x: number,
+    y: number,
+    size: number,
+    ink: string,
+    rim: string,
+    shine: string,
+    style: TagStyle,
+  ): void {
+    const outer = size * (style === "marker" ? 0.26 : style === "hollow" ? 0.36 : 0.32);
+
+    if (style === "block3d") {
+      ctx.fillStyle = luma(ink) > 0.45 ? "#1a1410" : "#0c0c10";
+      ctx.fillText(ch, x + size * 0.09, y + size * 0.08);
+    }
+
+    // Fat contrasting halo so pale ink on brick and dark ink on soot both read.
+    ctx.strokeStyle = rim;
+    ctx.lineWidth = outer;
+    ctx.strokeText(ch, x, y);
+
+    if (style === "hollow") {
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = size * 0.16;
+      ctx.strokeText(ch, x, y);
+      ctx.strokeStyle = shine;
+      ctx.lineWidth = size * 0.055;
+      ctx.strokeText(ch, x, y);
+      return;
+    }
+
+    if (style !== "marker") {
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = size * 0.12;
+      ctx.strokeText(ch, x, y);
+    }
+    ctx.fillStyle = ink;
+    ctx.fillText(ch, x, y);
+
+    // Inner contour — a second line inside the fill, not just a rim.
+    ctx.strokeStyle = shine;
+    ctx.lineWidth = size * (style === "wild" ? 0.07 : 0.05);
+    ctx.strokeText(ch, x, y);
+
+    if (style === "throwup" || style === "block3d" || style === "wild") {
+      ctx.fillStyle = withAlpha("#ffffff", 0.28);
+      ctx.fillText(ch, x - size * 0.02, y - size * 0.045);
+    }
+
+    if (style === "wild") {
+      ctx.strokeStyle = rim;
+      ctx.lineWidth = size * 0.028;
+      ctx.strokeText(ch, x + size * 0.012, y + size * 0.01);
+    }
   }
 
   private paintDrip(
@@ -424,4 +510,35 @@ function withAlpha(hex: string, a: number): string {
   const g = (n >> 8) & 255;
   const b = n & 255;
   return `rgba(${r},${g},${b},${a})`;
+}
+
+function luma(hex: string): number {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+/** Outline that stays visible against both the fill and typical brick. */
+function contrastRim(ink: string): string {
+  return luma(ink) > 0.48 ? "#0a0a0c" : "#f4eee0";
+}
+
+function contrastShine(ink: string): string {
+  return luma(ink) > 0.48 ? "rgba(28, 18, 12, 0.88)" : "rgba(255, 255, 255, 0.82)";
+}
+
+function fontFor(style: TagStyle, size: number): string {
+  if (style === "marker") {
+    return `italic 800 ${size}px "Segoe Script", "Comic Sans MS", cursive`;
+  }
+  if (style === "stencil") {
+    return `800 ${size}px Impact, "Arial Black", sans-serif`;
+  }
+  if (style === "wild" || style === "block3d") {
+    return `italic 900 ${size}px "Arial Black", Impact, sans-serif`;
+  }
+  return `900 ${size}px "Arial Black", Impact, Haettenschweiler, sans-serif`;
 }

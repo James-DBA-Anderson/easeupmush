@@ -49,59 +49,28 @@
 
     #hud {
       position: absolute;
-      top: 20px;
-      right: 20px;
+      top: max(16px, env(safe-area-inset-top));
+      right: max(16px, env(safe-area-inset-right));
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      width: min(300px, calc(100% - 32px));
+      max-height: min(56vh, calc(100% - 96px));
+      overflow: hidden;
       color: white;
       text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
       font-size: 16px;
       pointer-events: none;
-      z-index: 10;
-    }
-
-    #cleanliness-meter {
-      background: rgba(0,0,0,0.5);
-      padding: 10px 15px;
-      border-radius: 8px;
-      margin-bottom: 10px;
-    }
-
-    #cleanliness-bar {
-      width: 200px;
-      height: 20px;
-      background: #333;
-      border-radius: 4px;
-      overflow: hidden;
-      margin-top: 5px;
-      border: 2px solid #666;
-    }
-
-    #cleanliness-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #4caf50, #8bc34a);
-      transition: width 0.3s, background 0.3s;
-    }
-
-    #cleanliness-fill.warning {
-      background: linear-gradient(90deg, #ff9800, #ffc107);
-    }
-
-    #cleanliness-fill.danger {
-      background: linear-gradient(90deg, #f44336, #ff5722);
+      z-index: 18;
     }
 
     #score-panel {
       background: rgba(0,0,0,0.5);
       padding: 10px 15px;
       border-radius: 8px;
-      margin-bottom: 10px;
       text-align: right;
-      min-width: 200px;
-    }
-
-    #score-value {
-      font-size: 26px;
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
     }
 
     #cleaned {
@@ -122,13 +91,12 @@
     }
 
     #combo {
+      display: none;
       margin-top: 6px;
-      opacity: 0;
-      transition: opacity 0.15s;
     }
 
     #combo.active {
-      opacity: 1;
+      display: block;
     }
 
     #combo-value {
@@ -370,8 +338,8 @@
     #instructions {
       position: absolute;
       top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
+      left: 252px;
+      right: 332px;
       background: rgba(0,0,0,0.55);
       padding: 8px 16px;
       border-radius: 8px;
@@ -379,7 +347,7 @@
       text-align: center;
       font-size: 13px;
       pointer-events: none;
-      z-index: 10;
+      z-index: 8;
     }
 
     #face-splat {
@@ -478,16 +446,12 @@
     }
 
     #messages {
-      position: absolute;
-      bottom: 90px;
-      right: 20px;
-      width: 300px;
       display: flex;
       flex-direction: column;
       gap: 6px;
-      align-items: flex-end;
-      pointer-events: none;
-      z-index: 10;
+      width: 100%;
+      min-height: 0;
+      overflow: hidden;
     }
 
     .message {
@@ -899,39 +863,15 @@
     }
 
     body.touch-ui #hud {
-      top: 4px;
-      right: 4px;
-      font-size: 10px;
-      max-width: 130px;
-    }
-
-    body.touch-ui #score-panel,
-    body.touch-ui #cleanliness-meter {
-      padding: 3px 6px;
-      margin-bottom: 3px;
-      border-radius: 6px;
+      top: max(6px, env(safe-area-inset-top));
+      right: max(6px, env(safe-area-inset-right));
+      width: min(280px, 50vw);
+      max-height: calc(100% - 110px);
+      gap: 6px;
     }
 
     body.touch-ui #score-panel {
-      min-width: 0;
-      width: 100%;
-    }
-
-    body.touch-ui #score-value {
-      font-size: 14px;
-    }
-
-    body.touch-ui #cleaned,
-    body.touch-ui #complaints-line,
-    body.touch-ui #combo {
       display: none;
-    }
-
-    body.touch-ui #cleanliness-bar {
-      width: 100%;
-      height: 8px;
-      margin-top: 2px;
-      border-width: 1px;
     }
 
     body.touch-ui #instructions {
@@ -1036,21 +976,16 @@
       border-width: 1px;
     }
 
-    body.touch-ui #messages {
-      bottom: calc(12px + 88px + 12px + 88px + 14px + env(safe-area-inset-bottom));
-      right: max(4px, env(safe-area-inset-right));
-      width: min(36vw, 180px);
-      gap: 4px;
-    }
-
     body.touch-ui .message {
-      font-size: 10px;
-      padding: 5px 7px;
-      border-radius: 5px;
+      font-size: 14px;
+      line-height: 1.35;
+      padding: 8px 11px;
+      border-radius: 6px;
     }
 
     body.touch-ui .message-from {
-      font-size: 9px;
+      font-size: 11px;
+      margin-bottom: 3px;
     }
 
     body.touch-ui .stick {
@@ -1093,19 +1028,13 @@
 <body>
   <div id="game-container">
     <div id="hud">
+      <div id="messages"></div>
       <div id="score-panel">
-        <div>Score <span id="score-value">0</span></div>
         <div id="cleaned">Cleaned: <span id="cleaned-value">0</span></div>
         <div id="complaints-line">Complaints: <span id="complaints">0</span></div>
         <div id="combo">
           <span id="combo-value">x2</span>
           <div id="combo-bar"><div id="combo-fill"></div></div>
-        </div>
-      </div>
-      <div id="cleanliness-meter">
-        <div>Cleanliness: <span id="cleanliness-value">100</span>%</div>
-        <div id="cleanliness-bar">
-          <div id="cleanliness-fill" style="width: 100%"></div>
         </div>
       </div>
     </div>
@@ -1158,7 +1087,6 @@
       <p id="game-over-detail"></p>
       <button id="restart">BACK TO WORK</button>
     </div>
-    <div id="messages"></div>
     <div id="instructions">
       WASD: Move | Shift: Run | Mouse: Look | Click: Spray | ESC: Pause
     </div>

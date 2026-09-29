@@ -1106,19 +1106,35 @@ function emanuelFountain(scene: THREE.Scene): void {
   group.add(plaque);
 
   scene.add(group);
-  solids.push({
-    x: at.x,
-    z: at.z,
-    halfWide: 0.85,
-    halfDeep: 0.85,
-    yaw: at.yaw,
-  });
+  // Plinth is 1.55 m across — keep the walk box to that, not the canopy.
+  // Furniture, not a building, so path folk use the usual prop radius.
   addProp({
     x: at.x,
     z: at.z,
-    halfWide: 0.85,
-    halfDeep: 0.85,
+    halfWide: 0.72,
+    halfDeep: 0.72,
     yaw: at.yaw,
+  });
+}
+
+/** Play-park railing plus a walk blocker — the mesh was visual-only. */
+function placePlayRail(
+  scene: THREE.Scene,
+  x: number,
+  z: number,
+  yaw: number,
+  length: number,
+): void {
+  const rail = block(0.12, 1, length, PAINT);
+  rail.position.set(x, 0.5, z);
+  rail.rotation.y = yaw;
+  scene.add(rail);
+  addProp({
+    x,
+    z,
+    halfWide: 0.18,
+    halfDeep: length / 2,
+    yaw,
   });
 }
 
@@ -1182,18 +1198,16 @@ function playPark(scene: THREE.Scene): void {
       ] as const) {
         const seg = (tB - tA) * len;
         if (seg < 0.3) continue;
-        const mx = a.x + dx * ((tA + tB) / 2);
-        const mz = a.z + dz * ((tA + tB) / 2);
-        const rail = block(0.12, 1, seg, PAINT);
-        rail.position.set(mx, 0.5, mz);
-        rail.rotation.y = yaw;
-        scene.add(rail);
+        placePlayRail(
+          scene,
+          a.x + dx * ((tA + tB) / 2),
+          a.z + dz * ((tA + tB) / 2),
+          yaw,
+          seg,
+        );
       }
     } else {
-      const rail = block(0.12, 1, len, PAINT);
-      rail.position.set(a.x + dx / 2, 0.5, a.z + dz / 2);
-      rail.rotation.y = yaw;
-      scene.add(rail);
+      placePlayRail(scene, a.x + dx / 2, a.z + dz / 2, yaw, len);
     }
   }
 

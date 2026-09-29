@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { WATER_Y, isInLake } from "../world/lake";
+import { jetHitsBuilding } from "../world/blocking";
 import { buildArmedHand } from "./Hands";
 
 const GRAVITY = 26;
@@ -89,9 +90,12 @@ export class WaterJet {
   /** Ballistic samples that make the stream whip when the lance swings. */
   private ribbon: RibbonNode[] = [];
   private ribbonAcc = 0;
-  /** Latest ground hit from the ribbon tip, if any this frame. */
-  private ribbonHit: { point: THREE.Vector3; direction: THREE.Vector3 } | null =
-    null;
+  /** Latest ground or wall hit from the ribbon tip, if any this frame. */
+  private ribbonHit: {
+    point: THREE.Vector3;
+    direction: THREE.Vector3;
+    wall: boolean;
+  } | null = null;
   private lance: THREE.Group;
   private muzzle: THREE.Object3D;
   private emitAccumulator = 0;
@@ -99,6 +103,9 @@ export class WaterJet {
   private groundCool = 0;
   /** 0 ready, 1 fully stowed — tipLance layers on top of this. */
   private holsterAmount = 0;
+  /** Pull the viewmodel back so the barrel doesn't spear floors or walls. */
+  private closePull = 0;
+  private surfaceDist = 3;
   private tipPitch = 0;
   private tipYaw = 0;
   private tipRoll = 0;
@@ -403,8 +410,17 @@ export class WaterJet {
   private applyLancePose(): void {
     const amount = this.holsterAmount;
     this.lance.visible = amount < 0.99;
+    const scale = this.heavy ? 1.38 : 1;
+    const muzzleOut = 1.82 * scale;
+    this.surfaceDist = this.surfaceAhead();
+    const wantPull = THREE.MathUtils.clamp(
+      muzzleOut - this.surfaceDist + 0.16,
+      0,
+      1.55,
+    );
+    this.closePull += (wantPull - this.closePull) * 0.42;
     this.lance.position.y = -amount * 0.85;
-    this.lance.position.z = amount * 0.25;
+    this.lance.position.z = amount * 0.25 + this.closePull;
     const ready = 1 - amount;
     this.lance.rotation.set(
       0.04 - amount * 1.1 + this.tipPitch * ready,
@@ -414,12 +430,54 @@ export class WaterJet {
   }
 
   /**
+   * How far in front of the lens the floor or a building sits, so the lance
+   * can stay short of it when you're right up against a wall or looking down.
+   */
+  private surfaceAhead(): number {
+    this.camera.updateMatrixWorld(true);
+    const origin = this.camera.position;
+    const look = new THREE.Vector3();
+    this.camera.getWorldDirection(look);
+    let hit = this.probeRay(origin, look, 2.8);
+
+    const scale = this.heavy ? 1.38 : 1;
+    const local = new THREE.Vector3(0.28, -0.28, -1.82).multiplyScalar(scale);
+    const along = local.applyMatrix4(this.camera.matrixWorld).sub(origin);
+    if (along.lengthSq() > 0.01) {
+      hit = Math.min(hit, this.probeRay(origin, along, 2.8));
+    }
+    return hit;
+  }
+
+  private probeRay(
+    origin: THREE.Vector3,
+    dir: THREE.Vector3,
+    max: number,
+  ): number {
+    const d = dir.clone().normalize();
+    const step = 0.05;
+    for (let t = 0.15; t <= max; t += step) {
+      const x = origin.x + d.x * t;
+      const y = origin.y + d.y * t;
+      const z = origin.z + d.z * t;
+      if (this.buried(x, y, z)) return Math.max(0.12, t - step * 0.45);
+    }
+    return max;
+  }
+
+  private buried(x: number, y: number, z: number): boolean {
+    const surface = isInLake(x, z) ? WATER_Y + 0.03 : 0.04;
+    if (y <= surface + 0.05) return true;
+    return jetHitsBuilding(x, z, y);
+  }
+
+  /**
    * Where the focused stream hits the deck — prefer the waving ribbon tip so
    * wash follows the swing; fall back to a straight ballistic guess.
    */
   private ballisticLand(
     aim: { x: number; y: number } | null,
-  ): { point: THREE.Vector3; direction: THREE.Vector3 } | null {
+  ): { point: THREE.Vector3; direction: THREE.Vector3; wall: boolean } | null {
     if (this.ribbonHit) return this.ribbonHit;
 
     // In-flight whip tip (oldest sample) — keep wash on the waving stream.
@@ -440,11 +498,15 @@ export class WaterJet {
       vel.y -= GRAVITY * STREAM_STEP;
       pos.addScaledVector(vel, STREAM_STEP);
       const surface = isInLake(pos.x, pos.z) ? WATER_Y + 0.03 : 0.04;
-      if (pos.y > surface) continue;
+      const walled = jetHitsBuilding(pos.x, pos.z, pos.y);
+      if (pos.y > surface && !walled) continue;
+      if (walled) {
+        return { point: prev.clone(), direction: vel.clone(), wall: true };
+      }
       const dy = prev.y - pos.y;
       const t = dy > 1e-4 ? THREE.MathUtils.clamp((prev.y - surface) / dy, 0, 1) : 1;
       const point = prev.clone().lerp(pos, t).setY(surface);
-      return { point, direction: vel.clone() };
+      return { point, direction: vel.clone(), wall: false };
     }
     return null;
   }
@@ -459,6 +521,19 @@ export class WaterJet {
     if (!hit) return;
 
     this.groundCool = GROUND_STRIKE;
+    if (hit.wall) {
+      const nozzle = this.nozzle();
+      if (nozzle.distanceTo(hit.point) < BOUNCE_RANGE) {
+        this.bounceOff(hit.point, hit.direction, false, "body");
+      }
+      const facing = hit.direction.clone().multiplyScalar(-1);
+      facing.y *= 0.15;
+      if (facing.lengthSq() < 0.01) facing.set(0, 0, 1);
+      else facing.normalize();
+      this.splash(hit.point, false, facing);
+      return;
+    }
+
     const splash = this.hooks.onImpact(
       hit.point.clone().setY(0),
       hit.direction.clone(),
@@ -494,9 +569,16 @@ export class WaterJet {
       const reach = this.heavy ? 55 * 55 : 28 * 28;
       const far =
         node.at.distanceToSquared(muzzle) > reach || node.at.y < -2;
-      if (node.at.y > surface && !far) continue;
+      const walled = jetHitsBuilding(node.at.x, node.at.z, node.at.y);
+      if (node.at.y > surface && !far && !walled) continue;
 
-      if (!this.ribbonHit && node.at.y <= surface && prev.y > surface) {
+      if (!this.ribbonHit && walled) {
+        this.ribbonHit = {
+          point: prev.clone(),
+          direction: node.vel.clone(),
+          wall: true,
+        };
+      } else if (!this.ribbonHit && node.at.y <= surface && prev.y > surface) {
         const dy = prev.y - node.at.y;
         const t =
           dy > 1e-4
@@ -505,6 +587,7 @@ export class WaterJet {
         this.ribbonHit = {
           point: prev.clone().lerp(node.at, t).setY(surface),
           direction: node.vel.clone(),
+          wall: false,
         };
       }
       this.ribbon.splice(i, 1);
@@ -550,11 +633,16 @@ export class WaterJet {
       pts.push(this.ribbon[i]!.at);
     }
 
+    const close =
+      1 + THREE.MathUtils.clamp((1.15 - this.surfaceDist) * 0.85, 0, 0.85);
     let used = 0;
     for (let i = 0; i < pts.length - 1 && used < STREAM_SEGS; i++) {
       const a = pts[i]!;
       const b = pts[i + 1]!;
-      const span = new THREE.Vector3().subVectors(b, a);
+      if (this.buried(a.x, a.y, a.z)) break;
+      const clipped = this.clipToSurface(a, b);
+      if (!clipped) continue;
+      const span = new THREE.Vector3().subVectors(clipped, a);
       const len = span.length();
       if (len < 0.0005) continue;
 
@@ -563,18 +651,17 @@ export class WaterJet {
       for (let p = 0; p < pieces && used < STREAM_SEGS; p++) {
         const t0 = p / pieces;
         const t1 = (p + 1) / pieces;
-        const from = a.clone().lerp(b, t0);
-        const to = a.clone().lerp(b, t1);
+        const from = a.clone().lerp(clipped, t0);
+        const to = a.clone().lerp(clipped, t1);
         const bit = new THREE.Vector3().subVectors(to, from);
         const bitLen = bit.length();
         if (bitLen < 0.0005) continue;
 
         const mesh = this.stream[used]!;
         const along = (i + t0) / Math.max(1, pts.length - 1);
-        const radius =
-          this.streamRadius() * (1 + along * 0.4) * (this.heavy ? 1 : 1);
+        const radius = this.streamRadius() * (1 + along * 0.4) * close;
         mesh.position.copy(from);
-        mesh.scale.set(radius, bitLen * 1.06, radius);
+        mesh.scale.set(radius, bitLen * 1.14, radius);
         mesh.quaternion.setFromUnitVectors(
           Y_AXIS,
           bit.multiplyScalar(1 / bitLen),
@@ -582,9 +669,24 @@ export class WaterJet {
         mesh.visible = true;
         used++;
       }
+      if (clipped !== b && this.buried(b.x, b.y, b.z)) break;
     }
 
     for (let i = used; i < STREAM_SEGS; i++) this.stream[i]!.visible = false;
+  }
+
+  /** Walk `to` back onto the last free point so the jet ends on brick / paving. */
+  private clipToSurface(from: THREE.Vector3, to: THREE.Vector3): THREE.Vector3 | null {
+    if (this.buried(from.x, from.y, from.z)) return null;
+    if (!this.buried(to.x, to.y, to.z)) return to;
+    let a = from.clone();
+    let b = to.clone();
+    for (let i = 0; i < 7; i++) {
+      const m = a.clone().lerp(b, 0.5);
+      if (this.buried(m.x, m.y, m.z)) b.copy(m);
+      else a.copy(m);
+    }
+    return a;
   }
 
   /** Motion drips + mid-air hit samples. Floor wash is handled by strikeGround. */
@@ -737,12 +839,19 @@ export class WaterJet {
       }
 
       const soaked = this.hooks.onBodyHit(drop.at, drop.dirty, drop.velocity);
+      const walled =
+        !soaked &&
+        !drop.bounced &&
+        jetHitsBuilding(drop.at.x, drop.at.z, drop.at.y);
       const surface = isInLake(drop.at.x, drop.at.z) ? WATER_Y + 0.03 : 0.04;
-      const landed = !soaked && drop.at.y <= surface;
+      const landed = !soaked && !walled && drop.at.y <= surface;
 
-      if (soaked && !drop.bounced) {
-        if (nozzle.distanceTo(drop.at) < BOUNCE_RANGE) {
-          this.bounceOff(drop.at, drop.velocity, drop.dirty, "body");
+      if ((soaked || walled) && !drop.bounced) {
+        const hitAt = walled
+          ? drop.at.clone().addScaledVector(drop.velocity, -delta)
+          : drop.at;
+        if (nozzle.distanceTo(hitAt) < BOUNCE_RANGE) {
+          this.bounceOff(hitAt, drop.velocity, drop.dirty, "body");
         }
       }
 
@@ -750,7 +859,7 @@ export class WaterJet {
         // Floor rings / wash come from strikeGround at the stream tip only.
         // Individual drips just die when they hit so they don't seed a trail.
       }
-      if (soaked || landed || drop.life <= 0) {
+      if (soaked || walled || landed || drop.life <= 0) {
         drop.mesh.visible = false;
         this.tint(drop.mesh, false);
         this.idle.push(drop.mesh);
@@ -881,7 +990,11 @@ export class WaterJet {
     }
   }
 
-  private splash(at: THREE.Vector3, dirty = false): void {
+  private splash(
+    at: THREE.Vector3,
+    dirty = false,
+    facing?: THREE.Vector3,
+  ): void {
     if (this.splashes.length > 55) return;
     const mesh = new THREE.Mesh(
       new THREE.RingGeometry(0.06, 0.22, 12),
@@ -890,14 +1003,22 @@ export class WaterJet {
         transparent: true,
         opacity: 0.7,
         side: THREE.DoubleSide,
+        depthWrite: false,
       }),
     );
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(
-      at.x,
-      isInLake(at.x, at.z) ? WATER_Y + 0.05 : 0.06,
-      at.z,
-    );
+    if (facing && facing.lengthSq() > 0.01) {
+      const n = facing.clone().normalize();
+      mesh.quaternion.setFromUnitVectors(Z_AXIS, n);
+      mesh.position.copy(at).addScaledVector(n, 0.04);
+    } else {
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(
+        at.x,
+        isInLake(at.x, at.z) ? WATER_Y + 0.05 : 0.06,
+        at.z,
+      );
+    }
+    mesh.renderOrder = 3;
     this.scene.add(mesh);
     this.splashes.push({ mesh, life: 0.3 });
   }

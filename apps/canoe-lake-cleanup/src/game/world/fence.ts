@@ -503,9 +503,13 @@ export function parkGates(): THREE.Vector2[] {
   return gates;
 }
 
+function railHalf(): number {
+  return fenceStyle === "brick" ? 0.55 : 0.45;
+}
+
 /** Solid fencing underfoot — everywhere but the gateways. */
 export function atRailings(x: number, z: number): boolean {
-  const half = fenceStyle === "brick" ? 0.55 : 0.45;
+  const half = railHalf();
   const here = new THREE.Vector2(x, z);
   for (const run of RUNS) {
     const span = new THREE.Vector2().subVectors(run.to, run.from);
@@ -518,4 +522,53 @@ export function atRailings(x: number, z: number): boolean {
     if (!inGate(at, run.gates)) return true;
   }
   return false;
+}
+
+/**
+ * True if the straight step from A to B crosses a fence bay (not a gate).
+ * Endpoint sampling can skip a thin wall on a long frame.
+ */
+export function railingsBlockSpan(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): boolean {
+  for (const run of RUNS) {
+    const along = pathCrossesRun(ax, az, bx, bz, run.from, run.to);
+    if (along == null) continue;
+    if (!inGate(along, run.gates)) return true;
+  }
+  return false;
+}
+
+/** Nudge off a fence bay without crossing to the far side. */
+export function pushOffRailings(
+  x: number,
+  z: number,
+): { x: number; z: number } {
+  const half = railHalf() + 0.06;
+  let px = x;
+  let pz = z;
+  for (const run of RUNS) {
+    const span = new THREE.Vector2().subVectors(run.to, run.from);
+    const length = span.length();
+    if (length < 1e-4) continue;
+    const along = span.clone().normalize();
+    const ox = px - run.from.x;
+    const oz = pz - run.from.y;
+    const at = ox * along.x + oz * along.y;
+    if (at < 0 || at > length) continue;
+    if (inGate(at, run.gates)) continue;
+    const side = ox * along.y - oz * along.x;
+    if (Math.abs(side) > half) continue;
+    let dir = side < 0 ? -1 : 1;
+    if (Math.abs(side) < 1e-4) {
+      dir = insidePark(px + along.y * half, pz - along.x * half) ? 1 : -1;
+    }
+    const k = dir * half - side;
+    px += along.y * k;
+    pz += -along.x * k;
+  }
+  return { x: px, z: pz };
 }

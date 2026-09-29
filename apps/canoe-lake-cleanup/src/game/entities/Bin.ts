@@ -38,7 +38,7 @@ export class Bin {
     this.group.position.set(x, groundHeight(x, z), z);
 
     // Walkers / player slide around the drum.
-    addProp({ x, z, halfWide: 0.4, halfDeep: 0.4, yaw: 0 });
+    addProp({ x, z, halfWide: 0.28, halfDeep: 0.28, yaw: 0 });
 
     const post = new THREE.Mesh(
       new THREE.CylinderGeometry(0.06, 0.06, 1, 6),

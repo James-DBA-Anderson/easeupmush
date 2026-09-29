@@ -1,6 +1,6 @@
 /**
  * The work phone. Jobs come in as texts from the depot and from the public,
- * stacking up in the bottom right corner and fading out once they're stale.
+ * stacking in the top right and fading out once they're stale.
  */
 
 /** How long a message sits there, and how many are on screen at once. */

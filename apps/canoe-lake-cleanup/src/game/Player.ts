@@ -6,7 +6,7 @@ import { LitterPicker } from "./effects/LitterPicker";
 import { isInLake, WATER_Y, wadeFootY } from "./world/lake";
 import { groundHeight } from "./world/terrain";
 import { insidePark } from "./world/fence";
-import { isBlocked } from "./world/blocking";
+import { isBlocked, pushOutOfSolids, blockedAlong } from "./world/blocking";
 import {
   boardPedalo,
   consumePedaloImpact,
@@ -980,13 +980,27 @@ export class Player {
     return this.picker.sackPoint();
   }
 
-  /** Axis-by-axis so brushing the water's edge slides rather than sticking. */
+  /** Axis-by-axis so brushing a wall glances off instead of sticking. */
   private moveWithCollision(step: THREE.Vector3): void {
     const pos = this.camera.position;
+    const span = Math.hypot(step.x, step.z);
+    if (span > 0.4) {
+      const scale = 0.4 / span;
+      step.x *= scale;
+      step.z *= scale;
+    }
+    if (!this.canStand(pos.x, pos.z) && insidePark(pos.x, pos.z)) {
+      const free = pushOutOfSolids(pos.x, pos.z);
+      const jump = Math.hypot(free.x - pos.x, free.z - pos.z);
+      if (jump < 1.6 && this.canStand(free.x, free.z)) {
+        pos.x = free.x;
+        pos.z = free.z;
+      }
+    }
     for (const axis of ["x", "z"] as const) {
       const next = pos.clone();
       next[axis] += step[axis];
-      if (this.canStand(next.x, next.z)) pos[axis] = next[axis];
+      if (this.canReach(pos.x, pos.z, next.x, next.z)) pos[axis] = next[axis];
     }
     if (Math.abs(pos.x) > WORLD_LIMIT) pos.x = Math.sign(pos.x) * WORLD_LIMIT;
     if (Math.abs(pos.z) > WORLD_LIMIT) pos.z = Math.sign(pos.z) * WORLD_LIMIT;
@@ -1037,6 +1051,12 @@ export class Player {
     this.wadeSplashAt = null;
     this.wadeSplashBig = false;
     return { at, big };
+  }
+
+  private canReach(fromX: number, fromZ: number, toX: number, toZ: number): boolean {
+    if (!this.canStand(toX, toZ)) return false;
+    if (blockedAlong(fromX, fromZ, toX, toZ)) return false;
+    return true;
   }
 
   private canStand(x: number, z: number): boolean {

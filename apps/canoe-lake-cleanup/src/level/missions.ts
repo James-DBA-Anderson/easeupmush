@@ -4,6 +4,7 @@ export type MissionId =
   | "picnic"
   | "geese"
   | "swanboat"
+  | "punchup"
   | "fire"
   | "rebels"
   | "racers"
@@ -14,6 +15,7 @@ export const MISSION_IDS: readonly MissionId[] = [
   "picnic",
   "geese",
   "swanboat",
+  "punchup",
   "fire",
   "rebels",
   "racers",
@@ -25,6 +27,7 @@ export const MISSION_LABELS: Record<MissionId, string> = {
   picnic: "Picnic raid",
   geese: "Geese inbound",
   swanboat: "Stolen swanboat",
+  punchup: "Parents punch-up",
   fire: "Grass fire",
   rebels: "Rebel raid",
   racers: "Boy racers",
@@ -63,6 +66,7 @@ export const DEFAULT_MISSION_SPOTS: readonly MissionSpot[] = [
   { id: "picnic", x: 140, z: -10, start: 11.5, end: 16 },
   { id: "geese", x: 0, z: -8, start: 13.5, end: 18 },
   { id: "swanboat", x: 95, z: 40, start: 15, end: 18 },
+  { id: "punchup", x: 128, z: 32, start: 16, end: 19.5 },
   { id: "fire", x: 118, z: -28, start: 17, end: 20 },
   { id: "racers", x: 20, z: -117, start: 22, end: 1 },
   { id: "rebels", x: 10, z: -150, start: 1, end: 6 },

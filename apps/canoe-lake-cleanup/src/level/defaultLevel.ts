@@ -242,7 +242,7 @@ export const DEFAULT_LEVEL: LevelData = {
   trees: [],
   /** Empty → flat park (draw berms in the Terrain tool). */
   elevationZones: [],
-  /** Red-arrow mission anchors — picnic, geese, swanboat, fire, rebels. */
+  /** Red-arrow mission anchors — picnic, geese, swanboat, punch-up, fire, rebels. */
   missionSpots: DEFAULT_MISSION_SPOTS.map((s) => ({ ...s })),
 };
 
