@@ -60,6 +60,10 @@ export class Player {
   /** What's in their hands, what's wanted next, and how far through the
    * business of swapping over they are: 0 up and ready, 1 down out of sight. */
   private tool: Tool | null = null;
+
+  public currentTool(): Tool | null {
+    return this.tool;
+  }
   private wanted: Tool | null = null;
   private holster = 0;
   /** Seconds with nothing to do in front of them, and how long the last
@@ -227,6 +231,7 @@ export class Player {
         event.preventDefault();
         if (this.game.isIntroPlaying()) break;
         if (this.game.tryGrabHeavyHose(this.camera.position)) break;
+        if (this.game.tryRacerDoor(this.camera.position)) break;
         if (this.game.hasClockedOn()) this.togglePedalo();
         break;
       case "Escape":

@@ -22,6 +22,22 @@ const RUBBISH = new THREE.MeshStandardMaterial({
   roughness: 1,
 });
 
+const liveBins: Bin[] = [];
+
+/** Knock over every bin a wreck drives through. */
+export function smashBinsAlong(
+  x0: number,
+  z0: number,
+  x1: number,
+  z1: number,
+  vx: number,
+  vz: number,
+): void {
+  for (const bin of liveBins) {
+    if (bin.hitBySweep(x0, z0, x1, z1)) bin.smash(vx, vz);
+  }
+}
+
 /**
  * A council bin on its post. Starts empty; fills when people actually put
  * something in, and overflows in a heap on the lid until it's emptied with
@@ -32,8 +48,12 @@ export class Bin {
   private heap: THREE.Group;
   private fill = 0;
   private reported = false;
+  private smashed = false;
+  private fall = 0;
+  private sign = 1;
 
   constructor(scene: THREE.Scene, x: number, z: number) {
+    liveBins.push(this);
     this.group = new THREE.Group();
     this.group.position.set(x, groundHeight(x, z), z);
 
@@ -111,6 +131,42 @@ export class Bin {
     this.fill = 0;
     this.reported = false;
     this.heap.visible = false;
+  }
+
+  /** True when a moving wreck passes through the drum. */
+  public hitBySweep(x0: number, z0: number, x1: number, z1: number): boolean {
+    if (this.smashed) return false;
+    const dx = x1 - x0;
+    const dz = z1 - z0;
+    const len2 = dx * dx + dz * dz;
+    const px = this.group.position.x;
+    const pz = this.group.position.z;
+    const t =
+      len2 < 1e-6
+        ? 0
+        : Math.max(0, Math.min(1, ((px - x0) * dx + (pz - z0) * dz) / len2));
+    const d = Math.hypot(px - (x0 + dx * t), pz - (z0 + dz * t));
+    return d < 1.7;
+  }
+
+  /** Knock the drum off its post. The way the car is going sets the fall. */
+  public smash(vx: number, vz: number): void {
+    if (this.smashed) return;
+    this.smashed = true;
+    this.sign = vx >= 0 ? 1 : -1;
+    if (Math.abs(vz) > Math.abs(vx)) this.sign = vz >= 0 ? 1 : -1;
+    this.group.rotation.order = "YXZ";
+    const axis = Math.abs(vx) >= Math.abs(vz) ? "z" : "x";
+    this.group.userData.fallAxis = axis;
+  }
+
+  public tickSmash(delta: number): void {
+    if (!this.smashed || this.fall >= 1) return;
+    this.fall = Math.min(1, this.fall + delta * 3.2);
+    const ang = this.sign * this.fall * 1.35;
+    if (this.group.userData.fallAxis === "x") this.group.rotation.x = ang;
+    else this.group.rotation.z = ang;
+    if (this.fall > 0.35) this.heap.visible = this.fill > 0.2;
   }
 
   /** Someone put their rubbish in — the only way a bin fills. */

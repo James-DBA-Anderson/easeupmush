@@ -36,7 +36,7 @@ type Mode =
 type Flight = "approach" | "flare" | "ski" | "runUp" | "climb";
 
 /** A grown bird and one of this year's cygnets, still half her size. */
-export type SwanKind = "adult" | "cygnet";
+export type SwanKind = "adult" | "cygnet" | "king";
 
 /**
  * The model is built oversized and shrunk to life size: a mute swan is about
@@ -44,6 +44,8 @@ export type SwanKind = "adult" | "cygnet";
  */
 const ADULT_SIZE = 0.62;
 const CYGNET_SIZE = 0.38;
+/** The cob is a step up from the rest of the flock — not a giant. */
+const KING_SIZE = 0.8;
 
 /** A cygnet keeps this close to its mother, and she keeps them this close. */
 const BROOD_GAP = 1.1;
@@ -173,6 +175,8 @@ export class Swan {
   private gone = false;
   /** Landed from a revenge fly-in — charge the cleaner on touchdown. */
   private revengeLand = false;
+  /** One-shot when the cob's feet hit the water. */
+  private landedNews = false;
 
   public readonly kind: SwanKind;
   private readonly size: number;
@@ -205,7 +209,9 @@ export class Swan {
   ) {
     this.scene = scene;
     this.kind = kind;
-    this.size = kind === "cygnet" ? CYGNET_SIZE : ADULT_SIZE;
+    this.size =
+      kind === "cygnet" ? CYGNET_SIZE : kind === "king" ? KING_SIZE : ADULT_SIZE;
+    if (kind === "king") this.aggressive = true;
     this.swimY = WATER_Y - 0.41 * this.size;
     this.landY = 0.32 * this.size;
     this.roostY = 0.12 * this.size;
@@ -268,8 +274,11 @@ export class Swan {
     this.head.add(beak);
 
     if (!young) {
-      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 5), slate);
-      knob.position.set(0, 0.14, 0.28);
+      const knob = new THREE.Mesh(
+        new THREE.SphereGeometry(this.kind === "king" ? 0.13 : 0.07, 6, 5),
+        slate,
+      );
+      knob.position.set(0, this.kind === "king" ? 0.18 : 0.14, 0.28);
       this.head.add(knob);
     }
 
@@ -685,7 +694,19 @@ export class Swan {
         this.revengeLand = false;
         this.startCharge();
       }
+      if (this.kind === "king") this.landedNews = true;
     }
+  }
+
+  public isKing(): boolean {
+    return this.kind === "king";
+  }
+
+  /** True once, the moment the cob finishes his landing. */
+  public claimLanded(): boolean {
+    if (!this.landedNews) return false;
+    this.landedNews = false;
+    return true;
   }
 
   /**
@@ -954,7 +975,8 @@ export class Swan {
     }
 
     this.soakings += 1;
-    if (this.soakings >= PATIENCE) this.startCharge();
+    const patience = this.kind === "king" ? 1 : PATIENCE;
+    if (this.soakings >= patience) this.startCharge();
   }
 
   /**
@@ -1331,8 +1353,9 @@ export class Swan {
     this.hoseHits = 0;
     this.mode = "charge";
     this.modeTimer = 0;
-    this.modeLength = CHARGE_TIME;
-    this.chaseLeft = CHARGE_TIME;
+    const lasting = this.kind === "king" ? 16 : CHARGE_TIME;
+    this.modeLength = lasting;
+    this.chaseLeft = lasting;
   }
 
   public isCharging(): boolean {
@@ -1351,6 +1374,23 @@ export class Swan {
       this.mode === "roost" ||
       this.mode === "tumble"
     ) {
+      return;
+    }
+
+    if (this.kind === "king") {
+      for (const at of crowd) {
+        const gap = this.position.distanceTo(at);
+        if (gap < 9) {
+          this.startCharge();
+          return;
+        }
+        if (gap < 16) {
+          this.buskFace.copy(at);
+          this.buskLeft = Math.max(this.buskLeft, 3);
+          this.buskCool = 0.6;
+          return;
+        }
+      }
       return;
     }
 
@@ -1896,7 +1936,8 @@ export class Swan {
     }
 
     // Given up, or the player has legged it far enough to be someone else's problem.
-    if (this.chaseLeft <= 0 || gap > 45) {
+    const giveUp = this.kind === "king" ? 64 : 45;
+    if (this.chaseLeft <= 0 || gap > giveUp) {
       this.mode = isInLake(this.position.x, this.position.z) ? "swim" : "graze";
       this.modeTimer = 0;
       this.modeLength = 12 + Math.random() * 14;
@@ -1905,7 +1946,8 @@ export class Swan {
     }
 
     // Pull up just short so it jostles rather than standing inside you.
-    const wanted = gap > 1.4 ? 4.2 : 0.5;
+    const pace = this.kind === "king" ? 5.8 : 4.2;
+    const wanted = gap > 1.4 ? pace : 0.5;
     this.velocity.lerp(flat.normalize().multiplyScalar(wanted), 5 * delta);
     this.position.addScaledVector(this.velocity, delta);
 

@@ -143,18 +143,58 @@ function sagAmount(span: number): number {
   return Math.min(FAIRY_POLE_H * FAIRY_MAX_SAG_FRAC, span * 0.1);
 }
 
-function placePole(scene: THREE.Scene, x: number, z: number, y0: number): void {
+interface PoleRec {
+  group: THREE.Group;
+  x: number;
+  z: number;
+  baseY: number;
+  falling: boolean;
+  fall: number;
+  axis: THREE.Vector3;
+}
+
+interface SpanRec {
+  a: number;
+  b: number;
+  tube: THREE.Mesh;
+  bits: THREE.Object3D[];
+  hinge: THREE.Group | null;
+  swinging: boolean;
+  fall: number;
+  target: number;
+  axis: THREE.Vector3;
+}
+
+const poles: PoleRec[] = [];
+const spanRecs: SpanRec[] = [];
+let poleKnocked = false;
+let lightScene: THREE.Scene | null = null;
+
+function placePole(scene: THREE.Scene, x: number, z: number, y0: number): number {
+  const group = new THREE.Group();
+  group.position.set(x, y0, z);
   const post = new THREE.Mesh(
     new THREE.CylinderGeometry(0.06, 0.08, FAIRY_POLE_H, 8),
     POLE,
   );
-  post.position.set(x, y0 + FAIRY_POLE_H / 2, z);
+  post.position.y = FAIRY_POLE_H / 2;
   post.castShadow = true;
-  scene.add(post);
+  group.add(post);
 
   const cap = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), POLE);
-  cap.position.set(x, y0 + FAIRY_POLE_H, z);
-  scene.add(cap);
+  cap.position.y = FAIRY_POLE_H;
+  group.add(cap);
+  scene.add(group);
+  poles.push({
+    group,
+    x,
+    z,
+    baseY: y0,
+    falling: false,
+    fall: 0,
+    axis: new THREE.Vector3(1, 0, 0),
+  });
+  return poles.length - 1;
 }
 
 function placeBulb(
@@ -163,7 +203,7 @@ function placeBulb(
   color: FairyLightColor,
   recordPerch: boolean,
   spanPerches?: THREE.Vector3[],
-): void {
+): THREE.Object3D[] {
   const { bulb, glow } = bulbMats(color);
   const glass = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), bulb);
   glass.position.copy(at);
@@ -182,6 +222,7 @@ function placeBulb(
     perches.push(perch);
     spanPerches?.push(perch);
   }
+  return [glass, halo];
 }
 
 function placeSpan(
@@ -192,6 +233,8 @@ function placeSpan(
   y0b: number,
   startColor: FairyLightColor,
   bulbIndex: { n: number },
+  poleA: number,
+  poleB: number,
 ): void {
   const span = Math.hypot(b[0] - a[0], b[1] - a[1]);
   if (span < 0.4) return;
@@ -217,6 +260,7 @@ function placeSpan(
   );
   tube.castShadow = false;
   scene.add(tube);
+  const bits: THREE.Object3D[] = [];
 
   // Tighter spacing so pigeons can line up along the string.
   const spacing = Math.max(0.35, span / 28);
@@ -230,20 +274,52 @@ function placeSpan(
     travelled = 0;
     const alt = (bulbIndex.n + (startColor === "blue" ? 1 : 0)) % 2 === 0;
     // Most bulbs are perch spots so a flock can pack the wire.
-    placeBulb(scene, cur, alt ? "red" : "blue", bulbIndex.n % 2 === 0, spanPerches);
+    bits.push(
+      ...placeBulb(scene, cur, alt ? "red" : "blue", bulbIndex.n % 2 === 0, spanPerches),
+    );
     bulbIndex.n += 1;
   }
   if (spanPerches.length > 0) sections.push(spanPerches);
+  spanRecs.push({
+    a: poleA,
+    b: poleB,
+    tube,
+    bits,
+    hinge: null,
+    swinging: false,
+    fall: 0,
+    target: 0,
+    axis: new THREE.Vector3(1, 0, 0),
+  });
+}
+
+function clearLightWreck(): void {
+  if (lightScene) {
+    for (const pole of poles) lightScene.remove(pole.group);
+    for (const span of spanRecs) {
+      if (span.hinge) lightScene.remove(span.hinge);
+      else {
+        lightScene.remove(span.tube);
+        for (const bit of span.bits) lightScene.remove(bit);
+      }
+    }
+  }
+  poles.length = 0;
+  spanRecs.length = 0;
+  poleKnocked = false;
 }
 
 /** Poles at each node; sagging fairy-light wires between them. */
 export function buildFairyLights(scene: THREE.Scene): void {
+  clearLightWreck();
+  lightScene = scene;
   glowSprites.length = 0;
   perches.length = 0;
   sections.length = 0;
   for (const run of runs) {
     if (run.points.length < 1) continue;
     const footing = run.points.map(([x, z]) => groundHeight(x, z));
+    const first = poles.length;
     for (let i = 0; i < run.points.length; i++) {
       const p = run.points[i]!;
       placePole(scene, p[0], p[1], footing[i]!);
@@ -258,9 +334,110 @@ export function buildFairyLights(scene: THREE.Scene): void {
         footing[i + 1]!,
         run.color,
         bulbIndex,
+        first + i,
+        first + i + 1,
       );
     }
   }
   // Start unlit until the day-cycle / walk time slider drives them.
   lightFairyBulbs(0);
+}
+
+function pointSegDist(
+  px: number,
+  pz: number,
+  x0: number,
+  z0: number,
+  x1: number,
+  z1: number,
+): number {
+  const dx = x1 - x0;
+  const dz = z1 - z0;
+  const len2 = dx * dx + dz * dz;
+  const t =
+    len2 < 1e-6
+      ? 0
+      : Math.max(0, Math.min(1, ((px - x0) * dx + (pz - z0) * dz) / len2));
+  return Math.hypot(px - (x0 + dx * t), pz - (z0 + dz * t));
+}
+
+function hingeSpan(span: SpanRec, stand: PoleRec, falling: PoleRec): void {
+  if (!lightScene || span.hinge) return;
+  const pivot = new THREE.Vector3(stand.x, stand.baseY + FAIRY_POLE_H, stand.z);
+  const toward = new THREE.Vector3(falling.x - stand.x, 0, falling.z - stand.z);
+  const spanLen = Math.max(0.5, toward.length());
+  toward.multiplyScalar(1 / spanLen);
+  const axis = new THREE.Vector3(-toward.z, 0, toward.x);
+  if (axis.lengthSq() < 1e-6) axis.set(1, 0, 0);
+  axis.normalize();
+
+  const hinge = new THREE.Group();
+  hinge.position.copy(pivot);
+  lightScene.add(hinge);
+
+  lightScene.remove(span.tube);
+  span.tube.geometry.translate(-pivot.x, -pivot.y, -pivot.z);
+  hinge.add(span.tube);
+  for (const bit of span.bits) {
+    lightScene.remove(bit);
+    bit.position.sub(pivot);
+    hinge.add(bit);
+  }
+
+  span.hinge = hinge;
+  span.axis = axis;
+  span.target = -Math.atan2(FAIRY_POLE_H * 0.92, spanLen);
+  span.swinging = true;
+}
+
+/**
+ * The first pole the wreck actually reaches goes over, and the strings
+ * either side of it swing down from the poles that are still standing.
+ */
+export function knockFairyPoleAlong(
+  x0: number,
+  z0: number,
+  x1: number,
+  z1: number,
+  vx: number,
+  vz: number,
+): void {
+  if (poleKnocked || poles.length === 0) return;
+  let best = -1;
+  let bestD = 3.1;
+  for (let i = 0; i < poles.length; i++) {
+    const d = pointSegDist(poles[i]!.x, poles[i]!.z, x0, z0, x1, z1);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  if (best < 0) return;
+  poleKnocked = true;
+  const pole = poles[best]!;
+  const dir = new THREE.Vector3(vx, 0, vz);
+  if (dir.lengthSq() < 1e-4) dir.set(x1 - x0, 0, z1 - z0);
+  if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+  dir.normalize();
+  pole.axis.set(-dir.z, 0, dir.x).normalize();
+  pole.falling = true;
+  for (const span of spanRecs) {
+    if (span.a !== best && span.b !== best) continue;
+    const stand = poles[span.a === best ? span.b : span.a];
+    const hit = poles[best];
+    if (stand && hit) hingeSpan(span, stand, hit);
+  }
+}
+
+export function updateFairyWreck(delta: number): void {
+  for (const pole of poles) {
+    if (!pole.falling || pole.fall >= 1) continue;
+    pole.fall = Math.min(1, pole.fall + delta * 0.85);
+    pole.group.quaternion.setFromAxisAngle(pole.axis, -pole.fall * Math.PI * 0.5);
+  }
+  for (const span of spanRecs) {
+    if (!span.swinging || !span.hinge || span.fall >= 1) continue;
+    span.fall = Math.min(1, span.fall + delta * 0.7);
+    span.hinge.quaternion.setFromAxisAngle(span.axis, span.target * span.fall);
+  }
 }

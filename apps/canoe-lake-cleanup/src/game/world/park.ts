@@ -180,6 +180,34 @@ export function busStopSpots(): ReadonlyArray<{ x: number; z: number; yaw: numbe
   }));
 }
 
+export type GymKind = "pullup" | "bars" | "bench" | "walker" | "bike";
+
+export interface GymStation {
+  kind: GymKind;
+  x: number;
+  z: number;
+  yaw: number;
+}
+
+const GYM_KINDS: ReadonlyArray<readonly [PlaceableId, GymKind]> = [
+  ["gymPullUp", "pullup"],
+  ["gymBars", "bars"],
+  ["gymBench", "bench"],
+  ["gymWalker", "walker"],
+  ["gymBike", "bike"],
+];
+
+/** Outdoor gym stations from the level — pull-up, bars, bench, walker, bike. */
+export function gymStations(): GymStation[] {
+  const stations: GymStation[] = [];
+  for (const [id, kind] of GYM_KINDS) {
+    for (const spot of placeablesOf(id)) {
+      stations.push({ kind, x: spot.x, z: spot.z, yaw: spot.yaw });
+    }
+  }
+  return stations;
+}
+
 /** Where the play park sits, filled when it's built — kids walk here to play. */
 export interface PlayParkSite {
   /** Rubber boundary in world XZ. */

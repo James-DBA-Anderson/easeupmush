@@ -21,6 +21,7 @@ export type Callout =
   | "geese"
   | "swanboat"
   | "punchup"
+  | "kingswan"
   | "praise";
 
 /** How long before the same sort of job can be reported again. */
@@ -44,6 +45,7 @@ const COOLDOWN: Record<Callout, number> = {
   geese: 9999,
   swanboat: 9999,
   punchup: 9999,
+  kingswan: 9999,
   praise: 300,
 };
 
@@ -90,6 +92,7 @@ const SENDERS: Record<Callout, string> = {
   geese: "999 CONTROL",
   swanboat: "BOAT HIRE",
   punchup: "PARK WARDEN",
+  kingswan: "SOLENT NEWS",
   praise: "DEPOT",
 };
 
@@ -195,6 +198,11 @@ const LINES: Record<Callout, readonly string[]> = {
     "Lads have nicked a swan boat off the raft {where}. Get in one yourself and chase them — fill that hull till she sinks. Watch for cans.",
     "Stolen pedalo on the lake {where}. Hire a swan, catch them up, and hose theirs under. They'll chuck the odd can at you.",
     "Couple of scummers pedalling off in a hire swan {where}. Board one and spray their bilge till she's on the bottom.",
+  ],
+  kingswan: [
+    "The big cob's in {where}. King of the lake, and he doesn't share the bank.",
+    "They're saying the king swan's down on Canoe Lake. Wings up at anything that moves.",
+    "Solent cob's arrived {where}. Bigger than the rest, and he'll have a go.",
   ],
   punchup: [
     "Parents having a proper scrap {where}. Hose them off each other before someone goes in the lake.",

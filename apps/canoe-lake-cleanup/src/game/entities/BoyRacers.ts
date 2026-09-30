@@ -2,10 +2,18 @@ import * as THREE from "three";
 import {
   getRoadGraph,
   ROAD_WIDTH,
+  surroundFootprints,
   type RoadGraph,
 } from "../world/buildings";
 import { groundHeight } from "../world/terrain";
-import { isInLake, nearestShore, WATER_Y } from "../world/lake";
+import { isInLake, LAKE_BED_Y, nearestShore, WATER_Y } from "../world/lake";
+import { Grumble } from "../effects/Grumble";
+import { hitsAny } from "../world/collision";
+import { parkBuildingFootprints } from "../world/park";
+import { smashFencesAlong } from "../world/fence";
+import { smashBenchesAlong } from "../world/bench";
+import { knockFairyPoleAlong } from "../world/fairyLights";
+import { smashBinsAlong } from "./Bin";
 
 /** UK left lane offset. */
 const LANE = ROAD_WIDTH * 0.22;
@@ -58,11 +66,21 @@ interface RacerCar {
   fading: boolean;
   fade: number;
   crashed: boolean;
+  sideWindows: THREE.Mesh[];
+  cabinLight: THREE.PointLight | null;
 }
 
 let nextRacerId = 50_000;
 
-export type RacerPhase = "racing" | "crashing" | "steaming" | "done";
+export type RacerPhase =
+  | "racing"
+  | "crashing"
+  | "trapped"
+  | "climbing"
+  | "sinking"
+  | "done";
+
+const PANIC_LINES = ["HELP!", "THE DOORS!", "GET ME OUT!", "I CAN'T SWIM!"];
 
 /**
  * Night job: Skylines with underglow thrashing the esplanade, then one of them
@@ -89,6 +107,24 @@ export class BoyRacers {
   private crashQueued = false;
   private gone = false;
   private flickT = 0;
+  private driver: THREE.Group | null = null;
+  private driverArms: THREE.Object3D[] = [];
+  private brokenWindow: THREE.Mesh | null = null;
+  private doorTried = false;
+  private windowCharge = 0;
+  private lastWindowHit = -1;
+  private climb = 0;
+  private bangT = 0;
+  private nextShout = 1.2;
+  private nextThud = 0.4;
+  private doorQueued = false;
+  private needDoorQueued = false;
+  private windowQueued = false;
+  private rescuedQueued = false;
+  private thudQueued = false;
+  private doorTold = false;
+  private windowHintTold = false;
+  private doorGrumbleAt = 0;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -140,6 +176,106 @@ export class BoyRacers {
     if (!this.crashQueued) return false;
     this.crashQueued = false;
     return true;
+  }
+
+  /** One-shot: player yanked a door and it stayed shut. */
+  public claimDoorJam(): boolean {
+    if (!this.doorQueued) return false;
+    this.doorQueued = false;
+    return true;
+  }
+
+  /** One-shot: window spray before anyone's tried the doors. */
+  public claimNeedDoor(): boolean {
+    if (!this.needDoorQueued) return false;
+    this.needDoorQueued = false;
+    return true;
+  }
+
+  /** One-shot: a side window gave way. */
+  public claimWindow(): boolean {
+    if (!this.windowQueued) return false;
+    this.windowQueued = false;
+    return true;
+  }
+
+  /** One-shot: he's out and the wreck can go under. Score lands here. */
+  public claimRescued(): boolean {
+    if (!this.rescuedQueued) return false;
+    this.rescuedQueued = false;
+    return true;
+  }
+
+  /** Window bangs while he's still inside. */
+  public claimThud(): boolean {
+    if (!this.thudQueued) return false;
+    this.thudQueued = false;
+    return true;
+  }
+
+  /** HUD line while the wreck is waiting on the player. */
+  public prompt(): string | null {
+    if (this.phase === "trapped" && !this.doorTried) {
+      return "E or spray: Pull the door";
+    }
+    if (this.phase === "trapped") return "Spray the side window";
+    if (this.phase === "climbing") return "He's climbing out";
+    return null;
+  }
+
+  /**
+   * Pull a door. Only counts when the player is stood beside the wreck.
+   * Returns true when the pull happened (so E doesn't also board a pedalo).
+   */
+  public tryDoor(at: THREE.Vector3): boolean {
+    if (this.phase !== "trapped" || !this.crashCar) return false;
+    if (!this.nearDoor(at)) return false;
+    this.jamDoor();
+    return true;
+  }
+
+  /**
+   * Lance on the wreck. Doors jam. A side window breaks only after a door
+   * has been tried, and only after a short wash (not one stray droplet).
+   */
+  public takeSpray(point: THREE.Vector3): boolean {
+    if (this.phase !== "trapped" || !this.crashCar) return false;
+    const pane = this.windowUnder(point);
+    if (pane) {
+      if (!this.doorTried) {
+        if (!this.windowHintTold) {
+          this.windowHintTold = true;
+          this.needDoorQueued = true;
+        }
+        return true;
+      }
+      const now = performance.now();
+      if (now - this.lastWindowHit > 45) {
+        this.lastWindowHit = now;
+        this.windowCharge = Math.min(1, this.windowCharge + 0.2);
+      }
+      if (this.windowCharge >= 1) this.breakWindow(pane);
+      return true;
+    }
+    if (this.nearDoorPoint(point)) {
+      this.jamDoor();
+      return true;
+    }
+    return false;
+  }
+
+  private jamDoor(): void {
+    this.doorTried = true;
+    if (!this.doorTold) {
+      this.doorTold = true;
+      this.doorQueued = true;
+    }
+    const now = performance.now();
+    if (!this.crashCar || now - this.doorGrumbleAt < 900) return;
+    this.doorGrumbleAt = now;
+    const spot = this.crashCar.group.position.clone();
+    spot.y += 1.7;
+    new Grumble(this.scene, "IT WON'T OPEN!", spot);
   }
 
   public getPositions(): THREE.Vector3[] {
@@ -195,16 +331,18 @@ export class BoyRacers {
       if (this.passes >= PASSES_BEFORE_CRASH && this.carOnLakeFront()) {
         this.beginCrash();
       }
-    } else if (this.phase === "crashing" || this.phase === "steaming") {
+    } else if (
+      this.phase === "crashing" ||
+      this.phase === "trapped" ||
+      this.phase === "climbing" ||
+      this.phase === "sinking"
+    ) {
       this.updateCrash(delta);
     }
 
+    this.pulseCabinLights();
     this.updateFades(delta);
     this.updateSteam(delta);
-
-    if (this.phase === "steaming" && this.steamFor <= 0 && this.steam.length === 0) {
-      this.phase = "done";
-    }
   }
 
   public dispose(): void {
@@ -239,6 +377,8 @@ export class BoyRacers {
       lightIntensities: built.lights.map((l) => l.intensity),
       lamps: built.lamps,
       wheels: built.wheels,
+      sideWindows: built.sideWindows,
+      cabinLight: built.cabinLight,
       index: THREE.MathUtils.clamp(index, 0, Math.max(0, this.line.length - 1)),
       dir,
       progress: Math.min(0.42, gap * 0.07),
@@ -374,11 +514,93 @@ export class BoyRacers {
       0,
       aimZ,
     );
-    const dx = this.crashAim.x - at.x;
-    const dz = this.crashAim.z - at.z;
-    const len = Math.hypot(dx, dz) || 1;
-    this.crashVel.set((dx / len) * 32, 0, (dz / len) * 32);
-    this.crashCar.group.rotation.y = Math.atan2(-dz / len, dx / len);
+    this.pickClearAim(at);
+    const aimDx = this.crashAim.x - at.x;
+    const aimDz = this.crashAim.z - at.z;
+    const aimLen = Math.hypot(aimDx, aimDz) || 1;
+    this.crashVel.set((aimDx / aimLen) * 32, 0, (aimDz / aimLen) * 32);
+    this.crashCar.group.rotation.y = Math.atan2(-aimDz / aimLen, aimDx / aimLen);
+    this.seatDriver(this.crashCar);
+  }
+
+  /** Shift the splash point sideways until the run doesn't cross a building. */
+  private pickClearAim(at: THREE.Vector3): void {
+    const baseX = this.crashAim.x;
+    const attempts: { x: number; z: number }[] = [
+      { x: baseX, z: this.crashAim.z },
+    ];
+    for (const dx of [12, -12, 22, -22, 34, -34, 48, -48]) {
+      const x = THREE.MathUtils.clamp(baseX + dx, -70, 80);
+      let z = this.crashAim.z;
+      for (let probe = -90; probe < 40; probe += 3) {
+        if (isInLake(x, probe)) {
+          z = probe;
+          break;
+        }
+      }
+      attempts.push({ x, z });
+    }
+    for (const aim of attempts) {
+      if (this.aimClear(at.x, at.z, aim.x, aim.z)) {
+        this.crashAim.set(aim.x, 0, aim.z);
+        return;
+      }
+    }
+  }
+
+  private aimClear(ax: number, az: number, bx: number, bz: number): boolean {
+    const dist = Math.hypot(bx - ax, bz - az);
+    const steps = Math.max(1, Math.ceil(dist / 1.4));
+    const yaw = Math.atan2(-(bz - az), bx - ax);
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      if (this.poseBlocked(ax + (bx - ax) * t, az + (bz - az) * t, yaw)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Nose, tail and shoulders of the Skyline against park and terrace walls. */
+  private poseBlocked(x: number, z: number, yaw: number): boolean {
+    const fx = Math.cos(yaw);
+    const fz = -Math.sin(yaw);
+    const sx = -fz;
+    const sz = fx;
+    const spots: ReadonlyArray<readonly [number, number]> = [
+      [0, 0],
+      [2.2, 0],
+      [-2.05, 0],
+      [1.5, 0.9],
+      [1.5, -0.9],
+      [0, 0.95],
+      [0, -0.95],
+    ];
+    for (const [along, side] of spots) {
+      const px = x + fx * along + sx * side;
+      const pz = z + fz * along + sz * side;
+      if (
+        hitsAny(px, pz, parkBuildingFootprints(), 0.05) ||
+        hitsAny(px, pz, surroundFootprints(), 0.05)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private breakThrough(
+    x0: number,
+    z0: number,
+    x1: number,
+    z1: number,
+    vx: number,
+    vz: number,
+  ): void {
+    smashFencesAlong(x0, z0, x1, z1, vx, vz);
+    smashBenchesAlong(x0, z0, x1, z1, vx, vz);
+    smashBinsAlong(x0, z0, x1, z1, vx, vz);
+    knockFairyPoleAlong(x0, z0, x1, z1, vx, vz);
   }
 
   private updateCrash(delta: number): void {
@@ -386,8 +608,47 @@ export class BoyRacers {
     if (!car) return;
 
     if (this.phase === "crashing") {
-      car.group.position.x += this.crashVel.x * delta;
-      car.group.position.z += this.crashVel.z * delta;
+      const x0 = car.group.position.x;
+      const z0 = car.group.position.z;
+      const yaw = car.group.rotation.y;
+      let x1 = x0 + this.crashVel.x * delta;
+      let z1 = z0 + this.crashVel.z * delta;
+      if (this.poseBlocked(x1, z1, yaw) && !this.poseBlocked(x0, z0, yaw)) {
+        const xFree = !this.poseBlocked(x1, z0, yaw);
+        const zFree = !this.poseBlocked(x0, z1, yaw);
+        if (xFree && !zFree) {
+          z1 = z0;
+          this.crashVel.z = 0;
+        } else if (zFree && !xFree) {
+          x1 = x0;
+          this.crashVel.x = 0;
+        } else if (xFree && zFree) {
+          if (Math.abs(this.crashVel.x) >= Math.abs(this.crashVel.z)) {
+            z1 = z0;
+            this.crashVel.z = 0;
+          } else {
+            x1 = x0;
+            this.crashVel.x = 0;
+          }
+        } else {
+          x1 = x0;
+          z1 = z0;
+          this.crashVel.set(0, 0, 0);
+        }
+      }
+      car.group.position.x = x1;
+      car.group.position.z = z1;
+      const fwdX = Math.cos(yaw);
+      const fwdZ = -Math.sin(yaw);
+      this.breakThrough(x0, z0, x1, z1, this.crashVel.x, this.crashVel.z);
+      this.breakThrough(
+        x0 + fwdX * 2.1,
+        z0 + fwdZ * 2.1,
+        x1 + fwdX * 2.1,
+        z1 + fwdZ * 2.1,
+        this.crashVel.x,
+        this.crashVel.z,
+      );
       car.group.position.y =
         groundHeight(car.group.position.x, car.group.position.z) + 0.02;
       car.group.rotation.x = Math.min(0.35, car.group.rotation.x + delta * 0.4);
@@ -396,39 +657,254 @@ export class BoyRacers {
 
       if (!this.wet && isInLake(car.group.position.x, car.group.position.z)) {
         this.wet = true;
-        this.phase = "steaming";
+        this.phase = "trapped";
         this.crashQueued = true;
-        this.scored = true;
-        this.steamFor = 9;
-        this.crashVel.multiplyScalar(0.25);
+        this.steamFor = 6;
+        this.crashVel.multiplyScalar(0.18);
         this.burstSteam(28);
       }
     }
 
-    if (this.wet) this.flickerLamps(car, delta);
+    if (this.wet && this.phase !== "sinking") this.flickerLamps(car, delta);
 
-    if (this.phase === "steaming") {
-      this.steamFor -= delta;
-      this.steamAcc += delta;
-      while (this.steamAcc >= 0.04 && this.steamFor > 0) {
-        this.steamAcc -= 0.04;
-        this.burstSteam(3);
-      }
+    if (this.phase === "trapped") {
+      this.holdAfloat(car, delta);
+      this.panicInside(car, delta);
+      this.leakSteam(delta);
+    }
 
-      this.sink = Math.min(1, this.sink + delta * 0.18);
+    if (this.phase === "climbing") {
+      this.holdAfloat(car, delta);
+      this.climbOut(car, delta);
+    }
+
+    if (this.phase === "sinking") {
+      this.sink = Math.min(1, this.sink + delta * 0.16);
+      const floatY = WATER_Y + 0.12;
       car.group.position.y = THREE.MathUtils.lerp(
-        WATER_Y + 0.35,
-        WATER_Y - 0.55,
+        floatY,
+        LAKE_BED_Y + 0.04,
         this.sink * this.sink,
       );
-      car.group.rotation.z = this.sink * 0.55;
-      car.group.rotation.x = 0.15 + this.sink * 0.5;
-      car.group.position.x += this.crashVel.x * delta * (1 - this.sink);
-      car.group.position.z += this.crashVel.z * delta * (1 - this.sink);
-
-      if (this.steamFor <= 0 && this.steam.length === 0) {
-        this.phase = "done";
+      car.group.rotation.z *= 1 - delta * 0.6;
+      car.group.rotation.x = THREE.MathUtils.lerp(car.group.rotation.x, 0.08, delta * 0.8);
+      if (car.cabinLight) {
+        car.cabinLight.intensity *= Math.max(0, 1 - delta * 1.4);
       }
+      if (this.sink >= 1 && this.steam.length === 0) this.phase = "done";
+    }
+  }
+
+  /** Nose stays in the lake and the roof stays above the surface. */
+  private holdAfloat(car: RacerCar, delta: number): void {
+    const bob = Math.sin(performance.now() * 0.003) * 0.035;
+    car.group.position.y = WATER_Y + 0.12 + bob;
+    car.group.position.x += this.crashVel.x * delta * 0.15;
+    car.group.position.z += this.crashVel.z * delta * 0.15;
+    this.crashVel.multiplyScalar(Math.max(0, 1 - delta * 0.8));
+    car.group.rotation.z = Math.sin(performance.now() * 0.002) * 0.04;
+    car.group.rotation.x = 0.12;
+  }
+
+  private leakSteam(delta: number): void {
+    if (this.steamFor <= 0) return;
+    this.steamFor -= delta;
+    this.steamAcc += delta;
+    while (this.steamAcc >= 0.12 && this.steamFor > 0) {
+      this.steamAcc -= 0.12;
+      this.burstSteam(2);
+    }
+  }
+
+  private panicInside(car: RacerCar, delta: number): void {
+    this.bangT += delta;
+    const punch = Math.max(0, Math.sin(this.bangT * 11));
+    const side = Math.sin(this.bangT * 2.4) > 0 ? 1 : -1;
+    for (let i = 0; i < this.driverArms.length; i++) {
+      const arm = this.driverArms[i]!;
+      const own = i === 0 ? -1 : 1;
+      const hitting = own === side ? punch : punch * 0.15;
+      arm.rotation.x = -1.1 + hitting * 0.95;
+    }
+    if (this.driver) {
+      this.driver.position.y = 0.48 + punch * 0.04;
+      this.driver.rotation.y = side * punch * 0.25;
+    }
+
+    this.nextThud -= delta;
+    if (this.nextThud <= 0) {
+      this.nextThud = 0.55 + Math.random() * 0.35;
+      this.thudQueued = true;
+      car.group.position.x += side * 0.02;
+    }
+
+    this.nextShout -= delta;
+    if (this.nextShout <= 0) {
+      this.nextShout = 2.4 + Math.random() * 1.4;
+      const line = PANIC_LINES[Math.floor(Math.random() * PANIC_LINES.length)]!;
+      const spot = car.group.position.clone();
+      spot.y += 1.85;
+      new Grumble(this.scene, line, spot);
+    }
+  }
+
+  private climbOut(car: RacerCar, delta: number): void {
+    if (!this.driver) return;
+    this.climb += delta;
+    const t = Math.min(1, this.climb / 1.5);
+    const side = this.brokenSide();
+    this.driver.position.z = side * THREE.MathUtils.lerp(0.05, 1.15, t);
+    this.driver.position.y = THREE.MathUtils.lerp(0.5, 1.05, t);
+    this.driver.position.x = THREE.MathUtils.lerp(-0.15, -0.05, t);
+    this.driver.rotation.z = side * t * 0.9;
+    this.driver.rotation.x = -t * 0.6;
+    for (const arm of this.driverArms) arm.rotation.x = -0.4;
+    if (t < 1) return;
+    car.group.remove(this.driver);
+    this.driver = null;
+    this.rescuedQueued = true;
+    this.phase = "sinking";
+    this.steamFor = 2.5;
+    this.burstSteam(16);
+  }
+
+  private brokenSide(): 1 | -1 {
+    if (!this.brokenWindow) return 1;
+    return this.brokenWindow.position.z >= 0 ? 1 : -1;
+  }
+
+  private nearDoor(at: THREE.Vector3): boolean {
+    const car = this.crashCar;
+    if (!car) return false;
+    const local = car.group.worldToLocal(at.clone());
+    if (local.y < -0.4 || local.y > 2.6) return false;
+    return (
+      Math.hypot(local.x + 0.15, local.z - 1.05) < 1.45 ||
+      Math.hypot(local.x + 0.15, local.z + 1.05) < 1.45
+    );
+  }
+
+  /** Spray point sitting on a door skin rather than the glass. */
+  private nearDoorPoint(point: THREE.Vector3): boolean {
+    const car = this.crashCar;
+    if (!car) return false;
+    const local = car.group.worldToLocal(point.clone());
+    const lowOnTheDoor = local.y > 0.28 && local.y < 0.62;
+    const onTheSkin = Math.abs(local.z) > 0.72 && Math.abs(local.z) < 1.25;
+    const alongCabin = local.x < 0.4 && local.x > -0.9;
+    return lowOnTheDoor && onTheSkin && alongCabin;
+  }
+
+  private windowUnder(point: THREE.Vector3): THREE.Mesh | null {
+    const car = this.crashCar;
+    if (!car) return null;
+    const local = car.group.worldToLocal(point.clone());
+    let best: THREE.Mesh | null = null;
+    let bestD = 0.55;
+    for (const pane of car.sideWindows) {
+      if (pane === this.brokenWindow) continue;
+      const d = Math.hypot(local.x - pane.position.x, local.y - pane.position.y, local.z - pane.position.z);
+      if (d < bestD) {
+        bestD = d;
+        best = pane;
+      }
+    }
+    return best;
+  }
+
+  private breakWindow(pane: THREE.Mesh): void {
+    if (this.phase !== "trapped") return;
+    this.brokenWindow = pane;
+    pane.visible = false;
+    this.smashShards(pane);
+    this.phase = "climbing";
+    this.windowQueued = true;
+    if (this.driver) this.driver.rotation.y = 0;
+  }
+
+  private smashShards(pane: THREE.Mesh): void {
+    const car = this.crashCar;
+    if (!car) return;
+    const origin = new THREE.Vector3();
+    pane.getWorldPosition(origin);
+    const side = Math.sign(pane.position.z) || 1;
+    for (let i = 0; i < 7; i++) {
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x9fd8ff,
+        transparent: true,
+        opacity: 0.65,
+        roughness: 0.05,
+        metalness: 0.2,
+      });
+      const shard = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.05, 0.012), mat);
+      shard.position.copy(origin);
+      shard.position.x += (Math.random() - 0.5) * 0.2;
+      shard.position.y += (Math.random() - 0.5) * 0.15;
+      this.scene.add(shard);
+      const life = 0.7 + Math.random() * 0.5;
+      const puff: SteamPuff = {
+        mesh: shard,
+        life,
+        maxLife: life,
+        rise: -1.6 - Math.random(),
+        driftX: (Math.random() - 0.5) * 0.8,
+        driftZ: side * (0.6 + Math.random() * 0.8),
+      };
+      this.steam.push(puff);
+    }
+  }
+
+  private seatDriver(car: RacerCar): void {
+    const glow = car.cabinLight?.color.getHex() ?? 0xff2ec8;
+    const body = new THREE.MeshStandardMaterial({ color: 0x1a1c22, roughness: 0.7 });
+    const skin = new THREE.MeshStandardMaterial({ color: 0xc48a62, roughness: 0.65 });
+    const hair = new THREE.MeshStandardMaterial({ color: 0x1a120c, roughness: 0.8 });
+    const hi = new THREE.MeshStandardMaterial({
+      color: glow,
+      emissive: glow,
+      emissiveIntensity: 0.55,
+      roughness: 0.4,
+    });
+    const man = new THREE.Group();
+    man.position.set(-0.15, 0.48, 0.05);
+
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.36, 0.2), body);
+    torso.position.y = 0.28;
+    man.add(torso);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, 0.08), hi);
+    stripe.position.set(0, 0.36, 0.08);
+    man.add(stripe);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.15), skin);
+    head.position.y = 0.56;
+    man.add(head);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.08, 0.17), hair);
+    cap.position.y = 0.66;
+    man.add(cap);
+
+    this.driverArms = [];
+    for (const side of [-1, 1] as const) {
+      const arm = new THREE.Group();
+      arm.position.set(side * 0.16, 0.42, 0);
+      const upper = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.22, 0.07), body);
+      upper.position.set(side * 0.02, -0.08, 0);
+      arm.add(upper);
+      const fist = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.07), skin);
+      fist.position.set(side * 0.04, -0.2, side * 0.08);
+      arm.add(fist);
+      man.add(arm);
+      this.driverArms.push(arm);
+    }
+
+    car.group.add(man);
+    this.driver = man;
+  }
+
+  /** Interior neon breathes while the pack is still running. */
+  private pulseCabinLights(): void {
+    const t = performance.now() * 0.006;
+    for (const car of this.cars) {
+      if (!car.cabinLight || car.crashed) continue;
+      car.cabinLight.intensity = 3.4 + Math.sin(t + car.id) * 1.5;
     }
   }
 
@@ -532,11 +1008,14 @@ export class BoyRacers {
     wheels: THREE.Object3D[];
     lights: THREE.PointLight[];
     lamps: Lamp[];
+    sideWindows: THREE.Mesh[];
+    cabinLight: THREE.PointLight;
   } {
     const group = new THREE.Group();
     const wheels: THREE.Object3D[] = [];
     const lights: THREE.PointLight[] = [];
     const lamps: Lamp[] = [];
+    const sideWindows: THREE.Mesh[] = [];
     const paintCol = BODY_PAINTS[slot % BODY_PAINTS.length]!;
     const glowCol = GLOWS[slot % GLOWS.length]!;
     const accentCol = ACCENTS[slot % ACCENTS.length]!;
@@ -557,11 +1036,11 @@ export class BoyRacers {
       metalness: 0.35,
     });
     const glass = new THREE.MeshStandardMaterial({
-      color: 0x12181e,
-      roughness: 0.12,
-      metalness: 0.45,
+      color: 0x16303a,
+      roughness: 0.08,
+      metalness: 0.2,
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.32,
     });
     const tyre = new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 1 });
     const hub = new THREE.MeshStandardMaterial({
@@ -599,14 +1078,34 @@ export class BoyRacers {
     addBox(group, dark, 0.2, 0.04, 0.26, length * 0.18, hullY + 0.29, 0.18);
     addBox(group, dark, 0.2, 0.04, 0.26, length * 0.18, hullY + 0.29, -0.18);
 
-    // Cabin planted on the hull (bottom 0.49, hull top 0.58).
+    // Cabin is a beltline plus pillars so the glass is actually a window.
     const cabinY = 0.72;
-    addBox(group, paint, length * 0.42, 0.46, width * 0.8, -0.3, cabinY, 0, true);
-    addBox(group, paint, length * 0.36, 0.08, width * 0.74, -0.36, cabinY + 0.24, 0, true);
+    addBox(group, paint, length * 0.42, 0.16, width * 0.8, -0.3, 0.56, 0, true);
+    addBox(group, paint, length * 0.36, 0.08, width * 0.74, -0.36, cabinY + 0.32, 0, true);
+    for (const px of [-0.88, 0.18]) {
+      for (const pz of [width * 0.36, -width * 0.36]) {
+        addBox(group, paint, 0.08, 0.46, 0.08, px, 0.82, pz, true);
+      }
+    }
+    addBox(group, dark, 0.34, 0.1, 0.32, -0.22, 0.5, 0.12);
     addBox(group, glass, 0.06, 0.28, width * 0.68, -0.08, cabinY + 0.04, 0);
-    addBox(group, glass, 0.36, 0.22, 0.05, -0.28, cabinY + 0.02, width * 0.38);
-    addBox(group, glass, 0.36, 0.22, 0.05, -0.28, cabinY + 0.02, -width * 0.38);
+    sideWindows.push(
+      addBox(group, glass, 0.36, 0.22, 0.05, -0.28, cabinY + 0.02, width * 0.38),
+    );
+    sideWindows.push(
+      addBox(group, glass, 0.36, 0.22, 0.05, -0.28, cabinY + 0.02, -width * 0.38),
+    );
     addBox(group, glass, 0.06, 0.24, width * 0.64, -0.94, cabinY + 0.02, 0);
+
+    // Cabin neon — dash, roof lining and door cards, lit from inside the glass.
+    addLampBox(group, lamps, 0.85, 0.03, 0.72, -0.05, cabinY - 0.1, 0, glowCol, 0.95);
+    addLampBox(group, lamps, 1.05, 0.025, 0.85, -0.32, cabinY + 0.2, 0, glowCol, 0.85);
+    addLampBox(group, lamps, 0.7, 0.08, 0.02, -0.28, cabinY + 0.02, width * 0.32, glowCol, 0.9);
+    addLampBox(group, lamps, 0.7, 0.08, 0.02, -0.28, cabinY + 0.02, -width * 0.32, glowCol, 0.9);
+    const cabinLight = new THREE.PointLight(glowCol, 3.4, 3.2, 2);
+    cabinLight.position.set(-0.2, cabinY, 0);
+    group.add(cabinLight);
+    lights.push(cabinLight);
 
     // Boot deck — bites the cabin rear and the hull.
     const bootX = -1.2;
@@ -715,7 +1214,7 @@ export class BoyRacers {
       }
     }
 
-    return { group, wheels, lights, lamps };
+    return { group, wheels, lights, lamps, sideWindows, cabinLight };
   }
 }
 

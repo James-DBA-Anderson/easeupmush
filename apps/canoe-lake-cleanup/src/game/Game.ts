@@ -32,6 +32,7 @@ import { Gazebo } from "./entities/Gazebo";
 import { BenchSit, type BenchPastime } from "./entities/BenchSit";
 import { PlayVisit, canVisitPlayPark } from "./entities/PlayVisit";
 import { FootballKickabout } from "./entities/FootballKickabout";
+import { GymCrew } from "./entities/GymCrew";
 import { Fox } from "./entities/Fox";
 import { Puddles } from "./effects/Puddles";
 import { GrassFire } from "./effects/GrassFire";
@@ -69,12 +70,12 @@ import { getMission, getMissionSpot, missionWindowOpen } from "./world/missions"
 import { GooseFlock } from "./entities/GooseFlock";
 import { parkAudio } from "./audio/ParkAudio";
 import { readDebugBoot, type DebugFrom } from "../level/debugBoot";
-import { placeBench, clearSitterBenches, sitterBenchSeats } from "./world/bench";
+import { placeBench, clearSitterBenches, sitterBenchSeats, updateSmashedBenches } from "./world/bench";
 import { plantTrees, updateTrees, updateFlowerBeds, sprayFlowerBed, flowerBeds } from "./world/trees";
 import { buildSurrounds, getBeachOutline, lightWindows } from "./world/buildings";
-import { buildFairyLights, lightFairyBulbs, fairyLightSections } from "./world/fairyLights";
+import { buildFairyLights, lightFairyBulbs, fairyLightSections, updateFairyWreck } from "./world/fairyLights";
 import { WireBird, roostPerchesNorth } from "./entities/WireBird";
-import { buildFencing, parkGates } from "./world/fence";
+import { buildFencing, parkGates, updateBrokenFences } from "./world/fence";
 import {
   buildParkBuildings,
   bobPedalos,
@@ -89,6 +90,7 @@ import {
   setPedaloChop,
   consumePedaloWreck,
   getRoseGarden,
+  gymStations,
 } from "./world/park";
 import { DayCycle } from "./systems/DayCycle";
 import { Weather } from "./systems/Weather";
@@ -232,6 +234,8 @@ export class Game {
   private renderer: THREE.WebGLRenderer;
   private player: Player;
   private swans: Swan[] = [];
+  /** Afternoon cob — news, not a job. */
+  private kingIn = false;
   private people: Person[] = [];
   private nextPerson = 4 + Math.random() * 10;
   private nextEviction = 0;
@@ -270,6 +274,8 @@ export class Game {
   private nextPlayVisit = 35 + Math.random() * 40;
   private football: FootballKickabout[] = [];
   private nextFootball = 18 + Math.random() * 28;
+  private gymCrew: GymCrew | null = null;
+  private nextGym = 16 + Math.random() * 24;
   private nextArrival = 40 + Math.random() * 60;
   private nextDeparture = 50 + Math.random() * 70;
   private fox: Fox | null = null;
@@ -302,6 +308,7 @@ export class Game {
   private boyRacers: BoyRacers | null = null;
   private racerMissionStarted = false;
   private racerMissionDone = false;
+  private racerPromptShown: string | null = null;
   private racerHourWas = -1;
   private rebelBriefing: { wait: number; from: string; text: string }[] = [];
 
@@ -1828,6 +1835,11 @@ export class Game {
     return true;
   }
 
+  /** Yank a jammed door on the Skyline in the lake. */
+  public tryRacerDoor(at: THREE.Vector3): boolean {
+    return this.boyRacers?.tryDoor(at) ?? false;
+  }
+
   public onHeavyHoseEmpty(): void {
     this.messages.send(
       "DEPOT",
@@ -1836,6 +1848,34 @@ export class Game {
       10,
     );
     this.showTool("hose");
+  }
+
+  /**
+   * Mid-afternoon the cob flies in. Bigger than the flock, and he picks a fight.
+   * The radio mentions it. There's nothing to complete.
+   */
+  private updateKingSwan(): void {
+    if (!this.kingIn) {
+      const hour = this.dayCycle.hour;
+      if (hour >= 14.75 && hour < 21) this.bringKingSwan();
+      return;
+    }
+    for (const swan of this.swans) {
+      if (!swan.isKing() || !swan.claimLanded()) continue;
+      const at = swan.getPosition();
+      this.callouts.raise("kingswan", this.dayCycle.clockFace(), {
+        x: at.x,
+        z: at.z,
+      });
+    }
+  }
+
+  private bringKingSwan(): void {
+    this.kingIn = true;
+    const spot = waterSpot();
+    const swan = new Swan(new THREE.Vector3(spot.x, 0, spot.y), this.scene, "king");
+    swan.flyIn();
+    this.swans.push(swan);
   }
 
   /** Pedalo into birds — permanent takeout; too many and a V flies in mad. */
@@ -1917,6 +1957,8 @@ export class Game {
       return true;
     }
 
+    if (this.boyRacers?.takeSpray(point)) return true;
+
     // Water hitting a tagged wall carves fading streaks through the paint.
     for (const tag of this.graffiti) {
       if (!tag.hitBy(point, this.camera.position)) continue;
@@ -1990,6 +2032,9 @@ export class Game {
       if (lot.drench(this.camera.position)) this.complain();
       return true;
     }
+
+    // Bodybuilders — they want the lance while they're on the kit.
+    if (this.gymCrew?.takeSpray(point, heavy)) return true;
 
     // Play-park kids — hose them and mum/dad come steaming over.
     for (const visit of this.playVisits) {
@@ -2827,6 +2872,13 @@ export class Game {
       this.instructionsElement.innerHTML = mobile
         ? "Left stick: Pedal & steer | Look stick: Look | Spray: Aim & fire | Hold spray centred: Climb out"
         : "WASD: Pedal & steer | Mouse: Look | Click: Spray | E: Climb out";
+      return;
+    }
+    const racerTip = this.boyRacers?.prompt();
+    if (racerTip) {
+      this.instructionsElement.innerHTML = mobile
+        ? racerTip
+        : `${racerTip} | WASD: Move | Mouse: Look | Click: Spray | ESC: Unlock mouse`;
       return;
     }
     if (tool === "heavyHose") {
@@ -3923,6 +3975,11 @@ export class Game {
     if (this.boyRacers.claimRoar()) {
       parkAudio.engineRoar(1);
     }
+    const racerTip = this.boyRacers.prompt();
+    if (racerTip !== this.racerPromptShown) {
+      this.racerPromptShown = racerTip;
+      this.showTool(this.player.currentTool());
+    }
     if (this.boyRacers.claimWaterHit()) {
       const at = this.boyRacers.aimSpot();
       const here = this.camera.position;
@@ -3934,9 +3991,56 @@ export class Game {
       parkAudio.steamHiss(1.1);
       this.messages.send(
         "PCSO GRANT",
-        "One of them's gone in the lake. Steam coming off it like a kettle. Leave it — recovery's coming.",
+        "He's still in it, banging the glass. Get a door open — if it'll move.",
         this.dayCycle.clockFace(),
         14,
+      );
+    }
+    if (this.boyRacers.claimDoorJam()) {
+      parkAudio.vanDoor(false);
+      this.messages.send(
+        "PCSO GRANT",
+        "Handle's seized. Doors won't budge. Put the lance through a side window.",
+        this.dayCycle.clockFace(),
+        12,
+      );
+    }
+    if (this.boyRacers.claimNeedDoor()) {
+      this.messages.send(
+        "PCSO GRANT",
+        "Try the doors before you start smashing glass.",
+        this.dayCycle.clockFace(),
+        8,
+      );
+    }
+    if (this.boyRacers.claimWindow()) {
+      parkAudio.shoveHit(1);
+      this.messages.send(
+        "PCSO GRANT",
+        "Window's gone. He's climbing out.",
+        this.dayCycle.clockFace(),
+        8,
+      );
+    }
+    if (this.boyRacers.claimThud()) {
+      parkAudio.shoveHit(0.35);
+    }
+    if (this.boyRacers.claimRescued()) {
+      const at = this.boyRacers.aimSpot();
+      const pan = at
+        ? Math.max(-1, Math.min(1, (at.x - this.camera.position.x) / 40))
+        : 0;
+      parkAudio.waterSplash(1.1, pan);
+      this.cleaned += 1;
+      this.comboRun = this.comboLeft > 0 ? this.comboRun + 1 : 1;
+      this.comboLeft = COMBO_WINDOW;
+      this.score += 90 * this.multiplier();
+      this.updateHUD();
+      this.messages.send(
+        "PCSO GRANT",
+        "He's clear. The Skyline's going to the bottom.",
+        this.dayCycle.clockFace(),
+        10,
       );
     }
     if (this.boyRacers.claimCrash()) {
@@ -4101,6 +4205,9 @@ export class Game {
     for (const match of this.football) {
       for (const at of match.guestPositions()) add(at);
     }
+    if (this.gymCrew) {
+      for (const at of this.gymCrew.getPositions()) add(at);
+    }
     for (const lot of this.drunks) {
       for (const at of lot.guestPositions()) add(at);
     }
@@ -4229,6 +4336,37 @@ export class Game {
         match.dispose();
         this.football.splice(i, 1);
       }
+    }
+  }
+
+  /**
+   * Bodybuilders on the outdoor gym through the day. The lance is a cool-down
+   * they ask for, not a complaint.
+   */
+  private updateGym(delta: number): void {
+    const hour = this.dayCycle.hour;
+    const gymHours = hour >= 7.5 && hour < 19;
+    const wet = this.weather.rainStrength() > 0.35;
+    const stations = gymStations();
+
+    this.nextGym -= delta;
+    if (this.nextGym <= 0 && !this.gymCrew && gymHours && !wet && stations.length > 0) {
+      const seen = stations.some((st) => this.inShot(st.x, st.z, 1.4));
+      if (seen) {
+        this.nextGym = WAIT_AND_SEE;
+      } else {
+        this.gymCrew = new GymCrew(this.scene, stations);
+        this.nextGym = 70 + Math.random() * 90;
+      }
+    } else if (this.nextGym <= 0 && !this.gymCrew) {
+      this.nextGym = gymHours ? 18 + Math.random() * 20 : 80 + Math.random() * 60;
+    }
+
+    if (!this.gymCrew) return;
+    this.gymCrew.update(delta, wet);
+    if (this.gymCrew.isDone()) {
+      this.gymCrew.dispose();
+      this.gymCrew = null;
     }
   }
 
@@ -4835,6 +4973,7 @@ export class Game {
     this.mendUp(delta);
 
     this.temptSwans();
+    this.updateKingSwan();
     this.birdScraps(delta);
 
     const crowd = this.people.map((person) => person.getPosition());
@@ -4915,10 +5054,15 @@ export class Game {
     this.updateGazebos(delta);
     this.updateBenchSits(delta);
     this.updateFootball(delta);
+    this.updateGym(delta);
     this.updateGrassFire(delta);
     this.updateSwanboatMission(delta);
     this.updatePunchUpMission(delta);
     this.updateRacerMission(delta);
+    updateBrokenFences(delta);
+    updateSmashedBenches(delta);
+    updateFairyWreck(delta);
+    for (const bin of this.bins) bin.tickSmash(delta);
     this.updateRebelMission(delta);
     this.updatePlayVisits(delta);
     this.updateFlock(delta);
@@ -4981,6 +5125,7 @@ export class Game {
         ...this.benchSits.flatMap((lot) => lot.guestPositions()),
         ...this.playVisits.flatMap((visit) => visit.guestPositions()),
         ...this.football.flatMap((match) => match.guestPositions()),
+        ...(this.gymCrew?.getPositions() ?? []),
         ...this.drunks.flatMap((lot) => lot.guestPositions()),
         ...(this.parentPunchUp?.getPositions() ?? []),
       ],

@@ -44,6 +44,65 @@ export function benchFootprint(x: number, z: number, yaw: number): Footprint {
   };
 }
 
+interface LiveBench {
+  hinge: THREE.Group;
+  x: number;
+  z: number;
+  yaw: number;
+  smashed: boolean;
+  fall: number;
+  sign: number;
+}
+
+const liveBenches: LiveBench[] = [];
+
+function distToSeg(
+  px: number,
+  pz: number,
+  x0: number,
+  z0: number,
+  x1: number,
+  z1: number,
+): number {
+  const dx = x1 - x0;
+  const dz = z1 - z0;
+  const len2 = dx * dx + dz * dz;
+  const t =
+    len2 < 1e-6
+      ? 0
+      : Math.max(0, Math.min(1, ((px - x0) * dx + (pz - z0) * dz) / len2));
+  return Math.hypot(px - (x0 + dx * t), pz - (z0 + dz * t));
+}
+
+/** Tip any bench the wreck drives through. */
+export function smashBenchesAlong(
+  x0: number,
+  z0: number,
+  x1: number,
+  z1: number,
+  vx: number,
+  vz: number,
+): void {
+  for (const bench of liveBenches) {
+    if (bench.smashed) continue;
+    if (distToSeg(bench.x, bench.z, x0, z0, x1, z1) > 2.15) continue;
+    bench.smashed = true;
+    const fx = Math.cos(bench.yaw);
+    const fz = -Math.sin(bench.yaw);
+    const along = vx * fx + vz * fz;
+    const across = vx * -fz + vz * fx;
+    bench.sign = Math.abs(across) > Math.abs(along) ? (across >= 0 ? 1 : -1) : along >= 0 ? 1 : -1;
+  }
+}
+
+export function updateSmashedBenches(delta: number): void {
+  for (const bench of liveBenches) {
+    if (!bench.smashed || bench.fall >= 1) continue;
+    bench.fall = Math.min(1, bench.fall + delta * 3);
+    bench.hinge.rotation.x = bench.sign * bench.fall * 1.35;
+  }
+}
+
 /** Mesh plus walk-blocker for a placed bench. */
 export function placeBench(
   scene: THREE.Scene,
@@ -53,9 +112,14 @@ export function placeBench(
   opts?: { sitters?: boolean; crowd?: "elder" },
 ): THREE.Group {
   const bench = buildBench();
-  bench.position.set(x, groundHeight(x, z), z);
-  bench.rotation.y = yaw;
-  scene.add(bench);
+  const root = new THREE.Group();
+  const hinge = new THREE.Group();
+  hinge.add(bench);
+  root.add(hinge);
+  root.position.set(x, groundHeight(x, z), z);
+  root.rotation.y = yaw;
+  scene.add(root);
+  liveBenches.push({ hinge, x, z, yaw, smashed: false, fall: 0, sign: 1 });
   addProp(benchFootprint(x, z, yaw));
   if (opts?.sitters) {
     sitterBenches.push({
@@ -65,7 +129,7 @@ export function placeBench(
       ...(opts.crowd ? { crowd: opts.crowd } : {}),
     });
   }
-  return bench;
+  return root;
 }
 
 const IRON = new THREE.MeshStandardMaterial({ color: 0x1f3a30, roughness: 0.55, metalness: 0.5 });

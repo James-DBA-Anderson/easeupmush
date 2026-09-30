@@ -66,7 +66,7 @@ export class Cyclist {
   private speed: number;
   private sideOffset: number;
 
-  private wheels: THREE.Mesh[] = [];
+  private wheels: THREE.Object3D[] = [];
   private legs: THREE.Mesh[] = [];
   private crank = 0;
   private lean = 0;
@@ -123,88 +123,241 @@ export class Cyclist {
       roughness: 0.8,
     });
     const skin = new THREE.MeshStandardMaterial({ color: pick(SKIN), roughness: 0.8 });
-    const metal = new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.5, metalness: 0.6 });
+    const shorts = new THREE.MeshStandardMaterial({
+      color: lout ? 0x1a1a1e : 0x1e242c,
+      roughness: 0.9,
+    });
+    const metal = new THREE.MeshStandardMaterial({
+      color: lout ? pick([0x1a1a1e, 0x22262c, 0x2a2418]) : pick([0xc43a3a, 0x2a4a8a, 0x1f6b4a, 0x2a2a30, 0xd4a018]),
+      roughness: 0.45,
+      metalness: 0.35,
+    });
     const rubber = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 1 });
+    const spoke = new THREE.MeshStandardMaterial({
+      color: 0xc8cdd2,
+      roughness: 0.35,
+      metalness: 0.7,
+    });
 
-    // Wheels stand in the plane of travel, one fore and one aft. Fat tyres on
-    // the e-bikes, which is half the reason you can hear them coming.
-    const tyre = lout ? 0.1 : 0.045;
-    for (const z of [0.58, -0.58]) {
-      const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.33, tyre, 6, 18), rubber);
-      wheel.rotation.y = Math.PI / 2;
-      wheel.position.set(0, 0.33, z);
-      wheel.castShadow = true;
-      group.add(wheel);
-      this.wheels.push(wheel);
-    }
+    if (lout) this.buildEscooter(group, metal, rubber, spoke);
+    else this.buildBicycle(group, metal, rubber, spoke);
 
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 1.1), metal);
-    frame.position.set(0, 0.62, 0);
-    frame.rotation.x = -0.12;
-    group.add(frame);
-
-    const seatTube = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.42, 0.05), metal);
-    seatTube.position.set(0, 0.6, -0.34);
-    group.add(seatTube);
-
-    const bars = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.05, 0.05), metal);
-    bars.position.set(0, 0.95, 0.42);
-    group.add(bars);
-
-    if (lout) {
-      // Battery slung in the frame, and a phone playing something out loud.
-      const battery = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.3, 0.5), metal);
-      battery.position.set(0, 0.6, 0.05);
-      group.add(battery);
-
-      const phone = new THREE.Mesh(
-        new THREE.BoxGeometry(0.09, 0.16, 0.02),
-        new THREE.MeshStandardMaterial({ color: 0x9fd8ff, emissive: 0x2b6f96 }),
-      );
-      phone.position.set(0.2, 1.0, 0.44);
-      group.add(phone);
-    }
-
-    // Rider is a separate group so the hose can knock them clean off.
     this.rider = new THREE.Group();
+    if (lout) this.buildStandingRider(jersey, skin, shorts);
+    else this.buildSeatedRider(jersey, skin, shorts);
+    group.add(this.rider);
+    return group;
+  }
 
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.5, 0.28), jersey);
-    // Hunched over the bars rather than sat bolt upright.
-    torso.position.set(0, 1.06, -0.06);
-    torso.rotation.x = 0.5;
+  /** Diamond frame, fork, saddle and a chainring you can actually pedal. */
+  private buildBicycle(
+    group: THREE.Group,
+    metal: THREE.Material,
+    rubber: THREE.Material,
+    spoke: THREE.Material,
+  ): void {
+    const radius = 0.34;
+    const rear = v(0, radius, -0.52);
+    const front = v(0, radius, 0.58);
+    const bracket = v(0, radius + 0.02, -0.02);
+    const seat = v(0, 0.96, -0.22);
+    const head = v(0, 0.9, 0.38);
+
+    this.wheels.push(addSpokedWheel(group, rear, radius, 0.032, rubber, spoke));
+    this.wheels.push(addSpokedWheel(group, front, radius, 0.032, rubber, spoke));
+
+    spar(group, bracket, seat, 0.035, metal);
+    spar(group, seat, head, 0.032, metal);
+    spar(group, bracket, head, 0.038, metal);
+    spar(group, bracket, rear, 0.028, metal);
+    spar(group, seat, rear, 0.026, metal);
+    spar(group, head, front.clone().setY(radius + 0.04), 0.03, metal);
+
+    const saddle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, 0.26), rubber);
+    saddle.position.copy(seat).add(v(0, 0.05, -0.02));
+    group.add(saddle);
+
+    const stem = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.14, 0.03), metal);
+    stem.position.copy(head).add(v(0, 0.08, 0.02));
+    group.add(stem);
+    const bars = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.03, 0.03), metal);
+    bars.position.copy(head).add(v(0, 0.16, 0.04));
+    group.add(bars);
+    for (const side of [-1, 1] as const) {
+      const grip = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.035, 0.035), rubber);
+      grip.position.copy(bars.position).add(v(side * 0.22, 0, 0));
+      group.add(grip);
+    }
+
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.012, 6, 14), spoke);
+    ring.rotation.y = Math.PI / 2;
+    ring.position.copy(bracket);
+    group.add(ring);
+    for (const side of [-1, 1] as const) {
+      const pedal = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.02, 0.12), metal);
+      pedal.position.set(side * 0.12, bracket.y - 0.02, bracket.z);
+      group.add(pedal);
+    }
+
+    const lamp = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, 0.05, 0.07),
+      new THREE.MeshStandardMaterial({ color: 0xffe7a0, emissive: 0x554410, roughness: 0.4 }),
+    );
+    lamp.position.set(0, radius + 0.08, 0.66);
+    group.add(lamp);
+  }
+
+  /** Standing hire scooter — deck, stem, small wheels, battery in the floor. */
+  private buildEscooter(
+    group: THREE.Group,
+    shell: THREE.Material,
+    rubber: THREE.Material,
+    spoke: THREE.Material,
+  ): void {
+    const rearR = 0.13;
+    const frontR = 0.14;
+    const rear = v(0, rearR, -0.42);
+    const front = v(0, frontR, 0.5);
+
+    this.wheels.push(addSpokedWheel(group, rear, rearR, 0.028, rubber, spoke));
+    this.wheels.push(addSpokedWheel(group, front, frontR, 0.026, rubber, spoke));
+
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.045, 0.78), shell);
+    deck.position.set(0, 0.16, 0.02);
+    deck.castShadow = true;
+    group.add(deck);
+
+    const battery = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.36), rubber);
+    battery.position.set(0, 0.1, -0.02);
+    group.add(battery);
+
+    const rearGuard = new THREE.Mesh(
+      new THREE.TorusGeometry(rearR + 0.03, 0.012, 5, 10, Math.PI),
+      shell,
+    );
+    rearGuard.rotation.y = Math.PI / 2;
+    rearGuard.rotation.z = Math.PI;
+    rearGuard.position.copy(rear);
+    group.add(rearGuard);
+
+    const stemBase = v(0, 0.2, 0.34);
+    const stemTop = v(0, 1.08, 0.46);
+    spar(group, stemBase, stemTop, 0.04, shell);
+    spar(group, v(0, 0.2, 0.28), front.clone().setY(frontR + 0.02), 0.028, shell);
+
+    const bars = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.028, 0.028), spoke);
+    bars.position.copy(stemTop).add(v(0, 0.02, 0));
+    group.add(bars);
+    for (const side of [-1, 1] as const) {
+      const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.1, 6), rubber);
+      grip.rotation.z = Math.PI / 2;
+      grip.position.set(side * 0.2, bars.position.y, bars.position.z);
+      group.add(grip);
+    }
+
+    const lamp = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, 0.04, 0.04),
+      new THREE.MeshStandardMaterial({
+        color: 0xd8ffe8,
+        emissive: 0x1a6a40,
+        roughness: 0.3,
+      }),
+    );
+    lamp.position.set(0, 0.28, 0.52);
+    group.add(lamp);
+
+    const phone = new THREE.Mesh(
+      new THREE.BoxGeometry(0.07, 0.12, 0.015),
+      new THREE.MeshStandardMaterial({ color: 0x9fd8ff, emissive: 0x2b6f96 }),
+    );
+    phone.position.set(0.12, 1.02, 0.48);
+    phone.rotation.y = -0.4;
+    group.add(phone);
+  }
+
+  private buildSeatedRider(
+    jersey: THREE.Material,
+    skin: THREE.Material,
+    shorts: THREE.Material,
+  ): void {
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.5, 0.26), jersey);
+    torso.position.set(0, 1.08, -0.04);
+    torso.rotation.x = 0.55;
     torso.castShadow = true;
     this.rider.add(torso);
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), skin);
-    head.position.set(0, 1.32, 0.2);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), skin);
+    head.position.set(0, 1.34, 0.2);
     head.castShadow = true;
     this.rider.add(head);
 
-    // A helmet on the cyclist; a hood up on the lad, and no helmet in sight.
-    const hat = new THREE.Mesh(
-      new THREE.SphereGeometry(lout ? 0.19 : 0.16, 10, 6, 0, Math.PI * 2, 0, 1.4),
+    const helmet = new THREE.Mesh(
+      new THREE.SphereGeometry(0.15, 10, 6, 0, Math.PI * 2, 0, 1.35),
       jersey,
     );
-    hat.position.set(0, lout ? 1.32 : 1.34, lout ? 0.16 : 0.2);
-    this.rider.add(hat);
+    helmet.position.set(0, 1.36, 0.18);
+    this.rider.add(helmet);
 
-    for (const side of [-1, 1]) {
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.44, 0.1), jersey);
-      arm.geometry.translate(0, -0.22, 0);
-      arm.position.set(side * 0.17, 1.16, 0.1);
-      arm.rotation.x = 0.85;
+    this.addLimbs(jersey, shorts, {
+      armY: 1.18,
+      armZ: 0.08,
+      armX: 0.9,
+      legY: 0.84,
+      legZ: -0.08,
+    });
+  }
+
+  private buildStandingRider(
+    jersey: THREE.Material,
+    skin: THREE.Material,
+    shorts: THREE.Material,
+  ): void {
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.52, 0.24), jersey);
+    torso.position.set(0, 1.22, 0.02);
+    torso.rotation.x = 0.12;
+    torso.castShadow = true;
+    this.rider.add(torso);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), skin);
+    head.position.set(0, 1.56, 0.06);
+    head.castShadow = true;
+    this.rider.add(head);
+
+    const hood = new THREE.Mesh(
+      new THREE.SphereGeometry(0.17, 10, 6, 0, Math.PI * 2, 0, 1.45),
+      jersey,
+    );
+    hood.position.set(0, 1.56, 0.02);
+    this.rider.add(hood);
+
+    this.addLimbs(jersey, shorts, {
+      armY: 1.32,
+      armZ: 0.08,
+      armX: 0.7,
+      legY: 0.72,
+      legZ: 0.02,
+    });
+  }
+
+  private addLimbs(
+    jersey: THREE.Material,
+    shorts: THREE.Material,
+    at: { armY: number; armZ: number; armX: number; legY: number; legZ: number },
+  ): void {
+    for (const side of [-1, 1] as const) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.42, 0.08), jersey);
+      arm.geometry.translate(0, -0.2, 0);
+      arm.position.set(side * 0.2, at.armY, at.armZ);
+      arm.rotation.x = at.armX;
       this.rider.add(arm);
 
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.5, 0.13), metal);
-      leg.geometry.translate(0, -0.25, 0);
-      leg.position.set(side * 0.11, 0.82, -0.1);
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.48, 0.11), shorts);
+      leg.geometry.translate(0, -0.24, 0);
+      leg.position.set(side * 0.08, at.legY, at.legZ);
       leg.castShadow = true;
       this.rider.add(leg);
       this.legs.push(leg);
     }
-
-    group.add(this.rider);
-    return group;
   }
 
   private place(): void {
@@ -462,9 +615,9 @@ export class Cyclist {
     this.crank += delta * this.speed * 3.4;
     const swing = Math.sin(this.crank);
     if (this.kind === 'ebike') {
-      // Feet planted on the pedals, throttle doing the work.
-      this.legs[0]!.rotation.x = 0.7;
-      this.legs[1]!.rotation.x = 0.4;
+      // Standing on the deck — throttle, not pedals.
+      this.legs[0]!.rotation.x = 0.08;
+      this.legs[1]!.rotation.x = 0.14;
     } else {
       this.legs[0]!.rotation.x = 0.55 + swing * 0.7;
       this.legs[1]!.rotation.x = 0.55 - swing * 0.7;
@@ -488,4 +641,57 @@ export class Cyclist {
     this.pendingPed = null;
     this.scene.remove(this.group);
   }
+}
+
+function v(x: number, y: number, z: number): THREE.Vector3 {
+  return new THREE.Vector3(x, y, z);
+}
+
+/** Thin bar from A to B, along local Z. */
+function spar(
+  parent: THREE.Object3D,
+  a: THREE.Vector3,
+  b: THREE.Vector3,
+  thick: number,
+  material: THREE.Material,
+): void {
+  const dir = new THREE.Vector3().subVectors(b, a);
+  const len = dir.length();
+  if (len < 1e-4) return;
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(thick, thick, len), material);
+  bar.position.copy(a).add(b).multiplyScalar(0.5);
+  bar.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.normalize());
+  bar.castShadow = true;
+  parent.add(bar);
+}
+
+/** Tyre plus a few spokes. The group spins on X so the wheel rolls along +Z. */
+function addSpokedWheel(
+  parent: THREE.Object3D,
+  at: THREE.Vector3,
+  radius: number,
+  tyre: number,
+  rubber: THREE.Material,
+  spoke: THREE.Material,
+): THREE.Group {
+  const hub = new THREE.Group();
+  hub.position.copy(at);
+
+  const tyreMesh = new THREE.Mesh(new THREE.TorusGeometry(radius, tyre, 8, 18), rubber);
+  tyreMesh.rotation.y = Math.PI / 2;
+  tyreMesh.castShadow = true;
+  hub.add(tyreMesh);
+
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.16, radius * 0.16, tyre * 1.4, 8), spoke);
+  cap.rotation.z = Math.PI / 2;
+  hub.add(cap);
+
+  for (let i = 0; i < 6; i++) {
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(tyre * 0.45, radius * 1.7, tyre * 0.35), spoke);
+    arm.rotation.x = (i / 6) * Math.PI;
+    hub.add(arm);
+  }
+
+  parent.add(hub);
+  return hub;
 }

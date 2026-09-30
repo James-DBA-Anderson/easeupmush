@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { PATH_SPURS } from "./lake";
 import { PAVEMENT_WIDTH, ROAD_WIDTH, roadGapsAlong } from "./buildings";
 import { DEFAULT_LEVEL } from "../../level/defaultLevel";
@@ -88,237 +87,6 @@ export function insidePark(x: number, z: number): boolean {
   return inside;
 }
 
-class MeshBag {
-  private geos: THREE.BufferGeometry[] = [];
-
-  public add(geo: THREE.BufferGeometry): void {
-    this.geos.push(geo);
-  }
-
-  public build(scene: THREE.Scene, material: THREE.Material): void {
-    if (this.geos.length === 0) return;
-    const merged = mergeGeometries(this.geos, false);
-    for (const g of this.geos) g.dispose();
-    this.geos = [];
-    if (!merged) return;
-    const mesh = new THREE.Mesh(merged, material);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    scene.add(mesh);
-  }
-}
-
-/** Place a box centred on the run at `at`, length along the fence. */
-function bayBox(
-  bag: MeshBag,
-  from: THREE.Vector2,
-  along: THREE.Vector2,
-  at: number,
-  length: number,
-  height: number,
-  thick: number,
-  y0: number,
-): void {
-  if (length < 0.04) return;
-  // Local +X runs along the fence (ax, az).
-  const yaw = Math.atan2(-along.y, along.x);
-  const cx = from.x + along.x * at;
-  const cz = from.y + along.y * at;
-  const gy = groundHeight(cx, cz);
-  const geo = new THREE.BoxGeometry(length, height, thick);
-  geo.rotateY(yaw);
-  geo.translate(cx, gy + y0 + height / 2, cz);
-  bag.add(geo);
-}
-
-/** Upright post on the run. */
-function post(
-  bag: MeshBag,
-  from: THREE.Vector2,
-  along: THREE.Vector2,
-  at: number,
-  height: number,
-  radius: number,
-): void {
-  const cx = from.x + along.x * at;
-  const cz = from.y + along.y * at;
-  const gy = groundHeight(cx, cz);
-  const geo = new THREE.CylinderGeometry(radius, radius, height, 6);
-  geo.translate(cx, gy + height / 2 - 0.02, cz);
-  bag.add(geo);
-}
-
-class Wirework {
-  private bag = new MeshBag();
-
-  /** One overlapping hoop: wire up from the ground, over, and back down. */
-  public hoop(at: number, origin: THREE.Vector2, along: THREE.Vector2): void {
-    const half = HOOP_SPAN / 2;
-    const lx = origin.x + along.x * (at - half);
-    const lz = origin.y + along.y * (at - half);
-    const mx = origin.x + along.x * at;
-    const mz = origin.y + along.y * at;
-    const rx = origin.x + along.x * (at + half);
-    const rz = origin.y + along.y * (at + half);
-    const left = new THREE.Vector3(lx, groundHeight(lx, lz) - 0.08, lz);
-    const peak = new THREE.Vector3(
-      mx,
-      groundHeight(mx, mz) + WIRE_HEIGHT * 2 + 0.08,
-      mz,
-    );
-    const right = new THREE.Vector3(rx, groundHeight(rx, rz) - 0.08, rz);
-    const curve = new THREE.QuadraticBezierCurve3(left, peak, right);
-    this.bag.add(new THREE.TubeGeometry(curve, 10, WIRE_R, 4, false));
-  }
-
-  public gatePost(at: number, origin: THREE.Vector2, along: THREE.Vector2): void {
-    post(this.bag, origin, along, at, WIRE_HEIGHT + 0.12, WIRE_R * 1.4);
-  }
-
-  public build(scene: THREE.Scene): void {
-    this.bag.build(scene, WIRE_MAT);
-  }
-}
-
-/** True if this point along the run falls in a gateway. */
-function inGate(at: number, gates: Run["gates"]): boolean {
-  if (!gates) return false;
-  return gates.some(([start, width]) => at > start && at < start + width);
-}
-
-/**
- * Solid stretches of a run (between gateways), as [start, end] along the edge.
- */
-function solidBays(
-  length: number,
-  gates: Run["gates"],
-): Array<readonly [number, number]> {
-  const bays: Array<readonly [number, number]> = [];
-  let start = 0;
-  while (start < length - 0.01) {
-    if (inGate(start + 1e-4, gates)) {
-      let next = start + 0.05;
-      while (next < length && inGate(next, gates)) next += 0.05;
-      start = next;
-      continue;
-    }
-    let end = length;
-    for (const [g0] of gates ?? []) {
-      if (g0 > start + 1e-4 && g0 < end) end = g0;
-    }
-    if (end - start > 0.04) bays.push([start, end]);
-    start = end;
-  }
-  return bays;
-}
-
-/**
- * One straight stretch of garden wire. `perimeterAt` keeps hoop phasing even
- * across short editor edges.
- */
-function wireRun(work: Wirework, run: Run, perimeterAt: number): void {
-  const span = new THREE.Vector2().subVectors(run.to, run.from);
-  const length = span.length();
-  if (length < 0.02) return;
-  const along = span.clone().normalize();
-  const { from, gates } = run;
-  const bays = solidBays(length, gates);
-
-  const phase = ((perimeterAt % HOOP_STEP) + HOOP_STEP) % HOOP_STEP;
-  let first = phase === 0 ? 0 : HOOP_STEP - phase;
-  if (first < HOOP_STEP * 0.15) first += HOOP_STEP;
-
-  for (const [bayStart, bayEnd] of bays) {
-    const lo = bayStart + HOOP_SPAN * 0.45;
-    const hi = bayEnd - HOOP_SPAN * 0.45;
-    if (hi - lo < HOOP_STEP * 0.4) {
-      if (bayEnd - bayStart > HOOP_SPAN * 0.55) {
-        work.hoop((bayStart + bayEnd) / 2, from, along);
-      }
-      continue;
-    }
-    for (let at = first; at <= length + 0.01; at += HOOP_STEP) {
-      if (at < lo || at > hi) continue;
-      work.hoop(at, from, along);
-    }
-  }
-
-  for (const [start, width] of gates ?? []) {
-    for (const at of [start, start + width]) {
-      if (at < -0.01 || at > length + 0.01) continue;
-      work.gatePost(at, from, along);
-    }
-  }
-}
-
-function brickRun(brick: MeshBag, coping: MeshBag, run: Run): void {
-  const span = new THREE.Vector2().subVectors(run.to, run.from);
-  const length = span.length();
-  if (length < 0.02) return;
-  const along = span.clone().normalize();
-  const { from, gates } = run;
-
-  for (const [bayStart, bayEnd] of solidBays(length, gates)) {
-    const len = bayEnd - bayStart;
-    const mid = (bayStart + bayEnd) / 2;
-    bayBox(brick, from, along, mid, len, BRICK_H, BRICK_THICK, 0);
-    bayBox(coping, from, along, mid, len + 0.04, 0.08, BRICK_THICK + 0.08, BRICK_H);
-  }
-
-  for (const [start, width] of gates ?? []) {
-    for (const at of [start, start + width]) {
-      if (at < -0.01 || at > length + 0.01) continue;
-      bayBox(brick, from, along, at, 0.42, BRICK_H + 0.12, BRICK_THICK + 0.1, 0);
-      bayBox(
-        coping,
-        from,
-        along,
-        at,
-        0.48,
-        0.1,
-        BRICK_THICK + 0.16,
-        BRICK_H + 0.12,
-      );
-    }
-  }
-}
-
-function railingsRun(iron: MeshBag, run: Run): void {
-  const span = new THREE.Vector2().subVectors(run.to, run.from);
-  const length = span.length();
-  if (length < 0.02) return;
-  const along = span.clone().normalize();
-  const { from, gates } = run;
-
-  for (const [bayStart, bayEnd] of solidBays(length, gates)) {
-    const len = bayEnd - bayStart;
-    const mid = (bayStart + bayEnd) / 2;
-    bayBox(iron, from, along, mid, len, 0.04, 0.05, 0.12);
-    bayBox(iron, from, along, mid, len, 0.04, 0.05, RAIL_H - 0.08);
-    const lo = bayStart + 0.08;
-    const hi = bayEnd - 0.08;
-    for (let at = lo; at <= hi + 0.001; at += BAR_STEP) {
-      post(iron, from, along, at, RAIL_H - 0.06, 0.018);
-      const cx = from.x + along.x * at;
-      const cz = from.y + along.y * at;
-      const tip = new THREE.ConeGeometry(0.028, 0.1, 5);
-      tip.translate(cx, groundHeight(cx, cz) + RAIL_H + 0.02, cz);
-      iron.add(tip);
-    }
-  }
-
-  for (const [start, width] of gates ?? []) {
-    for (const at of [start, start + width]) {
-      if (at < -0.01 || at > length + 0.01) continue;
-      post(iron, from, along, at, RAIL_H + 0.15, 0.055);
-      const cx = from.x + along.x * at;
-      const cz = from.y + along.y * at;
-      const ball = new THREE.SphereGeometry(0.07, 8, 6);
-      ball.translate(cx, groundHeight(cx, cz) + RAIL_H + 0.22, cz);
-      iron.add(ball);
-    }
-  }
-}
 
 /**
  * Gate openings worked out from where path spurs and roads meet each stretch,
@@ -445,6 +213,305 @@ function gatesOn(from: THREE.Vector2, to: THREE.Vector2): [number, number][] {
 /** Rebuilt in `buildFencing` so applied level paths/ring drive the gates. */
 let RUNS: readonly Run[] = [];
 
+/** A few metres of fence that can be knocked flat. */
+interface FencePanel {
+  root: THREE.Group;
+  hinge: THREE.Group;
+  runIndex: number;
+  s0: number;
+  s1: number;
+  /** Ground midpoint. */
+  x: number;
+  z: number;
+  /** Unit along the run. */
+  ax: number;
+  az: number;
+  smashed: boolean;
+  fall: number;
+  sign: number;
+}
+
+const panels: FencePanel[] = [];
+const CHUNK = 2.6;
+
+function clearPanels(scene: THREE.Scene): void {
+  for (const panel of panels) scene.remove(panel.root);
+  panels.length = 0;
+}
+
+function openPanel(
+  scene: THREE.Scene,
+  runIndex: number,
+  from: THREE.Vector2,
+  along: THREE.Vector2,
+  s0: number,
+  s1: number,
+): THREE.Group {
+  const mid = (s0 + s1) / 2;
+  const x = from.x + along.x * mid;
+  const z = from.y + along.y * mid;
+  const root = new THREE.Group();
+  root.position.set(x, groundHeight(x, z), z);
+  root.rotation.y = Math.atan2(-along.y, along.x);
+  const hinge = new THREE.Group();
+  root.add(hinge);
+  scene.add(root);
+  panels.push({
+    root,
+    hinge,
+    runIndex,
+    s0,
+    s1,
+    x,
+    z,
+    ax: along.x,
+    az: along.y,
+    smashed: false,
+    fall: 0,
+    sign: 1,
+  });
+  return hinge;
+}
+
+function localBox(
+  parent: THREE.Object3D,
+  material: THREE.Material,
+  length: number,
+  height: number,
+  thick: number,
+  y0: number,
+): void {
+  if (length < 0.04) return;
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(length, height, thick), material);
+  mesh.position.set(0, y0 + height / 2, 0);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+}
+
+function localPost(
+  parent: THREE.Object3D,
+  material: THREE.Material,
+  localX: number,
+  height: number,
+  radius: number,
+): void {
+  const mesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius, radius, height, 6),
+    material,
+  );
+  mesh.position.set(localX, height / 2 - 0.02, 0);
+  mesh.castShadow = true;
+  parent.add(mesh);
+}
+
+/** True if this point along the run falls in a gateway. */
+function inGate(at: number, gates: Run["gates"]): boolean {
+  if (!gates) return false;
+  return gates.some(([start, width]) => at > start && at < start + width);
+}
+
+/**
+ * Solid stretches of a run (between gateways), as [start, end] along the edge.
+ */
+function solidBays(
+  length: number,
+  gates: Run["gates"],
+): Array<readonly [number, number]> {
+  const bays: Array<readonly [number, number]> = [];
+  let start = 0;
+  while (start < length - 0.01) {
+    if (inGate(start + 1e-4, gates)) {
+      let next = start + 0.05;
+      while (next < length && inGate(next, gates)) next += 0.05;
+      start = next;
+      continue;
+    }
+    let end = length;
+    for (const [g0] of gates ?? []) {
+      if (g0 > start + 1e-4 && g0 < end) end = g0;
+    }
+    if (end - start > 0.04) bays.push([start, end]);
+    start = end;
+  }
+  return bays;
+}
+
+function wirePanels(scene: THREE.Scene, run: Run, runIndex: number): void {
+  const span = new THREE.Vector2().subVectors(run.to, run.from);
+  const length = span.length();
+  if (length < 0.02) return;
+  const along = span.clone().normalize();
+  const { from, gates } = run;
+
+  for (const [bayStart, bayEnd] of solidBays(length, gates)) {
+    for (let s = bayStart; s < bayEnd - 0.15; s += CHUNK) {
+      const s0 = s;
+      const s1 = Math.min(bayEnd, s + CHUNK);
+      const hinge = openPanel(scene, runIndex, from, along, s0, s1);
+      const mid = (s0 + s1) / 2;
+      const lo = Math.max(s0 + HOOP_SPAN * 0.2, bayStart + HOOP_SPAN * 0.35);
+      const hi = Math.min(s1 - HOOP_SPAN * 0.2, bayEnd - HOOP_SPAN * 0.35);
+      let placed = 0;
+      for (let at = lo; at <= hi + 0.01; at += HOOP_STEP) {
+        const localX = at - mid;
+        const half = HOOP_SPAN / 2;
+        const left = new THREE.Vector3(localX - half, -0.08, 0);
+        const peak = new THREE.Vector3(localX, WIRE_HEIGHT * 2 + 0.08, 0);
+        const right = new THREE.Vector3(localX + half, -0.08, 0);
+        const curve = new THREE.QuadraticBezierCurve3(left, peak, right);
+        const hoop = new THREE.Mesh(
+          new THREE.TubeGeometry(curve, 8, WIRE_R, 4, false),
+          WIRE_MAT,
+        );
+        hoop.castShadow = true;
+        hinge.add(hoop);
+        placed += 1;
+      }
+      if (placed === 0 && s1 - s0 > 0.4) {
+        const curve = new THREE.QuadraticBezierCurve3(
+          new THREE.Vector3(-(s1 - s0) * 0.35, -0.08, 0),
+          new THREE.Vector3(0, WIRE_HEIGHT * 2 + 0.08, 0),
+          new THREE.Vector3((s1 - s0) * 0.35, -0.08, 0),
+        );
+        hinge.add(
+          new THREE.Mesh(new THREE.TubeGeometry(curve, 8, WIRE_R, 4, false), WIRE_MAT),
+        );
+      }
+    }
+  }
+
+  for (const [start, width] of gates ?? []) {
+    for (const at of [start, start + width]) {
+      if (at < -0.01 || at > length + 0.01) continue;
+      const hinge = openPanel(scene, runIndex, from, along, at - 0.2, at + 0.2);
+      localPost(hinge, WIRE_MAT, 0, WIRE_HEIGHT + 0.12, WIRE_R * 1.4);
+    }
+  }
+}
+
+function brickPanels(scene: THREE.Scene, run: Run, runIndex: number): void {
+  const span = new THREE.Vector2().subVectors(run.to, run.from);
+  const length = span.length();
+  if (length < 0.02) return;
+  const along = span.clone().normalize();
+  const { from, gates } = run;
+
+  for (const [bayStart, bayEnd] of solidBays(length, gates)) {
+    for (let s = bayStart; s < bayEnd - 0.15; s += CHUNK) {
+      const s0 = s;
+      const s1 = Math.min(bayEnd, s + CHUNK);
+      const hinge = openPanel(scene, runIndex, from, along, s0, s1);
+      const len = s1 - s0;
+      localBox(hinge, BRICK_MAT, len, BRICK_H, BRICK_THICK, 0);
+      localBox(hinge, COPING_MAT, len + 0.04, 0.08, BRICK_THICK + 0.08, BRICK_H);
+    }
+  }
+
+  for (const [start, width] of gates ?? []) {
+    for (const at of [start, start + width]) {
+      if (at < -0.01 || at > length + 0.01) continue;
+      const hinge = openPanel(scene, runIndex, from, along, at - 0.24, at + 0.24);
+      localBox(hinge, BRICK_MAT, 0.42, BRICK_H + 0.12, BRICK_THICK + 0.1, 0);
+      localBox(hinge, COPING_MAT, 0.48, 0.1, BRICK_THICK + 0.16, BRICK_H + 0.12);
+    }
+  }
+}
+
+function railPanels(scene: THREE.Scene, run: Run, runIndex: number): void {
+  const span = new THREE.Vector2().subVectors(run.to, run.from);
+  const length = span.length();
+  if (length < 0.02) return;
+  const along = span.clone().normalize();
+  const { from, gates } = run;
+
+  for (const [bayStart, bayEnd] of solidBays(length, gates)) {
+    for (let s = bayStart; s < bayEnd - 0.15; s += CHUNK) {
+      const s0 = s;
+      const s1 = Math.min(bayEnd, s + CHUNK);
+      const hinge = openPanel(scene, runIndex, from, along, s0, s1);
+      const mid = (s0 + s1) / 2;
+      const len = s1 - s0;
+      localBox(hinge, IRON_MAT, len, 0.04, 0.05, 0.12);
+      localBox(hinge, IRON_MAT, len, 0.04, 0.05, RAIL_H - 0.08);
+      for (let at = s0 + 0.08; at <= s1 - 0.08; at += BAR_STEP) {
+        localPost(hinge, IRON_MAT, at - mid, RAIL_H - 0.06, 0.018);
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.1, 5), IRON_MAT);
+        tip.position.set(at - mid, RAIL_H + 0.02, 0);
+        hinge.add(tip);
+      }
+    }
+  }
+
+  for (const [start, width] of gates ?? []) {
+    for (const at of [start, start + width]) {
+      if (at < -0.01 || at > length + 0.01) continue;
+      const hinge = openPanel(scene, runIndex, from, along, at - 0.2, at + 0.2);
+      localPost(hinge, IRON_MAT, 0, RAIL_H + 0.15, 0.055);
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), IRON_MAT);
+      ball.position.set(0, RAIL_H + 0.22, 0);
+      hinge.add(ball);
+    }
+  }
+}
+
+function distToSeg(
+  px: number,
+  pz: number,
+  x0: number,
+  z0: number,
+  x1: number,
+  z1: number,
+): number {
+  const dx = x1 - x0;
+  const dz = z1 - z0;
+  const len2 = dx * dx + dz * dz;
+  const t =
+    len2 < 1e-6
+      ? 0
+      : Math.max(0, Math.min(1, ((px - x0) * dx + (pz - z0) * dz) / len2));
+  return Math.hypot(px - (x0 + dx * t), pz - (z0 + dz * t));
+}
+
+/**
+ * Knock over every fence panel the wreck's path crosses. `vx, vz` is the
+ * way it's travelling, so the top falls with the car rather than against it.
+ */
+export function smashFencesAlong(
+  x0: number,
+  z0: number,
+  x1: number,
+  z1: number,
+  vx: number,
+  vz: number,
+): void {
+  for (const panel of panels) {
+    if (panel.smashed) continue;
+    const half = Math.max(0.35, (panel.s1 - panel.s0) / 2);
+    if (distToSeg(panel.x, panel.z, x0, z0, x1, z1) > half + 1.25) continue;
+    panel.smashed = true;
+    const dot = vx * -panel.az + vz * panel.ax;
+    panel.sign = dot >= 0 ? 1 : -1;
+  }
+}
+
+/** Finish the topple after the car has gone past. */
+export function updateBrokenFences(delta: number): void {
+  for (const panel of panels) {
+    if (!panel.smashed || panel.fall >= 1) continue;
+    panel.fall = Math.min(1, panel.fall + delta * 2.6);
+    panel.hinge.rotation.x = panel.sign * panel.fall * 1.4;
+  }
+}
+
+function fenceGap(runIndex: number, at: number): boolean {
+  for (const panel of panels) {
+    if (!panel.smashed || panel.runIndex !== runIndex) continue;
+    if (at >= panel.s0 - 0.2 && at <= panel.s1 + 0.2) return true;
+  }
+  return false;
+}
+
 function rebuildRuns(): void {
   const runs: Run[] = [];
   for (let i = 0; i < PARK_RING.length; i++) {
@@ -457,28 +524,13 @@ function rebuildRuns(): void {
 
 export function buildFencing(scene: THREE.Scene): void {
   rebuildRuns();
-  if (fenceStyle === "brick") {
-    const brick = new MeshBag();
-    const coping = new MeshBag();
-    for (const run of RUNS) brickRun(brick, coping, run);
-    brick.build(scene, BRICK_MAT);
-    coping.build(scene, COPING_MAT);
-    return;
+  clearPanels(scene);
+  for (let i = 0; i < RUNS.length; i++) {
+    const run = RUNS[i]!;
+    if (fenceStyle === "brick") brickPanels(scene, run, i);
+    else if (fenceStyle === "railings") railPanels(scene, run, i);
+    else wirePanels(scene, run, i);
   }
-  if (fenceStyle === "railings") {
-    const iron = new MeshBag();
-    for (const run of RUNS) railingsRun(iron, run);
-    iron.build(scene, IRON_MAT);
-    return;
-  }
-
-  const work = new Wirework();
-  let perimeterAt = 0;
-  for (const run of RUNS) {
-    wireRun(work, run, perimeterAt);
-    perimeterAt += new THREE.Vector2().subVectors(run.to, run.from).length();
-  }
-  work.build(scene);
 }
 
 /**
@@ -519,6 +571,7 @@ export function atRailings(x: number, z: number): boolean {
     const at = offset.dot(along);
     if (at < 0 || at > length) continue;
     if (Math.abs(offset.x * along.y - offset.y * along.x) > half) continue;
+    if (fenceGap(RUNS.indexOf(run), at)) continue;
     if (!inGate(at, run.gates)) return true;
   }
   return false;
@@ -537,6 +590,7 @@ export function railingsBlockSpan(
   for (const run of RUNS) {
     const along = pathCrossesRun(ax, az, bx, bz, run.from, run.to);
     if (along == null) continue;
+    if (fenceGap(RUNS.indexOf(run), along)) continue;
     if (!inGate(along, run.gates)) return true;
   }
   return false;
@@ -560,6 +614,7 @@ export function pushOffRailings(
     const at = ox * along.x + oz * along.y;
     if (at < 0 || at > length) continue;
     if (inGate(at, run.gates)) continue;
+    if (fenceGap(RUNS.indexOf(run), at)) continue;
     const side = ox * along.y - oz * along.x;
     if (Math.abs(side) > half) continue;
     let dir = side < 0 ? -1 : 1;

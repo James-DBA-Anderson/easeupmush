@@ -272,12 +272,16 @@ export class WaterJet {
     hose.rotation.set(1.05, 0, 0.35);
     gun.add(hose);
 
-    // Right hand on the grip, sleeve parented so the forearm stays attached.
+    // Right hand on the grip; left braces the lance further up the tube.
     const hand = buildArmedHand(1, "gun");
-    // Sit the palm on the orange grip; mitt curls under, thumb wraps the side.
     hand.position.set(0.0, -0.07, 0.035);
     hand.rotation.set(-0.15, 0.08, 0.2);
     gun.add(hand);
+
+    const brace = buildArmedHand(-1, "brace");
+    brace.position.set(0.01, 0.0, -0.4);
+    brace.rotation.set(0.45, -0.2, -0.7);
+    gun.add(brace);
 
     group.add(gun);
     // Slight overall cant so it doesn't sit dead centre.

@@ -2404,11 +2404,8 @@ export class Person {
       pos.set(targetX, 0, targetZ);
     } else {
       const gap = Math.hypot(targetX - pos.x, targetZ - pos.z);
-      if (gap > 8) {
-        // Teleport if they've been dunked / scared far off the circuit.
-        pos.set(targetX, 0, targetZ);
-      } else if (gap > 0.02) {
-        const step = Math.min(gap, this.speed * delta * 1.45);
+      if (gap > 0.02) {
+        const step = Math.min(gap, this.speed * delta * (gap > 6 ? 2.2 : 1.45));
         const self = { x: pos.x, z: pos.z };
         const landed = stepWalk(
           pos.x,
@@ -3254,7 +3251,6 @@ export class Person {
       }
     }
     this.index = best;
-    if (this.errand === "strolling") this.place();
   }
 
   public getPosition(): THREE.Vector3 {
