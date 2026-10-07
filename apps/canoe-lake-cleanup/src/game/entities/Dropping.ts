@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { PATH_Y } from "../world/lake";
 import { groundHeight } from "../world/terrain";
 
-export type DropKind = "swan" | "fox" | "gull";
+export type DropKind = "swan" | "fox" | "gull" | "pigeon";
 
 const TEX = 128;
 /** How close a new deposit must be to stack onto an existing pile. */
@@ -11,7 +11,8 @@ export const MERGE_RADIUS = 1.75;
 export const MAX_PILES = 28;
 /** Layers before the pile rises into a walkable lump. */
 const MOUND_FROM = 4;
-const MAX_LAYERS = 22;
+/** More drops to reach the cap — piles don't rocket up in a few sittings. */
+const MAX_LAYERS = 40;
 
 const SWAN = { r: 185, g: 200, b: 170 };
 const GULL = { r: 236, g: 240, b: 228 };
@@ -64,6 +65,8 @@ export class Dropping {
   private moundWear = 0;
   private kind: DropKind;
   private layers = 1;
+  /** Extra pigeon dabs before a stack actually rises. */
+  private pigeonDabs = 0;
   private trodden = false;
   /** World-space half-width of the splat plane. */
   private half = 0.55;
@@ -114,8 +117,9 @@ export class Dropping {
     );
     this.group.add(this.splat);
 
+    this.half = 0.55 * this.padScale();
     this.paintSplat(true);
-    this.spawnClumps(kind === "fox" ? 2 : kind === "gull" ? 2 : 4);
+    this.spawnClumps(kind === "fox" ? 2 : kind === "gull" ? 2 : kind === "pigeon" ? 1 : 4);
     this.resizeSplat();
 
     scene.add(this.group);
@@ -148,9 +152,24 @@ export class Dropping {
     if (left < 0.12) return 0;
     const base =
       this.layers < MOUND_FROM
-        ? 0.01 + this.layers * 0.006
-        : 0.1 + (this.layers - MOUND_FROM) * 0.06;
-    return base * left * this.heightScale * (1 - this.moundWear * 0.85);
+        ? 0.01 + this.layers * 0.003
+        : 0.05 + (this.layers - MOUND_FROM) * 0.015;
+    return base * left * this.heightScale * this.heightPad() * (1 - this.moundWear * 0.85);
+  }
+
+  /** Pigeon splats stay small; swans and foxes keep the full pad. */
+  private padScale(): number {
+    return this.kind === "pigeon" ? 0.36 : 1;
+  }
+
+  private heightPad(): number {
+    return this.kind === "pigeon" ? 0.14 : 1;
+  }
+
+  private refreshHalf(): void {
+    const cap = this.kind === "pigeon" ? 0.88 : 2.8;
+    const grow = this.kind === "pigeon" ? 0.012 : 0.1;
+    this.half = Math.min(cap, (0.55 + this.layers * grow) * this.widthScale * this.padScale());
   }
 
   /**
@@ -160,7 +179,7 @@ export class Dropping {
   public reshape(heightScale: number, widthScale: number): void {
     this.heightScale = heightScale;
     this.widthScale = widthScale;
-    this.half = Math.min(2.8, (0.55 + this.layers * 0.1) * this.widthScale);
+    this.refreshHalf();
     this.resizeSplat();
     this.refreshClumpVisibility();
     this.rebuildMound();
@@ -229,13 +248,27 @@ export class Dropping {
 
   /** Another deposit on this pile — thicker pad, more lumps. */
   public addLayer(kind: DropKind = this.kind): void {
-    this.layers = Math.min(MAX_LAYERS, this.layers + 1);
     if (kind === "fox") this.kind = "fox";
     else if (this.kind === "gull" && kind === "swan") this.kind = "swan";
+    else if (this.kind === "pigeon" && kind === "swan") this.kind = "swan";
 
-    this.half = Math.min(2.8, (0.55 + this.layers * 0.1) * this.widthScale);
+    const pigeonStack = this.kind === "pigeon" || kind === "pigeon";
+    if (pigeonStack) {
+      this.pigeonDabs += 1;
+      // Four dabs smear the pad before it gains a height layer.
+      if (this.pigeonDabs % 4 !== 0) {
+        this.paintSplat(false);
+        this.resizeSplat();
+        return;
+      }
+    }
+
+    this.layers = Math.min(MAX_LAYERS, this.layers + 1);
+    this.refreshHalf();
     this.paintSplat(false);
-    this.spawnClumps(kind === "fox" ? 1 : 2 + Math.floor(Math.random() * 2));
+    this.spawnClumps(
+      kind === "fox" ? 1 : kind === "pigeon" ? 1 : 2 + Math.floor(Math.random() * 2),
+    );
     this.resizeSplat();
     this.refreshClumpVisibility();
     this.rebuildMound();
@@ -1084,7 +1117,7 @@ export class Dropping {
   private colour(): { r: number; g: number; b: number } {
     if (this.trodden) return TROD;
     if (this.kind === "fox") return FOX;
-    if (this.kind === "gull") return GULL;
+    if (this.kind === "gull" || this.kind === "pigeon") return GULL;
     return SWAN;
   }
 
@@ -1097,16 +1130,21 @@ export class Dropping {
     }
 
     const col = this.colour();
-    const blobs = 7 + this.layers * 3;
-    const strength = Math.min(0.95, 0.45 + this.layers * 0.12);
+    const blobs = this.kind === "pigeon" ? 3 + this.layers : 7 + this.layers * 3;
+    const strength = Math.min(
+      0.95,
+      this.kind === "pigeon"
+        ? 0.32 + this.layers * 0.06
+        : 0.45 + this.layers * 0.12,
+    );
 
     for (let i = 0; i < blobs; i++) {
       const ang = Math.random() * Math.PI * 2;
-      const rad = Math.pow(Math.random(), 0.55) * TEX * 0.38;
+      const rad = Math.pow(Math.random(), 0.55) * TEX * (this.kind === "pigeon" ? 0.3 : 0.38);
       const x = TEX * 0.5 + Math.cos(ang) * rad;
       const y = TEX * 0.5 + Math.sin(ang) * rad;
-      const rx = TEX * (0.08 + Math.random() * 0.16);
-      const ry = TEX * (0.06 + Math.random() * 0.14);
+      const rx = TEX * (this.kind === "pigeon" ? 0.05 + Math.random() * 0.08 : 0.08 + Math.random() * 0.16);
+      const ry = TEX * (this.kind === "pigeon" ? 0.04 + Math.random() * 0.07 : 0.06 + Math.random() * 0.14);
       const rot = Math.random() * Math.PI;
 
       ctx.save();
@@ -1232,14 +1270,17 @@ export class Dropping {
       const rad = Math.random() * this.half * 0.55;
       const lx = Math.cos(ang) * rad;
       const lz = Math.sin(ang) * rad;
-      const height = 0.04 + Math.random() * 0.05 + this.layers * 0.018;
+      const height =
+        0.04 +
+        Math.random() * 0.05 +
+        this.layers * (this.kind === "pigeon" ? 0.004 : 0.009);
       mesh.position.set(lx, height * 0.45 + this.moundHeight() * 0.35, lz);
       mesh.rotation.set(
         (Math.random() - 0.5) * 0.6,
         Math.random() * Math.PI,
         (Math.random() - 0.5) * 0.6,
       );
-      const s = 0.7 + Math.random() * 0.55;
+      const s = (this.kind === "pigeon" ? 0.32 : 0.7) + Math.random() * (this.kind === "pigeon" ? 0.22 : 0.55);
       mesh.scale.multiplyScalar(s);
       this.group.add(mesh);
       this.clumps.push({

@@ -48,6 +48,32 @@ const BLAST_LINES = [
   "COME HERE YOU VANDAL!",
   "THOSE ARE COUNCIL FLOWERS!",
 ];
+const GRUMPY_LINES = [
+  "LOOK AT THE STATE OF THAT",
+  "NOBODY MINDS THESE BEDS",
+  "COUNCIL CUTS, THIS IS",
+  "DO I LOOK LIKE I'VE GOT HELP?",
+  "EVERY BLOOM'S HAD IT",
+];
+const SPRAY_GRUMP = [
+  "OI — WATCH THAT WASHER",
+  "I'M WORKING HERE",
+  "YOU'VE SOAKED ME",
+  "DO YOU MIND?",
+  "THAT'S MY FLEECE",
+];
+const SPRAY_ANGRY = [
+  "I SAID WATCH IT",
+  "YOU'RE DOING THAT ON PURPOSE",
+  "KEEP THAT THING OFF ME",
+  "I'VE HAD ENOUGH OF THIS",
+];
+const SPRAY_MAD = [
+  "RIGHT — THAT'S IT",
+  "COME HERE WITH THAT THING",
+  "I'LL HAVE YOUR JOB",
+  "YOU'VE ASKED FOR THIS",
+];
 const HUNT_LINES = [
   "GET BACK HERE!",
   "I SAW THAT!",
@@ -63,9 +89,10 @@ type HuntTarget =
   | { kind: "dog"; dog: Dog };
 
 /**
- * Council gardener on the ornamental beds. Waters and replants, loses it if
- * anyone (dog included) walks through the blooms, and if you hose them from
- * point-blank — though a distant misting gets a thumbs-up.
+ * Council gardener on the ornamental beds. Grumpy at the best of times.
+ * Waters and replants, loses it if anyone (dog included) walks through the
+ * blooms, and if you hose him enough he comes for you — though a distant
+ * misting of the beds still gets a nod.
  */
 export class Gardener {
   private scene: THREE.Scene;
@@ -92,6 +119,11 @@ export class Gardener {
   private tendRestoreIn = 0;
   /** Soften repeat anger so every footfall isn't a fresh chase. */
   private angerCool = 0;
+  private hoseCool = 0;
+  private wet = 0;
+  private soakCount = 0;
+  private grudge = 0;
+  private flinch = 0;
   /** Lakeside loop when beds sit on opposite shores. */
   private route: LoopRoute = emptyRoute();
 
@@ -130,7 +162,7 @@ export class Gardener {
     return true;
   }
 
-  /** Distant watering — he likes that. */
+  /** Distant watering — he likes that, even if he won't smile. */
   public noticeWatered(): void {
     if (this.praiseCool > 0 || this.job === "hunt") return;
     this.praiseCool = 8;
@@ -140,6 +172,50 @@ export class Gardener {
   /** Close-range washer stripped petals — come for the cleaner. */
   public noticeBlasted(): void {
     this.startHunt({ kind: "player" }, BLAST_LINES);
+  }
+
+  public soakedBy(point: THREE.Vector3, heavy = false): boolean {
+    const here = this.group.position;
+    const dx = point.x - here.x;
+    const dz = point.z - here.z;
+    const r = heavy ? 2.4 : 0.6;
+    if (dx * dx + dz * dz > r * r) return false;
+    return point.y > here.y - 0.15 && point.y < here.y + (heavy ? 2.4 : 1.9);
+  }
+
+  public isSoaked(): boolean {
+    return this.wet > 0;
+  }
+
+  /**
+   * Jet on him, not the beds. First blast he's just grumpy; keep it up and
+   * he comes after you with the rake.
+   */
+  public drench(from?: THREE.Vector3): boolean {
+    if (this.hoseCool > 0) return false;
+    this.hoseCool = 0.42;
+    const first = this.wet <= 0;
+    this.wet = 9;
+    this.soakCount += 1;
+    this.grudge = 0;
+    this.flinch = 0.5;
+    if (from) this.faceToward(from);
+
+    if (this.job === "hunt") {
+      if (!this.grumble) {
+        this.say(SPRAY_MAD[Math.floor(Math.random() * SPRAY_MAD.length)]!);
+      }
+      return first;
+    }
+
+    if (this.soakCount >= 3) {
+      this.startHunt({ kind: "player" }, SPRAY_MAD);
+      return first;
+    }
+
+    const lines = this.soakCount === 1 ? SPRAY_GRUMP : SPRAY_ANGRY;
+    this.say(lines[Math.floor(Math.random() * lines.length)]!);
+    return first;
   }
 
   public update(
@@ -152,14 +228,25 @@ export class Gardener {
         ? null
         : this.grumble;
     this.face?.update(delta);
+    const soaked = this.wet > 0 || this.soakCount > 0;
     this.face?.setMood(
-      this.job === "hunt" ? "angry" : this.job === "tend" ? "pleased" : "idle",
+      this.job === "hunt" ? "angry" : soaked ? "angry" : "disgusted",
     );
     if (this.timer > 0) this.timer -= delta;
     if (this.swingCool > 0) this.swingCool -= delta;
     if (this.praiseCool > 0) this.praiseCool -= delta;
     if (this.angerCool > 0) this.angerCool -= delta;
     if (this.shoutIn > 0) this.shoutIn -= delta;
+    if (this.hoseCool > 0) this.hoseCool = Math.max(0, this.hoseCool - delta);
+    if (this.flinch > 0) this.flinch = Math.max(0, this.flinch - delta);
+    if (this.wet > 0) this.wet = Math.max(0, this.wet - delta);
+    else if (this.soakCount > 0) {
+      this.grudge += delta;
+      if (this.grudge > 16) {
+        this.soakCount -= 1;
+        this.grudge = 0;
+      }
+    }
 
     this.group.position.y = groundHeight(
       this.group.position.x,
@@ -172,6 +259,11 @@ export class Gardener {
     }
 
     this.watchBeds(player, people);
+
+    if (this.flinch > 0 && this.job !== "hunt") {
+      this.flinchPose();
+      return;
+    }
 
     if (this.job === "hunt") {
       this.chase(delta, player);
@@ -488,8 +580,9 @@ export class Gardener {
   private idlePose(delta: number): void {
     this.chatIn -= delta;
     if (this.chatIn <= 0 && !this.grumble && this.job !== "hunt") {
-      this.say(TEND_LINES[Math.floor(Math.random() * TEND_LINES.length)]!);
-      this.chatIn = 20 + Math.random() * 30;
+      const lines = GRUMPY_LINES;
+      this.say(lines[Math.floor(Math.random() * lines.length)]!);
+      this.chatIn = 18 + Math.random() * 28;
     }
     this.step += delta * 2;
     this.group.rotation.z = Math.sin(this.step) * 0.03;
@@ -510,6 +603,17 @@ export class Gardener {
     this.legs[0]!.rotation.x = 0.35;
     this.legs[1]!.rotation.x = -0.55;
     this.group.rotation.x = 0.12;
+    this.rake.visible = true;
+  }
+
+  private flinchPose(): void {
+    const t = this.flinch / 0.5;
+    this.arms[0]!.rotation.x = -1.6 * t;
+    this.arms[1]!.rotation.x = -1.85 * t;
+    this.arms[0]!.rotation.z = 0.55 * t;
+    this.arms[1]!.rotation.z = -0.7 * t;
+    this.group.rotation.x = -0.12 * t;
+    this.group.rotation.z = Math.sin(this.flinch * 28) * 0.08;
     this.rake.visible = true;
   }
 

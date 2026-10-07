@@ -24,15 +24,22 @@ const INKS = [
   "#f7f4ec",
 ];
 
-type TagStyle = "throwup" | "block3d" | "hollow" | "stencil" | "wild" | "marker";
-const STYLES: readonly TagStyle[] = [
-  "throwup",
-  "block3d",
-  "hollow",
-  "stencil",
-  "wild",
-  "marker",
-];
+/**
+ * Bubble throw-up is the usual; long phrases go up as a one-line handstyle,
+ * wide walls sometimes get a blockbuster.
+ */
+type TagStyle = "throwup" | "handstyle" | "blockbuster";
+
+const CHROME = "#c9ccd2";
+const HAND_INKS = ["#141418", "#1f3fa8", "#c0201c", "#f4f1e6", "#2a7a3a", "#d94ec2"];
+
+interface Glyph {
+  ch: string;
+  x: number;
+  jy: number;
+  rot: number;
+  w: number;
+}
 
 const TEX_W = 512;
 const TEX_H = 256;
@@ -128,10 +135,11 @@ export class Graffiti {
     this.mesh.rotation.y = wall.yaw;
     scene.add(this.mesh);
 
+    // Depth spans the building's 0.45m collision pad plus a full droplet step.
     this.reach = new THREE.Vector3(
       this.wide / 2 + 0.35,
       this.high / 2 + 0.35,
-      0.7,
+      0.95,
     );
   }
 
@@ -143,17 +151,22 @@ export class Graffiti {
    * Did a droplet land on the painted face? `from` is the lance — tags on the
    * far side of a cafe don't count if you're hosing through the brickwork.
    */
-  public hitBy(point: THREE.Vector3, from?: THREE.Vector3): boolean {
+  public hitBy(
+    point: THREE.Vector3,
+    from?: THREE.Vector3,
+    direction?: THREE.Vector3,
+  ): boolean {
     this.mesh.worldToLocal(this.localHit.copy(point));
+    // Local +Z is out from the brick. Allow a hair into the wall, nothing from
+    // the room behind it.
+    if (this.localHit.z < -0.05 || this.localHit.z > this.reach.z) return false;
+    if (direction) this.projectOntoPaint(direction);
     if (
       Math.abs(this.localHit.x) >= this.reach.x ||
       Math.abs(this.localHit.y) >= this.reach.y
     ) {
       return false;
     }
-    // Local +Z is out from the brick. Allow a hair into the wall, nothing from
-    // the room behind it.
-    if (this.localHit.z < -0.05 || this.localHit.z > this.reach.z) return false;
     if (from) {
       this.mesh.worldToLocal(this.localFrom.copy(from));
       if (this.localFrom.z < 0.25) return false;
@@ -162,12 +175,29 @@ export class Graffiti {
   }
 
   /**
+   * Droplets die on the building's padded footprint a little short of the
+   * brick. Slide the local hit along its flight onto the paint so glancing
+   * shots wash where the stream visibly lands, not a metre or two before it.
+   */
+  private projectOntoPaint(direction: THREE.Vector3): void {
+    if (this.localHit.z <= 0) return;
+    this.mesh.getWorldQuaternion(this.invQuat).invert();
+    this.localDir.copy(direction).applyQuaternion(this.invQuat);
+    if (this.localDir.z > -1e-3) return;
+    const t = this.localHit.z / -this.localDir.z;
+    const slide = t * Math.hypot(this.localDir.x, this.localDir.y);
+    if (slide > 4) return;
+    this.localHit.addScaledVector(this.localDir, t);
+    this.localHit.z = 0;
+  }
+
+  /**
    * Carve a pressure-wash streak through the paint at the hit. Soft erase —
    * the lettering fades under the jet rather than punching clean holes.
    */
   public scrub(point: THREE.Vector3, direction: THREE.Vector3): void {
     if (this.rinsing) return;
-    if (!this.hitBy(point)) return;
+    if (!this.hitBy(point, undefined, direction)) return;
 
     // Local plane coords: X along the wall, Y up. Canvas Y runs the other way.
     const u = this.localHit.x / this.wide + 0.5;
@@ -270,105 +300,10 @@ export class Graffiti {
     ctx.clearRect(0, 0, TEX_W, TEX_H);
     this.mask.fill(0);
 
-    const ink = INKS[Math.floor(Math.random() * INKS.length)]!;
-    const style = STYLES[Math.floor(Math.random() * STYLES.length)]!;
-    const rim = contrastRim(ink);
-    const shine = contrastShine(ink);
     const word = chosen ?? TAGS[Math.floor(Math.random() * TAGS.length)]!;
-    const short = word.length <= 4;
-
-    // Game canvas is CSS-flipped on X; paint mirrored so tags read forwards.
-    ctx.save();
-    ctx.translate(TEX_W, 0);
-    ctx.scale(-1, 1);
-
-    // Soft spray haze behind the letters.
-    const haze = ctx.createRadialGradient(
-      TEX_W * 0.5,
-      TEX_H * 0.5,
-      10,
-      TEX_W * 0.5,
-      TEX_H * 0.5,
-      TEX_W * 0.42,
-    );
-    haze.addColorStop(0, withAlpha(ink, style === "stencil" ? 0.08 : 0.14));
-    haze.addColorStop(1, withAlpha(ink, 0));
-    ctx.fillStyle = haze;
-    ctx.fillRect(0, 0, TEX_W, TEX_H);
-
-    const marginX = 28;
-    const marginY = 22;
-    const maxTextW = TEX_W - marginX * 2;
-    const maxTextH = TEX_H - marginY * 2;
-
-    let size = short ? 118 : word.length > 10 ? 58 : 72;
-    const setFont = () => {
-      ctx.font = fontFor(style, size);
-    };
-    setFont();
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    while (size > 28 && ctx.measureText(word).width > maxTextW) {
-      size -= 4;
-      setFont();
-    }
-    const approxH = size * 1.15;
-    if (approxH > maxTextH) {
-      size = Math.floor(maxTextH / 1.15);
-      setFont();
-    }
-
-    const textW = ctx.measureText(word).width;
-    const tilt = (Math.random() - 0.5) * (style === "stencil" ? 0.04 : 0.12);
-    const cx = TEX_W / 2;
-    const cy = TEX_H * (0.5 + (Math.random() - 0.5) * 0.06);
-
-    ctx.translate(cx, cy);
-    ctx.rotate(tilt);
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
-    ctx.miterLimit = 2;
-
-    let x = -textW / 2;
-    const jig = style === "stencil" ? 0.4 : style === "marker" ? 2.4 : 1.8;
-    const spin = style === "wild" ? 0.14 : style === "stencil" ? 0.02 : 0.08;
-    for (let i = 0; i < word.length; i++) {
-      const ch = word[i]!;
-      const w = ctx.measureText(ch).width;
-      const jigX = (Math.random() - 0.5) * jig * (short ? 1.3 : 1);
-      const jigY = (Math.random() - 0.5) * jig * (short ? 1.6 : 1.2);
-      const rot = (Math.random() - 0.5) * spin;
-
-      ctx.save();
-      ctx.translate(x + w / 2 + jigX, jigY);
-      ctx.rotate(rot);
-      this.paintGlyph(ctx, ch, -w / 2, 0, size, ink, rim, shine, style);
-      if (ch !== " " && style !== "stencil" && Math.random() < (short ? 0.5 : 0.3)) {
-        this.paintDrip(
-          ctx,
-          0,
-          size * 0.38,
-          ink,
-          size * (0.08 + Math.random() * 0.12),
-        );
-      }
-      ctx.restore();
-      x += w * (short ? 1.02 : style === "wild" ? 0.94 : 0.98);
-    }
-
-    if (short && style !== "stencil" && Math.random() < 0.7) {
-      ctx.beginPath();
-      ctx.moveTo(-textW * 0.45, size * 0.55);
-      ctx.quadraticCurveTo(0, size * 0.72, textW * 0.48, size * 0.5);
-      ctx.strokeStyle = rim;
-      ctx.lineWidth = size * 0.14;
-      ctx.stroke();
-      ctx.strokeStyle = ink;
-      ctx.lineWidth = size * 0.07;
-      ctx.stroke();
-    }
-
-    ctx.restore();
+    const style = pickStyle(word, this.wide);
+    if (style === "handstyle") this.paintHandstyle(word);
+    else this.paintPiece(word.toUpperCase(), style);
 
     // Seed the mask from what we drew so scrubbing can track coverage.
     const data = ctx.getImageData(0, 0, TEX_W, TEX_H).data;
@@ -382,89 +317,290 @@ export class Graffiti {
     this.paintFull = Math.max(1, sum);
   }
 
-  private paintGlyph(
-    ctx: CanvasRenderingContext2D,
-    ch: string,
-    x: number,
-    y: number,
-    size: number,
-    ink: string,
-    rim: string,
-    shine: string,
-    style: TagStyle,
-  ): void {
-    const outer = size * (style === "marker" ? 0.26 : style === "hollow" ? 0.36 : 0.32);
+  /**
+   * Throw-up / blockbuster: letters laid out with a gap wide enough that fills
+   * never overlap, then drawn in passes — 3D, outline, fill, shine — so a
+   * neighbour's outline can only ever sit under a fill, not across it.
+   */
+  private paintPiece(word: string, style: "throwup" | "blockbuster"): void {
+    const ctx = this.ctx;
+    const throwup = style === "throwup";
+    const chrome = throwup && Math.random() < 0.4;
+    const ink = chrome ? CHROME : INKS[Math.floor(Math.random() * INKS.length)]!;
+    const rim = chrome ? "#0d0d10" : contrastRim(ink);
+    const dark = luma(ink) > 0.5 ? "#1a1612" : "#0a0a0e";
 
-    if (style === "block3d") {
-      ctx.fillStyle = luma(ink) > 0.45 ? "#1a1410" : "#0c0c10";
-      ctx.fillText(ch, x + size * 0.09, y + size * 0.08);
+    // Bubble swell, outline and 3D depth as fractions of the font size.
+    const swellR = throwup ? 0.1 : 0;
+    const rimR = throwup ? 0.07 : 0.06;
+    const depthR = throwup ? 0.05 : 0.12;
+    const font = (s: number) => `900 ${s}px "Arial Black", Impact, sans-serif`;
+
+    const maxW = TEX_W - 60;
+    const maxH = TEX_H - 90;
+    const layout = (s: number) => {
+      ctx.font = font(s);
+      const swell = s * swellR;
+      const outline = s * rimR;
+      const gap = throwup ? 2 * swell + outline : 2 * outline + s * 0.03;
+      const glyphs: Glyph[] = [];
+      let x = 0;
+      let last = 0;
+      for (const ch of word) {
+        if (ch === " ") {
+          x += s * 0.32;
+          continue;
+        }
+        const w = ctx.measureText(ch).width;
+        glyphs.push({ ch, x: x + w / 2, jy: 0, rot: 0, w });
+        x += w + gap;
+        last = x - gap;
+      }
+      return { glyphs, width: Math.max(1, last) };
+    };
+
+    let size = throwup ? 120 : 110;
+    let lay = layout(size);
+    const halo = () => 2 * size * (swellR + rimR) + size * depthR;
+    while (
+      size > 30 &&
+      (lay.width + halo() > maxW || size * 0.72 + halo() > maxH)
+    ) {
+      size -= 4;
+      lay = layout(size);
     }
 
-    // Fat contrasting halo so pale ink on brick and dark ink on soot both read.
-    ctx.strokeStyle = rim;
-    ctx.lineWidth = outer;
-    ctx.strokeText(ch, x, y);
-
-    if (style === "hollow") {
-      ctx.strokeStyle = ink;
-      ctx.lineWidth = size * 0.16;
-      ctx.strokeText(ch, x, y);
-      ctx.strokeStyle = shine;
-      ctx.lineWidth = size * 0.055;
-      ctx.strokeText(ch, x, y);
-      return;
+    const swell = size * swellR;
+    const outline = size * rimR;
+    const depth = size * depthR;
+    const capH = size * 0.72;
+    for (const g of lay.glyphs) {
+      g.x -= lay.width / 2;
+      g.jy = throwup ? (Math.random() - 0.5) * size * 0.05 : 0;
+      g.rot = (Math.random() - 0.5) * (throwup ? 0.07 : 0.02);
     }
 
-    if (style !== "marker") {
-      ctx.strokeStyle = ink;
-      ctx.lineWidth = size * 0.12;
-      ctx.strokeText(ch, x, y);
-    }
-    ctx.fillStyle = ink;
-    ctx.fillText(ch, x, y);
+    const centres: { x: number; w: number }[] = [];
+    ctx.save();
+    // Game canvas is CSS-flipped on X; paint mirrored so tags read forwards.
+    ctx.translate(TEX_W, 0);
+    ctx.scale(-1, 1);
+    ctx.translate(TEX_W / 2, TEX_H * 0.42);
+    ctx.rotate((Math.random() - 0.5) * (throwup ? 0.1 : 0.05));
+    ctx.font = font(size);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.lineJoin = throwup ? "round" : "miter";
+    ctx.lineCap = "round";
+    ctx.miterLimit = 3;
 
-    // Inner contour — a second line inside the fill, not just a rim.
-    ctx.strokeStyle = shine;
-    ctx.lineWidth = size * (style === "wild" ? 0.07 : 0.05);
-    ctx.strokeText(ch, x, y);
+    const each = (fn: (g: Glyph, base: number) => void) => {
+      for (const g of lay.glyphs) {
+        ctx.save();
+        ctx.translate(g.x, 0);
+        ctx.rotate(g.rot);
+        fn(g, capH / 2 + g.jy);
+        ctx.restore();
+      }
+    };
+    const body = 2 * (swell + outline);
 
-    if (style === "throwup" || style === "block3d" || style === "wild") {
-      ctx.fillStyle = withAlpha("#ffffff", 0.28);
-      ctx.fillText(ch, x - size * 0.02, y - size * 0.045);
-    }
+    each((g, base) => {
+      ctx.fillStyle = dark;
+      ctx.strokeStyle = dark;
+      ctx.lineWidth = body;
+      for (let k = depth; k > 0; k -= 1.5) {
+        ctx.strokeText(g.ch, k, base + k);
+        ctx.fillText(g.ch, k, base + k);
+      }
+    });
 
-    if (style === "wild") {
+    ctx.shadowColor = withAlpha(rim, 0.5);
+    ctx.shadowBlur = size * 0.12;
+    each((g, base) => {
       ctx.strokeStyle = rim;
-      ctx.lineWidth = size * 0.028;
-      ctx.strokeText(ch, x + size * 0.012, y + size * 0.01);
+      ctx.fillStyle = rim;
+      ctx.lineWidth = body;
+      ctx.strokeText(g.ch, 0, base);
+      ctx.fillText(g.ch, 0, base);
+    });
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
+
+    each((g, base) => {
+      ctx.fillStyle = ink;
+      if (swell > 0) {
+        ctx.strokeStyle = ink;
+        ctx.lineWidth = 2 * swell;
+        ctx.strokeText(g.ch, 0, base);
+      }
+      ctx.fillText(g.ch, 0, base);
+      const at = ctx.getTransform().transformPoint(new DOMPoint(0, 0));
+      centres.push({ x: at.x, w: g.w });
+    });
+
+    each((g, base) => {
+      if (throwup) {
+        ctx.strokeStyle = withAlpha("#ffffff", chrome ? 0.4 : 0.28);
+        ctx.lineWidth = size * 0.022;
+        ctx.strokeText(g.ch, 0, base);
+        ctx.fillStyle = withAlpha("#ffffff", 0.85);
+        ctx.beginPath();
+        ctx.ellipse(
+          -g.w * 0.22,
+          base - capH + size * 0.05,
+          size * 0.035,
+          size * 0.022,
+          -0.5,
+          0,
+          Math.PI * 2,
+        );
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = withAlpha("#ffffff", 0.22);
+        ctx.lineWidth = size * 0.018;
+        ctx.strokeText(g.ch, -size * 0.012, base - size * 0.012);
+      }
+    });
+    ctx.restore();
+
+    if (Math.random() < 0.85) {
+      const drips = 2 + (Math.random() < 0.4 ? 1 : 0);
+      this.dripFrom(centres, drips, ink, size * 0.08, depth + outline + 2);
+    }
+  }
+
+  /** One joined-up line — written in a single stroke so letters can't stack. */
+  private paintHandstyle(word: string): void {
+    const ctx = this.ctx;
+    const ink = HAND_INKS[Math.floor(Math.random() * HAND_INKS.length)]!;
+    const font = (s: number) =>
+      `italic 700 ${s}px "Segoe Script", "Brush Script MT", "URW Chancery L", "Comic Sans MS", cursive`;
+
+    const maxW = TEX_W - 60;
+    const maxH = TEX_H - 80;
+    let size = 100;
+    ctx.font = font(size);
+    while (
+      size > 26 &&
+      (ctx.measureText(word).width > maxW || size * 1.25 > maxH)
+    ) {
+      size -= 4;
+      ctx.font = font(size);
+    }
+    const textW = ctx.measureText(word).width;
+
+    ctx.save();
+    ctx.translate(TEX_W, 0);
+    ctx.scale(-1, 1);
+    ctx.translate(TEX_W / 2, TEX_H * 0.45);
+    ctx.rotate(-0.1 + Math.random() * 0.12);
+    ctx.font = font(size);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+
+    ctx.shadowColor = withAlpha(ink, 0.45);
+    ctx.shadowBlur = size * 0.08;
+    ctx.strokeStyle = ink;
+    ctx.fillStyle = ink;
+    ctx.lineWidth = size * 0.05;
+    ctx.strokeText(word, 0, 0);
+    ctx.fillText(word, 0, 0);
+
+    if (Math.random() < 0.55) {
+      ctx.lineWidth = size * 0.045;
+      ctx.beginPath();
+      ctx.moveTo(-textW * 0.48, size * 0.44);
+      ctx.quadraticCurveTo(0, size * 0.64, textW * 0.56, size * 0.3);
+      ctx.stroke();
+    }
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
+
+    const m = ctx.getTransform();
+    const a = m.transformPoint(new DOMPoint(-textW * 0.4, 0));
+    const b = m.transformPoint(new DOMPoint(textW * 0.4, 0));
+    ctx.restore();
+
+    if (Math.random() < 0.65) {
+      const x = a.x + (b.x - a.x) * Math.random();
+      this.dripFrom([{ x, w: 0 }], 1, ink, size * 0.05, 2);
+    }
+  }
+
+  /**
+   * Gravity runs off the lowest paint in a column: thick where they leave the
+   * letter, tapering, with a bead at the end. Drawn unmirrored — they fall
+   * straight down whatever the piece's tilt.
+   */
+  private dripFrom(
+    spots: readonly { x: number; w: number }[],
+    count: number,
+    ink: string,
+    thick: number,
+    inset: number,
+  ): void {
+    if (spots.length === 0 || count <= 0) return;
+    const data = this.ctx.getImageData(0, 0, TEX_W, TEX_H).data;
+    const pool = [...spots].sort(() => Math.random() - 0.5);
+    for (let i = 0; i < Math.min(count, pool.length); i++) {
+      const spot = pool[i]!;
+      const x = Math.round(spot.x + (Math.random() - 0.5) * spot.w * 0.5);
+      const bottom = lowestPaint(data, x);
+      if (bottom < 0) continue;
+      const w = thick * (0.8 + Math.random() * 0.5);
+      this.paintDrip(x, bottom - inset, ink, w, 14 + Math.random() * 34);
     }
   }
 
   private paintDrip(
-    ctx: CanvasRenderingContext2D,
     x: number,
-    y: number,
+    y0: number,
     ink: string,
-    thick: number,
+    w: number,
+    len: number,
   ): void {
-    const len = 10 + Math.random() * 22;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.quadraticCurveTo(
-      x + (Math.random() - 0.5) * 6,
-      y + len * 0.55,
-      x + (Math.random() - 0.5) * 4,
-      y + len,
-    );
-    ctx.strokeStyle = ink;
-    ctx.lineWidth = thick;
-    ctx.lineCap = "round";
-    ctx.stroke();
-    // Blob at the tip.
-    ctx.beginPath();
-    ctx.arc(x + (Math.random() - 0.5) * 3, y + len + 2, thick * 0.85, 0, Math.PI * 2);
+    const ctx = this.ctx;
+    const tipY = Math.min(TEX_H - w * 1.4 - 2, y0 + len);
+    if (tipY < y0 + w) return;
+    const run = tipY - y0;
+    const neck = w * 0.35;
+    ctx.save();
     ctx.fillStyle = ink;
+    ctx.beginPath();
+    ctx.moveTo(x - w / 2, y0);
+    ctx.bezierCurveTo(
+      x - w / 2,
+      y0 + run * 0.35,
+      x - neck / 2,
+      tipY - run * 0.3,
+      x - neck / 2,
+      tipY,
+    );
+    ctx.lineTo(x + neck / 2, tipY);
+    ctx.bezierCurveTo(
+      x + neck / 2,
+      tipY - run * 0.3,
+      x + w / 2,
+      y0 + run * 0.35,
+      x + w / 2,
+      y0,
+    );
+    ctx.closePath();
     ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x, tipY + w * 0.35, w * 0.42, w * 0.55, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = withAlpha("#ffffff", 0.25);
+    ctx.lineWidth = Math.max(1, w * 0.12);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x - w * 0.14, y0 + 2);
+    ctx.lineTo(x - neck * 0.15, tipY);
+    ctx.stroke();
+    ctx.restore();
   }
 
   private eraseMask(
@@ -503,6 +639,21 @@ export class Graffiti {
   }
 }
 
+function pickStyle(word: string, wide: number): TagStyle {
+  if (word.length > 8 && Math.random() < 0.8) return "handstyle";
+  if (wide >= 2.4 && Math.random() < 0.45) return "blockbuster";
+  return "throwup";
+}
+
+/** Lowest solid pixel in a canvas column, or -1 if there's no paint there. */
+function lowestPaint(data: Uint8ClampedArray, x: number): number {
+  const xi = Math.max(0, Math.min(TEX_W - 1, x));
+  for (let y = TEX_H - 1; y >= 0; y--) {
+    if (data[(y * TEX_W + xi) * 4 + 3]! > 200) return y;
+  }
+  return -1;
+}
+
 function withAlpha(hex: string, a: number): string {
   const h = hex.replace("#", "");
   const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
@@ -524,21 +675,4 @@ function luma(hex: string): number {
 /** Outline that stays visible against both the fill and typical brick. */
 function contrastRim(ink: string): string {
   return luma(ink) > 0.48 ? "#0a0a0c" : "#f4eee0";
-}
-
-function contrastShine(ink: string): string {
-  return luma(ink) > 0.48 ? "rgba(28, 18, 12, 0.88)" : "rgba(255, 255, 255, 0.82)";
-}
-
-function fontFor(style: TagStyle, size: number): string {
-  if (style === "marker") {
-    return `italic 800 ${size}px "Segoe Script", "Comic Sans MS", cursive`;
-  }
-  if (style === "stencil") {
-    return `800 ${size}px Impact, "Arial Black", sans-serif`;
-  }
-  if (style === "wild" || style === "block3d") {
-    return `italic 900 ${size}px "Arial Black", Impact, sans-serif`;
-  }
-  return `900 ${size}px "Arial Black", Impact, Haettenschweiler, sans-serif`;
 }

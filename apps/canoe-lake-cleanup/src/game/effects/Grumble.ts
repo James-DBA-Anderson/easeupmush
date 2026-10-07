@@ -72,7 +72,7 @@ export class Grumble {
   }
 
   /** Returns false once it has faded and cleaned itself up. */
-  public update(delta: number, at: THREE.Vector3): boolean {
+  public update(delta: number, at: THREE.Vector3, hover = 2.05): boolean {
     this.life -= delta;
     if (this.life <= 0) {
       this.dispose();
@@ -80,7 +80,7 @@ export class Grumble {
     }
 
     const age = LIFE - this.life;
-    this.sprite.position.copy(at).add(new THREE.Vector3(0, 2.05 + age * 0.22, 0));
+    this.sprite.position.copy(at).add(new THREE.Vector3(0, hover + age * 0.18, 0));
 
     const material = this.sprite.material as THREE.SpriteMaterial;
     // Pops out quickly, holds, then fades over the last half second.

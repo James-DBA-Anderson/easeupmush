@@ -83,7 +83,13 @@ export class WaterJet {
 
   private droplets: Droplet[] = [];
   private idle: THREE.Mesh[] = [];
-  private splashes: { mesh: THREE.Mesh; life: number }[] = [];
+  private splashes: {
+    mesh: THREE.Mesh;
+    life: number;
+    maxLife: number;
+    baseOpacity: number;
+    grow: number;
+  }[] = [];
   /** Solid jet look — cylinder segments along the arc. */
   private stream: THREE.Mesh[] = [];
   private streamMat: THREE.MeshBasicMaterial;
@@ -272,16 +278,12 @@ export class WaterJet {
     hose.rotation.set(1.05, 0, 0.35);
     gun.add(hose);
 
-    // Right hand on the grip; left braces the lance further up the tube.
+    // Right hand on the grip, sleeve parented so the forearm stays attached.
     const hand = buildArmedHand(1, "gun");
+    // Sit the palm on the orange grip; mitt curls under, thumb wraps the side.
     hand.position.set(0.0, -0.07, 0.035);
     hand.rotation.set(-0.15, 0.08, 0.2);
     gun.add(hand);
-
-    const brace = buildArmedHand(-1, "brace");
-    brace.position.set(0.01, 0.0, -0.4);
-    brace.rotation.set(0.45, -0.2, -0.7);
-    gun.add(brace);
 
     group.add(gun);
     // Slight overall cant so it doesn't sit dead centre.
@@ -527,14 +529,14 @@ export class WaterJet {
     this.groundCool = GROUND_STRIKE;
     if (hit.wall) {
       const nozzle = this.nozzle();
-      if (nozzle.distanceTo(hit.point) < BOUNCE_RANGE) {
-        this.bounceOff(hit.point, hit.direction, false, "body");
+      if (nozzle.distanceTo(hit.point) < BOUNCE_RANGE * 0.65) {
+        this.bounceOff(hit.point, hit.direction, false, "wall");
       }
       const facing = hit.direction.clone().multiplyScalar(-1);
       facing.y *= 0.15;
       if (facing.lengthSq() < 0.01) facing.set(0, 0, 1);
       else facing.normalize();
-      this.splash(hit.point, false, facing);
+      this.splash(hit.point, false, facing, true);
       return;
     }
 
@@ -882,14 +884,16 @@ export class WaterJet {
     at: THREE.Vector3,
     incoming: THREE.Vector3,
     dirty: boolean,
-    kind: "ground" | "body",
+    kind: "ground" | "body" | "wall",
     force = 1,
   ): void {
     const punch = dirty ? Math.max(1, force) : 1;
     const count =
-      kind === "ground"
-        ? Math.round((18 + Math.floor(Math.random() * 12)) * punch)
-        : 7 + Math.floor(Math.random() * 6);
+      kind === "wall"
+        ? 3 + Math.floor(Math.random() * 3)
+        : kind === "ground"
+          ? Math.round((12 + Math.floor(Math.random() * 8)) * punch)
+          : 6 + Math.floor(Math.random() * 4);
 
     const look = this.camera.getWorldDirection(new THREE.Vector3());
     const gap = this.camera.position.distanceTo(at);
@@ -942,18 +946,18 @@ export class WaterJet {
         if (backAtYou > 0.55 && Math.random() < backAtYou) {
           // Steep / aimed down — kick back toward the lance.
           const throwBack =
-            Math.min(14, 5.5 + speedIn * 0.4) *
+            Math.min(9, 4 + speedIn * 0.32) *
             (0.75 + Math.random() * 0.5) *
             throwBoost;
           velocity = new THREE.Vector3(
             -along.x * throwBack + side.x * flare,
-            lift + 2.2,
+            lift + 1.6,
             -along.z * throwBack + side.z * flare,
           );
         } else {
           // Forward spray — arc hits and skips onward the way it was going.
           const throwOn =
-            Math.min(17, 7 + speedIn * 0.55) *
+            Math.min(10.5, 5 + speedIn * 0.42) *
             (0.8 + Math.random() * 0.45) *
             throwBoost;
           velocity = new THREE.Vector3(
@@ -962,6 +966,17 @@ export class WaterJet {
             along.z * throwOn + side.z * flare,
           );
         }
+      } else if (kind === "wall") {
+        const out = incoming.clone().multiplyScalar(-1);
+        out.y = 0;
+        if (out.lengthSq() < 0.01) out.set(0, 0, 1);
+        out.normalize();
+        const scatter = 1.2 + Math.random() * 1.8;
+        velocity = new THREE.Vector3(
+          out.x * scatter + (Math.random() - 0.5) * 0.8,
+          1.2 + Math.random() * 1.4,
+          out.z * scatter + (Math.random() - 0.5) * 0.8,
+        );
       } else {
         // Off a body: a little scatter onward.
         const out = 2.2 + Math.random() * 3.6;
@@ -985,7 +1000,10 @@ export class WaterJet {
         velocity,
         fan: side.clone().multiplyScalar(Math.random() > 0.5 ? 1 : -1),
         fanRate: kind === "ground" ? 0.8 + Math.random() * 1.4 : 0,
-        life: BOUNCE_LIFE * (0.8 + Math.random() * 0.4) * (dirty ? Math.min(1.25, 0.85 + punch * 0.15) : 1),
+        life:
+          BOUNCE_LIFE *
+          (kind === "wall" ? 0.45 : 0.8 + Math.random() * 0.4) *
+          (dirty ? Math.min(1.25, 0.85 + punch * 0.15) : 1),
         bounced: true,
         dirty,
       };
@@ -998,22 +1016,29 @@ export class WaterJet {
     at: THREE.Vector3,
     dirty = false,
     facing?: THREE.Vector3,
+    onWall = false,
   ): void {
     if (this.splashes.length > 55) return;
     const mesh = new THREE.Mesh(
-      new THREE.RingGeometry(0.06, 0.22, 12),
+      new THREE.RingGeometry(
+        onWall ? 0.03 : 0.06,
+        onWall ? 0.11 : 0.22,
+        onWall ? 10 : 12,
+      ),
       new THREE.MeshBasicMaterial({
         color: dirty ? 0x8a7348 : 0xdff2ff,
         transparent: true,
-        opacity: 0.7,
+        opacity: onWall ? 0.32 : 0.7,
         side: THREE.DoubleSide,
         depthWrite: false,
+        depthTest: !onWall,
+        blending: onWall ? THREE.NormalBlending : THREE.NormalBlending,
       }),
     );
     if (facing && facing.lengthSq() > 0.01) {
       const n = facing.clone().normalize();
       mesh.quaternion.setFromUnitVectors(Z_AXIS, n);
-      mesh.position.copy(at).addScaledVector(n, 0.04);
+      mesh.position.copy(at).addScaledVector(n, onWall ? 0.02 : 0.04);
     } else {
       mesh.rotation.x = -Math.PI / 2;
       mesh.position.set(
@@ -1022,18 +1047,26 @@ export class WaterJet {
         at.z,
       );
     }
-    mesh.renderOrder = 3;
+    mesh.renderOrder = onWall ? 1 : 3;
     this.scene.add(mesh);
-    this.splashes.push({ mesh, life: 0.3 });
+    const maxLife = onWall ? 0.18 : 0.3;
+    this.splashes.push({
+      mesh,
+      life: maxLife,
+      maxLife,
+      baseOpacity: onWall ? 0.32 : 0.7,
+      grow: onWall ? 0.85 : 2.5,
+    });
   }
 
   private stepSplashes(delta: number): void {
     for (let i = this.splashes.length - 1; i >= 0; i--) {
       const splash = this.splashes[i]!;
       splash.life -= delta;
-      const t = Math.max(0, splash.life / 0.3);
-      splash.mesh.scale.setScalar(1 + (1 - t) * 2.5);
-      (splash.mesh.material as THREE.MeshBasicMaterial).opacity = 0.7 * t;
+      const t = Math.max(0, splash.life / splash.maxLife);
+      splash.mesh.scale.setScalar(1 + (1 - t) * splash.grow);
+      (splash.mesh.material as THREE.MeshBasicMaterial).opacity =
+        splash.baseOpacity * t;
       if (splash.life <= 0) {
         this.scene.remove(splash.mesh);
         splash.mesh.geometry.dispose();

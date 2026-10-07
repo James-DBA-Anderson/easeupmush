@@ -11,7 +11,7 @@ import {
   northwestScore,
   pickNorthwestPathIndex,
 } from "../world/lake";
-import { insidePark, parkGates } from "../world/fence";
+import { atRailings, insidePark, parkGates } from "../world/fence";
 import { binStations, cafeQueueSpot } from "../world/park";
 import { stepWalk, clearWalkSpot } from "../world/blocking";
 import { groundHeight } from "../world/terrain";
@@ -255,9 +255,15 @@ const FEED_PAUSE = 2.2;
 
 /** Depot radio: feeders on the NW stretch — bag odds go up for a while. */
 let feederRush = false;
+/** Wire-bird job — a cluster of bag-feeders at the mission pin. */
+let pigeonFeeders = false;
 
 export function setFeederRush(on: boolean): void {
   feederRush = on;
+}
+
+export function setPigeonFeeders(on: boolean): void {
+  pigeonFeeders = on;
 }
 
 const FEEDING_LINES = [
@@ -276,6 +282,35 @@ const SCATTER_LINES = [
   "CHUCK THE GRUB IN",
   "SWEET AS NUT, THAT",
 ];
+const PIGEON_FAN_LINES = [
+  "COME ON MY BEAUTIES",
+  "GET STUCK IN",
+  "LOOK AT THE LITTLE LUVS",
+  "MORE FOR YOU",
+  "DON'T FIGHT — THERE'S LOADS",
+  "YES! YES! COME ON!",
+];
+const PIGEON_FAN_SOAKED = [
+  "YOU'VE RUINED IT!",
+  "MY BIRDS!",
+  "THAT WAS FOR THE PIGEONS!",
+  "OI — THAT'S THEIR DINNER!",
+];
+const PIGEON_FAN_DONE = [
+  "RIGHT — I'M OFF",
+  "YOU CAN FEED 'EM THEN",
+  "NOT STANDING FOR THIS",
+  "THEY'LL STARVE NOW!",
+];
+const PIGEON_FAN_MOAN = [
+  "GERROFF",
+  "I'M ALREADY DOWN",
+  "LEAVE IT",
+  "OW — THAT'S ENOUGH",
+  "YOU'VE MADE YOUR POINT",
+];
+const PIGEON_SOAK_GIVE_UP = 3;
+const PIGEON_LIE_Y = 0.42;
 
 const ICE_BUY = [
   "TWO NINETY PLEASE",
@@ -391,6 +426,32 @@ export class Person {
   private scattering = 0;
   private scatterWait = 25 + Math.random() * 45;
   private scatterAt: THREE.Vector3 | null = null;
+  private pigeonFeedWait = 999;
+  private pigeonSpillQueue: { from: THREE.Vector3; to: THREE.Vector3 }[] = [];
+  private pigeonSoakCount = 0;
+  /** On the paving after a hose blast — stays down until the player looks away. */
+  private pigeonDown = false;
+  /** 0 lying, 1 standing. */
+  private pigeonGetUp = 0;
+  /** 0 upright, 1 flat — the tip-over after a soak. */
+  private pigeonFall = 1;
+  private pigeonFlinch = 0;
+  private pigeonAnim = 0;
+  private pigeonStuck = 0;
+  private readonly speechTmp = new THREE.Vector3();
+  /** Wire-bird job — walk the path by the mission pin while chucking bread. */
+  private pigeonFeed: {
+    phase: "approach" | "anchored";
+    gx: number;
+    gz: number;
+    slot: number;
+    baseX: number;
+    baseZ: number;
+    wary: THREE.Vector2;
+    paceX: number;
+    paceZ: number;
+  } | null = null;
+  private readonly pigeonPace = new THREE.Vector2();
   /** Stands in for the crowd turning over: empty-handed people wander off and
    * fresh ones turn up with a new bag. */
   private restock = 0;
@@ -467,6 +528,10 @@ export class Person {
   private errand: Errand = "strolling";
   private visitLeft = VISIT_MIN + Math.random() * (VISIT_MAX - VISIT_MIN);
   private gateFor: THREE.Vector2 | null = null;
+  private fenceHop = 0;
+  private fenceHopFrom = new THREE.Vector3();
+  private fenceHopTo = new THREE.Vector3();
+
   /** Gateway midpoint — walk through here before joining / after leaving the path. */
   private gateWay: THREE.Vector2 | null = null;
   private joinAt = new THREE.Vector2();
@@ -522,19 +587,7 @@ export class Person {
     attacker: THREE.Vector3,
     lout = false,
   ): void {
-    // Crash victims don't keep the random kid / dog roll from construction.
-    if (this.kid) {
-      this.kid.removeFromParent();
-      this.kid = null;
-      this.kidFace = null;
-      this.kidLegs = [];
-      this.kidArms = [];
-      this.kidCone = null;
-    }
-    if (this.dog) {
-      this.dog.dispose();
-      this.dog = null;
-    }
+    this.ditchCompanions();
     this.handfuls = 0;
     if (this.bag) {
       this.bag.removeFromParent();
@@ -630,6 +683,7 @@ export class Person {
     ) {
       return;
     }
+    this.pigeonFeed = null;
     this.errand = "leaving";
     const here = this.group.position;
     const best = nearestGate(here.x, here.z);
@@ -695,6 +749,17 @@ export class Person {
   /** Walk toward a point on the flat, swinging the arms. Returns the gap left. */
   private walkToward(to: THREE.Vector2, delta: number): number {
     const here = this.group.position;
+    if (this.fenceHop > 0) {
+      this.fenceHop -= delta;
+      const t = 1 - Math.max(0, this.fenceHop) / 0.52;
+      here.lerpVectors(this.fenceHopFrom, this.fenceHopTo, t);
+      here.y = Math.sin(t * Math.PI) * 0.52;
+      this.faceToward(to.x, to.y);
+      this.stepPhase += delta * this.speed * 5;
+      this.stride(this.stepPhase, 1.15);
+      return Math.hypot(to.x - here.x, to.y - here.z);
+    }
+
     const gap = Math.hypot(to.x - here.x, to.y - here.z);
     if (gap < 0.05) return 0;
     const step = Math.min(gap, this.speed * delta);
@@ -730,12 +795,42 @@ export class Person {
         );
       }
     }
+    if (
+      Math.hypot(landed.x - here.x, landed.z - here.z) < 0.001 &&
+      step > 0 &&
+      (this.errand === "arriving" || this.errand === "leaving")
+    ) {
+      const gate =
+        this.errand === "leaving"
+          ? this.gateFor ?? this.gateWay
+          : this.gateWay ?? this.gateFor;
+      const gx = gate?.x ?? to.x;
+      const gz = gate?.y ?? to.y;
+      const nearGate = Math.hypot(gx - here.x, gz - here.z) < 9;
+      const nx = here.x + dx;
+      const nz = here.z + dz;
+      if (nearGate && atRailings(nx, nz)) {
+        for (let hop = 1.0; hop <= 2.2; hop += 0.35) {
+          const tx = here.x + (dx / step) * hop;
+          const tz = here.z + (dz / step) * hop;
+          if (!atRailings(tx, tz)) {
+            this.fenceHopFrom.set(here.x, 0, here.z);
+            this.fenceHopTo.set(tx, 0, tz);
+            this.fenceHop = 0.52;
+            this.faceToward(to.x, to.y);
+            return Math.hypot(to.x - here.x, to.y - here.z);
+          }
+        }
+      }
+    }
     here.x = landed.x;
     here.z = landed.z;
     this.faceToward(to.x, to.y);
     this.stepPhase += delta * this.speed * 4.5;
     this.stride(this.stepPhase, 1);
-    this.showMood("idle");
+    this.showMood(
+      this.pigeonSoakCount >= PIGEON_SOAK_GIVE_UP ? "angry" : "idle",
+    );
     // If a wall stopped them short, treat the remaining gap as whatever's left.
     return Math.hypot(to.x - here.x, to.y - here.z);
   }
@@ -876,6 +971,7 @@ export class Person {
       this.pleasedHold = Math.max(0, this.pleasedHold - delta);
     }
     if (this.madLeft <= 0) return;
+    if (this.pigeonFeed || this.pigeonDown) return;
 
     if (this.dutyCalls(player)) {
       this.coolOff("duty");
@@ -1168,7 +1264,7 @@ export class Person {
   }
 
   private giveBag(): void {
-    this.handfuls = feederRush ? HANDFULS_RUSH : HANDFULS;
+    this.handfuls = feederRush || pigeonFeeders ? HANDFULS_RUSH : HANDFULS;
     this.bag = new THREE.Mesh(
       new THREE.BoxGeometry(0.2, 0.26, 0.14),
       new THREE.MeshStandardMaterial({ color: 0xd8c9a4, roughness: 1 }),
@@ -1178,7 +1274,7 @@ export class Person {
     this.bag.castShadow = true;
     this.arms[1]!.children[1]!.add(this.bag);
     // Stay on the stretch while the bag lasts — don't clock out mid-feed.
-    if (feederRush) {
+    if (feederRush || pigeonFeeders) {
       this.visitLeft = Math.max(this.visitLeft, 160);
     }
   }
@@ -1199,7 +1295,8 @@ export class Person {
 
   /** Washer hits a feeder — bag gone, off home. */
   private ditchFeederBag(): void {
-    if (!feederRush || this.handfuls <= 0) return;
+    if ((!feederRush && !pigeonFeeders) || this.handfuls <= 0) return;
+    if (pigeonFeeders) this.pigeonFeed = null;
     this.handfuls = 0;
     if (this.bag) {
       this.bag.removeFromParent();
@@ -1222,6 +1319,533 @@ export class Person {
       return;
     }
     this.giveBag();
+  }
+
+  /** Wire-bird buildup — long bag on the lakeside path by the mission pin. */
+  public stockForPigeonMission(): void {
+    if (this.handfuls > 0) {
+      this.handfuls = HANDFULS_RUSH;
+      this.visitLeft = Math.max(this.visitLeft, 160);
+    } else {
+      this.giveBag();
+    }
+    this.pigeonFeedWait = 0.6 + Math.random() * 1.2;
+  }
+
+  /** Stand in the mission start cluster — no strolling the loop. */
+  public anchorPigeonFeeder(gx: number, gz: number, slot: number): void {
+    this.pigeonFeed = {
+      phase: "anchored",
+      gx,
+      gz,
+      slot,
+      baseX: gx,
+      baseZ: gz,
+      wary: new THREE.Vector2(),
+      paceX: gx,
+      paceZ: gz,
+    };
+    this.stockForPigeonMission();
+    this.ditchCompanions();
+    this.snapPigeonFeedSpot();
+    this.pickPigeonPaceSpot();
+    this.errand = "strolling";
+    this.visitLeft = Math.max(this.visitLeft, 200);
+  }
+
+  /** Debug / late joiners — bag in hand, walking the path to the mission pin. */
+  public beginPigeonFeederApproach(
+    gx: number,
+    gz: number,
+    slot: number,
+    gate?: THREE.Vector2,
+  ): void {
+    const join = loopPoint(nearestLoopIndex(gx, gz));
+    this.pigeonFeed = {
+      phase: "approach",
+      gx,
+      gz,
+      slot,
+      baseX: join.x,
+      baseZ: join.y,
+      wary: new THREE.Vector2(),
+      paceX: gx,
+      paceZ: gz,
+    };
+    this.ditchCompanions();
+    this.stockForPigeonMission();
+    this.speed = Math.max(this.speed, 1.85);
+    const shore = nearestShore(join.x, join.y);
+    const inland = outwardAt(shore);
+    const clear = clearWalkSpot(join.x, join.y, {
+      radius: 0.45,
+      inland: { x: inland.x, z: inland.y },
+      reach: 5,
+    });
+    this.joinAt.set(clear.x, clear.z);
+    this.errand = "arriving";
+    this.arriveStage = "gate";
+    const g = gate ?? nearestGate(gx, gz);
+    this.gateWay = g.clone();
+    const out = gateOutside(g, 8 + Math.random() * 4);
+    this.group.position.set(out.x, groundHeight(out.x, out.y), out.y);
+    this.faceToward(g.x, g.y);
+    this.visitLeft = Math.max(this.visitLeft, 240);
+  }
+
+  public isPigeonFeederAnchored(): boolean {
+    return this.pigeonFeed?.phase === "anchored";
+  }
+
+  public isPigeonFeederApproaching(): boolean {
+    return this.pigeonFeed?.phase === "approach";
+  }
+
+  public isPigeonFeederScattering(): boolean {
+    return this.scattering > 0;
+  }
+
+  public isPigeonFanaticFeeder(): boolean {
+    return this.pigeonFeed !== null;
+  }
+
+  public pigeonSoakHits(): number {
+    return this.pigeonSoakCount;
+  }
+
+  public isPigeonFanaticDown(): boolean {
+    return this.pigeonDown;
+  }
+
+  public claimPigeonSpills(): { from: THREE.Vector3; to: THREE.Vector3 }[] {
+    if (this.pigeonSpillQueue.length === 0) return [];
+    return this.pigeonSpillQueue.splice(0);
+  }
+
+  /** Hose blast — tipped over and the whole bag goes everywhere. */
+  public knockPigeonFanatic(from?: THREE.Vector3): void {
+    if (!this.pigeonFeed) return;
+    this.wet = DRYING;
+    if (this.pigeonDown) {
+      this.pigeonFlinch = Math.max(this.pigeonFlinch, 0.55);
+      if (this.sprayTalkCool <= 0) {
+        this.say(PIGEON_FAN_MOAN);
+        this.sprayTalkCool = 1.4 + Math.random() * 0.8;
+      }
+      this.showMood("angry");
+      return;
+    }
+
+    this.pigeonSoakCount += 1;
+    this.pigeonDown = true;
+    this.pigeonGetUp = 0;
+    this.pigeonFall = 0;
+    this.pigeonFlinch = 0.2;
+    this.pigeonAnim = 0;
+    this.scattering = 0;
+    this.feeding = 0;
+    this.strop = 0;
+    this.getUpTip = Math.random() < 0.5 ? 1 : -1;
+
+    this.dumpBagInTheAir(from);
+    this.say(PIGEON_FAN_SOAKED);
+    this.sprayTalkCool = 1.6;
+    this.showMood("angry");
+    if (from) this.faceToward(from.x, from.z);
+    this.posePigeonDown(0, 0);
+  }
+
+  private finishPigeonApproach(): void {
+    if (!this.pigeonFeed) return;
+    this.pigeonFeed.phase = "anchored";
+    this.errand = "strolling";
+    this.route.ready = false;
+    this.snapPigeonFeedSpot();
+    this.pickPigeonPaceSpot();
+    this.visitLeft = Math.max(this.visitLeft, 200);
+  }
+
+  private snapPigeonFeedSpot(): void {
+    if (!this.pigeonFeed) return;
+    const { gx, gz } = this.pigeonFeed;
+    this.index = nearestLoopIndex(gx, gz);
+    const hub = loopPoint(this.index);
+    const from =
+      this.joinAt.lengthSq() > 0.01
+        ? this.joinAt
+        : hub;
+    const shore = nearestShore(from.x, from.y);
+    const inland = outwardAt(shore);
+    const along = new THREE.Vector2(-inland.y, inland.x);
+    const clear = clearWalkSpot(from.x, from.y, {
+      radius: 0.55,
+      inland: { x: inland.x, z: inland.y },
+      along: { x: along.x, z: along.y },
+      reach: 6,
+    });
+    this.pigeonFeed.baseX = clear.x;
+    this.pigeonFeed.baseZ = clear.z;
+    this.pigeonFeed.wary.set(0, 0);
+    this.joinAt.set(clear.x, clear.z);
+    this.group.position.set(
+      clear.x,
+      groundHeight(clear.x, clear.z),
+      clear.z,
+    );
+    this.faceToward(gx, gz);
+  }
+
+  private pigeonStandY(): number {
+    return groundHeight(this.group.position.x, this.group.position.z);
+  }
+
+  /**
+   * Tip over, then lie there kicking. `getUp` is 0 on the ground, 1 standing.
+   * `pigeonFall` 0→1 is the actual tumble.
+   */
+  private posePigeonDown(getUp: number, delta: number): void {
+    const stand = this.pigeonStandY();
+    const lie = stand + PIGEON_LIE_Y;
+    const fall = THREE.MathUtils.clamp(this.pigeonFall, 0, 1);
+    const rise = THREE.MathUtils.clamp(getUp, 0, 1);
+    const down = fall * (1 - rise);
+    const falling = fall < 1;
+    this.pigeonAnim += delta;
+    const flinch = this.pigeonFlinch > 0 ? 1.7 : 1;
+    const wiggle = down * flinch;
+    const thrash = falling ? 1.35 : 0.7;
+
+    const throwArm = falling ? -2.35 * fall : -0.35 * down;
+    const gettingUp = rise > 0.02;
+    const storm = gettingUp && this.pigeonSoakCount >= PIGEON_SOAK_GIVE_UP;
+    const kick = gettingUp ? 0 : wiggle;
+    const unroll = storm ? Math.min(1, rise / 0.32) : 0;
+    const standUp = storm ? Math.max(0, (rise - 0.32) / 0.68) : rise;
+    const standEase = storm
+      ? standUp * standUp * (3 - 2 * standUp)
+      : rise;
+    this.group.rotation.x = storm ? -0.28 * Math.sin(standUp * Math.PI) : 0;
+    this.group.rotation.z =
+      this.getUpTip * (Math.PI / 2) * (storm ? 1 - unroll : down);
+    const lift = falling ? Math.sin(fall * Math.PI) * 0.22 : 0;
+    this.group.position.y = THREE.MathUtils.lerp(lie, stand, standEase) + lift;
+    const plant = storm ? Math.sin(unroll * Math.PI) * 0.55 : 0;
+    this.arms[0]!.rotation.set(
+      throwArm * 0.75 -
+        Math.sin(this.pigeonAnim * 11) * 0.65 * kick * thrash -
+        plant * 0.8,
+      0,
+      0.3 + Math.sin(this.pigeonAnim * 8.1) * 0.4 * kick,
+    );
+    this.arms[1]!.rotation.set(
+      throwArm -
+        Math.sin(this.pigeonAnim * 12.4) * 0.75 * kick * thrash -
+        plant,
+      0,
+      -0.35 - Math.cos(this.pigeonAnim * 9.6) * 0.45 * kick,
+    );
+    this.legs[0]!.rotation.set(
+      0.2 * (storm ? 1 - standEase : down) +
+        Math.sin(this.pigeonAnim * 10.2) * 0.45 * kick,
+      0,
+      0,
+    );
+    this.legs[1]!.rotation.set(
+      -0.15 * (storm ? 1 - standEase : down) -
+        Math.cos(this.pigeonAnim * 11.5) * 0.4 * kick,
+      0,
+      0,
+    );
+    this.torso.rotation.set(
+      storm
+        ? 0.22 * (1 - standEase)
+        : gettingUp
+          ? 0.18 * (1 - rise)
+          : Math.sin(this.pigeonAnim * 5.5) * 0.14 * kick,
+      0,
+      gettingUp ? 0 : Math.sin(this.pigeonAnim * 6.8) * 0.12 * kick,
+    );
+    this.head.rotation.set(
+      storm
+        ? 0.08 * (1 - standEase)
+        : gettingUp
+          ? 0.12 * (1 - rise)
+          : 0.2 * down + Math.sin(this.pigeonAnim * 6.4) * 0.22 * kick,
+      0,
+      0,
+    );
+  }
+
+  private finishPigeonGetUp(): void {
+    this.pigeonDown = false;
+    this.pigeonGetUp = 1;
+    this.scattering = 0;
+    this.group.rotation.x = 0;
+    this.group.rotation.z = 0;
+    this.torso.rotation.set(0, 0, 0);
+    this.arms[0]!.rotation.set(0, 0, 0.08);
+    this.arms[1]!.rotation.set(0, 0, -0.08);
+    this.legs[0]!.rotation.set(0, 0, 0);
+    this.legs[1]!.rotation.set(0, 0, 0);
+    this.head.rotation.set(0, 0, 0);
+    this.pigeonFall = 1;
+    this.pigeonFlinch = 0;
+    if (this.pigeonSoakCount < PIGEON_SOAK_GIVE_UP) {
+      this.nudgePigeonFeederClear();
+    }
+    this.group.position.y = this.pigeonStandY();
+    if (this.pigeonSoakCount >= PIGEON_SOAK_GIVE_UP) {
+      this.say(PIGEON_FAN_DONE);
+      this.showMood("angry");
+      this.speed = Math.max(this.speed, 2.15);
+      this.headHome();
+      return;
+    }
+    this.stockForPigeonMission();
+    this.say(PIGEON_FAN_LINES);
+    this.showMood("pleased");
+  }
+
+  /** After a dump, step off the bread so he isn't glued to the pile. */
+  private nudgePigeonFeederClear(avoid?: THREE.Vector3): void {
+    const here = this.group.position;
+    const shore = nearestShore(here.x, here.z);
+    const inland = outwardAt(shore);
+    const along = new THREE.Vector2(-inland.y, inland.x);
+    let x = here.x;
+    let z = here.z;
+    if (avoid) {
+      const dx = x - avoid.x;
+      const dz = z - avoid.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 1.7) {
+        const push = 1.85 - d;
+        if (d < 0.08) {
+          x += inland.x * push + along.x * push * 0.4;
+          z += inland.y * push + along.y * push * 0.4;
+        } else {
+          x += (dx / d) * push;
+          z += (dz / d) * push;
+        }
+      }
+    } else {
+      x += inland.x * 0.9 + along.x * 0.35;
+      z += inland.y * 0.9 + along.y * 0.35;
+    }
+    const clear = clearWalkSpot(x, z, {
+      radius: 0.55,
+      inland: { x: inland.x, z: inland.y },
+      along: { x: along.x, z: along.y },
+      reach: 5,
+    });
+    here.x = clear.x;
+    here.z = clear.z;
+    if (this.pigeonFeed) {
+      this.pigeonFeed.baseX = clear.x;
+      this.pigeonFeed.baseZ = clear.z;
+      this.pigeonFeed.wary.set(0, 0);
+    }
+  }
+
+  private ditchCompanions(): void {
+    if (this.kid) {
+      this.kid.removeFromParent();
+      this.kid = null;
+      this.kidFace = null;
+      this.kidLegs = [];
+      this.kidArms = [];
+      this.kidCone = null;
+    }
+    if (this.dog) {
+      this.dog.dispose();
+      this.dog = null;
+    }
+  }
+
+  private walkPigeonToward(to: THREE.Vector2, delta: number): number {
+    const before = this.group.position.clone();
+    const gap = this.walkToward(to, delta);
+    const moved = Math.hypot(
+      this.group.position.x - before.x,
+      this.group.position.z - before.z,
+    );
+    if (moved < 0.01 && gap > 0.5) {
+      this.pigeonStuck += delta;
+    } else {
+      this.pigeonStuck = 0;
+    }
+    if (this.pigeonStuck > 0.25 && gap > 0.4) {
+      const shore = nearestShore(this.group.position.x, this.group.position.z);
+      const inland = outwardAt(shore);
+      const along = new THREE.Vector2(-inland.y, inland.x);
+      const towardX = (to.x - this.group.position.x) / gap;
+      const towardZ = (to.y - this.group.position.z) / gap;
+      const step = Math.min(gap, Math.max(0.35, this.speed * delta * 1.8));
+      const tries: [number, number][] = [
+        [towardX, towardZ],
+        [along.x, along.y],
+        [-along.x, -along.y],
+        [inland.x, inland.y],
+      ];
+      for (const [dx, dz] of tries) {
+        const nx = this.group.position.x + dx * step;
+        const nz = this.group.position.z + dz * step;
+        if (isInLake(nx, nz)) continue;
+        this.group.position.x = nx;
+        this.group.position.z = nz;
+        break;
+      }
+      this.group.position.y = this.pigeonStandY();
+      this.faceToward(to.x, to.y);
+      this.pigeonStuck = 0;
+      return Math.hypot(to.x - this.group.position.x, to.y - this.group.position.z);
+    }
+    return gap;
+  }
+
+  private tickPigeonFeed(delta: number, watched: boolean): number {
+    if (!this.pigeonFeed) return -1;
+
+    if (this.pigeonDown) {
+      this.showMood("angry");
+      if (this.pigeonFlinch > 0) {
+        this.pigeonFlinch = Math.max(0, this.pigeonFlinch - delta);
+      }
+      if (this.pigeonFall < 1) {
+        this.pigeonFall = Math.min(1, this.pigeonFall + delta / 0.22);
+        this.posePigeonDown(0, delta);
+        return -1;
+      }
+      const stormOff = this.pigeonSoakCount >= PIGEON_SOAK_GIVE_UP;
+      if (watched && !stormOff) {
+        this.pigeonGetUp = 0;
+        this.posePigeonDown(0, delta);
+        return -1;
+      }
+      this.pigeonGetUp = Math.min(
+        1,
+        this.pigeonGetUp + delta / (stormOff ? 1.05 : 0.9),
+      );
+      this.posePigeonDown(this.pigeonGetUp, delta);
+      if (this.pigeonGetUp >= 1) this.finishPigeonGetUp();
+      return -1;
+    }
+
+    if (this.pigeonFeed.phase === "approach") {
+      if (this.errand === "arriving") {
+        if (this.arriveStage === "gate" && this.gateWay) {
+          const gap = this.walkPigeonToward(this.gateWay, delta);
+          const here = this.group.position;
+          if (gap < 1.1 || insidePark(here.x, here.z)) {
+            this.arriveStage = "path";
+            this.gateWay = null;
+            setRouteToward(
+              this.route,
+              here.x,
+              here.z,
+              this.joinAt.x,
+              this.joinAt.y,
+            );
+          }
+          return -1;
+        }
+        const aim = routeAim(
+          this.route,
+          this.group.position.x,
+          this.group.position.z,
+          this.joinAt.x,
+          this.joinAt.y,
+          5,
+        );
+        const gap = this.walkPigeonToward(aim ?? this.joinAt, delta);
+        if (gap < 1.15) this.finishPigeonApproach();
+        return -1;
+      }
+      return -1;
+    }
+
+    this.pigeonFeed.wary.set(0, 0);
+
+    if (this.handfuls > 0 && !this.kid) {
+      this.pigeonFeedWait -= delta;
+      if (this.pigeonFeedWait <= 0) {
+        this.tossPigeonHandful();
+        this.pigeonFeedWait = 4 + Math.random() * 5;
+      }
+    }
+
+    if (this.kid && this.handfuls > 0) {
+      this.scatterWait -= delta;
+      if (this.scatterWait <= 0) {
+        this.tossPigeonHandful();
+        this.scatterWait = 10 + Math.random() * 14;
+      }
+    }
+
+    this.visitLeft -= delta;
+    if (this.handfuls > 0) this.visitLeft = Math.max(this.visitLeft, 55);
+
+    if (this.scattering > 0) {
+      this.scattering -= delta;
+      this.sprinkle();
+      this.group.position.y = this.pigeonStandY();
+      this.group.rotation.z = 0;
+    } else {
+      this.pacePigeonFeed(delta);
+    }
+
+    this.showMood("pleased");
+    if (this.visitLeft <= 0 && this.handfuls <= 0) this.headHome();
+    return -1;
+  }
+
+  /** Stroll a few metres of path around the pin so he isn't glued to one tile. */
+  private pacePigeonFeed(delta: number): void {
+    if (!this.pigeonFeed) return;
+    const here = this.group.position;
+    let gap = Math.hypot(
+      this.pigeonFeed.paceX - here.x,
+      this.pigeonFeed.paceZ - here.z,
+    );
+    if (gap < 0.85) this.pickPigeonPaceSpot();
+    this.pigeonPace.set(this.pigeonFeed.paceX, this.pigeonFeed.paceZ);
+    this.walkPigeonToward(this.pigeonPace, delta);
+    this.pigeonFeed.baseX = here.x;
+    this.pigeonFeed.baseZ = here.z;
+  }
+
+  private pickPigeonPaceSpot(): void {
+    if (!this.pigeonFeed) return;
+    const pin = this.pigeonFeed;
+    const here = this.group.position;
+    const hub = nearestLoopIndex(pin.gx, pin.gz);
+    let bestX = pin.gx;
+    let bestZ = pin.gz;
+    let bestScore = -1;
+    for (let di = -4; di <= 4; di++) {
+      const p = loopPoint(hub + di);
+      const shore = nearestShore(p.x, p.y);
+      const inland = outwardAt(shore);
+      const along = new THREE.Vector2(-inland.y, inland.x);
+      const clear = clearWalkSpot(p.x, p.y, {
+        radius: 0.5,
+        inland: { x: inland.x, z: inland.y },
+        along: { x: along.x, z: along.y },
+        reach: 5,
+      });
+      const fromPin = Math.hypot(clear.x - pin.gx, clear.z - pin.gz);
+      if (fromPin > 6.2) continue;
+      const fromHere = Math.hypot(clear.x - here.x, clear.z - here.z);
+      if (fromHere < 1.8) continue;
+      const score = fromHere + Math.random() * 0.8;
+      if (score > bestScore) {
+        bestScore = score;
+        bestX = clear.x;
+        bestZ = clear.z;
+      }
+    }
+    pin.paceX = bestX;
+    pin.paceZ = bestZ;
   }
 
   /** Peel off the path toward the nearest council bin with the empty bag. */
@@ -1549,8 +2173,15 @@ export class Person {
     const here = this.group.position;
     const dx = point.x - here.x;
     const dz = point.z - here.z;
-    if (dx * dx + dz * dz <= 0.55 * 0.55) {
-      if (point.y > here.y - 0.1 && point.y < here.y + 1.85) return true;
+    const r = this.pigeonFeed
+      ? this.pigeonDown
+        ? 1.7
+        : 2.15
+      : 0.55;
+    if (dx * dx + dz * dz <= r * r) {
+      const y0 = this.pigeonDown ? here.y - 0.45 : here.y - 0.25;
+      const y1 = this.pigeonDown ? here.y + 1.05 : here.y + 2.2;
+      if (point.y > y0 && point.y < y1) return true;
     }
     // Kid trails a step behind — count a hit on them too.
     if (this.kid) {
@@ -1823,7 +2454,7 @@ export class Person {
     }
 
     // Hose the feeders off the NW stretch — bag ditched, they're done.
-    if (first) this.ditchFeederBag();
+    if (first && !this.pigeonFeed) this.ditchFeederBag();
 
     // Parent gets the hose — kid gets hauled along in the chase, not left tipped.
     if (this.kid) this.haulKidAlong();
@@ -2334,8 +2965,18 @@ export class Person {
     this.grumble = new Grumble(
       this.scene,
       lines[Math.floor(Math.random() * lines.length)]!,
-      this.group.position,
+      this.speechAnchor(),
     );
+  }
+
+  /** Head when he's on the paving, feet-origin when he's stood up. */
+  private speechAnchor(): THREE.Vector3 {
+    if (this.pigeonDown) {
+      this.head.getWorldPosition(this.speechTmp);
+      return this.speechTmp;
+    }
+    this.speechTmp.copy(this.group.position);
+    return this.speechTmp;
   }
 
   /** Soaked clothes go dark, and dry out slowly as they walk it off. */
@@ -2432,9 +3073,14 @@ export class Person {
     mess: readonly THREE.Vector3[] = [],
     player: THREE.Vector3 | null = null,
     raining = false,
+    watched = false,
   ): number {
     this.grumble =
-      this.grumble?.update(delta, this.group.position) === false
+      this.grumble?.update(
+        delta,
+        this.speechAnchor(),
+        this.pigeonDown ? 0.5 : 2.05,
+      ) === false
         ? null
         : this.grumble;
     this.dry(delta);
@@ -2447,6 +3093,10 @@ export class Person {
     this.kidFace?.update(delta);
     this.tickUmbrella(delta, raining);
     this.tickMad(delta, player);
+
+    if (this.pigeonFeed) {
+      return this.tickPigeonFeed(delta, watched);
+    }
 
     if (this.errand === "arriving") {
       if (this.arriveStage === "gate" && this.gateWay) {
@@ -2622,7 +3272,7 @@ export class Person {
     this.iceCreamWait -= delta;
     if (this.iceCreamWait <= 0) {
       this.iceCreamWait = 55 + Math.random() * 90;
-      if (!this.adultCone && !this.kidCone) {
+      if (!this.adultCone && !this.kidCone && !pigeonFeeders) {
         const fancy = this.kid ? 0.58 : 0.2;
         if (Math.random() < fancy) this.startIceCream();
       }
@@ -2827,6 +3477,95 @@ export class Person {
     if (this.handfuls <= 0) this.emptyHanded();
   }
 
+  private tossPigeonHandful(): void {
+    if (this.handfuls <= 0) return;
+    this.handfuls -= 1;
+    this.scattering = 0.55;
+    this.scatterAt = this.tossOntoPath();
+    this.grumble?.dispose();
+    this.grumble = new Grumble(
+      this.scene,
+      PIGEON_FAN_LINES[Math.floor(Math.random() * PIGEON_FAN_LINES.length)]!,
+      this.group.position,
+    );
+    if (this.handfuls <= 0 && this.bag) {
+      this.bag.removeFromParent();
+      this.bag = null;
+    }
+  }
+
+  /** Whole bag goes up as he tips — crumbs fly from his hands and land on the path. */
+  private dumpBagInTheAir(fromSpray?: THREE.Vector3): void {
+    const origin = new THREE.Vector3();
+    if (this.bag) {
+      this.bag.getWorldPosition(origin);
+    } else {
+      this.arms[1]!.getWorldPosition(origin);
+      origin.y += 0.15;
+    }
+    const dumps = Math.max(this.handfuls, 8) + Math.floor(Math.random() * 6);
+    this.handfuls = 0;
+    if (this.bag) {
+      this.bag.removeFromParent();
+      this.bag = null;
+    }
+
+    const here = this.group.position;
+    let ax = Math.sin(this.group.rotation.y);
+    let az = Math.cos(this.group.rotation.y);
+    if (fromSpray) {
+      ax = here.x - fromSpray.x;
+      az = here.z - fromSpray.z;
+      const len = Math.hypot(ax, az) || 1;
+      ax /= len;
+      az /= len;
+    }
+    const sideX = -az;
+    const sideZ = ax;
+
+    for (let i = 0; i < dumps; i++) {
+      const along = 1.6 + Math.random() * 2.8;
+      const side = (Math.random() - 0.5) * 3.2;
+      const from = origin.clone().add(
+        new THREE.Vector3(
+          (Math.random() - 0.5) * 0.35,
+          0.1 + Math.random() * 0.35,
+          (Math.random() - 0.5) * 0.35,
+        ),
+      );
+      const to = new THREE.Vector3(
+        from.x + ax * along + sideX * side,
+        0,
+        from.z + az * along + sideZ * side,
+      );
+      this.pigeonSpillQueue.push({ from, to });
+    }
+  }
+
+  /** Bread on the paving — along the path, not under his feet. */
+  private tossOntoPath(spread = 2.4): THREE.Vector3 {
+    const here = this.group.position;
+    const shore = nearestShore(here.x, here.z);
+    const inland = outwardAt(shore);
+    const alongX = -inland.y;
+    const alongZ = inland.x;
+    const side = Math.random() < 0.5 ? 1 : -1;
+    const reach = spread + Math.random() * 1.4;
+    let x =
+      here.x +
+      alongX * side * reach +
+      inland.x * (0.35 + Math.random() * 0.7);
+    let z =
+      here.z +
+      alongZ * side * reach +
+      inland.y * (0.35 + Math.random() * 0.7);
+    if (isInLake(x, z)) {
+      x = here.x + alongX * side * reach + inland.x * 1.5;
+      z = here.z + alongZ * side * reach + inland.y * 1.5;
+    }
+    return new THREE.Vector3(x, 0, z);
+  }
+
   /** A few metres past the shore, where the swans and ducks can get at it. */
   private tossIntoPond(): THREE.Vector3 {
     const here = this.group.position;
@@ -2926,7 +3665,9 @@ export class Person {
     this.legs[0]!.rotation.x = 0;
     this.legs[1]!.rotation.x = 0;
     this.group.rotation.x = 0;
-    this.group.position.y = 0;
+    this.group.position.y = this.pigeonFeed
+      ? this.pigeonStandY()
+      : 0;
     this.showMood("pleased");
 
     // Face the pond while they chuck it in.

@@ -12,10 +12,9 @@ const WING = 0x5a606c;
 const LOW_PASS_Y = 5.4;
 
 /**
- * Park pigeon on the fairy lights — lines up on a home perch, swoops down for
- * bread near the feeders, skims low around the park now and then, then flies
- * straight back to the same spot and messes under the wire. Hose knocks them
- * off and they clear out.
+ * Park pigeon on the fairy lights — already around the lake, swoops down for
+ * bread when someone's feeding, then flies home. They mess while eating, and
+ * again under the wire if they retreat up there. Hose knocks them off.
  */
 export class WireBird {
   private scene: THREE.Scene;
@@ -27,36 +26,58 @@ export class WireBird {
   private flap = Math.random() * Math.PI * 2;
   private swoopIn: number;
   private feedLeft = 0;
-  private dropIn: number;
   /** Countdown until a casual low fly-past off the wire. */
   private passIn: number;
   private pending: THREE.Vector3 | null = null;
-  private fed = false;
+  /** Ate on the path — dump under the wire when they land back up. */
+  private gut = false;
+  /** Reached a feeder during the wire-bird buildup (counts toward half-flock). */
+  private joinedFlock = false;
   private age = 0;
   private faceYaw = 0;
   /** Waypoints for a low circuit (outbound then home). */
   private passRoute: THREE.Vector3[] = [];
   private passIdx = 0;
 
-  constructor(scene: THREE.Scene, perch: THREE.Vector3, stagger = 0) {
+  constructor(
+    scene: THREE.Scene,
+    perch: THREE.Vector3,
+    stagger = 0,
+    start: "arrive" | "perch" | "wander" = "arrive",
+  ) {
     this.scene = scene;
     this.home = perch.clone();
     this.swoopIn = 2 + stagger * 0.35 + Math.random() * 5;
-    this.dropIn = 3 + Math.random() * 6;
     this.passIn = 6 + stagger * 0.5 + Math.random() * 14;
     this.build();
-    // Arrive from a short arc so the line fills in along the wire.
-    const bearing = Math.PI * 0.6 + (Math.random() - 0.5) * 0.8;
-    // Some glide in low so you can hose them on arrival.
-    const arriveY =
-      Math.random() < 0.4
-        ? LOW_PASS_Y + Math.random() * 2.2
-        : perch.y + 4 + Math.random() * 6;
-    this.group.position.set(
-      perch.x + Math.cos(bearing) * (18 + Math.random() * 22),
-      arriveY,
-      perch.z + Math.sin(bearing) * (18 + Math.random() * 22),
-    );
+    if (start === "perch") {
+      this.group.position.copy(perch);
+      this.mode = "perch";
+      this.fold();
+      this.group.rotation.x = 0.06;
+      this.faceYaw = Math.random() * Math.PI * 2;
+      this.group.rotation.y = this.faceYaw;
+    } else if (start === "wander") {
+      const bearing = Math.random() * Math.PI * 2;
+      const dist = 28 + Math.random() * 62;
+      this.group.position.set(
+        perch.x + Math.cos(bearing) * dist,
+        LOW_PASS_Y + Math.random() * 3.5,
+        perch.z + Math.sin(bearing) * dist,
+      );
+      this.beginLowPass();
+    } else {
+      const bearing = Math.PI * 0.6 + (Math.random() - 0.5) * 0.8;
+      const arriveY =
+        Math.random() < 0.4
+          ? LOW_PASS_Y + Math.random() * 2.2
+          : perch.y + 4 + Math.random() * 6;
+      this.group.position.set(
+        perch.x + Math.cos(bearing) * (18 + Math.random() * 22),
+        arriveY,
+        perch.z + Math.sin(bearing) * (18 + Math.random() * 22),
+      );
+    }
     scene.add(this.group);
   }
 
@@ -81,13 +102,91 @@ export class WireBird {
     return this.mode === "perch" && this.swoopIn <= 0;
   }
 
+  public isFeeding(): boolean {
+    return this.mode === "feed";
+  }
+
+  public hasJoinedFlock(): boolean {
+    return this.joinedFlock;
+  }
+
+  public markJoinedFlock(): void {
+    this.joinedFlock = true;
+  }
+
+  /** Peel off toward food from a wire, a skim, or a long flight in. */
+  public tryFlockDown(food: THREE.Vector3, chance: number): boolean {
+    if (
+      this.mode === "flee" ||
+      this.mode === "gone" ||
+      this.mode === "feed" ||
+      this.mode === "swoop" ||
+      this.mode === "return"
+    ) {
+      return false;
+    }
+    if (this.mode === "perch" && this.swoopIn > 0) return false;
+    if (Math.random() > chance) return false;
+    this.target.set(food.x, 0.15, food.z);
+    this.mode = "swoop";
+    this.age = 0;
+    this.passRoute = [];
+    return true;
+  }
+
+  /** Others peeling off the wire — perched birds catch on faster. */
+  public hurryFlock(delta: number, pressure: number): void {
+    if (this.mode !== "perch") return;
+    // Short post-scare waits stay put until the path looks clear.
+    if (this.swoopIn > 1.5) this.swoopIn -= delta * pressure;
+    this.passIn += delta * 0.4;
+  }
+
+  /** In the air heading to or from a feeder (buildup contagion). */
+  public isFlockingAirborne(): boolean {
+    return this.mode === "swoop" || this.mode === "in" || this.mode === "return";
+  }
+
+  /** On the path under the mission pin — feeding or diving in. */
+  public isAtMission(cx: number, cz: number, radius: number): boolean {
+    const p = this.group.position;
+    const dx = p.x - cx;
+    const dz = p.z - cz;
+    if (dx * dx + dz * dz > radius * radius) return false;
+    return this.mode === "feed" || this.mode === "swoop";
+  }
+
+  public isOnThePath(): boolean {
+    return this.mode === "feed" || this.mode === "swoop";
+  }
+
+  /**
+   * Spooked — home to a wire. `home` is the perch to use; `soon` means food
+   * is still down so they peel off again once the path isn't underfoot.
+   */
+  public retreatToWire(home?: THREE.Vector3, soon = false): boolean {
+    if (this.mode === "flee" || this.mode === "gone") return false;
+    if (home) this.home.copy(home);
+    this.passRoute = [];
+    this.swoopIn = soon ? 0.4 + Math.random() * 0.85 : 2.4 + Math.random() * 3.2;
+    if (this.mode === "perch") {
+      if (this.group.position.distanceToSquared(this.home) > 1.4) {
+        this.mode = "return";
+        this.age = 0;
+      }
+      return true;
+    }
+    this.mode = "return";
+    this.age = 0;
+    return true;
+  }
+
   /** Dive on a scrap / feeder — returns true if it took the job. */
   public swoopTo(food: THREE.Vector3): boolean {
     if (!this.wantsFood()) return false;
     this.target.set(food.x, 0.15, food.z);
     this.mode = "swoop";
     this.age = 0;
-    this.fed = false;
     return true;
   }
 
@@ -107,17 +206,19 @@ export class WireBird {
     const dz = point.z - here.z;
     // Airborne passes need a bit more forgiveness; wire stream thins out.
     const r =
-      this.mode === "pass" || this.mode === "swoop" || this.mode === "return"
-        ? 2.6
-        : this.mode === "in"
-          ? 2.2
-          : 1.6;
+      this.mode === "feed"
+        ? 2.15
+        : this.mode === "pass" || this.mode === "swoop" || this.mode === "return"
+          ? 2.6
+          : this.mode === "in"
+            ? 2.2
+            : 1.8;
     return dx * dx + dy * dy * 0.55 + dz * dz < r * r;
   }
 
-  /** Hose blast — off the lights and away. */
-  public scare(): void {
-    this.flush();
+  /** Hose blast — back to the lights; they come down again while food lasts. */
+  public scare(home?: THREE.Vector3, soon = false): void {
+    this.retreatToWire(home, soon);
   }
 
   /** Mission over / scared — clear off for good. */
@@ -173,23 +274,31 @@ export class WireBird {
         this.group.rotation.y = this.faceYaw;
         this.swoopIn = 3 + Math.random() * 7;
         this.passIn = 5 + Math.random() * 16;
-        // Just back from a feed — mess under the wire sooner.
-        if (this.fed) {
-          this.dropIn = Math.min(this.dropIn, 0.6 + Math.random() * 1.4);
-          this.fed = false;
+        if (this.gut) {
+          this.gut = false;
+          if (Math.random() < 0.55) this.pending = this.groundUnder();
         }
       }
       return;
     }
 
     if (this.mode === "swoop") {
-      this.flyToward(this.target, delta, 15);
-      if (this.group.position.distanceTo(this.target) < 0.45) {
+      const gap = this.group.position.distanceTo(this.target);
+      this.flyToward(this.target, delta, gap > 28 ? 22 : 15);
+      if (gap < 0.45) {
         this.group.position.copy(this.target);
         this.mode = "feed";
         this.feedLeft = 1.2 + Math.random() * 1.6;
         this.fold();
-        this.fed = true;
+        this.joinedFlock = true;
+        this.gut = true;
+        if (Math.random() < 0.7) {
+          this.pending = new THREE.Vector3(
+            this.group.position.x + (Math.random() - 0.5) * 0.7,
+            0,
+            this.group.position.z + (Math.random() - 0.5) * 0.7,
+          );
+        }
       }
       return;
     }
@@ -209,13 +318,7 @@ export class WireBird {
     if (this.mode === "perch") {
       this.sit();
       this.swoopIn -= delta;
-      this.dropIn -= delta;
       this.passIn -= delta;
-      if (this.dropIn <= 0 && !this.pending) {
-        this.dropIn = 5 + Math.random() * 9;
-        this.pending = this.groundUnder();
-      }
-      // Idle low circuit — leave the wire, skim the park, come home.
       if (this.passIn <= 0 && this.swoopIn > 0.8) {
         this.beginLowPass();
       }
@@ -245,6 +348,15 @@ export class WireBird {
     this.passIdx = 0;
   }
 
+  private groundUnder(): THREE.Vector3 {
+    const jitter = 0.25 + Math.random() * 1.1;
+    const ang = Math.random() * Math.PI * 2;
+    const x = this.home.x + Math.cos(ang) * jitter;
+    const z = this.home.z + Math.sin(ang) * jitter;
+    const y = isInLake(x, z) ? WATER_Y : 0;
+    return new THREE.Vector3(x, y, z);
+  }
+
   public dispose(): void {
     this.scene.remove(this.group);
   }
@@ -270,15 +382,6 @@ export class WireBird {
       wing.rotation.z =
         (i === 0 ? 0.12 : -0.12) + Math.sin(this.flap + i) * 0.03;
     }
-  }
-
-  private groundUnder(): THREE.Vector3 {
-    const jitter = 0.25 + Math.random() * 1.1;
-    const ang = Math.random() * Math.PI * 2;
-    const x = this.home.x + Math.cos(ang) * jitter;
-    const z = this.home.z + Math.sin(ang) * jitter;
-    const y = isInLake(x, z) ? WATER_Y : 0;
-    return new THREE.Vector3(x, y, z);
   }
 
   private beat(): void {
@@ -369,6 +472,29 @@ export class WireBird {
  * Pack pigeons onto the two fairy-light spans nearest the feeders — bunched
  * tight on each wire rather than stretched along the whole run.
  */
+/** One or two birds per fairy-light span so the flock is spread round the park. */
+export function roostPerchesSpread(
+  count: number,
+  sections: readonly (readonly THREE.Vector3[])[],
+): THREE.Vector3[] {
+  if (count <= 0) return [];
+  const usable = sections.filter((sec) => sec.length > 0);
+  if (usable.length === 0) return [];
+
+  const out: THREE.Vector3[] = [];
+  let si = 0;
+  while (out.length < count) {
+    const sec = usable[si % usable.length]!;
+    const mid = Math.floor(sec.length / 2);
+    const bulb = sec[mid] ?? sec[0]!;
+    const jitter = (out.length % 3) - 1;
+    const pick = sec[Math.min(sec.length - 1, Math.max(0, mid + jitter))] ?? bulb;
+    out.push(pick.clone());
+    si += 1;
+  }
+  return out;
+}
+
 export function roostPerchesNear(
   tip: { x: number; z: number },
   count: number,
@@ -395,10 +521,26 @@ export function roostPerchesNear(
   const pick = ranked.slice(0, Math.min(2, ranked.length));
   if (pick.length === 0) return [];
 
+  const near: THREE.Vector3[] = [];
+  const reach = 9.5 * 9.5;
+  for (const { sec } of pick) {
+    for (const p of sec) {
+      const dx = p.x - tip.x;
+      const dz = p.z - tip.z;
+      if (dx * dx + dz * dz <= reach) near.push(p.clone());
+    }
+  }
+  if (near.length >= 2) {
+    if (near.length <= count) return near;
+    const step = near.length / count;
+    return Array.from({ length: count }, (_, i) =>
+      near[Math.min(near.length - 1, Math.floor(i * step))]!.clone(),
+    );
+  }
+
   const out: THREE.Vector3[] = [];
   const firstShare = pick.length === 1 ? count : Math.ceil(count / 2);
   const shares = pick.length === 1 ? [count] : [firstShare, count - firstShare];
-
   for (let i = 0; i < pick.length; i++) {
     out.push(...packSection(pick[i]!.sec, shares[i]!));
   }

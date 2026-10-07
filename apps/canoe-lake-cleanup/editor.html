@@ -501,15 +501,7 @@
           <button type="button" id="walk-toggle" title="Walk the park in first person and place items under the crosshair">Walk</button>
           <div class="debug-wrap">
             <button type="button" id="debug-toggle" title="Play the game with no intro — start of shift or a mission" aria-expanded="false" aria-haspopup="true">Debug</button>
-            <div id="debug-menu" hidden role="menu" aria-label="Debug start">
-              <button type="button" role="menuitem" data-debug-from="start">Start of shift</button>
-              <button type="button" role="menuitem" data-debug-from="picnic">Picnic raid</button>
-              <button type="button" role="menuitem" data-debug-from="geese">Geese inbound</button>
-              <button type="button" role="menuitem" data-debug-from="swanboat">Stolen swanboat</button>
-              <button type="button" role="menuitem" data-debug-from="fire">Grass fire</button>
-              <button type="button" role="menuitem" data-debug-from="racers">Boy racers</button>
-              <button type="button" role="menuitem" data-debug-from="rebels">Rebel raid</button>
-            </div>
+            <div id="debug-menu" hidden role="menu" aria-label="Debug start"></div>
           </div>
           <a class="play-link" href="./">Play game</a>
         </div>
@@ -744,6 +736,13 @@
                 </label>
               </div>
               <p class="ribbon-hint">Window on the shift clock. Game start / game end follow clock-on and end of shift; times are local park hours (wraps past midnight).</p>
+            </div>
+            <div class="ribbon-group">
+              <span class="group-label">Test</span>
+              <div class="group-row">
+                <button type="button" id="mission-test-play" title="Open the game at the selected wired mission (no intro)">Test in game</button>
+              </div>
+              <p class="ribbon-hint">Skips the van intro and drops you in at that job’s debug stand. Placeholder pins are editor-only until wired in code.</p>
             </div>
             <div class="ribbon-group">
               <span class="group-label">Edit</span>

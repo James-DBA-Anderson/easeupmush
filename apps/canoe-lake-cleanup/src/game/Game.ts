@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import { Player, type Tool } from "./Player";
 import { Swan, setSwanFeederRush } from "./entities/Swan";
-import { Person, setFeederRush } from "./entities/Person";
-import { Dropping, MAX_PILES, MERGE_RADIUS, type DropKind } from "./entities/Dropping";
+import { Person, setFeederRush, setPigeonFeeders } from "./entities/Person";
+import { Dropping, MAX_PILES, type DropKind } from "./entities/Dropping";
 import { Litter } from "./entities/Litter";
 import { Bread } from "./entities/Bread";
 import { Cyclist } from "./entities/Cyclist";
@@ -74,7 +74,9 @@ import { placeBench, clearSitterBenches, sitterBenchSeats, updateSmashedBenches 
 import { plantTrees, updateTrees, updateFlowerBeds, sprayFlowerBed, flowerBeds } from "./world/trees";
 import { buildSurrounds, getBeachOutline, lightWindows } from "./world/buildings";
 import { buildFairyLights, lightFairyBulbs, fairyLightSections, updateFairyWreck } from "./world/fairyLights";
-import { WireBird, roostPerchesNorth } from "./entities/WireBird";
+import { WireBird, roostPerchesNear, roostPerchesSpread } from "./entities/WireBird";
+import { DebugTape } from "./debug/DebugTape";
+import { nearestGate, nearestLoopIndex } from "./world/pathRoute";
 import { buildFencing, parkGates, updateBrokenFences } from "./world/fence";
 import {
   buildParkBuildings,
@@ -136,8 +138,13 @@ const GRAFFITI_HIDE_FOR = 6;
 const MISSION_GAP = 50;
 /** A job left running this long (e.g. ignored geese) stops holding up the next. */
 const MISSION_HOLD_MAX = 150;
-/** Pigeons bunched on the two fairy-light spans nearest the feeders. */
-const PIGEON_FLOCK = 18;
+/** Park pigeons on wires and skimming the lake all shift. */
+const PIGEON_FLOCK = 24;
+/** Feeders linger ~two minutes unless sprayed dry first. */
+const PIGEON_FEEDER_FOR = 120;
+/** Path patch around the mission pin where birds pile in. */
+const PIGEON_MISSION_RADIUS = 13;
+const PIGEON_BREAD_RADIUS = 11;
 /** Pedalo bird kills before a revenge V-formation flies in. */
 const BIRD_KILL_REVENGE = 4;
 const REVENGE_FLOCK = 7;
@@ -163,6 +170,10 @@ const SCRAP_RATE = 0.22;
  * see the spot. Past it there's haze and trees in the way.
  */
 const OFF_STAGE = 160;
+/** Debug boot (`?debug=1`) — pull fog and the camera far plane in. */
+const DEBUG_FOG_NEAR = 28;
+const DEBUG_FOG_FAR = 95;
+const DEBUG_CAMERA_FAR = 120;
 /** How long to hang on before trying again when the player's in the way. */
 const WAIT_AND_SEE = 3;
 
@@ -400,10 +411,21 @@ export class Game {
   private gooseFlock: GooseFlock | null = null;
   private rearDoorOpen = 0;
 
-  /** Mission 7 — pigeons perching on wires at the north end. */
+  /** Mission 7 — wire birds: feeders on the path, then hose the lights. */
+  private pigeonBuildup = false;
   private pigeonMissionStarted = false;
   private pigeonMissionDone = false;
   private pigeonMissionBirds: WireBird[] = [];
+  private pigeonFeederPeople: Person[] = [];
+  private pigeonFeedersLeft = 0;
+  private pigeonFeederHasLaid = false;
+  private pigeonFlockSurge = 0;
+  private pigeonSwarmHad = 0;
+  private pigeonFoodPeak = 0;
+  private pigeonExodusDone = false;
+  private pigeonRetreatHomes: THREE.Vector3[] = [];
+  private debugTape: DebugTape | null = null;
+  private debugTapeSample = 0;
 
   private health = HEALTH_MAX;
   private sincePecked = HEAL_DELAY;
@@ -412,9 +434,13 @@ export class Game {
   private frozen = false;
   /** Player pause — sim stopped, last frame still drawn under the overlay. */
   private paused = false;
+  /** `?debug=1` — shorter fog / camera far plane. */
+  private debugShortDraw = false;
   /**
    * Shift hasn't started until the van intro hands off to first person.
    */
+  /** Seconds on shift — controls bar fades after twenty. */
+  private dutyFor = 0;
   private onDuty = false;
 
   private cleanedElement: HTMLElement;
@@ -451,6 +477,7 @@ export class Game {
     this.renderer = new THREE.WebGLRenderer({
       antialias: dpr < 1.4,
       powerPreference: "high-performance",
+      preserveDrawingBuffer: readDebugBoot() !== null,
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(dpr, 1.5));
@@ -498,6 +525,13 @@ export class Game {
         event.stopPropagation();
         this.setPaused(true);
       });
+    document.getElementById("record-btn")?.addEventListener(
+      "pointerdown",
+      (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      },
+    );
     document
       .getElementById("resume")!
       .addEventListener("click", (event) => {
@@ -538,6 +572,11 @@ export class Game {
 
     this.setupScene();
     this.setupLights();
+    this.debugShortDraw = readDebugBoot() !== null;
+    if (this.debugShortDraw) {
+      this.camera.far = DEBUG_CAMERA_FAR;
+      this.camera.updateProjectionMatrix();
+    }
     this.puddles = new Puddles(this.scene);
     this.spawnSwans();
     this.spawnPeople();
@@ -564,6 +603,7 @@ export class Game {
       this.applyDebugBoot(debug.from);
       this.wireIntroAudio();
       document.body.classList.add("debug-boot");
+      this.wireDebugTape();
     } else {
       this.shiftIntro = new ShiftIntro(this.scene, this.camera);
       if (this.shiftIntro.start()) {
@@ -589,6 +629,7 @@ export class Game {
     buildPaths(this.scene);
     buildSurrounds(this.scene);
     buildFairyLights(this.scene);
+    this.seedParkPigeons();
     buildFencing(this.scene);
     buildParkBuildings(this.scene);
     buildCleanerVan(this.scene);
@@ -686,6 +727,17 @@ export class Game {
     const sky = this.dayCycle.skyState();
     this.weather.setRainAllowed(this.rainUnlocked());
     this.weather.update(delta, sky);
+    if (this.debugShortDraw) {
+      const fog = this.scene.fog;
+      if (fog instanceof THREE.Fog) {
+        fog.near = DEBUG_FOG_NEAR;
+        fog.far = DEBUG_FOG_FAR;
+      }
+      if (this.camera.far !== DEBUG_CAMERA_FAR) {
+        this.camera.far = DEBUG_CAMERA_FAR;
+        this.camera.updateProjectionMatrix();
+      }
+    }
     updateTrees(this.elapsed, this.weather.getWind(), this.camera.position);
     updateFlowerBeds(delta);
 
@@ -996,11 +1048,16 @@ export class Game {
         if (!swan.isAshore() && !swan.isCharging()) continue;
         person.spook(swan.getPosition(), swan.isWingsOut());
       }
+      const at = person.getPosition();
+      const watched =
+        person.isPigeonFanaticFeeder() &&
+        this.inShot(at.x, at.z, at.y + 0.7);
       const stepped = person.update(
         delta,
         mess,
         this.camera.position,
         this.weather.isWet(),
+        watched,
       );
       if (stepped >= 0) {
         const pile = piles[stepped]!;
@@ -1013,7 +1070,16 @@ export class Game {
       }
 
       const scattered = person.claimScatter();
-      if (scattered) this.bread.push(new Bread(this.scene, scattered));
+      if (scattered) {
+        this.bread.push(new Bread(this.scene, scattered));
+        if (person.isPigeonFanaticFeeder()) {
+          this.onPigeonFeederLaid(scattered);
+        }
+      }
+      for (const spill of person.claimPigeonSpills()) {
+        this.bread.push(new Bread(this.scene, spill.to, spill.from));
+        this.onPigeonFeederLaid(spill.to);
+      }
 
       const dropped = person.claimLitter();
       if (dropped && this.litter.length < 14) {
@@ -1075,14 +1141,18 @@ export class Game {
     const safe = clearOfLakeRim(position.x, position.z);
     const at = position.clone().set(safe.x, position.y, safe.y);
 
-    // Stack onto an existing pile rather than peppering the same square.
+    // Stack onto a pile this drop actually overlaps.
     let nearest: Dropping | null = null;
-    let best = MERGE_RADIUS * MERGE_RADIUS;
+    let best = Infinity;
+    const incoming =
+      kind === "pigeon" ? 0.2 : kind === "gull" ? 0.5 : 0.55;
     for (const pile of this.droppings) {
       const here = pile.getPosition();
       const dx = here.x - at.x;
       const dz = here.z - at.z;
       const d2 = dx * dx + dz * dz;
+      const reach = pile.getRadius() + incoming;
+      if (d2 > reach * reach) continue;
       if (d2 < best) {
         best = d2;
         nearest = pile;
@@ -1263,10 +1333,21 @@ export class Game {
       if (have) this.graffitiMissionTags.push(have);
       return !have;
     });
-    const words = [...TAGS].sort(() => Math.random() - 0.5);
-    this.graffitiPending = fresh.map((wall, i) => ({
+    const tagBag = [...TAGS].sort(() => Math.random() - 0.5);
+    const used = new Set<Tag>();
+    const pickTag = (): Tag => {
+      let pool = tagBag.filter((t) => !used.has(t));
+      if (pool.length === 0) {
+        used.clear();
+        pool = [...tagBag];
+      }
+      const word = pool[Math.floor(Math.random() * pool.length)]!;
+      used.add(word);
+      return word;
+    };
+    this.graffitiPending = fresh.map((wall) => ({
       wall,
-      word: words[i % words.length]!,
+      word: pickTag(),
     }));
     this.graffitiMissionLeft = GRAFFITI_MISSION_FOR;
     this.placeMissionTags();
@@ -1308,6 +1389,7 @@ export class Game {
     if (!cleared && this.graffitiMissionLeft > 0) return;
 
     this.graffitiMissionDone = true;
+    this.completeMission("graffiti");
     // Anything still pending never went up — don't leave it queued.
     this.graffitiPending = [];
     if (cleared) {
@@ -1413,25 +1495,156 @@ export class Game {
     }
   }
 
+  /** Walkers, dogs, and the player — not the mad feeder. */
+  private pigeonThreatSpots(): { x: number; z: number }[] {
+    const threats: { x: number; z: number }[] = [
+      { x: this.camera.position.x, z: this.camera.position.z },
+    ];
+    for (const person of this.people) {
+      if (person.isGone() || person.isPigeonFanaticFeeder()) continue;
+      const at = person.getPosition();
+      threats.push({ x: at.x, z: at.z });
+      const dog = person.getDog();
+      if (dog) {
+        const d = dog.getPosition();
+        threats.push({ x: d.x, z: d.z });
+      }
+    }
+    return threats;
+  }
+
+  /** When bread is down, a body almost on the pile is enough to flush. */
+  private pigeonClearRadius(): number {
+    return this.pigeonMissionFoodLeft() > 0 ? 1.65 : 4.4;
+  }
+
+  private ensurePigeonRetreatHomes(): THREE.Vector3[] {
+    if (this.pigeonRetreatHomes.length === 0) {
+      const pin = getMissionSpot("pigeons");
+      this.pigeonRetreatHomes = roostPerchesNear(
+        pin,
+        Math.max(8, PIGEON_FLOCK),
+        fairyLightSections(),
+      );
+    }
+    return this.pigeonRetreatHomes;
+  }
+
+  /** Nearest of the two mission spans — hop along them, don't send them across the park. */
+  private pigeonRetreatPerch(bird: WireBird): THREE.Vector3 {
+    const homes = this.ensurePigeonRetreatHomes();
+    if (homes.length === 0) {
+      return bird.homePerch();
+    }
+    const at = bird.getPosition();
+    const perched = bird.isPerched();
+    let best: THREE.Vector3 | null = null;
+    let bestD = Infinity;
+    let nearest: THREE.Vector3 = homes[0]!;
+    let nearestD = Infinity;
+    for (const home of homes) {
+      const d = at.distanceToSquared(home);
+      if (d < nearestD) {
+        nearestD = d;
+        nearest = home;
+      }
+      if (perched && d < 2.2) continue;
+      if (d < bestD) {
+        bestD = d;
+        best = home;
+      }
+    }
+    return (best ?? nearest).clone();
+  }
+
+  private spookPigeon(bird: WireBird): void {
+    bird.scare(this.pigeonRetreatPerch(bird), this.pigeonMissionFoodLeft() > 0);
+  }
+
+  /** Hose on eating / perched birds — feeder and bread used to swallow the jet. */
+  private hosePigeons(point: THREE.Vector3, heavy: boolean): boolean {
+    let origin: THREE.Vector3 | null = null;
+    for (const bird of this.pigeonMissionBirds) {
+      if (bird.isGone()) continue;
+      const here = bird.getPosition();
+      const onPath = bird.isOnThePath();
+      const catchR = heavy ? (onPath ? 3.4 : 4.2) : onPath ? 2.15 : 1.9;
+      const dx = point.x - here.x;
+      const dy = point.y - here.y;
+      const dz = point.z - here.z;
+      const hit = heavy
+        ? dx * dx + dy * dy * 0.45 + dz * dz < catchR * catchR
+        : onPath
+          ? dx * dx + dy * dy * 0.35 + dz * dz < catchR * catchR
+          : bird.soakedBy(point);
+      if (!hit) continue;
+      origin = here;
+      this.spookPigeon(bird);
+      break;
+    }
+    if (!origin) return false;
+    const cluster = heavy ? 6.5 : 4.2;
+    for (const other of this.pigeonMissionBirds) {
+      if (other.isGone()) continue;
+      if (other.getPosition().distanceTo(origin) < cluster) {
+        this.spookPigeon(other);
+      }
+    }
+    return true;
+  }
+
+  private pigeonSpotThreatened(
+    x: number,
+    z: number,
+    threats: readonly { x: number; z: number }[],
+    radius = 4.4,
+  ): boolean {
+    const r2 = radius * radius;
+    for (const t of threats) {
+      const dx = x - t.x;
+      const dz = z - t.z;
+      if (dx * dx + dz * dz < r2) return true;
+    }
+    return false;
+  }
+
+  /** Walkers and the player flush birds off the food — not the mad feeder. */
+  private flushPigeonsFromCrowd(): void {
+    const threats = this.pigeonThreatSpots();
+    const radius = this.pigeonClearRadius();
+    for (const bird of this.pigeonMissionBirds) {
+      if (bird.isGone() || !bird.isOnThePath()) continue;
+      const at = bird.getPosition();
+      if (this.pigeonSpotThreatened(at.x, at.z, threats, radius)) {
+        this.spookPigeon(bird);
+      }
+    }
+  }
+
   /** Perched pigeons dive on nearby bread / bag-feeders, then home to the wire. */
   private dispatchPigeonSwoops(): void {
     const hungry = this.pigeonMissionBirds.filter((b) => b.wantsFood());
     if (hungry.length === 0) return;
 
+    const pin = getMissionSpot("pigeons");
     const foods: THREE.Vector3[] = [];
     for (const pile of this.bread) {
-      foods.push(pile.getPosition());
+      if (pile.isGone()) continue;
+      const at = pile.getPosition();
+      const dx = at.x - pin.x;
+      const dz = at.z - pin.z;
+      if (dx * dx + dz * dz > PIGEON_BREAD_RADIUS * PIGEON_BREAD_RADIUS) continue;
+      foods.push(at);
     }
-    for (const person of this.people) {
-      if (person.hasFood()) foods.push(person.getPosition());
-    }
-    for (const lot of this.benchSits) {
-      if (lot.hasFood()) foods.push(lot.getFeederPosition());
+    for (const person of this.pigeonFeederPeople) {
+      if (person.isGone() || !person.hasFood()) continue;
+      if (!person.isPigeonFanaticFeeder()) continue;
+      foods.push(person.getPosition());
     }
     if (foods.length === 0) return;
 
     for (const bird of hungry) {
-      if (Math.random() > 0.35) continue;
+      if (Math.random() > 0.45) continue;
       const home = bird.homePerch();
       let best = foods[0]!;
       let bestD = Infinity;
@@ -1446,6 +1659,48 @@ export class Game {
       }
       bird.swoopTo(best);
     }
+  }
+
+  private pigeonMissionFoodLeft(): number {
+    const pin = getMissionSpot("pigeons");
+    let n = 0;
+    for (const pile of this.bread) {
+      const at = pile.getPosition();
+      const dx = at.x - pin.x;
+      const dz = at.z - pin.z;
+      if (dx * dx + dz * dz > PIGEON_BREAD_RADIUS * PIGEON_BREAD_RADIUS) continue;
+      n += pile.remaining();
+    }
+    return n;
+  }
+
+  private pigeonExodus(): void {
+    const birds = this.pigeonMissionBirds.filter((b) => !b.isGone());
+    let leave = Math.max(2, Math.round(birds.length * 0.4));
+    for (const bird of birds) {
+      if (leave <= 0) break;
+      if (Math.random() > 0.7 && leave < birds.length * 0.4) continue;
+      bird.flush();
+      leave -= 1;
+    }
+  }
+
+  private completePigeonMission(): void {
+    this.pigeonMissionDone = true;
+    this.pigeonBuildup = false;
+    this.completeMission("pigeons");
+    setPigeonFeeders(false);
+    this.pigeonFeederPeople = [];
+    this.cleaned += 1;
+    this.score += 60 * this.multiplier();
+    this.updateHUD();
+    this.messages.send(
+      "DEPOT",
+      "Path's clear of the bread. Flock's had it.",
+      this.dayCycle.clockFace(),
+      12,
+    );
+    this.seedParkPigeons();
   }
 
   /**
@@ -1556,6 +1811,7 @@ export class Game {
       this.picnicRaidTip = null;
       this.picnicRaidParty = null;
       this.picnicRaidClear = 0;
+      this.completeMission("picnic");
       if (!this.gooseMissionStarted && !this.gooseMissionDone) {
         this.gooseMissionPending = 12;
       }
@@ -1668,6 +1924,7 @@ export class Game {
 
     if (this.gooseFlock.isCleared() && !this.gooseMissionDone) {
       this.gooseMissionDone = true;
+      this.completeMission("geese");
       this.cleaned += 1;
       this.score += 120 * this.multiplier();
       this.updateHUD();
@@ -1688,7 +1945,7 @@ export class Game {
     return [
       this.graffitiMissionStarted && !this.graffitiMissionDone,
       this.feederRushLeft > 0,
-      this.pigeonMissionStarted && !this.pigeonMissionDone,
+      (this.pigeonBuildup || this.pigeonMissionStarted) && !this.pigeonMissionDone,
       this.picnicRaidActive,
       this.gooseMissionStarted && !this.gooseMissionDone,
       this.swanboatMissionStarted && !this.swanboatMissionDone,
@@ -1713,75 +1970,265 @@ export class Game {
     else this.missionQuietFor += delta;
 
     if (
+      !this.pigeonBuildup &&
       !this.pigeonMissionStarted &&
       !this.pigeonMissionDone &&
       this.secondEventDone &&
       this.missionsQuiet() &&
       missionWindowOpen("pigeons", this.dayCycle.hour)
     ) {
-      this.startPigeonMission();
+      this.beginPigeonBuildup();
     }
   }
 
-  /** Mission 7 — pigeons perching on wires at the north end. */
+  /** Mission 7 — feeders draw birds off the fairy lights; hose them clear. */
   private updatePigeonMission(delta: number): void {
-    if (this.pigeonMissionBirds.length === 0) return;
+    if (this.pigeonBuildup || this.pigeonMissionStarted) {
+      this.updatePigeonFeeders(delta);
+      this.dispatchPigeonFlockBuildup(delta);
+      const spot = getMissionSpot("pigeons");
+      const birds = this.pigeonMissionBirds.filter((b) => !b.isGone());
+      if (this.pigeonFlockSurge > 0) this.pigeonFlockSurge -= delta;
+      const at = this.countPigeonsAtMission(spot);
+      const need = Math.ceil(Math.max(1, birds.length) * 0.5);
+      if (
+        this.pigeonBuildup &&
+        !this.pigeonMissionStarted &&
+        this.pigeonFeederHasLaid &&
+        birds.length > 0 &&
+        at >= need
+      ) {
+        this.activatePigeonMission();
+      }
+    }
 
-    this.dispatchPigeonSwoops();
+    if (this.pigeonMissionStarted) this.dispatchPigeonSwoops();
+    this.flushPigeonsFromCrowd();
 
+    let joinedLeft = 0;
     for (let i = this.pigeonMissionBirds.length - 1; i >= 0; i--) {
       const bird = this.pigeonMissionBirds[i]!;
       bird.update(delta);
       const drop = bird.claimDrop();
       if (drop && !isInLake(drop.x, drop.z)) {
-        this.addDropping(drop, "gull");
+        this.addDropping(drop, "pigeon");
       }
       if (bird.isGone()) {
         bird.dispose();
         this.pigeonMissionBirds.splice(i, 1);
+        continue;
       }
+      if (bird.hasJoinedFlock()) joinedLeft += 1;
+    }
+    this.pigeonSwarmHad = Math.max(this.pigeonSwarmHad, joinedLeft);
+
+    const foodLeft = this.pigeonMissionFoodLeft();
+    this.pigeonFoodPeak = Math.max(this.pigeonFoodPeak, foodLeft);
+    if (
+      this.pigeonMissionStarted &&
+      !this.pigeonMissionDone &&
+      !this.pigeonExodusDone &&
+      this.pigeonFoodPeak > 4 &&
+      foodLeft <= this.pigeonFoodPeak * 0.2
+    ) {
+      this.pigeonExodusDone = true;
+      this.pigeonExodus();
     }
 
     if (
       this.pigeonMissionStarted &&
       !this.pigeonMissionDone &&
-      this.pigeonMissionBirds.length === 0
+      this.pigeonFeederHasLaid &&
+      this.pigeonFoodPeak > 0 &&
+      foodLeft <= 0
     ) {
-      this.pigeonMissionDone = true;
-      this.cleaned += 1;
-      this.score += 60 * this.multiplier();
-      this.updateHUD();
-      this.messages.send(
-        "DEPOT",
-        "Wire birds cleared off the lights. Nice hosing.",
-        this.dayCycle.clockFace(),
-        12,
+      this.completePigeonMission();
+    }
+  }
+
+  /** Pigeons on fairy lights and skimming the lake — already here, not teleported in. */
+  private seedParkPigeons(): void {
+    const roost = roostPerchesSpread(PIGEON_FLOCK, fairyLightSections());
+    if (roost.length === 0) return;
+    while (this.pigeonMissionBirds.length < roost.length) {
+      const i = this.pigeonMissionBirds.length;
+      const start = i % 3 === 0 ? "wander" : "perch";
+      this.pigeonMissionBirds.push(
+        new WireBird(this.scene, roost[i]!, i, start),
       );
     }
   }
 
-  private startPigeonMission(): void {
-    if (this.pigeonMissionStarted || this.pigeonMissionDone) return;
-    
-    this.pigeonMissionStarted = true;
-
-    const spot = getMissionSpot("pigeons");
-    const roost = roostPerchesNorth(PIGEON_FLOCK, fairyLightSections());
-    if (roost.length === 0) return;
-
-    for (let i = 0; i < roost.length; i++) {
-      this.pigeonMissionBirds.push(new WireBird(this.scene, roost[i]!, i));
+  private beginPigeonBuildup(): void {
+    if (
+      this.pigeonBuildup ||
+      this.pigeonMissionStarted ||
+      this.pigeonMissionDone
+    ) {
+      return;
     }
 
+    const spot = getMissionSpot("pigeons");
+    if (fairyLightSections().length === 0) return;
+
+    this.pigeonBuildup = true;
+    this.pigeonFeederHasLaid = false;
+    this.pigeonFlockSurge = 0;
+    this.pigeonSwarmHad = 0;
+    this.pigeonFoodPeak = 0;
+    this.pigeonExodusDone = false;
+    this.pigeonRetreatHomes = [];
+    this.pigeonFeedersLeft = PIGEON_FEEDER_FOR;
+    setPigeonFeeders(true);
+    this.seedPigeonFeeders(spot);
+    this.seedParkPigeons();
+  }
+
+  private onPigeonFeederLaid(at: THREE.Vector3): void {
+    const spot = getMissionSpot("pigeons");
+    const dx = at.x - spot.x;
+    const dz = at.z - spot.z;
+    if (dx * dx + dz * dz > PIGEON_BREAD_RADIUS * PIGEON_BREAD_RADIUS * 1.4) {
+      return;
+    }
+    this.pigeonFeederHasLaid = true;
+  }
+
+  private activatePigeonMission(): void {
+    if (this.pigeonMissionStarted) return;
+    this.pigeonMissionStarted = true;
+
+    const feeder = this.pigeonFeederPeople.find((p) => !p.isGone());
+    const at = feeder?.getPosition();
+    const aim = at
+      ? { x: at.x, z: at.z }
+      : getMissionSpot("pigeons");
     this.announceMission("pigeons");
-    this.callouts.raise("jobs", this.dayCycle.clockFace(), { x: spot.x, z: spot.z });
-    this.missionArrow.point({ x: spot.x, y: 0, z: spot.z });
+    this.callouts.raise("jobs", this.dayCycle.clockFace(), aim);
+    this.missionArrow.point({ x: aim.x, y: 0, z: aim.z });
     this.messages.send(
       "DEPOT",
-      "Caller says there's pigeons all over the north-end fairy lights. Get up there with the hose.",
+      "That's half the flock on the path with that feeder. Hose them off before it gets worse.",
       this.dayCycle.clockFace(),
       18,
     );
+  }
+
+  /** One bird-mad feeder — walks to the start patch by the mission pin. */
+  private seedPigeonFeeders(spot: { x: number; z: number }): void {
+    if (PATH_LOOP.length < 4) return;
+    this.pigeonFeederPeople = [];
+    const gate = nearestGate(spot.x, spot.z);
+    const walker = new Person(this.scene, nearestLoopIndex(spot.x, spot.z));
+    walker.beginPigeonFeederApproach(spot.x, spot.z, 0, gate);
+    this.people.push(walker);
+    this.pigeonFeederPeople.push(walker);
+  }
+
+  private updatePigeonFeeders(delta: number): void {
+    if (this.pigeonFeedersLeft <= 0) return;
+    this.pigeonFeedersLeft -= delta;
+    if (this.pigeonFeedersLeft <= 0) {
+      setPigeonFeeders(false);
+      this.pigeonFeedersLeft = 0;
+    }
+  }
+
+  private pigeonBreadNear(spot: { x: number; z: number }): boolean {
+    for (const pile of this.bread) {
+      const at = pile.getPosition();
+      const dx = at.x - spot.x;
+      const dz = at.z - spot.z;
+      if (dx * dx + dz * dz <= PIGEON_BREAD_RADIUS * PIGEON_BREAD_RADIUS) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Birds only move once the feeder is at the pin and food is hitting the path. */
+  private pigeonFeedLuring(spot: { x: number; z: number }): boolean {
+    if (!this.pigeonFeederHasLaid) return false;
+    if (this.pigeonBreadNear(spot)) return true;
+    for (const person of this.pigeonFeederPeople) {
+      if (person.isGone()) continue;
+      if (!person.isPigeonFeederAnchored()) continue;
+      if (person.isPigeonFeederScattering()) return true;
+    }
+    return false;
+  }
+
+  private countPigeonsAtMission(spot: { x: number; z: number }): number {
+    let n = 0;
+    for (const bird of this.pigeonMissionBirds) {
+      if (bird.isGone()) continue;
+      if (bird.isAtMission(spot.x, spot.z, PIGEON_MISSION_RADIUS)) n += 1;
+    }
+    return n;
+  }
+
+  /** Staggered peel-off from the wires; more follow as others fly over. */
+  private dispatchPigeonFlockBuildup(delta: number): void {
+    const spot = getMissionSpot("pigeons");
+    if (!this.pigeonFeedLuring(spot)) return;
+
+    const birds = this.pigeonMissionBirds.filter((b) => !b.isGone());
+    if (birds.length === 0) return;
+
+    const foods: THREE.Vector3[] = [];
+    for (const person of this.pigeonFeederPeople) {
+      if (person.isGone() || !person.hasFood()) continue;
+      if (!person.isPigeonFeederAnchored()) continue;
+      const at = person.getPosition();
+      foods.push(
+        new THREE.Vector3(
+          at.x + (Math.random() - 0.5) * 1.4,
+          0,
+          at.z + (Math.random() - 0.5) * 1.4,
+        ),
+      );
+    }
+    for (const pile of this.bread) {
+      const at = pile.getPosition();
+      const dx = at.x - spot.x;
+      const dz = at.z - spot.z;
+      if (dx * dx + dz * dz <= PIGEON_BREAD_RADIUS * PIGEON_BREAD_RADIUS) {
+        foods.push(at);
+      }
+    }
+    if (foods.length === 0) return;
+
+    const threats = this.pigeonThreatSpots();
+    const clearAt = this.pigeonClearRadius();
+    const safe = foods.filter(
+      (f) => !this.pigeonSpotThreatened(f.x, f.z, threats, clearAt),
+    );
+    const targets = safe.length > 0 ? safe : foods;
+    if (targets.length === 0) return;
+
+    const joined = birds.filter((b) => b.hasJoinedFlock()).length;
+    const airborne = birds.filter((b) => b.isFlockingAirborne()).length;
+    const contagion = joined / birds.length;
+    const pressure = 0.35 + airborne * 0.22 + contagion * 1.8;
+
+    for (const bird of birds) {
+      bird.hurryFlock(delta, pressure);
+    }
+
+    const surge = this.pigeonFlockSurge > 0 ? 2.8 : 1;
+    const tryChance = Math.min(
+      0.95,
+      delta * (0.14 + contagion * 0.72 + airborne * 0.07) * surge,
+    );
+    for (const bird of birds) {
+      const food = targets[Math.floor(Math.random() * targets.length)]!;
+      bird.tryFlockDown(food, tryChance);
+    }
+  }
+
+  /** Debug boot — one feeder still walking in; buildup plays out from there. */
+  private startPigeonMission(): void {
+    this.beginPigeonBuildup();
   }
 
   /** Walk-up at the van rear — third-person take the heavy hose. */
@@ -1941,6 +2388,41 @@ export class Game {
     }
   }
 
+  /** Lance on the pigeon feeder — piles at his feet used to swallow the jet. */
+  private hosePigeonFeeder(
+    point: THREE.Vector3,
+    heavy: boolean,
+    bodyR: number,
+  ): boolean {
+    for (const person of this.people) {
+      if (!person.isPigeonFanaticFeeder() || person.isGone()) continue;
+      const at = person.getPosition();
+      const dx = point.x - at.x;
+      const dz = point.z - at.z;
+      const reach = heavy ? Math.max(bodyR, 3.4) : 2.35;
+      const near = dx * dx + dz * dz <= reach * reach;
+      const body = person.soakedBy(point);
+      if (!body && !near) continue;
+      if (!body && (point.y < at.y - 0.5 || point.y > at.y + 2.25)) continue;
+      const dry = !person.isSoaked();
+      const alreadyDown = person.isPigeonFanaticDown();
+      const soaksBefore = person.pigeonSoakHits();
+      person.knockPigeonFanatic(this.camera.position);
+      if (person.pigeonSoakHits() !== soaksBefore) {
+        this.debugTape?.note("hose", "feeder", {
+          soaks: person.pigeonSoakHits(),
+          down: person.isPigeonFanaticDown(),
+        });
+      }
+      if (!alreadyDown) {
+        this.pigeonFlockSurge = Math.max(this.pigeonFlockSurge, 14);
+      }
+      if (dry) this.complain();
+      return true;
+    }
+    return false;
+  }
+
   /**
    * A droplet in flight. If it caught a swan, that one takes offence and its
    * neighbours square up with it — mute swans are not a forgiving bird.
@@ -1959,11 +2441,20 @@ export class Game {
 
     if (this.boyRacers?.takeSpray(point)) return true;
 
+    const flushedPigeons = this.hosePigeons(point, heavy);
+    if (this.hosePigeonFeeder(point, heavy, bodyR)) return true;
+
     // Water hitting a tagged wall carves fading streaks through the paint.
     for (const tag of this.graffiti) {
-      if (!tag.hitBy(point, this.camera.position)) continue;
+      if (!tag.hitBy(point, this.camera.position, direction)) continue;
       tag.scrub(point, direction);
       if (tag.claimCredit()) this.creditClean();
+      return true;
+    }
+
+    if (this.gardener?.soakedBy(point, heavy)) {
+      const dry = !this.gardener.isSoaked();
+      if (this.gardener.drench(this.camera.position) && dry) this.complain();
       return true;
     }
 
@@ -1980,6 +2471,20 @@ export class Game {
       }
     }
 
+    for (let i = this.bread.length - 1; i >= 0; i--) {
+      const pile = this.bread[i]!;
+      if (!pile.hitBy(point)) continue;
+      if (!dirty) pile.wash(heavy ? 0.28 : 0.18);
+      if (pile.isGone()) {
+        pile.dispose();
+        this.bread.splice(i, 1);
+      }
+      if (!flushedPigeons) this.hosePigeons(point, heavy);
+      return true;
+    }
+
+    if (flushedPigeons) return true;
+
     // Gulls (incl. picnic stoops) — before ground crowds so the lance connects.
     for (const gull of this.gulls) {
       if (gull.isGone()) continue;
@@ -1988,29 +2493,6 @@ export class Game {
       else gull.rinse(point);
       if (this.picnicRaidActive) gull.hoseOff();
       else gull.flush();
-      return true;
-    }
-
-    // Pigeons — heavy reel reaches further and knocks whole clusters.
-    for (const bird of this.pigeonMissionBirds) {
-      if (bird.isGone()) continue;
-      const here = bird.getPosition();
-      const catchR = heavy ? 4.2 : 1.6;
-      const dx = point.x - here.x;
-      const dy = point.y - here.y;
-      const dz = point.z - here.z;
-      const hit = heavy
-        ? dx * dx + dy * dy * 0.45 + dz * dz < catchR * catchR
-        : bird.soakedBy(point);
-      if (!hit) continue;
-      const at = bird.getPosition();
-      bird.scare();
-      for (const other of this.pigeonMissionBirds) {
-        if (other === bird || other.isGone()) continue;
-        if (other.getPosition().distanceTo(at) < (heavy ? 6.5 : 3.8)) {
-          other.scare();
-        }
-      }
       return true;
     }
 
@@ -2164,6 +2646,15 @@ export class Game {
         : person.soakedBy(point);
       if (!soaked) continue;
       const dry = !person.isSoaked();
+      if (person.isPigeonFanaticFeeder()) {
+        const alreadyDown = person.isPigeonFanaticDown();
+        person.knockPigeonFanatic(this.camera.position);
+        if (!alreadyDown) {
+          this.pigeonFlockSurge = Math.max(this.pigeonFlockSurge, 14);
+        }
+        if (dry) this.complain();
+        return true;
+      }
       if (heavy) {
         person.knockDown(this.camera.position);
         if (dry) this.complain();
@@ -2549,6 +3040,16 @@ export class Game {
     }
   }
 
+  private updateBread(delta: number): void {
+    for (let i = this.bread.length - 1; i >= 0; i--) {
+      const pile = this.bread[i]!;
+      pile.update(delta);
+      if (!pile.isGone()) continue;
+      pile.dispose();
+      this.bread.splice(i, 1);
+    }
+  }
+
   /** Rinse away piles that are mostly washed clear; rain wears at the rest. */
   private updateDroppings(delta: number): void {
     const rain = this.weather.rainStrength();
@@ -2608,7 +3109,10 @@ export class Game {
       this.gulls.push(
         new Gull(
           this.scene,
-          new THREE.Vector2((Math.random() - 0.5) * 120, 0),
+          new THREE.Vector2(
+            (Math.random() - 0.5) * 110,
+            (Math.random() - 0.5) * 90,
+          ),
         ),
       );
       this.nextGull = 35 + Math.random() * 80;
@@ -2618,8 +3122,9 @@ export class Game {
     const picnic = this.picnics.find((p) => p.isRaidable());
     if (picnic) {
       const at = picnic.getPosition();
-      for (const gull of this.gulls) {
-        if (Math.random() < 0.35) gull.watchOver(at.x, at.z);
+      const live = this.gulls.filter((g) => !g.isGone());
+      if (live.length > 0) {
+        live[Math.floor(Math.random() * live.length)]!.watchOver(at.x, at.z);
       }
     }
 
@@ -2920,6 +3425,17 @@ export class Game {
         : "WASD: Move | Shift: Run | Click: Spray | Q: Litter picker | E: Swan boat | ESC: Unlock mouse";
   }
 
+  /** Fade the top controls strip once they've had twenty seconds on shift. */
+  private updateControlsHint(delta: number): void {
+    if (!this.onDuty) {
+      this.dutyFor = 0;
+      this.instructionsElement.classList.remove("faded");
+      return;
+    }
+    this.dutyFor += delta;
+    this.instructionsElement.classList.toggle("faded", this.dutyFor >= 20);
+  }
+
   public isIntroPlaying(): boolean {
     return (
       this.shiftIntro?.isActive() === true ||
@@ -3148,6 +3664,8 @@ export class Game {
 
   private clockOn(opts?: { quiet?: boolean }): void {
     this.onDuty = true;
+    this.dutyFor = 0;
+    this.instructionsElement.classList.remove("faded");
     if (!opts?.quiet) {
       this.callouts.raise("shift", this.dayCycle.clockFace(), this.overnightTip());
       this.callouts.lockTrouble();
@@ -3771,6 +4289,7 @@ export class Game {
 
     if (this.grassFire.claimCleared()) {
       this.fireMissionDone = true;
+      this.completeMission("fire");
       this.cleaned += 1;
       this.comboRun = this.comboLeft > 0 ? this.comboRun + 1 : 1;
       this.comboLeft = COMBO_WINDOW;
@@ -3844,6 +4363,7 @@ export class Game {
     }
 
     if (this.stolenSwanboat.claimCleared()) {
+      this.completeMission("swanboat");
       this.cleaned += 1;
       this.comboRun = this.comboLeft > 0 ? this.comboRun + 1 : 1;
       this.comboLeft = COMBO_WINDOW;
@@ -3920,6 +4440,7 @@ export class Game {
     }
 
     if (this.parentPunchUp.claimCleared()) {
+      this.completeMission("punchup");
       this.cleaned += 1;
       this.comboRun = this.comboLeft > 0 ? this.comboRun + 1 : 1;
       this.comboLeft = COMBO_WINDOW;
@@ -4044,6 +4565,7 @@ export class Game {
       );
     }
     if (this.boyRacers.claimCrash()) {
+      this.completeMission("racers");
       this.cleaned += 1;
       this.comboRun = this.comboLeft > 0 ? this.comboRun + 1 : 1;
       this.comboLeft = COMBO_WINDOW;
@@ -4116,6 +4638,7 @@ export class Game {
     if (swing) this.takeStrike(swing);
 
     if (this.rebelRaid.isCleared() && !this.rebelMissionWon) {
+      this.completeMission("rebels");
       this.cleaned += 1;
       this.comboRun = this.comboLeft > 0 ? this.comboRun + 1 : 1;
       this.comboLeft = COMBO_WINDOW;
@@ -4170,6 +4693,10 @@ export class Game {
     this.missionBanner.show(MISSION_LABELS[id]);
     this.missionArrow.pulse(9);
     this.miniMap.pulseMissions(9);
+  }
+
+  private completeMission(id: MissionId): void {
+    this.missionBanner.show(MISSION_LABELS[id], 5.2, "done");
   }
 
   /**
@@ -4943,6 +5470,7 @@ export class Game {
         paused: true,
       });
       this.renderer.render(this.scene, this.camera);
+      this.sampleDebugTape(0);
       return;
     }
 
@@ -4957,6 +5485,7 @@ export class Game {
         paused: false,
       });
       this.renderer.render(this.scene, this.camera);
+      this.sampleDebugTape(0);
       return;
     }
 
@@ -5007,6 +5536,7 @@ export class Game {
     const mess = activeMess.map((dropping) => dropping.getPosition());
     this.refreshWalkCrowd();
     this.updatePeople(delta, activeMess);
+    this.updateBread(delta);
 
     this.elapsed += delta;
     const wind = this.weather.getWind();
@@ -5043,6 +5573,7 @@ export class Game {
     this.callouts.update(delta);
     this.messages.update(delta);
     this.missionBanner.update(delta);
+    this.updateControlsHint(delta);
     this.updateCyclists(delta, mess);
     this.updateTraffic(delta);
     this.updateBoats(delta);
@@ -5102,6 +5633,7 @@ export class Game {
 
     this.refreshPressureGauge();
     this.renderer.render(this.scene, this.camera);
+    this.sampleDebugTape(delta);
   };
 
   private paintMiniMap(): void {
@@ -5227,8 +5759,28 @@ export class Game {
     }
 
     if (this.pigeonMissionStarted && !this.pigeonMissionDone) {
-      const spot = getMissionSpot("pigeons");
-      spots.push({ x: spot.x, z: spot.z });
+      const feeder = this.pigeonFeederPeople.find(
+        (p) => !p.isGone() && p.isPigeonFanaticFeeder(),
+      );
+      if (feeder) {
+        const at = feeder.getPosition();
+        spots.push({ x: at.x, z: at.z });
+      } else {
+        const pin = getMissionSpot("pigeons");
+        let any = false;
+        for (const pile of this.bread) {
+          if (pile.isGone()) continue;
+          const at = pile.getPosition();
+          const dx = at.x - pin.x;
+          const dz = at.z - pin.z;
+          if (dx * dx + dz * dz > PIGEON_BREAD_RADIUS * PIGEON_BREAD_RADIUS) {
+            continue;
+          }
+          spots.push({ x: at.x, z: at.z });
+          any = true;
+        }
+        if (!any) spots.push({ x: pin.x, z: pin.z });
+      }
     }
 
     return spots;
@@ -5327,6 +5879,57 @@ export class Game {
     // Camera local +X after a Yaw spin — positive is the player's right.
     const right = dx * Math.cos(yaw) + dz * -Math.sin(yaw);
     return THREE.MathUtils.clamp(right / 5.5, -1, 1);
+  }
+
+  private wireDebugTape(): void {
+    const btn = document.getElementById("record-btn");
+    if (!btn) return;
+    this.debugTape = new DebugTape();
+    const send = this.messages.send.bind(this.messages);
+    this.messages.send = (from, text, clock, life = 14) => {
+      this.debugTape?.note("radio", `${from}: ${text}`);
+      send(from, text, clock, life);
+    };
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const tape = this.debugTape;
+      if (!tape) return;
+      if (tape.isOn()) {
+        tape.stop();
+        btn.classList.remove("on");
+        btn.textContent = "RECORD";
+        return;
+      }
+      if (!tape.start(this.renderer.domElement)) {
+        btn.textContent = "NO REC";
+        return;
+      }
+      btn.classList.add("on");
+      btn.textContent = "STOP";
+    });
+  }
+
+  private sampleDebugTape(delta: number): void {
+    const tape = this.debugTape;
+    if (!tape?.isOn()) return;
+    this.debugTapeSample += delta > 0 ? delta : 1 / 30;
+    if (this.debugTapeSample < 0.45) return;
+    this.debugTapeSample = 0;
+    const at = this.camera.position;
+    const feeder = this.pigeonFeederPeople.find((p) => !p.isGone());
+    const birds = this.pigeonMissionBirds.filter((b) => !b.isGone());
+    const onPath = birds.filter((b) => b.isOnThePath()).length;
+    tape.note("tick", "state", {
+      paused: this.paused,
+      x: Math.round(at.x * 10) / 10,
+      z: Math.round(at.z * 10) / 10,
+      food: Math.round(this.pigeonMissionFoodLeft() * 100) / 100,
+      soaks: feeder?.pigeonSoakHits() ?? 0,
+      down: feeder?.isPigeonFanaticDown() ?? false,
+      birds: birds.length,
+      onPath,
+    });
   }
 
   public start(): void {

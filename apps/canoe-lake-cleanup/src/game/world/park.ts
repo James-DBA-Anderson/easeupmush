@@ -1145,7 +1145,14 @@ function emanuelFountain(scene: THREE.Scene): void {
   });
 }
 
-/** Play-park railing plus a walk blocker — the mesh was visual-only. */
+const PLAY_FENCE_H = 1;
+const PLAY_BAR = new THREE.MeshStandardMaterial({
+  color: 0x525860,
+  roughness: 0.42,
+  metalness: 0.72,
+});
+
+/** Metal picket fence — same height as the old solid rails. */
 function placePlayRail(
   scene: THREE.Scene,
   x: number,
@@ -1153,10 +1160,38 @@ function placePlayRail(
   yaw: number,
   length: number,
 ): void {
-  const rail = block(0.12, 1, length, PAINT);
-  rail.position.set(x, 0.5, z);
-  rail.rotation.y = yaw;
-  scene.add(rail);
+  const y0 = groundHeight(x, z);
+  const group = new THREE.Group();
+  group.position.set(x, y0, z);
+  group.rotation.y = yaw;
+
+  const top = new THREE.Mesh(new THREE.BoxGeometry(length, 0.035, 0.045), PLAY_BAR);
+  top.position.set(0, PLAY_FENCE_H - 0.06, 0);
+  group.add(top);
+  const sole = new THREE.Mesh(new THREE.BoxGeometry(length, 0.035, 0.045), PLAY_BAR);
+  sole.position.set(0, 0.1, 0);
+  group.add(sole);
+
+  const bars = Math.max(3, Math.ceil(length / 0.14));
+  for (let i = 0; i <= bars; i++) {
+    const along = (i / bars - 0.5) * length;
+    const post = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.014, 0.014, PLAY_FENCE_H - 0.18, 6),
+      PLAY_BAR,
+    );
+    post.position.set(along, PLAY_FENCE_H * 0.5 - 0.04, 0);
+    group.add(post);
+  }
+  for (const end of [-length / 2, length / 2]) {
+    const leg = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, PLAY_FENCE_H, 0.05),
+      PLAY_BAR,
+    );
+    leg.position.set(end, PLAY_FENCE_H / 2, 0);
+    group.add(leg);
+  }
+
+  scene.add(group);
   addProp({
     x,
     z,

@@ -23,6 +23,7 @@ import {
 import {
   createPlaceholderMission,
   formatMissionClock,
+  isMissionId,
   isPlaceholderMission,
   missionClockChoices,
   missionClockFromSelectValue,
@@ -30,6 +31,12 @@ import {
   missionLabel,
   normalizeMissionSpots,
 } from "../level/missions";
+import {
+  DEBUG_FROM_LABELS,
+  debugPlayUrl,
+  isDebugFrom,
+  type DebugFrom,
+} from "../level/debugBoot";
 import {
   clearRefBackground,
   readRefBackground,
@@ -3068,6 +3075,31 @@ window.addEventListener("resize", resize);
 const walkToggle = document.getElementById("walk-toggle") as HTMLButtonElement;
 const debugToggle = document.getElementById("debug-toggle") as HTMLButtonElement;
 const debugMenu = document.getElementById("debug-menu") as HTMLDivElement;
+const missionTestPlay = document.getElementById(
+  "mission-test-play",
+) as HTMLButtonElement;
+
+function openDebugGame(from: DebugFrom): void {
+  window.open(debugPlayUrl(from), "_blank");
+  status.textContent = `Debug: opening game (${DEBUG_FROM_LABELS[from]}, no intro)…`;
+}
+
+function buildDebugMenu(): void {
+  debugMenu.replaceChildren();
+  for (const [from, label] of Object.entries(DEBUG_FROM_LABELS) as [
+    DebugFrom,
+    string,
+  ][]) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.role = "menuitem";
+    btn.dataset.debugFrom = from;
+    btn.textContent = label;
+    debugMenu.appendChild(btn);
+  }
+}
+
+buildDebugMenu();
 
 function setDebugMenuOpen(open: boolean): void {
   debugMenu.hidden = !open;
@@ -3083,12 +3115,22 @@ debugMenu.addEventListener("click", (ev) => {
   const btn = (ev.target as HTMLElement).closest(
     "[data-debug-from]",
   ) as HTMLElement | null;
-  if (!btn?.dataset.debugFrom) return;
-  const from = btn.dataset.debugFrom;
+  const raw = btn?.dataset.debugFrom;
+  if (!raw || !isDebugFrom(raw)) return;
   setDebugMenuOpen(false);
-  // Real game — no walk-mode Maps underlay, intro skipped via ?debug=1.
-  window.open(`./?debug=1&from=${encodeURIComponent(from)}`, "_blank");
-  status.textContent = `Debug: opening game (${from}, no intro)…`;
+  openDebugGame(raw);
+});
+
+missionTestPlay.addEventListener("click", () => {
+  ensureMissionSpots();
+  const m = level.missionSpots[activeMission];
+  if (!m) return;
+  if (!isMissionId(m.id)) {
+    status.textContent =
+      "Only built-in wired missions can be tested — pick a red pin or use Debug in the title bar.";
+    return;
+  }
+  openDebugGame(m.id);
 });
 
 document.addEventListener("click", () => {

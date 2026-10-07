@@ -64,7 +64,9 @@ export class Gull {
   private heading = Math.random() * Math.PI * 2;
   private circleAt: THREE.Vector2;
   private circleAngle = Math.random() * Math.PI * 2;
-  private circleRadius = 25 + Math.random() * 40;
+  private circleRadius = 22 + Math.random() * 48;
+  /** Each bird wheels at its own pace so they don't lock into a formation. */
+  private wheelSpeed = CRUISE_SPEED * (0.72 + Math.random() * 0.56);
   private height = CRUISE_HEIGHT;
   private flap = Math.random() * Math.PI * 2;
   private step = 0;
@@ -442,7 +444,7 @@ export class Gull {
 
   /** Wheeling over the lake on stiff wings, keeping an eye on the paving. */
   private circle(delta: number, scraps: readonly Scrap[]): void {
-    this.circleAngle += (delta * CRUISE_SPEED) / this.circleRadius;
+    this.circleAngle += (delta * this.wheelSpeed) / this.circleRadius;
 
     // Sometimes drop into a low beat so the washer can knock them mid-air.
     if (!this.raidCircle) {
