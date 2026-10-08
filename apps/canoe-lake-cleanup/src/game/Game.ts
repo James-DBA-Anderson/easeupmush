@@ -70,6 +70,14 @@ import { getMission, getMissionSpot, missionWindowOpen } from "./world/missions"
 import { GooseFlock } from "./entities/GooseFlock";
 import { parkAudio } from "./audio/ParkAudio";
 import { readDebugBoot, type DebugFrom } from "../level/debugBoot";
+import {
+  DRAW_CAMERA_FAR,
+  DRAW_FOG,
+  isDrawDistance,
+  readDrawDistance,
+  writeDrawDistance,
+  type DrawDistance,
+} from "./graphicsSettings";
 import { placeBench, clearSitterBenches, sitterBenchSeats, updateSmashedBenches } from "./world/bench";
 import { plantTrees, updateTrees, updateFlowerBeds, sprayFlowerBed, flowerBeds } from "./world/trees";
 import { buildSurrounds, getBeachOutline, lightWindows } from "./world/buildings";
@@ -171,9 +179,6 @@ const SCRAP_RATE = 0.22;
  */
 const OFF_STAGE = 160;
 /** Debug boot (`?debug=1`) — pull fog and the camera far plane in. */
-const DEBUG_FOG_NEAR = 28;
-const DEBUG_FOG_FAR = 95;
-const DEBUG_CAMERA_FAR = 120;
 /** How long to hang on before trying again when the player's in the way. */
 const WAIT_AND_SEE = 3;
 
@@ -436,6 +441,9 @@ export class Game {
   private paused = false;
   /** `?debug=1` — shorter fog / camera far plane. */
   private debugShortDraw = false;
+  private drawDistance: DrawDistance = "normal";
+  /** Title overlay is up — shift hasn't started. */
+  private titleOpen = false;
   /**
    * Shift hasn't started until the van intro hands off to first person.
    */
@@ -573,10 +581,8 @@ export class Game {
     this.setupScene();
     this.setupLights();
     this.debugShortDraw = readDebugBoot() !== null;
-    if (this.debugShortDraw) {
-      this.camera.far = DEBUG_CAMERA_FAR;
-      this.camera.updateProjectionMatrix();
-    }
+    this.drawDistance = this.debugShortDraw ? "low" : readDrawDistance();
+    this.applyDrawDistance();
     this.puddles = new Puddles(this.scene);
     this.spawnSwans();
     this.spawnPeople();
@@ -609,11 +615,10 @@ export class Game {
       if (this.shiftIntro.start()) {
         this.player.beginIntro();
         this.showTool(null);
-        this.wireIntroAudio();
+        this.showTitleScreen();
       } else {
         this.shiftIntro = null;
         this.forceClockOn();
-        this.wireIntroAudio();
       }
     }
 
@@ -726,18 +731,8 @@ export class Game {
     this.dayCycle.update(delta);
     const sky = this.dayCycle.skyState();
     this.weather.setRainAllowed(this.rainUnlocked());
+    this.applyDrawDistance();
     this.weather.update(delta, sky);
-    if (this.debugShortDraw) {
-      const fog = this.scene.fog;
-      if (fog instanceof THREE.Fog) {
-        fog.near = DEBUG_FOG_NEAR;
-        fog.far = DEBUG_FOG_FAR;
-      }
-      if (this.camera.far !== DEBUG_CAMERA_FAR) {
-        this.camera.far = DEBUG_CAMERA_FAR;
-        this.camera.updateProjectionMatrix();
-      }
-    }
     updateTrees(this.elapsed, this.weather.getWind(), this.camera.position);
     updateFlowerBeds(delta);
 
@@ -3355,10 +3350,8 @@ export class Game {
 
   public showTool(tool: Tool | null): void {
     const mobile = document.body.classList.contains("touch-ui");
-    if (this.shiftIntro?.isAwaitingGesture()) {
-      this.instructionsElement.innerHTML = mobile
-        ? "Tap to clock on"
-        : "Click to clock on";
+    if (this.titleOpen) {
+      this.instructionsElement.innerHTML = "";
       return;
     }
     if (this.isIntroPlaying()) {
@@ -3443,34 +3436,110 @@ export class Game {
     );
   }
 
-  /** Waiting for the first click / tap before the van arrival rolls. */
+  /** Title screen owns the first click — canvas clicks must not start the zoom. */
   public isAwaitingIntroGesture(): boolean {
-    return this.shiftIntro?.isAwaitingGesture() === true;
+    return false;
   }
 
-  /**
-   * First pointer / key — browsers block Web Audio until a gesture, so the
-   * van arrival waits here and park ambience starts with the get-out.
-   */
   public noteIntroGesture(): void {
-    void parkAudio.unlock().then(() => {
-      this.shiftIntro?.beginArrival();
-      this.showTool(null);
-    });
+    /* title Start begins the zoom */
   }
 
   private wireIntroAudio(): void {
-    if (parkAudio.isUnlocked()) {
-      this.shiftIntro?.beginArrival();
-      return;
-    }
+    /* debug boot still needs a gesture before Web Audio will play */
+    if (parkAudio.isUnlocked()) return;
     const onGesture = () => {
       window.removeEventListener("pointerdown", onGesture);
       window.removeEventListener("keydown", onGesture);
-      this.noteIntroGesture();
+      void parkAudio.unlock();
     };
     window.addEventListener("pointerdown", onGesture);
     window.addEventListener("keydown", onGesture);
+  }
+
+  private applyDrawDistance(): void {
+    const far = DRAW_CAMERA_FAR[this.drawDistance];
+    if (this.camera.far !== far) {
+      this.camera.far = far;
+      this.camera.updateProjectionMatrix();
+    }
+    const fog = DRAW_FOG[this.drawDistance];
+    this.weather.setDrawFog(
+      fog.scale,
+      fog.near != null && fog.far != null
+        ? { near: fog.near, far: fog.far }
+        : null,
+    );
+  }
+
+  private showTitleScreen(): void {
+    this.titleOpen = true;
+    document.body.classList.add("title-screen");
+    const root = document.getElementById("title-screen");
+    root?.classList.add("on");
+    this.showTitleHome();
+    this.syncDrawDistanceRadios();
+    document.getElementById("title-start")?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.beginFromTitle();
+    });
+    document.getElementById("title-graphics")?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.showTitleGraphics();
+    });
+    document.getElementById("title-graphics-back")?.addEventListener(
+      "click",
+      (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.showTitleHome();
+      },
+    );
+    root?.querySelectorAll<HTMLInputElement>('input[name="draw-distance"]').forEach(
+      (input) => {
+        input.addEventListener("change", () => {
+          if (!isDrawDistance(input.value) || !input.checked) return;
+          this.setDrawDistance(input.value);
+        });
+      },
+    );
+  }
+
+  private showTitleHome(): void {
+    document.getElementById("title-home")?.classList.add("on");
+    document.getElementById("title-graphics-panel")?.classList.remove("on");
+  }
+
+  private showTitleGraphics(): void {
+    document.getElementById("title-home")?.classList.remove("on");
+    document.getElementById("title-graphics-panel")?.classList.add("on");
+  }
+
+  private syncDrawDistanceRadios(): void {
+    document
+      .querySelectorAll<HTMLInputElement>('input[name="draw-distance"]')
+      .forEach((input) => {
+        input.checked = input.value === this.drawDistance;
+      });
+  }
+
+  private setDrawDistance(level: DrawDistance): void {
+    this.drawDistance = level;
+    writeDrawDistance(level);
+    this.applyDrawDistance();
+    this.applyTimeAndWeather(0);
+  }
+
+  private beginFromTitle(): void {
+    if (!this.titleOpen) return;
+    this.titleOpen = false;
+    document.getElementById("title-screen")?.classList.remove("on");
+    void parkAudio.unlock();
+    this.shiftIntro?.beginArrival();
+    this.showTool(null);
+    this.renderer.domElement.requestPointerLock();
   }
 
   /** Still in the van intro or not yet clocked on — tools and jobs wait. */
@@ -3660,6 +3729,7 @@ export class Game {
     if (eye) this.player.takeOverFromIntro(eye.x, eye.y, eye.z, eye.yaw);
     else this.player.endIntro();
     this.clockOn();
+    document.body.classList.remove("title-screen");
   }
 
   private clockOn(opts?: { quiet?: boolean }): void {
@@ -5957,6 +6027,7 @@ export class Game {
   /** Stop the shift mid-flow — overlay up, mouse free, nothing ticks. */
   public setPaused(on: boolean): void {
     if (this.dead) return;
+    if (this.titleOpen || this.shiftIntro?.isActive()) return;
     if (this.paused === on) return;
     this.paused = on;
     document.body.classList.toggle("paused", on);

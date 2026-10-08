@@ -101,6 +101,9 @@ export class Weather {
   private held = 0;
   /** Picnic / grass-fire first — no wet weather until Game unlocks it. */
   private rainAllowed = false;
+  /** 1 = shipped weather fog. High stretches it; low uses an override. */
+  private fogScale = 1;
+  private fogClip: { near: number; far: number } | null = null;
 
   private rain: THREE.LineSegments;
   private rainSpeeds: Float32Array;
@@ -289,6 +292,12 @@ export class Weather {
     return this.mix('gloom');
   }
 
+  /** Graphics draw-distance. `clip` (low) replaces weather fog outright. */
+  public setDrawFog(scale: number, clip: { near: number; far: number } | null): void {
+    this.fogScale = scale;
+    this.fogClip = clip;
+  }
+
   private applySky(sky: SkyState): void {
     const gloom = this.mix('gloom');
     // Grey the sky out rather than just darkening it — overcast is pale, not black.
@@ -298,8 +307,13 @@ export class Weather {
     this.scene.background = skyColor;
     const fog = this.scene.fog as THREE.Fog;
     fog.color.copy(skyColor);
-    fog.near = this.mix('fogNear');
-    fog.far = this.mix('fogFar');
+    if (this.fogClip) {
+      fog.near = this.fogClip.near;
+      fog.far = this.fogClip.far;
+    } else {
+      fog.near = this.mix("fogNear") * this.fogScale;
+      fog.far = this.mix("fogFar") * this.fogScale;
+    }
   }
 
   /** Clouds ride the same wind as the rain, only slower and much higher up. */
