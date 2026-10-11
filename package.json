@@ -14,6 +14,7 @@
     "assets": "npm run dev -w @easeupmush/dynamic-image-gen",
     "setup:assets": "npm run setup:img -w @easeupmush/dynamic-image-gen",
     "models": "npm run dev -w @easeupmush/dynamic-model-gen",
+    "dialogue": "npm run dev -w @easeupmush/dialogue-record",
     "setup:models": "npm run setup:3d -w @easeupmush/dynamic-model-gen",
     "setup:ollama": "npm run setup:ollama -w @easeupmush/dynamic-model-gen",
     "dev:site": "npm run dev -w @easeupmush/site",

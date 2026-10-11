@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { PATH_SPURS } from "./lake";
-import { PAVEMENT_WIDTH, ROAD_WIDTH, roadGapsAlong } from "./buildings";
+import { roadCrossingsAlong } from "./buildings";
 import { DEFAULT_LEVEL } from "../../level/defaultLevel";
 import type { FenceStyle, XZ } from "../../level/types";
 import { groundHeight } from "./terrain";
@@ -89,8 +89,8 @@ export function insidePark(x: number, z: number): boolean {
 
 
 /**
- * Gate openings worked out from where path spurs and roads meet each stretch,
- * so the fence never runs across the paving or the tarmac.
+ * Gate openings where path spurs and parade roads *cut* each stretch.
+ * A road running alongside (with pavement) is not a gate.
  */
 function projectOnRun(
   x: number,
@@ -180,13 +180,7 @@ function gatesOn(from: THREE.Vector2, to: THREE.Vector2): [number, number][] {
     }
   }
 
-  for (const [gs, gw] of roadGapsAlong(
-    from.x,
-    from.y,
-    to.x,
-    to.y,
-    ROAD_WIDTH * 0.5 + PAVEMENT_WIDTH + 1.25,
-  )) {
+  for (const [gs, gw] of roadCrossingsAlong(from.x, from.y, to.x, to.y)) {
     const start = Math.max(0.4, gs);
     const end = Math.min(length - 0.4, gs + gw);
     if (end - start < 3) continue;

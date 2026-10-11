@@ -1,45 +1,16 @@
 import * as THREE from 'three';
-import { PATH_LOOP, loopPoint } from '../world/lake';
-import { isBlocked } from '../world/blocking';
+import { isInLake, PATH_LOOP, PATH_Y, WATER_Y, loopPoint } from '../world/lake';
+import { isBlocked, slideMove } from '../world/blocking';
+import { groundHeight } from '../world/terrain';
 import { Grumble } from '../effects/Grumble';
 import { TumbleBody } from '../effects/TumbleBody';
 import { TYRE_SEGMENT, type Tread } from './Footprint';
+import { lines } from "../../dialogue";
 
 const JERSEYS = [0xd8452f, 0x2f6fd8, 0x1f1f26, 0xe0b83c, 0x3f9f5f];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
 
-const BELL_LINES = [
-  "DING DING!",
-  "MIND YOUR BACKS",
-  "COMING THROUGH",
-  "ON YOUR RIGHT",
-];
-const SPLAT_LINES = [
-  "UP MY BACK!",
-  "ALL OVER MY TYRES",
-  "OH, LOVELY",
-  "ARGH!",
-  "I'VE COPPED THAT",
-];
-const EJECT_LINES = [
-  "ARGH!",
-  "I'M OFF!",
-  "WHOA!",
-  "MY BIKE!",
-  "YOU WHAT?!",
-  "OI — MY FACE!",
-];
-
 /** The lads on the e-bikes don't ring, and they don't slow down either. */
-const LOUT_LINES = [
-  "OUT THE WAY!",
-  "WOOOO!",
-  "GET IN!",
-  "SAFE, BRUV",
-  "MOVE!",
-  "SCUMMER!",
-  "I'LL LAY YOU OUT, MUSH",
-];
 const TRACKSUITS = [0x1f1f26, 0x22303f, 0x2d2438, 0x1c2b1c];
 
 /** How close something ahead has to be before they slow and ring. */
@@ -94,6 +65,9 @@ export class Cyclist {
   private linger = 0;
   private riderOffered = false;
   private pendingPed: { at: THREE.Vector3; lout: boolean } | null = null;
+  /** E-scooter wreck skidding on its side after the rider comes off. */
+  private slideVel = new THREE.Vector3();
+  private slideHits = new WeakSet<object>();
 
   constructor(scene: THREE.Scene, index: number, kind: RiderKind = 'cyclist') {
     this.scene = scene;
@@ -447,7 +421,16 @@ export class Cyclist {
 
     this.tumble = new TumbleBody(this.rider, 0.58);
     this.tumble.kick(forward, away, this.speed);
-    this.ring(EJECT_LINES);
+    this.ring('cyclist', lines('cyclist', 'eject'));
+
+    if (this.kind === 'ebike') {
+      this.slideVel.copy(forward).multiplyScalar(this.speed * (0.85 + Math.random() * 0.2));
+      this.slideVel.addScaledVector(away, 1.6 + Math.random() * 1.4);
+      const side = this.tipSign;
+      this.slideVel.x += Math.cos(this.heading) * side * (1.1 + Math.random() * 1.2);
+      this.slideVel.z -= Math.sin(this.heading) * side * (1.1 + Math.random() * 1.2);
+      this.slideVel.y = 0;
+    }
   }
 
   /**
@@ -472,7 +455,12 @@ export class Cyclist {
     // The lads don't brake for anybody. They just shout and keep going.
     const wanted = blocked && !lout ? 1.4 : this.cruise;
     this.speed += (wanted - this.speed) * Math.min(1, 2.5 * delta);
-    if (blocked && this.bellCooldown <= 0) this.ring(lout ? LOUT_LINES : BELL_LINES);
+    if (blocked && this.bellCooldown <= 0) {
+      this.ring(
+        lout ? 'e-bike-lout' : 'cyclist',
+        lout ? lines('e-bike-lout', 'lout') : lines('cyclist', 'bell'),
+      );
+    }
 
     const spacing = PATH_LOOP[0]!.distanceTo(PATH_LOOP[1]!) || 1;
     const steps = (this.speed * delta) / spacing;
@@ -498,6 +486,11 @@ export class Cyclist {
       this.pendingPed = { at, lout: this.kind === 'ebike' };
       this.scene.remove(this.rider);
       this.tumble = null;
+    }
+
+    if (this.kind === 'ebike') {
+      this.slideWreck(delta);
+      return;
     }
 
     // Burn wreck linger once the bike is down; rider is already a pedestrian.
@@ -532,6 +525,99 @@ export class Cyclist {
     }
   }
 
+  /** On its side, still carrying speed — scrapes along until friction wins. */
+  private slideWreck(delta: number): void {
+    const here = this.group.position;
+    const speed = Math.hypot(this.slideVel.x, this.slideVel.z);
+
+    this.tipAmount = Math.min(
+      Math.PI / 2,
+      this.tipAmount + delta * (speed > 2.5 ? 4.2 : 2.6),
+    );
+    if (this.tipAmount > Math.PI / 2 - 0.06) this.tipped = true;
+
+    if (speed > 0.2) {
+      this.heading = Math.atan2(this.slideVel.x, this.slideVel.z);
+    }
+
+    const stepX = this.slideVel.x * delta;
+    const stepZ = this.slideVel.z * delta;
+    const landed = slideMove(here.x, here.z, stepX, stepZ, 0.52);
+    const bounced =
+      Math.abs(landed.x - (here.x + stepX)) > 0.02 ||
+      Math.abs(landed.z - (here.z + stepZ)) > 0.02;
+    if (bounced) {
+      if (Math.abs(landed.x - here.x) < 0.002) this.slideVel.x *= -0.5;
+      if (Math.abs(landed.z - here.z) < 0.002) this.slideVel.z *= -0.5;
+      this.slideVel.multiplyScalar(0.68);
+      this.tipSign = this.slideVel.x * Math.cos(this.heading) > 0 ? 1 : -1;
+    }
+
+    here.x = landed.x;
+    here.z = landed.z;
+
+    if (isInLake(here.x, here.z)) {
+      this.slideVel.multiplyScalar(Math.max(0, 1 - 5 * delta));
+      here.y = WATER_Y + 0.05;
+    } else {
+      here.y = groundHeight(here.x, here.z) + PATH_Y + Math.sin(this.tipAmount) * 0.12;
+      const drag = this.tipped ? 1.15 : 0.5;
+      this.slideVel.multiplyScalar(Math.max(0, 1 - drag * delta));
+    }
+
+    this.group.rotation.set(
+      Math.sin(performance.now() / 80) * 0.07 * Math.min(1, speed / 7),
+      this.heading,
+      this.tipSign * this.tipAmount,
+    );
+    for (const wheel of this.wheels) {
+      wheel.rotation.x -= delta * (1.6 + speed * 2.6);
+    }
+
+    if (this.tipped && speed < 0.6) this.linger -= delta;
+  }
+
+  public wreckSpeed(): number {
+    if (this.phase !== 'crashed' || this.kind !== 'ebike') return 0;
+    return Math.hypot(this.slideVel.x, this.slideVel.z);
+  }
+
+  /**
+   * Something in front of a sliding e-scooter — birds get a chance to lift
+   * before it arrives.
+   */
+  public noticeWreck(target: object, at: THREE.Vector3): boolean {
+    const speed = this.wreckSpeed();
+    if (speed < 0.85) return false;
+    const here = this.group.position;
+    const dx = at.x - here.x;
+    const dz = at.z - here.z;
+    const gap = Math.hypot(dx, dz);
+    const reach = 5.5 + speed * 0.45;
+    if (gap > reach || gap < 0.15) return false;
+    const fx = Math.sin(this.heading);
+    const fz = Math.cos(this.heading);
+    const along = dx * fx + dz * fz;
+    if (along < -0.35) return false;
+    const side = Math.abs(dx * -fz + dz * fx);
+    if (side > 2.5 + along * 0.18) return false;
+    if (this.slideHits.has(target)) return false;
+    this.slideHits.add(target);
+    return true;
+  }
+
+  /** Solid hit from a wreck that still has some pace on it. */
+  public tryWreckHit(target: object, at: THREE.Vector3, radius: number): boolean {
+    if (this.wreckSpeed() < 1.35) return false;
+    const here = this.group.position;
+    const dx = at.x - here.x;
+    const dz = at.z - here.z;
+    if (dx * dx + dz * dz > radius * radius) return false;
+    if (this.slideHits.has(target)) return false;
+    this.slideHits.add(target);
+    return true;
+  }
+
   /** Anything within a narrow cone out front, which is worth braking for. */
   private somethingInTheWay(ahead: readonly THREE.Vector3[]): boolean {
     const here = this.group.position;
@@ -546,13 +632,14 @@ export class Cyclist {
     return false;
   }
 
-  private ring(lines: readonly string[]): void {
+  private ring(characterId: string, lines: readonly string[]): void {
     this.bellCooldown = BELL_COOLDOWN;
     this.grumble?.dispose();
     this.grumble = new Grumble(
       this.scene,
       lines[Math.floor(Math.random() * lines.length)]!,
       this.group.position,
+      characterId,
     );
   }
 
@@ -569,7 +656,7 @@ export class Cyclist {
       if (dx * dx + dz * dz > TYRE_RANGE * TYRE_RANGE) continue;
 
       this.avoiding = spot.clone();
-      this.ring(SPLAT_LINES);
+      this.ring('cyclist', lines('cyclist', 'splat'));
       // Straight through it, and now the back tyre prints it up the path.
       this.smear = SMEAR_LENGTH;
       this.laidAt = here.clone();

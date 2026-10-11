@@ -3,63 +3,12 @@ import { PATH_LOOP, loopPoint } from "../world/lake";
 import { Grumble } from "../effects/Grumble";
 import { MuckFlecks } from "../effects/MuckFlecks";
 import { TYRE_SEGMENT, type Tread } from "./Footprint";
+import { lines } from "../../dialogue";
 
 const BODYWORK = [0xb03a2e, 0x2f5d8c, 0x7a3f8c, 0x3f7a4a, 0x8c6a2f];
 const COATS = [0x6b5f7a, 0x7a6a58, 0x3f4a5a, 0x8a5a5a, 0x4a4a52];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
 const HAIR = [0xdedede, 0xc8c2b6, 0xb0aaa0];
-
-const HORN_LINES = [
-  "BEEP BEEP!",
-  "MIND YOURSELF, LOVE",
-  "COMING PAST",
-  "EXCUSE ME!",
-];
-const SPLAT_LINES = [
-  "UP MY WHEELS!",
-  "OH, FOR HEAVEN'S SAKE",
-  "LOOK AT THAT",
-  "DISGUSTING!",
-  "I'VE COPPED THAT ALL UP THE SIDE",
-];
-const SOAKED = [
-  "OI! WATCH THAT LANCE!",
-  "I'M SOAKED!",
-  "DO YOU MIND?",
-  "THAT WAS MY COAT!",
-  "WHAT ARE YOU PLAYING AT?",
-  "YOU'LL SHORT THE BATTERY!",
-];
-const FOULED = [
-  "THAT'S GOT POO ON IT!",
-  "LOOK AT MY SCOOTER!",
-  "YOU FILTHY SOD!",
-  "THAT'S DISGUSTING!",
-  "YOU'VE COVERED ME!",
-  "I WANT THAT WASHED OFF!",
-];
-const RAM_LINES = [
-  "I'LL HAVE YOU!",
-  "COME HERE!",
-  "RIGHT — YOU'RE FOR IT!",
-  "OUT THE WAY!",
-  "I'LL RUN YOU DOWN!",
-  "THAT'S MY BEST COAT!",
-];
-/** Stopped for a natter with somebody they know, which is most people. */
-const CHAT_LINES = [
-  "LOVELY DAY FOR IT",
-  "HOW'S YOUR MOTHER?",
-  "TERRIBLE, ALL THIS MESS",
-  "I SAID TO HIM, I SAID",
-  "THEY WANT SHOOTING, THEM SWANS",
-  "I'M HANGING, MUSH",
-  "SWEET AS NUT TODAY",
-  "YOU CLUED UP ON THE SCORE?",
-  "LET'S HAVE A BURN ON THAT THEN, MUSH",
-  "JUST OFF FOR A SLASH",
-  "FANCY SOME GRUB AFTER?",
-];
 
 /** They dawdle, and they stop dead for anything in front of them. */
 const CRUISE_LOW = 1.4;
@@ -336,7 +285,7 @@ export class Scooter {
     this.flinch = Math.max(this.flinch, 1.6);
     this.chatting = 0;
     this.anger = Math.min(3, this.anger + 0.7);
-    this.reactToSpray(SOAKED, first);
+    this.reactToSpray(lines('scooter', 'soaked'), first);
     if (this.anger >= 1.6) this.startRam();
     return first;
   }
@@ -359,7 +308,7 @@ export class Scooter {
     this.flinch = Math.max(this.flinch, 2.4);
     this.chatting = 0;
     this.anger = Math.min(3, this.anger + 1.4);
-    this.reactToSpray(FOULED, first);
+    this.reactToSpray(lines('scooter', 'fouled'), first);
     this.startRam();
     return first;
   }
@@ -379,7 +328,7 @@ export class Scooter {
     this.chatting = 0;
     // Fresh ticket so they don't vanish the moment the chase ends.
     this.ticketLeft = Math.max(this.ticketLeft, PATH_LOOP.length * 0.85);
-    this.sound(RAM_LINES);
+    this.sound(lines('scooter', 'ram'));
   }
 
   private reactToSpray(lines: readonly string[], first: boolean): void {
@@ -421,7 +370,7 @@ export class Scooter {
     }
 
     const blocked = this.somethingInTheWay(ahead);
-    if (blocked && this.hornCooldown <= 0) this.sound(HORN_LINES);
+    if (blocked && this.hornCooldown <= 0) this.sound(lines('scooter', 'horn'));
 
     // Every so often they pull over for a chat, whether you like it or not.
     if (this.chatting > 0) {
@@ -431,7 +380,7 @@ export class Scooter {
       if (this.chatIn <= 0) {
         this.chatting = CHAT_FOR;
         this.chatIn = CHAT_EVERY + Math.random() * 25;
-        this.sound(CHAT_LINES);
+        this.sound(lines('scooter', 'chat'));
       }
     }
 
@@ -486,7 +435,7 @@ export class Scooter {
       this.flinch = 2.2;
       this.speed = 0;
       this.group.rotation.x = 0;
-      this.sound(RAM_LINES);
+      this.sound(lines('scooter', 'ram'));
       // Snap back onto the nearest path point so they don't sit in a bush.
       this.rejoinLoop();
       return;
@@ -540,6 +489,7 @@ export class Scooter {
       this.scene,
       lines[Math.floor(Math.random() * lines.length)]!,
       this.group.position,
+      "scooter",
     );
   }
 
@@ -560,7 +510,7 @@ export class Scooter {
       if (dx * dx + dz * dz > TYRE_RANGE * TYRE_RANGE) continue;
 
       this.avoiding = spot.clone();
-      this.sound(SPLAT_LINES);
+      this.sound(lines('scooter', 'splat'));
       // Straight through it — the wheels print it up the paving behind them.
       this.smear = SMEAR_LENGTH;
       this.laidAt = here.clone();

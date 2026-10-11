@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { voices } from '../audio/Voices';
 
 const LIFE = 2.6;
 
@@ -8,7 +9,13 @@ export class Grumble {
   private sprite: THREE.Sprite;
   private life = LIFE;
 
-  constructor(scene: THREE.Scene, text: string, at: THREE.Vector3) {
+  constructor(
+    scene: THREE.Scene,
+    text: string,
+    at: THREE.Vector3,
+    /** Catalog character — plays a live take if one is set for this line. */
+    characterId?: string,
+  ) {
     this.scene = scene;
     this.sprite = new THREE.Sprite(
       new THREE.SpriteMaterial({
@@ -20,6 +27,7 @@ export class Grumble {
     this.sprite.scale.set(2.2, 0.55, 1);
     this.sprite.position.copy(at);
     scene.add(this.sprite);
+    if (characterId) voices.playText(characterId, text);
   }
 
   private static draw(text: string): THREE.CanvasTexture {

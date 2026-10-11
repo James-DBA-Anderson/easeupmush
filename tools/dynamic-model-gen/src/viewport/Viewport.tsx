@@ -7,7 +7,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js'
 import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
-import { buildGroupFromSpec, meshFromPart, partHandle } from '../lib/buildMesh'
+import { buildGroupFromSpec, makeGroupPivot, meshFromPart, partHandle } from '../lib/buildMesh'
 import {
   DEFAULT_KNIFE_SIZE,
   makeKnifeGeometry,
@@ -20,7 +20,7 @@ import {
 } from '../lib/cutMesh'
 import type { ModelExt } from '../lib/fileSource'
 import { sniffModel } from '../lib/fileSource'
-import type { ModelPart, ModelSpec, PartShape } from '../lib/spec'
+import type { ModelGroup, ModelPart, ModelSpec, PartShape, SceneNodeInfo } from '../lib/spec'
 import { PART_SHAPE_LABELS, PART_SHAPES } from '../lib/spec'
 import {
   clipDuration,
@@ -50,10 +50,11 @@ type ViewportProps = {
   editing: boolean
   tool: EditorTool
   selectedPartId: string | null
+  selectedPartIds: string[]
   brushRadius: number
   brushStrength: number
-  onSelectPart: (id: string | null) => void
-  onParts?: (parts: { id: string; label: string }[]) => void
+  onSelectPart: (id: string | null, opts?: { additive?: boolean }) => void
+  onParts?: (parts: SceneNodeInfo[]) => void
   onCheckpoint?: () => void
   onHistoryChange?: (state: { undo: boolean; redo: boolean }) => void
   onClipChange?: (clip: ClipInfo) => void
@@ -78,6 +79,8 @@ export type ViewportApi = {
   getCutLoop: () => CutLoopInfo
   setPartLabels: (labels: { id: string; label: string }[]) => void
   addShape: (shape: PartShape, color?: string) => { id: string; label: string }
+  groupSelection: (ids: string[]) => { id: string; label: string } | null
+  ungroup: (id: string) => boolean
   updatePart: (id: string, patch: { color?: string; roughness?: number; metalness?: number }) => void
   pushHistory: () => void
   undo: () => boolean
@@ -103,6 +106,7 @@ export function Viewport({
   editing,
   tool,
   selectedPartId,
+  selectedPartIds,
   brushRadius,
   brushStrength,
   onSelectPart,
@@ -141,6 +145,8 @@ export function Viewport({
       getCutLoop: () => handle.getCutLoop(),
       setPartLabels: (labels) => handle.setPartLabels(labels),
       addShape: (shape, color) => handle.addShape(shape, color),
+      groupSelection: (ids) => handle.groupSelection(ids),
+      ungroup: (id) => handle.ungroup(id),
       updatePart: (id, patch) => handle.updatePart(id, patch),
       pushHistory: () => handle.pushHistory(),
       undo: () => handle.undo(),
@@ -193,8 +199,8 @@ export function Viewport({
   }, [brushRadius, brushStrength])
 
   useEffect(() => {
-    apiRef.current?.highlight(selectedPartId)
-  }, [selectedPartId])
+    apiRef.current?.highlight(selectedPartId, selectedPartIds)
+  }, [selectedPartId, selectedPartIds])
 
   useEffect(() => {
     apiRef.current?.setShowTextures(showTextures)
@@ -255,8 +261,9 @@ class ViewportHandle {
   private cutPlane: THREE.Mesh
   private onCutLoopChange?: (loop: CutLoopInfo) => void
   private mount: HTMLElement
-  private onSelectPart: (id: string | null) => void
-  private onParts?: (parts: { id: string; label: string }[]) => void
+  private onSelectPart: (id: string | null, opts?: { additive?: boolean }) => void
+  private onParts?: (parts: SceneNodeInfo[]) => void
+  private selectedIds: string[] = []
   private onCheckpoint?: () => void
   private onHistoryChange?: (state: { undo: boolean; redo: boolean }) => void
   private onClipChange?: (clip: ClipInfo) => void
@@ -275,8 +282,8 @@ class ViewportHandle {
 
   constructor(
     mount: HTMLElement,
-    onSelectPart: (id: string | null) => void,
-    onParts?: (parts: { id: string; label: string }[]) => void,
+    onSelectPart: (id: string | null, opts?: { additive?: boolean }) => void,
+    onParts?: (parts: SceneNodeInfo[]) => void,
   ) {
     this.mount = mount
     this.onSelectPart = onSelectPart
@@ -603,7 +610,7 @@ class ViewportHandle {
   public setPartLabels(labels: { id: string; label: string }[]): void {
     const byId = new Map(labels.map((item) => [item.id, item.label.trim()]))
     this.modelRoot.traverse((child) => {
-      if (!(child instanceof THREE.Mesh)) return
+      if (!child.userData.partId) return
       const label = byId.get(String(child.userData.partId))
       if (!label) return
       child.name = label
@@ -618,21 +625,31 @@ class ViewportHandle {
     this.checkpoint()
     const used = new Set<string>()
     this.modelRoot.traverse((child) => {
-      if (child instanceof THREE.Mesh && child.userData.partId) used.add(String(child.userData.partId))
+      if (child.userData.partId) used.add(String(child.userData.partId))
     })
     const base = PART_SHAPE_LABELS[shape]
     let n = 1
-    let id = shape
+    let id: string = shape
     while (used.has(id)) {
       n += 1
       id = `${shape}-${n}`
     }
     const label = n === 1 ? base : `${base} ${n}`
     const pos: [number, number, number] = [0, 0.55, 0]
-    const selected = this.findPart(this.selectedId)
-    if (selected) {
-      const handle = partHandle(selected)
-      pos[0] = handle.position.x + Math.max(0.55, selected.scale.x * 0.7)
+    const selected = this.findHandle(this.selectedId)
+    const host =
+      selected?.userData.isGroup
+        ? selected
+        : selected?.parent?.userData.isGroup
+          ? selected.parent
+          : this.modelRoot
+    if (selected?.userData.isGroup) {
+      pos[0] = 0.35
+      pos[1] = 0
+      pos[2] = 0
+    } else if (selected && !selected.userData.isGroup) {
+      const handle = selected
+      pos[0] = handle.position.x + Math.max(0.55, handle.scale.x * 0.7)
       pos[1] = handle.position.y
       pos[2] = handle.position.z
     } else if (this.modelRoot.children.length) {
@@ -661,7 +678,14 @@ class ViewportHandle {
       },
       'medium',
     )
-    this.modelRoot.add(mesh)
+    const wrap = new THREE.Group()
+    wrap.name = label
+    wrap.userData.partId = id
+    wrap.userData.partPivot = true
+    wrap.position.copy(mesh.position)
+    mesh.position.set(0, 0, 0)
+    wrap.add(mesh)
+    host.add(wrap)
     this.tagParts()
     this.onParts?.(this.listParts())
     this.selectedId = id
@@ -788,25 +812,99 @@ class ViewportHandle {
     })
   }
 
-  public highlight(partId: string | null): void {
+  public highlight(partId: string | null, ids: string[] = []): void {
     this.selectedId = partId
+    this.selectedIds = ids.length ? ids : partId ? [partId] : []
+    const lit = new Set(this.selectedIds)
+    for (const id of this.selectedIds) {
+      const handle = this.findHandle(id)
+      if (!handle?.userData.isGroup) continue
+      handle.traverse((child) => {
+        if (child.userData.partId) lit.add(String(child.userData.partId))
+      })
+    }
     this.modelRoot.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return
       const mat = child.material
-      if (mat instanceof THREE.MeshStandardMaterial) {
-        const on = child.userData.partId === partId
-        mat.emissive.setHex(on ? 0x6a4a18 : 0x000000)
-        mat.emissiveIntensity = on ? 0.55 : 0
-      }
+      if (!(mat instanceof THREE.MeshStandardMaterial)) return
+      const id = String(child.userData.partId ?? '')
+      const on = lit.has(id)
+      const primary = id === partId
+      mat.emissive.setHex(on ? 0x6a4a18 : 0x000000)
+      mat.emissiveIntensity = primary ? 0.55 : on ? 0.28 : 0
     })
     this.attachGizmo()
     if (this.tool === 'points' || this.tool === 'cut') this.refreshNodeOverlay()
   }
 
+  public groupSelection(ids: string[]): { id: string; label: string } | null {
+    const unique = [...new Set(ids.filter(Boolean))]
+    const handles = unique
+      .map((id) => this.findHandle(id))
+      .filter((node): node is THREE.Object3D => Boolean(node))
+    const roots = handles.filter(
+      (node) => !handles.some((other) => other !== node && this.isAncestor(other, node)),
+    )
+    if (roots.length < 1) return null
+    this.checkpoint()
+    const used = new Set<string>()
+    this.modelRoot.traverse((child) => {
+      if (child.userData.partId) used.add(String(child.userData.partId))
+    })
+    let n = 1
+    let id = 'group'
+    while (used.has(id)) {
+      n += 1
+      id = `group-${n}`
+    }
+    const label = n === 1 ? 'Group' : `Group ${n}`
+    const parent = this.sharedParent(roots) ?? this.modelRoot
+    parent.updateMatrixWorld(true)
+    const box = new THREE.Box3()
+    for (const node of roots) {
+      node.updateMatrixWorld(true)
+      box.expandByObject(node)
+    }
+    const center = box.getCenter(new THREE.Vector3())
+    parent.worldToLocal(center)
+    const pivot = makeGroupPivot({
+      id,
+      label,
+      position: [center.x, center.y, center.z],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+    })
+    parent.add(pivot)
+    for (const node of roots) this.reparentKeepWorld(node, pivot)
+    this.tagParts()
+    this.onParts?.(this.listParts())
+    this.selectedId = id
+    this.onSelectPart(id)
+    this.attachGizmo()
+    return { id, label }
+  }
+
+  public ungroup(id: string): boolean {
+    const pivot = this.findHandle(id)
+    if (!pivot?.userData.isGroup) return false
+    this.checkpoint()
+    const parent = pivot.parent ?? this.modelRoot
+    const children = [...pivot.children]
+    for (const child of children) this.reparentKeepWorld(child, parent)
+    pivot.removeFromParent()
+    this.tagParts()
+    this.onParts?.(this.listParts())
+    this.selectedId = children[0]?.userData.partId
+      ? String(children[0].userData.partId)
+      : null
+    if (this.selectedId) this.onSelectPart(this.selectedId)
+    this.attachGizmo()
+    return true
+  }
+
   public ground(): void {
     this.checkpoint()
-    const mesh = this.findPart(this.selectedId)
-    const target = mesh ? partHandle(mesh) : this.modelRoot
+    const target = this.findHandle(this.selectedId) ?? this.modelRoot
     target.updateMatrixWorld(true)
     const box = new THREE.Box3().setFromObject(target)
     if (box.isEmpty() || !isFiniteBox(box)) return
@@ -815,8 +913,7 @@ class ViewportHandle {
 
   public recenter(): void {
     this.checkpoint()
-    const mesh = this.findPart(this.selectedId)
-    const target = mesh ? partHandle(mesh) : this.modelRoot
+    const target = this.findHandle(this.selectedId) ?? this.modelRoot
     target.updateMatrixWorld(true)
     const box = new THREE.Box3().setFromObject(target)
     if (box.isEmpty() || !isFiniteBox(box)) return
@@ -867,7 +964,24 @@ class ViewportHandle {
   public captureSpec(base?: ModelSpec | null): ModelSpec | null {
     const byId = new Map((base?.parts ?? []).map((part) => [part.id, part]))
     const parts: ModelPart[] = []
+    const groups: ModelGroup[] = []
     this.modelRoot.traverse((child) => {
+      if (child.userData.isGroup && child.userData.partId) {
+        const ancestor = child.parent
+        const parentId =
+          ancestor && ancestor !== this.modelRoot && ancestor.userData.partId
+            ? String(ancestor.userData.partId)
+            : undefined
+        groups.push({
+          id: String(child.userData.partId),
+          label: child.name || String(child.userData.partId),
+          parent: parentId,
+          position: [child.position.x, child.position.y, child.position.z],
+          rotation: [child.rotation.x, child.rotation.y, child.rotation.z],
+          scale: [child.scale.x, child.scale.y, child.scale.z],
+        })
+        return
+      }
       if (!(child instanceof THREE.Mesh) || !child.userData.partId) return
       const id = String(child.userData.partId)
       const prior = byId.get(id)
@@ -907,6 +1021,7 @@ class ViewportHandle {
       style: base?.style || 'clay',
       density: base?.density || 'medium',
       parts,
+      ...(groups.length ? { groups } : {}),
     }
   }
 
@@ -1554,9 +1669,60 @@ class ViewportHandle {
     return found
   }
 
+  private findHandle(id: string | null): THREE.Object3D | null {
+    if (!id) return null
+    let found: THREE.Object3D | null = null
+    this.modelRoot.traverse((child) => {
+      if (found || child.userData.partId !== id) return
+      if (child.userData.isGroup || child.userData.partPivot) found = child
+      else if (child instanceof THREE.Mesh) found = partHandle(child)
+    })
+    return found
+  }
+
+  private isAncestor(ancestor: THREE.Object3D, node: THREE.Object3D): boolean {
+    let cur: THREE.Object3D | null = node.parent
+    while (cur) {
+      if (cur === ancestor) return true
+      cur = cur.parent
+    }
+    return false
+  }
+
+  private sharedParent(nodes: THREE.Object3D[]): THREE.Object3D | null {
+    if (!nodes.length) return null
+    const first = nodes[0]!.parent
+    if (!first) return null
+    return nodes.every((node) => node.parent === first) ? first : this.modelRoot
+  }
+
+  private reparentKeepWorld(object: THREE.Object3D, parent: THREE.Object3D): void {
+    parent.updateMatrixWorld(true)
+    object.updateMatrixWorld(true)
+    const world = object.matrixWorld.clone()
+    parent.add(object)
+    const local = parent.matrixWorld.clone().invert().multiply(world)
+    local.decompose(object.position, object.quaternion, object.scale)
+  }
+
+  private parentGroupId(object: THREE.Object3D): string | undefined {
+    let cur: THREE.Object3D | null = object.parent
+    while (cur && cur !== this.modelRoot) {
+      if (cur.userData.isGroup && cur.userData.partId) return String(cur.userData.partId)
+      cur = cur.parent
+    }
+    return undefined
+  }
+
   private tagParts(): void {
     let index = 0
     this.modelRoot.traverse((child) => {
+      if (child.userData.isGroup) {
+        if (!child.userData.partId) child.userData.partId = child.name || `group-${index}`
+        if (!child.name) child.name = String(child.userData.partId)
+        index += 1
+        return
+      }
       if (!(child instanceof THREE.Mesh)) return
       if (!child.userData.partId) {
         child.userData.partId = child.name || `part-${index}`
@@ -1567,16 +1733,51 @@ class ViewportHandle {
     })
   }
 
-  private listParts(): { id: string; label: string }[] {
-    const parts: { id: string; label: string }[] = []
+  private listParts(): SceneNodeInfo[] {
+    const nodes: SceneNodeInfo[] = []
     this.modelRoot.traverse((child) => {
-      if (!(child instanceof THREE.Mesh) || !child.userData.partId) return
-      parts.push({
+      if (!child.userData.partId) return
+      if (child.userData.isGroup) {
+        const ancestor = child.parent
+        nodes.push({
+          id: String(child.userData.partId),
+          label: child.name || String(child.userData.partId),
+          kind: 'group',
+          parent:
+            ancestor && ancestor !== this.modelRoot && ancestor.userData.partId
+              ? String(ancestor.userData.partId)
+              : undefined,
+        })
+        return
+      }
+      if (!(child instanceof THREE.Mesh)) return
+      if (child.parent?.userData.partPivot && child.parent.userData.partId === child.userData.partId) {
+        const handle = child.parent
+        const ancestor = handle.parent
+        nodes.push({
+          id: String(child.userData.partId),
+          label: child.name || String(child.userData.partId),
+          kind: 'part',
+          parent:
+            ancestor && ancestor !== this.modelRoot && ancestor.userData.partId
+              ? String(ancestor.userData.partId)
+              : undefined,
+        })
+        return
+      }
+      if (child.parent?.userData.partPivot) return
+      const ancestor = child.parent
+      nodes.push({
         id: String(child.userData.partId),
         label: child.name || String(child.userData.partId),
+        kind: 'part',
+        parent:
+          ancestor && ancestor !== this.modelRoot && ancestor.userData.partId
+            ? String(ancestor.userData.partId)
+            : undefined,
       })
     })
-    return parts
+    return nodes
   }
 
   private attachGizmo(): void {
@@ -1596,9 +1797,17 @@ class ViewportHandle {
     }
     this.transform.enabled = true
     this.transform.setSize(1.65)
-    const mesh = this.findPart(this.selectedId)
-    if (mesh) this.transform.attach(this.tool === 'scale' ? mesh : partHandle(mesh))
-    else this.transform.detach()
+    const handle = this.findHandle(this.selectedId)
+    if (!handle) {
+      this.transform.detach()
+      return
+    }
+    if (this.tool === 'scale' && handle.userData.partPivot) {
+      const mesh = this.findPart(this.selectedId)
+      this.transform.attach(mesh ?? handle)
+      return
+    }
+    this.transform.attach(handle)
   }
 
   private attachNodeGizmo(): void {
@@ -1771,8 +1980,10 @@ class ViewportHandle {
         this.transform.setMode('translate')
       }
       if (this.isGizmoTool()) this.transform.enabled = true
-      this.onSelectPart(partId)
-      this.selectedId = partId
+      const groupId = ev.detail >= 2 ? this.parentGroupId(hit.object) : undefined
+      const pick = groupId && !ev.shiftKey ? groupId : partId
+      this.onSelectPart(pick, { additive: ev.shiftKey })
+      this.selectedId = pick
       this.attachGizmo()
       return
     }

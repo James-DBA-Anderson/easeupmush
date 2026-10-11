@@ -5,23 +5,11 @@ import { gateOutside, nearestGate } from "../world/pathRoute";
 import type { GymStation } from "../world/park";
 import { Face } from "./Face";
 import { Grumble } from "../effects/Grumble";
+import { lines } from "../../dialogue";
 
 const VESTS = [0x1c1c22, 0xc45a4a, 0x2f4f7f, 0xd4a018, 0x3f6b4a, 0xf2f0ea];
 const SHORTS = [0x1a1a22, 0x2b3038, 0x6b2030, 0x1a3a6a];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
-
-const LOVES = [
-  "YEAH THAT'S IT",
-  "KEEP THAT COMING",
-  "LOVELY AND COLD",
-  "FREE SHOWER MATE",
-  "DON'T STOP",
-  "THAT'S THE PUMP",
-  "BEAUTY",
-  "RIGHT ON THE LATS",
-];
-
-const GRUNT = ["ONE MORE", "COME ON", "LIGHT WEIGHT", "EASY", "PUSH"];
 
 const HIP = 0.82;
 
@@ -111,7 +99,7 @@ export class GymCrew {
       lifter.face.setMood("pleased");
       if (lifter.shoutIn <= 0) {
         lifter.shoutIn = 1.6;
-        this.say(lifter, LOVES);
+        this.say(lifter, lines('gym', 'loves'));
       }
       return true;
     }
@@ -198,7 +186,7 @@ export class GymCrew {
     else lifter.face.setMood("pleased");
     if (lifter.gruntIn <= 0 && lifter.glow <= 0 && Math.random() < 0.45) {
       lifter.gruntIn = 5 + Math.random() * 7;
-      this.say(lifter, GRUNT);
+      this.say(lifter, lines('gym', 'grunt'));
     }
     this.pose(lifter);
   }
@@ -326,6 +314,7 @@ export class GymCrew {
       this.scene,
       lines[Math.floor(Math.random() * lines.length)]!,
       at,
+      "gym",
     );
   }
 

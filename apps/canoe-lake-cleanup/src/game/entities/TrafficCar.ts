@@ -6,10 +6,34 @@ import {
   type RoadLink,
 } from "../world/buildings";
 import { groundHeight } from "../world/terrain";
+import {
+  assembleStreetCar,
+  pickStreetCarKind,
+  streetCarPaint,
+  type CarPart,
+  type CarSink,
+} from "../world/streetCar";
 
-const PAINTS = [
-  0xc45c4a, 0x3d5a7a, 0xd8d4cc, 0x2f2f32, 0xb8a05a, 0x5a7a5c, 0x6a7c8c, 0x5c3a4a,
-];
+function matt(
+  color: number,
+  roughness: number,
+  metalness: number,
+): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({ color, roughness, metalness });
+}
+
+function glow(
+  color: number,
+  emissive: number,
+  emissiveIntensity: number,
+): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.4,
+    emissive,
+    emissiveIntensity,
+  });
+}
 
 const CRUISE_LOW = 9;
 const CRUISE_HIGH = 14;
@@ -43,6 +67,8 @@ export class TrafficCar {
   private fading = false;
   private gone = false;
   private bob = Math.random() * Math.PI * 2;
+  private wheels: THREE.Object3D[] = [];
+  private wheelR = 0.33;
 
   public readonly id = nextTrafficId++;
   /** Odd one blasting the stereo with the windows down. */
@@ -129,6 +155,8 @@ export class TrafficCar {
       return;
     }
     this.place(this.progress);
+    const spin = (this.speed * delta) / Math.max(0.2, this.wheelR);
+    for (const wheel of this.wheels) wheel.rotation.z -= spin;
   }
 
   /** Reached a vertex — continue, turn onto a link, or fade at a dead end. */
@@ -259,87 +287,57 @@ export class TrafficCar {
 
   private build(): THREE.Group {
     const group = new THREE.Group();
-    const paint = new THREE.MeshStandardMaterial({
-      color: PAINTS[Math.floor(Math.random() * PAINTS.length)]!,
-      roughness: 0.42,
-      metalness: 0.28,
-    });
-    const glass = new THREE.MeshStandardMaterial({
-      color: 0x2b3742,
-      roughness: 0.35,
-      metalness: 0.2,
-    });
-    const bumper = new THREE.MeshStandardMaterial({
-      color: 0x1a1a1c,
-      roughness: 0.7,
-    });
-    const tyre = new THREE.MeshStandardMaterial({ color: 0x0e0e10, roughness: 1 });
-    const hub = new THREE.MeshStandardMaterial({
-      color: 0xb0b4b8,
-      roughness: 0.45,
-      metalness: 0.55,
-    });
-    this.materials.push(paint, glass, bumper, tyre, hub);
+    const kind = pickStreetCarKind(Math.random);
+    const paintCol = streetCarPaint(kind, Math.random);
+    const kit: Record<CarPart, THREE.MeshStandardMaterial> = {
+      paint: matt(paintCol, 0.42, 0.28),
+      glass: matt(0x2b3742, 0.35, 0.2),
+      bumper: matt(0x1a1a1c, 0.7, 0),
+      tyre: matt(0x0e0e10, 1, 0),
+      hub: matt(0xb0b4b8, 0.45, 0.55),
+      lightFront: glow(0xf2f0e4, 0x2a2818, 0.35),
+      lightRear: glow(0xa81818, 0x3a0808, 0.4),
+      amber: glow(0xf0a020, 0x402008, 0.3),
+      plateFront: matt(0xf4f1ea, 0.7, 0),
+      plateRear: matt(0xf0cc3a, 0.7, 0),
+      chrome: matt(0xc8ccd0, 0.28, 0.75),
+      trim: matt(0x1c1c1e, 0.65, 0),
+      sign: glow(0xf0c12a, 0x403008, 0.25),
+    };
+    this.materials.push(...Object.values(kit));
 
-    const length = 4.2;
-    const width = 1.78;
-    const ride = 0.34;
-
-    const body = new THREE.Mesh(new THREE.BoxGeometry(length, 0.52, width), paint);
-    body.position.y = ride + 0.28;
-    body.castShadow = true;
-    group.add(body);
-
-    const cabin = new THREE.Mesh(
-      new THREE.BoxGeometry(length * 0.42, 0.48, width * 0.9),
-      paint,
-    );
-    cabin.position.set(-0.08, ride + 0.88, 0);
-    cabin.castShadow = true;
-    group.add(cabin);
-
-    const windscreen = new THREE.Mesh(
-      new THREE.BoxGeometry(0.06, 0.34, width * 0.8),
-      glass,
-    );
-    windscreen.position.set(length * 0.18, ride + 0.9, 0);
-    group.add(windscreen);
-
-    const front = new THREE.Mesh(
-      new THREE.BoxGeometry(0.18, 0.22, width * 0.98),
-      bumper,
-    );
-    front.position.set(length * 0.45, ride + 0.28, 0);
-    group.add(front);
-
-    const rear = new THREE.Mesh(
-      new THREE.BoxGeometry(0.18, 0.22, width * 0.98),
-      bumper,
-    );
-    rear.position.set(-length * 0.45, ride + 0.28, 0);
-    group.add(rear);
-
-    const wheelX = length * 0.3;
-    const wheelZ = width * 0.5 - 0.06;
-    for (const lx of [-wheelX, wheelX]) {
-      for (const lz of [-wheelZ, wheelZ]) {
-        const wheel = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.33, 0.33, 0.26, 9),
-          tyre,
+    const sink: CarSink = {
+      box: (part, size, at) => {
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(size[0], size[1], size[2]),
+          kit[part],
         );
-        wheel.rotation.x = Math.PI / 2;
-        wheel.position.set(lx, 0.33, lz);
-        group.add(wheel);
+        mesh.position.set(at[0], at[1], at[2]);
+        mesh.castShadow = true;
+        group.add(mesh);
+      },
+      wheel: (x, y, z, radius, thick) => {
+        const hub = new THREE.Group();
+        hub.position.set(x, y, z);
+        const tyre = new THREE.Mesh(
+          new THREE.CylinderGeometry(radius, radius, thick, 9),
+          kit.tyre,
+        );
+        tyre.rotation.x = Math.PI / 2;
+        hub.add(tyre);
         const cap = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.14, 0.14, 0.28, 7),
-          hub,
+          new THREE.CylinderGeometry(radius * 0.42, radius * 0.42, thick + 0.02, 7),
+          kit.hub,
         );
         cap.rotation.x = Math.PI / 2;
-        cap.position.set(lx, 0.33, lz);
-        group.add(cap);
-      }
-    }
+        hub.add(cap);
+        group.add(hub);
+        this.wheels.push(hub);
+      },
+    };
 
+    const size = assembleStreetCar(sink, kind, Math.random);
+    this.wheelR = size.wheelR;
     return group;
   }
 

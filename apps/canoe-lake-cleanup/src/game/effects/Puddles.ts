@@ -20,6 +20,13 @@ const FLOW = 1.15;
 
 const WATER = 0x4a8f9c;
 const DEEP = 0x2a5a68;
+const COFFEE = 0x5a3418;
+const COFFEE_DEEP = 0x2a1608;
+const ICE = 0xf0dcc4;
+const ICE_DEEP = 0xd4a090;
+
+export type SpillKind = "coffee" | "ice";
+type Stain = "water" | SpillKind;
 
 interface Puddle {
   mesh: THREE.Mesh;
@@ -37,6 +44,7 @@ interface Puddle {
   /** Flow heading in XZ while draining (for stretch). */
   flowX: number;
   flowZ: number;
+  stain: Stain;
 }
 
 /**
@@ -86,6 +94,7 @@ export class Puddles {
     let nearest: Puddle | null = null;
     let best = MERGE * MERGE;
     for (const puddle of this.puddles) {
+      if (puddle.stain !== "water") continue;
       const dx = puddle.x - x;
       const dz = puddle.z - z;
       const d2 = dx * dx + dz * dz;
@@ -108,9 +117,11 @@ export class Puddles {
     }
 
     if (this.puddles.length >= MAX_PUDDLES) {
-      // Top up the smallest rather than spawning forever.
-      let weak = this.puddles[0]!;
-      for (const puddle of this.puddles) {
+      // Top up the smallest water puddle rather than spawning forever.
+      const waters = this.puddles.filter((p) => p.stain === "water");
+      if (waters.length === 0) return;
+      let weak = waters[0]!;
+      for (const puddle of waters) {
         if (puddle.volume < weak.volume) weak = puddle;
       }
       weak.x = x;
@@ -143,10 +154,81 @@ export class Puddles {
       disturb: 0.9,
       flowX: 0,
       flowZ: 0,
+      stain: "water",
     };
     this.pose(puddle);
     this.scene.add(mesh, stream);
     this.puddles.push(puddle);
+  }
+
+  /** Dropped coffee or a melted 99 — sticky, stays put until you lance it. */
+  public spill(x: number, z: number, kind: SpillKind): void {
+    if (isInLake(x, z)) return;
+
+    let nearest: Puddle | null = null;
+    let best = 0.85 * 0.85;
+    for (const puddle of this.puddles) {
+      if (puddle.stain !== kind) continue;
+      const dx = puddle.x - x;
+      const dz = puddle.z - z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < best) {
+        best = d2;
+        nearest = puddle;
+      }
+    }
+    if (nearest) {
+      nearest.volume = Math.min(MAX_VOLUME, nearest.volume + 0.45);
+      nearest.disturb = Math.min(1.4, nearest.disturb + 0.6);
+      this.pose(nearest);
+      return;
+    }
+
+    const seed = Math.random() * 40;
+    const mesh = new THREE.Mesh(this.geometry, this.makeWaterMat(seed));
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.renderOrder = 2;
+    const stream = new THREE.Mesh(this.streamGeo, this.makeWaterMat(seed + 1.7));
+    stream.rotation.x = -Math.PI / 2;
+    stream.visible = false;
+    stream.renderOrder = 2;
+    const puddle: Puddle = {
+      mesh,
+      stream,
+      x,
+      z,
+      volume: 0.55,
+      drains: false,
+      seed,
+      disturb: 0.7,
+      flowX: 0,
+      flowZ: 0,
+      stain: kind,
+    };
+    this.pose(puddle);
+    this.scene.add(mesh, stream);
+    this.puddles.push(puddle);
+  }
+
+  /** Jet on a coffee / ice-cream puddle — washes it off the paving. */
+  public rinseStain(point: THREE.Vector3): boolean {
+    let nearest: Puddle | null = null;
+    let best = 0.85 * 0.85;
+    for (const puddle of this.puddles) {
+      if (puddle.stain === "water") continue;
+      const dx = puddle.x - point.x;
+      const dz = puddle.z - point.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < best) {
+        best = d2;
+        nearest = puddle;
+      }
+    }
+    if (!nearest) return false;
+    nearest.volume = Math.max(0, nearest.volume - 0.16);
+    nearest.disturb = Math.min(1.4, nearest.disturb + 0.55);
+    this.pose(nearest);
+    return true;
   }
 
   public update(delta: number, sunDirection?: THREE.Vector3): void {
@@ -157,7 +239,11 @@ export class Puddles {
 
     for (let i = this.puddles.length - 1; i >= 0; i--) {
       const puddle = this.puddles[i]!;
-      puddle.drains = distanceToShore(puddle.x, puddle.z) < DRAIN_RANGE;
+      if (puddle.stain === "water") {
+        puddle.drains = distanceToShore(puddle.x, puddle.z) < DRAIN_RANGE;
+      } else {
+        puddle.drains = false;
+      }
       puddle.disturb = Math.max(0, puddle.disturb - delta * 1.6);
 
       if (puddle.drains) {
@@ -192,7 +278,9 @@ export class Puddles {
         puddle.flowX *= Math.max(0, 1 - delta * 2);
         puddle.flowZ *= Math.max(0, 1 - delta * 2);
         // Inland paving — gathers, then dries off in the air.
-        puddle.volume -= EVAPORATE * delta * (0.5 + puddle.volume * 0.5);
+        const dry =
+          puddle.stain === "water" ? EVAPORATE : EVAPORATE * 0.22;
+        puddle.volume -= dry * delta * (0.5 + puddle.volume * 0.5);
       }
 
       if (puddle.volume <= 0.02) {
@@ -317,7 +405,15 @@ export class Puddles {
     puddle.mesh.scale.set(spread * across, spread * stretch, 1);
 
     const mat = puddle.mesh.material as THREE.ShaderMaterial;
-    mat.uniforms["opacity"]!.value = 0.28 + t * 0.42;
+    const tint =
+      puddle.stain === "coffee"
+        ? { wet: COFFEE, deep: COFFEE_DEEP, opacity: 0.55 }
+        : puddle.stain === "ice"
+          ? { wet: ICE, deep: ICE_DEEP, opacity: 0.5 }
+          : { wet: WATER, deep: DEEP, opacity: 0.28 };
+    (mat.uniforms["waterColor"]!.value as THREE.Color).setHex(tint.wet);
+    (mat.uniforms["deepColor"]!.value as THREE.Color).setHex(tint.deep);
+    mat.uniforms["opacity"]!.value = tint.opacity + t * 0.42;
     mat.uniforms["depth"]!.value = t;
     mat.uniforms["disturb"]!.value = puddle.disturb;
 

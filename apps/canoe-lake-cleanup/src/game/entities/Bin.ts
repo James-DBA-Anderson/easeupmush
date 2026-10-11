@@ -40,8 +40,8 @@ export function smashBinsAlong(
 
 /**
  * A council bin on its post. Starts empty; fills when people actually put
- * something in, and overflows in a heap on the lid until it's emptied with
- * the litter picker.
+ * something in, and overflows in a heap on the lid. Sack-swapping isn't a
+ * job on this shift — overflowing is just scenery.
  */
 export class Bin {
   private group: THREE.Group;

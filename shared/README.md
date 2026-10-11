@@ -4,9 +4,13 @@ Shared utilities for Ease Up Mush browser games.
 
 ## Packages
 
-### `@easeupmush/shared/phraseology`
+### `@easeupmush/shared/tool-switch`
 
-Pompey slang glossary used across the site.
+Click-the-logo menu that opens the other local benches (level editor, Spritebench, Meshbench, Linebench) in a new tab.
+
+### `@easeupmush/shared/dialogue`
+
+Shared types and helpers for a game's spoken-line catalog. Each game keeps its own catalog (see Canoe Lake `src/dialogue/`) so Linebench can import it on load.
 
 ```javascript
 import phraseology from '@easeupmush/shared/phraseology';

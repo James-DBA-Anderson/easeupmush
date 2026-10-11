@@ -1,3 +1,4 @@
+import { mountToolSwitch } from "@easeupmush/shared/tool-switch";
 import { cloneLevel, DEFAULT_LEVEL } from "../level/defaultLevel";
 import {
   clearLocalLevel,
@@ -76,7 +77,8 @@ type Hit =
         | "playArea"
         | "carPark"
         | "beach"
-        | "missions";
+        | "missions"
+        | "overnight";
       index: number;
     }
   | { kind: "elev"; zone: number; index: number }
@@ -150,6 +152,9 @@ const addMissionBtn = document.getElementById(
 const delMissionBtn = document.getElementById(
   "del-mission",
 ) as HTMLButtonElement;
+const missionNameRow = document.getElementById("mission-name-row");
+const missionWhenGroup = document.getElementById("mission-when-group");
+const overnightHeapsGroup = document.getElementById("overnight-heaps-group");
 const ribbonTabs = document.getElementById("ribbon-tabs")!;
 const ribbonPanes = Array.from(
   document.querySelectorAll<HTMLElement>(".ribbon-pane"),
@@ -168,6 +173,7 @@ if (!Array.isArray(level.terraceRuns)) {
 }
 if (!Array.isArray(level.fairyLightRuns)) level.fairyLightRuns = [];
 level.missionSpots = normalizeMissionSpots(level.missionSpots);
+if (!Array.isArray(level.overnightPiles)) level.overnightPiles = [];
 if (!level.fenceStyle) level.fenceStyle = "wire";
 fenceStyleSelect.value = level.fenceStyle;
 
@@ -188,6 +194,7 @@ if (!readLocalLevel()) {
     }
     if (!Array.isArray(level.fairyLightRuns)) level.fairyLightRuns = [];
     level.missionSpots = normalizeMissionSpots(level.missionSpots);
+    if (!Array.isArray(level.overnightPiles)) level.overnightPiles = [];
     if (!level.fenceStyle) level.fenceStyle = "wire";
     fenceStyleSelect.value = level.fenceStyle;
     fillPathSelect();
@@ -200,6 +207,8 @@ let tool: Tool = "shore";
 let activePath = 0;
 let activeElev = 0;
 let activeMission = 0;
+/** First job — placing overnight heaps rather than a single pin. */
+let editingOvernight = true;
 let selected: Hit | null = null;
 let placeTreeKind: TreeKind = "holm";
 /** Yaw used when placing flower beds (radians). */
@@ -226,6 +235,10 @@ function ensureFairyRuns(): void {
 
 function ensureMissionSpots(): void {
   level.missionSpots = normalizeMissionSpots(level.missionSpots);
+}
+
+function ensureOvernightPiles(): void {
+  if (!Array.isArray(level.overnightPiles)) level.overnightPiles = [];
 }
 
 function fairyStampColor(): FairyLightColor {
@@ -718,6 +731,7 @@ function undo(): void {
   fillPathSelect();
   fillElevSelect();
   level.missionSpots = normalizeMissionSpots(level.missionSpots);
+  if (!Array.isArray(level.overnightPiles)) level.overnightPiles = [];
   fillMissionSelect();
   if (!level.fenceStyle) level.fenceStyle = "wire";
   fenceStyleSelect.value = level.fenceStyle;
@@ -828,6 +842,11 @@ function pickWalkRay(
     }
   }
   if (tool === "missions" || tool === "pan") {
+    ensureOvernightPiles();
+    for (let i = 0; i < level.overnightPiles.length; i++) {
+      const p = level.overnightPiles[i]!;
+      consider(p[0], p[1], 2.4, { kind: "overnight", index: i }, [0.2, 0.6]);
+    }
     ensureMissionSpots();
     for (let i = 0; i < level.missionSpots.length; i++) {
       const m = level.missionSpots[i]!;
@@ -925,7 +944,17 @@ function applyHitSelection(hit: Hit): void {
     syncFoliageYawUi();
     status.textContent = `${TREE_LABELS[placeTreeKind]} selected — hold to drag, Delete to remove.`;
   }
+  if (hit.kind === "overnight") {
+    editingOvernight = true;
+    if (tool !== "missions" && tool !== "pan") setTool("missions");
+    selected = { kind: "overnight", index: hit.index };
+    missionSelect.value = "overnight";
+    syncMissionTimeUi();
+    status.textContent =
+      "Overnight heap — drag or arrows to move, Delete to remove.";
+  }
   if (hit.kind === "missions") {
+    editingOvernight = false;
     activeMission = hit.index;
     if (tool !== "missions" && tool !== "pan") setTool("missions");
     selected = { kind: "missions", index: hit.index };
@@ -974,6 +1003,10 @@ function selectionWorldPos(): { x: number; z: number } | null {
   if (selected.kind === "missions") {
     const m = level.missionSpots[selected.index];
     return m ? { x: m.x, z: m.z } : null;
+  }
+  if (selected.kind === "overnight") {
+    const p = level.overnightPiles[selected.index];
+    return p ? { x: p[0], z: p[1] } : null;
   }
   if (selected.kind === "trees") {
     const t = level.trees[selected.index];
@@ -1039,6 +1072,12 @@ function moveSelectedTo(wx: number, wz: number): boolean {
     level.bins[selected.index] = [wx, wz];
     return true;
   }
+  if (selected.kind === "overnight") {
+    ensureOvernightPiles();
+    if (!level.overnightPiles[selected.index]) return false;
+    level.overnightPiles[selected.index] = [wx, wz];
+    return true;
+  }
   if (selected.kind === "trees") {
     const t = level.trees[selected.index];
     if (!t) return false;
@@ -1101,6 +1140,9 @@ function deleteSelected(): boolean {
     fillPathSelect();
   } else if (selected.kind === "bins") {
     level.bins.splice(selected.index, 1);
+  } else if (selected.kind === "overnight") {
+    ensureOvernightPiles();
+    level.overnightPiles.splice(selected.index, 1);
   } else if (selected.kind === "trees") {
     level.trees.splice(selected.index, 1);
   } else if (selected.kind === "place") {
@@ -1123,6 +1165,7 @@ function deleteSelected(): boolean {
   }
   selected = null;
   dirty();
+  syncMissionTimeUi();
   return true;
 }
 
@@ -1252,6 +1295,11 @@ function hitTestWorld(wx: number, wz: number): Hit | null {
     }
   }
   if (tool === "missions" || tool === "pan") {
+    ensureOvernightPiles();
+    for (let i = 0; i < level.overnightPiles.length; i++) {
+      const p = level.overnightPiles[i]!;
+      if (near(p[0], p[1])) return { kind: "overnight", index: i };
+    }
     ensureMissionSpots();
     for (let i = 0; i < level.missionSpots.length; i++) {
       const m = level.missionSpots[i]!;
@@ -1404,6 +1452,26 @@ function drawMissionSpots(): void {
   });
 }
 
+function drawOvernightPiles(): void {
+  ensureOvernightPiles();
+  const active = tool === "missions" && editingOvernight;
+  level.overnightPiles.forEach((p, index) => {
+    const [sx, sy] = screenFromWorld(p[0], p[1]);
+    const sel = selected?.kind === "overnight" && selected.index === index;
+    ctx.beginPath();
+    ctx.arc(sx, sy, sel ? 7 : 5.5, 0, Math.PI * 2);
+    ctx.fillStyle = sel
+      ? "#d4a574"
+      : active
+        ? "#8b5a2b"
+        : "rgba(139,90,43,0.5)";
+    ctx.fill();
+    ctx.strokeStyle = sel ? "#fff" : "#000a";
+    ctx.lineWidth = sel ? 2 : 1;
+    ctx.stroke();
+  });
+}
+
 function fillMissionClockSelect(select: HTMLSelectElement): void {
   if (select.options.length > 0) return;
   for (const c of missionClockChoices()) {
@@ -1418,6 +1486,16 @@ function syncMissionTimeUi(): void {
   ensureMissionSpots();
   fillMissionClockSelect(missionStartSelect);
   fillMissionClockSelect(missionEndSelect);
+  if (missionNameRow) missionNameRow.hidden = editingOvernight;
+  if (missionWhenGroup) missionWhenGroup.hidden = editingOvernight;
+  if (overnightHeapsGroup) overnightHeapsGroup.hidden = !editingOvernight;
+  if (editingOvernight) {
+    missionNameInput.value = "Overnight tip";
+    missionStartSelect.value = missionClockSelectValue("gameStart");
+    missionEndSelect.value = missionClockSelectValue("gameEnd");
+    delMissionBtn.disabled = selected?.kind !== "overnight";
+    return;
+  }
   const m = level.missionSpots[activeMission];
   if (!m) return;
   missionNameInput.value = missionLabel(m);
@@ -1428,7 +1506,12 @@ function syncMissionTimeUi(): void {
 
 function fillMissionSelect(): void {
   ensureMissionSpots();
+  ensureOvernightPiles();
   missionSelect.innerHTML = "";
+  const overnight = document.createElement("option");
+  overnight.value = "overnight";
+  overnight.textContent = "Overnight tip";
+  missionSelect.appendChild(overnight);
   level.missionSpots.forEach((m, i) => {
     const opt = document.createElement("option");
     opt.value = String(i);
@@ -1438,20 +1521,31 @@ function fillMissionSelect(): void {
     missionSelect.appendChild(opt);
   });
   if (activeMission >= level.missionSpots.length) activeMission = 0;
-  missionSelect.value = String(activeMission);
+  missionSelect.value = editingOvernight ? "overnight" : String(activeMission);
   syncMissionTimeUi();
 }
 
 function selectMissionIndex(index: number): void {
   ensureMissionSpots();
   if (index < 0 || index >= level.missionSpots.length) return;
+  editingOvernight = false;
   activeMission = index;
   selected = { kind: "missions", index };
   missionSelect.value = String(index);
   syncMissionTimeUi();
 }
 
+function selectOvernight(): void {
+  ensureOvernightPiles();
+  editingOvernight = true;
+  selected =
+    selected?.kind === "overnight" ? selected : null;
+  missionSelect.value = "overnight";
+  syncMissionTimeUi();
+}
+
 function applyMissionClockFromUi(): void {
+  if (editingOvernight) return;
   ensureMissionSpots();
   const m = level.missionSpots[activeMission];
   if (!m) return;
@@ -1466,6 +1560,7 @@ function applyMissionClockFromUi(): void {
 }
 
 function applyMissionNameFromUi(): void {
+  if (editingOvernight) return;
   ensureMissionSpots();
   const m = level.missionSpots[activeMission];
   if (!m) return;
@@ -1483,6 +1578,7 @@ function addPlaceholderMission(): void {
   pushHistory();
   const spot = createPlaceholderMission(viewX, viewZ);
   level.missionSpots.push(spot);
+  editingOvernight = false;
   activeMission = level.missionSpots.length - 1;
   selected = { kind: "missions", index: activeMission };
   dirty();
@@ -1861,7 +1957,10 @@ function draw(): void {
     }
   }
   if (tool === "bins") drawHandles(level.bins, "#7dcea0", "bins");
-  if (tool === "missions" || tool === "pan") drawMissionSpots();
+  if (tool === "missions" || tool === "pan") {
+    drawOvernightPiles();
+    drawMissionSpots();
+  }
 
   ctx.restore();
 
@@ -2112,6 +2211,14 @@ function actAtWorld(wx: number, wz: number, shift = false): boolean {
     level.bins.push([wx, wz]);
     selected = { kind: "bins", index: level.bins.length - 1 };
     dirty();
+  } else if (tool === "missions" && editingOvernight) {
+    ensureOvernightPiles();
+    pushHistory();
+    level.overnightPiles.push([wx, wz]);
+    selected = { kind: "overnight", index: level.overnightPiles.length - 1 };
+    status.textContent = `Overnight heap ${level.overnightPiles.length} — drag or arrows to move, Delete to remove.`;
+    dirty();
+    syncMissionTimeUi();
   } else if (tool === "trees") {
     pushHistory();
     const spot =
@@ -2246,6 +2353,9 @@ function onPointerMove(ev: PointerEvent): void {
     }
   } else if (dragging.kind === "bins") {
     level.bins[dragging.index] = [wx, wz];
+  } else if (dragging.kind === "overnight") {
+    ensureOvernightPiles();
+    level.overnightPiles[dragging.index] = [wx, wz];
   } else if (dragging.kind === "missions") {
     const m = level.missionSpots[dragging.index];
     if (m) {
@@ -2397,6 +2507,12 @@ function nudgeSelected(dx: number, dz: number): boolean {
     level.bins[selected.index] = [p[0] + dx, p[1] + dz];
     return true;
   }
+  if (selected.kind === "overnight") {
+    const p = level.overnightPiles[selected.index];
+    if (!p) return false;
+    level.overnightPiles[selected.index] = [p[0] + dx, p[1] + dz];
+    return true;
+  }
   if (selected.kind === "missions") {
     const m = level.missionSpots[selected.index];
     if (!m) return false;
@@ -2498,7 +2614,10 @@ function setTool(next: Tool): void {
     if (isPolyTool(next)) activePath = 0;
     if (next === "missions") {
       ensureMissionSpots();
-      selected = { kind: "missions", index: activeMission };
+      ensureOvernightPiles();
+      if (!editingOvernight) {
+        selected = { kind: "missions", index: activeMission };
+      }
     }
   }
   tool = next;
@@ -2536,7 +2655,9 @@ function setTool(next: Tool): void {
                               ? "Foliage: pick a kind and click to place. Empty → none in the game."
                               : `Foliage: ${level.trees.length} placed — click to add, drag/arrows move, [ ] rotate beds, Delete remove.`
                             : next === "missions"
-                              ? "Missions: Add a named draft pin, set start/end, drag it. Built-ins are red; placeholders amber."
+                              ? editingOvernight
+                                ? "Overnight tip: click paving to place heaps. Drag / arrows move; Delete removes. Empty → auto-scatter near the van."
+                                : "Missions: Add a named draft pin, set start/end, drag it. Built-ins are red; placeholders amber."
                               : "Pan: drag or scroll to move the view. Zoom slider or Ctrl/Cmd+scroll to zoom.";
   fillPathSelect();
   fillElevSelect();
@@ -2562,6 +2683,14 @@ pathSelect.addEventListener("change", () => {
 });
 
 missionSelect.addEventListener("change", () => {
+  if (missionSelect.value === "overnight") {
+    selectOvernight();
+    status.textContent =
+      "Overnight tip: click paving to place heaps. Drag / arrows move; Delete removes.";
+    draw();
+    walk.syncMarker();
+    return;
+  }
   selectMissionIndex(Number(missionSelect.value) || 0);
   const m = level.missionSpots[activeMission];
   status.textContent = m
@@ -2585,6 +2714,10 @@ addMissionBtn.addEventListener("click", () => {
 });
 delMissionBtn.addEventListener("click", () => {
   if (tool !== "missions") setTool("missions");
+  if (editingOvernight) {
+    if (selected?.kind === "overnight") deleteSelected();
+    return;
+  }
   deleteActiveMission();
 });
 
@@ -2823,9 +2956,11 @@ document.getElementById("reset")!.addEventListener("click", () => {
     if (!Array.isArray(level.fairyLightRuns)) level.fairyLightRuns = [];
     if (!Array.isArray(level.trees)) level.trees = [];
     level.missionSpots = normalizeMissionSpots(level.missionSpots);
+    if (!Array.isArray(level.overnightPiles)) level.overnightPiles = [];
     activePath = 0;
     activeElev = 0;
     activeMission = 0;
+    editingOvernight = true;
     selected = null;
     fillPathSelect();
     fillElevSelect();
@@ -2856,9 +2991,11 @@ document.getElementById("import-file")!.addEventListener("change", async (ev) =>
     if (!Array.isArray(level.elevationZones)) level.elevationZones = [];
     if (!Array.isArray(level.trees)) level.trees = [];
     level.missionSpots = normalizeMissionSpots(level.missionSpots);
+    if (!Array.isArray(level.overnightPiles)) level.overnightPiles = [];
     activePath = 0;
     activeElev = 0;
     activeMission = 0;
+    editingOvernight = true;
     selected = null;
     fillPathSelect();
     fillElevSelect();
@@ -3122,6 +3259,10 @@ debugMenu.addEventListener("click", (ev) => {
 });
 
 missionTestPlay.addEventListener("click", () => {
+  if (editingOvernight) {
+    openDebugGame("start");
+    return;
+  }
   ensureMissionSpots();
   const m = level.missionSpots[activeMission];
   if (!m) return;
@@ -3255,6 +3396,11 @@ zoomInput.addEventListener("input", () => {
   persistView();
   draw();
 });
+
+const toolSwitchHost = document.querySelector("#titlebar h1");
+if (toolSwitchHost instanceof HTMLElement) {
+  mountToolSwitch(toolSwitchHost, "editor");
+}
 
 void readRefBackground().then((saved) => {
   if (!saved) return;

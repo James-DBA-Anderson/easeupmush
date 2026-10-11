@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { ModelPart, ModelSpec } from './spec'
+import type { ModelGroup, ModelPart, ModelSpec } from './spec'
 
 function segs(density: ModelSpec['density']): { w: number; h: number } {
   if (density === 'chunky') return { w: 6, h: 4 }
@@ -62,10 +62,24 @@ export function partHandle(object: THREE.Object3D): THREE.Object3D {
   return object
 }
 
+export function makeGroupPivot(entry: ModelGroup): THREE.Group {
+  const pivot = new THREE.Group()
+  pivot.name = entry.label || entry.id
+  pivot.userData.partId = entry.id
+  pivot.userData.isGroup = true
+  pivot.position.set(...entry.position)
+  pivot.rotation.set(...entry.rotation)
+  pivot.scale.set(...entry.scale)
+  return pivot
+}
+
 export function buildGroupFromSpec(spec: ModelSpec): THREE.Group {
   const group = new THREE.Group()
   group.name = spec.name || 'model'
   const pivots = new Map<string, THREE.Group>()
+  for (const entry of spec.groups ?? []) {
+    pivots.set(entry.id, makeGroupPivot(entry))
+  }
   for (const part of spec.parts) {
     const mesh = meshFromPart(part, spec.density)
     const pivot = new THREE.Group()
@@ -79,12 +93,14 @@ export function buildGroupFromSpec(spec: ModelSpec): THREE.Group {
     pivot.add(mesh)
     pivots.set(part.id, pivot)
   }
-  for (const part of spec.parts) {
-    const pivot = pivots.get(part.id)
-    if (!pivot) continue
-    const parent = part.parent ? pivots.get(part.parent) : undefined
+  const attach = (id: string, parentId?: string) => {
+    const pivot = pivots.get(id)
+    if (!pivot) return
+    const parent = parentId ? pivots.get(parentId) : undefined
     if (parent && parent !== pivot) parent.add(pivot)
     else group.add(pivot)
   }
+  for (const entry of spec.groups ?? []) attach(entry.id, entry.parent)
+  for (const part of spec.parts) attach(part.id, part.parent)
   return group
 }

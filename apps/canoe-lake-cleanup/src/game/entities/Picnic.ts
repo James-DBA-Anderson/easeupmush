@@ -13,6 +13,7 @@ import {
 import { Face } from "./Face";
 import { Grumble } from "../effects/Grumble";
 import { PATH_Y } from "../world/lake";
+import { lines } from "../../dialogue";
 
 const COATS = [0x2f4f7f, 0x8b3a3a, 0x3f6b4a, 0x5a4a7a, 0x2b2b33, 0xb06a2c, 0xd8c8a0];
 const TROUSERS = [0x2b3038, 0x4a4a52, 0x6b5a44, 0x3a5a6a];
@@ -25,42 +26,6 @@ const HIP_Y = 0.92;
 const SIT_HIP_Y = 0.34;
 /** Half-up shoo — still low, not standing. */
 const SHOO_HIP_Y = 0.55;
-
-const CHAT = [
-  "LOVELY DAY",
-  "PASS THE CRISPS",
-  "MORE TEA?",
-  "DON'T MIND IF I DO",
-  "CRACKING PICNIC",
-  "WATCH THE ANTS",
-  "SAVE ME A SARNIE",
-];
-
-const GULL_RAID = [
-  "OI! GET OFF!",
-  "THAT'S OUR LUNCH!",
-  "BLOODY SEAGULL!",
-  "SHOOD!",
-  "NOT THE SARNIES!",
-  "GERROUT OF IT!",
-];
-
-const GULL_STOLE = [
-  "IT'S HAD THE LOT!",
-  "RUDE!",
-  "THAT WAS MY CHEESE!",
-  "LITTLE THIEF!",
-  "COME BACK WITH THAT!",
-];
-
-const HOSED = [
-  "MY SARNIES!",
-  "YOU'VE SOAKED THE LOT!",
-  "THE CUTLERY!",
-  "OI — THAT WAS LUNCH!",
-  "LOOK AT THE STATE OF IT!",
-  "YOU'VE RUINED THE PICNIC!",
-];
 
 type Phase = "toGate" | "arriving" | "settled" | "toExit" | "leaving";
 
@@ -238,7 +203,7 @@ export class Picnic {
     const guest =
       this.guests.find((g) => g.phase === "settled") ??
       this.guests.find((g) => g.phase === "arriving");
-    if (guest) this.say(guest, GULL_RAID);
+    if (guest) this.say(guest, lines('picnic', 'gull-raid'));
   }
 
   /** Beakful taken — hide a plate and swear about it. */
@@ -255,7 +220,7 @@ export class Picnic {
       }
       this.raidLeft = Math.max(this.raidLeft, 3.2);
       const guest = this.guests.find((g) => g.phase === "settled");
-      if (guest) this.say(guest, GULL_STOLE);
+      if (guest) this.say(guest, lines('picnic', 'gull-stole'));
       return;
     }
   }
@@ -328,7 +293,7 @@ export class Picnic {
         const guest =
           this.guests.find((g) => g.phase === "settled") ?? this.guests[0];
         if (guest) {
-          this.say(guest, HOSED);
+          this.say(guest, lines('picnic', 'hosed'));
           guest.face.setMood("angry");
         }
       }
@@ -416,7 +381,7 @@ export class Picnic {
         guest.chatIn -= delta;
         if (guest.chatIn <= 0) {
           guest.chatIn = 10 + Math.random() * 18;
-          if (Math.random() < 0.5) this.say(guest, CHAT);
+          if (Math.random() < 0.5) this.say(guest, lines('picnic', 'chat'));
         }
       }
     }
@@ -779,6 +744,6 @@ export class Picnic {
     const line = lines[Math.floor(Math.random() * lines.length)]!;
     const at = guest.group.position.clone();
     at.y = 2.1;
-    this.grumble = new Grumble(this.scene, line, at);
+    this.grumble = new Grumble(this.scene, line, at, "picnic");
   }
 }

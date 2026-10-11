@@ -573,6 +573,38 @@ textarea {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
+.outliner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  width: 100%;
+  max-height: 14rem;
+  overflow: auto;
+}
+
+.outliner button {
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 0.22rem 0.45rem;
+  font-size: 0.75rem;
+  text-align: left;
+  color: var(--fog);
+}
+
+.outliner button.group {
+  font-weight: 650;
+}
+
+.outliner button.active {
+  border-color: color-mix(in srgb, var(--accent) 45%, white 8%);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.outliner button.primary {
+  border-color: color-mix(in srgb, var(--accent) 80%, white 10%);
+}
+
 .gizmo-hint {
   margin: 0;
   font-size: 0.75rem;

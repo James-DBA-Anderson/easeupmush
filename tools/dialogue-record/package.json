@@ -1,0 +1,37 @@
+{
+  "name": "@easeupmush/dialogue-record",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Linebench — record game dialogue locally.",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite",
+    "dev:api": "tsx watch server/index.ts",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "start": "tsx server/index.ts"
+  },
+  "dependencies": {
+    "@easeupmush/canoe-lake-cleanup": "*",
+    "@easeupmush/shared": "*",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.170.0",
+    "@vitejs/plugin-react": "^6.0.4",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.20.5",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0"
+  }
+}

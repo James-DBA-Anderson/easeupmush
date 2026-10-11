@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { mountToolSwitch } from '@easeupmush/shared/tool-switch'
 import {
   fetchHealth,
   generateModel,
@@ -36,7 +37,8 @@ import {
   type ImportSource,
 } from './lib/fileSource'
 import type { CutLoopInfo } from './lib/cutMesh'
-import type { ModelSpec, PartShape } from './lib/spec'
+import { outlinerRows } from './lib/outliner'
+import type { ModelSpec, PartShape, SceneNodeInfo } from './lib/spec'
 import { PART_SHAPE_LABELS, PART_SHAPES } from './lib/spec'
 import { Viewport, type EditorTool, type ViewportApi } from './viewport/Viewport'
 import { emptyClip, type ClipInfo } from './lib/anim'
@@ -48,6 +50,7 @@ type AppSnap = {
   spec: ModelSpec | null
   current: GenerateDone | null
   selectedPartId: string | null
+  selectedPartIds: string[]
   importedSource: ImportSource | null
 }
 
@@ -82,11 +85,13 @@ function App() {
   const [editing, setEditing] = useState(false)
   const [tool, setTool] = useState<EditorTool>('orbit')
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null)
-  const [liveParts, setLiveParts] = useState<{ id: string; label: string }[]>([])
+  const [selectedPartIds, setSelectedPartIds] = useState<string[]>([])
+  const [liveParts, setLiveParts] = useState<SceneNodeInfo[]>([])
   const [promptOpen, setPromptOpen] = useState(false)
   const [promptMode, setPromptMode] = useState<'create' | 'edit'>('create')
   const [brushRadius, setBrushRadius] = useState(0.32)
   const [brushStrength, setBrushStrength] = useState(0.7)
+  const brandRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const viewRef = useRef<ViewportApi | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -104,14 +109,21 @@ function App() {
   const specRef = useRef(spec)
   const currentRef = useRef(current)
   const selectedRef = useRef(selectedPartId)
+  const selectedIdsRef = useRef(selectedPartIds)
   const importedRef = useRef(importedSource)
   const appPast = useRef<AppSnap[]>([])
   const appFuture = useRef<AppSnap[]>([])
   specRef.current = spec
   currentRef.current = current
   selectedRef.current = selectedPartId
+  selectedIdsRef.current = selectedPartIds
   importedRef.current = importedSource
   const hasModel = Boolean(current || spec)
+  useEffect(() => {
+    const el = brandRef.current
+    if (!el) return
+    return mountToolSwitch(el, 'meshbench')
+  }, [])
   useEffect(() => {
     if (!hasModel) setAnimOpen(false)
   }, [hasModel])
@@ -129,11 +141,38 @@ function App() {
   const cutting = tool === 'cut'
   const [cutLoop, setCutLoop] = useState<CutLoopInfo>({ count: 0, closed: false })
   const [cutPieces, setCutPieces] = useState<{ id: string; label: string }[] | null>(null)
-  const promptParts = spec?.parts?.length ? spec.parts : liveParts
+  const promptParts = spec?.parts?.length ? spec.parts : liveParts.filter((n) => n.kind !== 'group')
+  const selectedNode =
+    liveParts.find((p) => p.id === selectedPartId) ??
+    spec?.parts.find((p) => p.id === selectedPartId) ??
+    spec?.groups?.find((g) => g.id === selectedPartId) ??
+    null
   const selectedPart =
     spec?.parts.find((p) => p.id === selectedPartId) ??
-    liveParts.find((p) => p.id === selectedPartId) ??
-    null
+    (liveParts.find((p) => p.id === selectedPartId)?.kind === 'part'
+      ? liveParts.find((p) => p.id === selectedPartId)
+      : null)
+  const selectedIsGroup =
+    liveParts.find((p) => p.id === selectedPartId)?.kind === 'group' ||
+    Boolean(spec?.groups?.some((g) => g.id === selectedPartId))
+  const outliner = outlinerRows(
+    liveParts.length
+      ? liveParts
+      : [
+          ...(spec?.groups ?? []).map((g) => ({
+            id: g.id,
+            label: g.label,
+            kind: 'group' as const,
+            parent: g.parent,
+          })),
+          ...(spec?.parts ?? []).map((p) => ({
+            id: p.id,
+            label: p.label,
+            kind: 'part' as const,
+            parent: p.parent,
+          })),
+        ],
+  )
   const selectedColor =
     spec?.parts.find((p) => p.id === selectedPartId)?.color ?? '#c47a4a'
 
@@ -186,15 +225,50 @@ function App() {
     }
   }, [busy])
 
-  const onSelectPart = useCallback((id: string | null) => {
-    if (!id) return
+  const onSelectPart = useCallback((id: string | null, opts?: { additive?: boolean }) => {
+    if (!id) {
+      setSelectedPartId(null)
+      setSelectedPartIds([])
+      return
+    }
     setSelectedPartId(id)
+    setSelectedPartIds((current) => {
+      if (opts?.additive) {
+        return current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+      }
+      return [id]
+    })
     setEditing(true)
     setTool((current) => (current === 'orbit' ? 'translate' : current))
   }, [])
 
-  const onParts = useCallback((parts: { id: string; label: string }[]) => {
+  const onParts = useCallback((parts: SceneNodeInfo[]) => {
     setLiveParts(parts)
+  }, [])
+
+  const onGroup = useCallback(() => {
+    const ids = selectedIdsRef.current.length ? selectedIdsRef.current : selectedRef.current ? [selectedRef.current] : []
+    const grouped = viewRef.current?.groupSelection(ids)
+    if (!grouped) {
+      setNotice('Select a part, then Group. Shift-click to add more.')
+      return
+    }
+    const next = viewRef.current?.captureSpec(specRef.current)
+    if (next) setSpec(next)
+    setSelectedPartId(grouped.id)
+    setSelectedPartIds([grouped.id])
+    setNotice(`Grouped as ${grouped.label}`)
+  }, [])
+
+  const onUngroup = useCallback(() => {
+    const id = selectedRef.current
+    if (!id) return
+    if (!viewRef.current?.ungroup(id)) {
+      setNotice('Select a group to ungroup')
+      return
+    }
+    const next = viewRef.current?.captureSpec(specRef.current)
+    if (next) setSpec(next)
   }, [])
 
   const takeAppSnap = useCallback(
@@ -202,6 +276,7 @@ function App() {
       spec: specRef.current ? structuredClone(specRef.current) : null,
       current: currentRef.current,
       selectedPartId: selectedRef.current,
+      selectedPartIds: selectedIdsRef.current,
       importedSource: importedRef.current,
     }),
     [],
@@ -211,8 +286,25 @@ function App() {
     setSpec(snap.spec)
     setCurrent(snap.current)
     setSelectedPartId(snap.selectedPartId)
+    setSelectedPartIds(snap.selectedPartIds ?? [])
     setImportedSource(snap.importedSource)
   }, [])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'g' && event.key !== 'G') return
+      if (!(event.metaKey || event.ctrlKey)) return
+      const target = event.target
+      if (target instanceof HTMLElement && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return
+      }
+      event.preventDefault()
+      if (event.shiftKey) onUngroup()
+      else onGroup()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onGroup, onUngroup])
 
   const syncHistoryFlags = useCallback(() => {
     setCanUndo(appPast.current.length > 0)
@@ -322,6 +414,7 @@ function App() {
     setTool('orbit')
     if (!revising) {
       setSelectedPartId(null)
+      setSelectedPartIds([])
       setImportedSource(null)
       if (importUrlRef.current) {
         URL.revokeObjectURL(importUrlRef.current)
@@ -361,6 +454,7 @@ function App() {
       const still =
         keepPart && result.spec?.parts.some((part) => part.id === keepPart) ? keepPart : null
       setSelectedPartId(still)
+      setSelectedPartIds(still ? [still] : [])
       setGallery((prev) => [{ ...result, createdAt: Date.now() }, ...prev].slice(0, 16))
       setPromptOpen(false)
       setSceneRev((rev) => rev + 1)
@@ -478,6 +572,7 @@ function App() {
         prompt: label,
       })
       setSelectedPartId(shape)
+      setSelectedPartIds([shape])
       setEditing(true)
       setTool('translate')
       setPromptOpen(false)
@@ -488,7 +583,10 @@ function App() {
     const added = viewRef.current?.addShape(shape, color)
     const next = viewRef.current?.captureSpec(spec)
     if (next) setSpec(next)
-    if (added) setSelectedPartId(added.id)
+    if (added) {
+      setSelectedPartId(added.id)
+      setSelectedPartIds([added.id])
+    }
     setEditing(true)
     setTool('translate')
     setNotice(`Added ${added?.label ?? label}`)
@@ -502,6 +600,7 @@ function App() {
       if (!kind) throw new Error('Use a GLB, GLTF, OBJ, or Meshbench JSON file')
       commitHistory()
       setSelectedPartId(null)
+      setSelectedPartIds([])
       setEditing(true)
       setImportedSource(bundle.source)
       setPromptOpen(false)
@@ -572,7 +671,7 @@ function App() {
     <div className="app">
       <div className="backdrop" aria-hidden />
       <header className="chrome">
-        <div className="brand">
+        <div className="brand" ref={brandRef}>
           <span className="brand-mark" aria-hidden />
           <p className="brand-name">Meshbench</p>
         </div>
@@ -684,6 +783,7 @@ function App() {
           editing={editing}
           tool={tool}
           selectedPartId={selectedPartId}
+          selectedPartIds={selectedPartIds}
           brushRadius={brushRadius}
           brushStrength={brushStrength}
           showTextures={showTextures}
@@ -736,7 +836,7 @@ function App() {
                         key={part.id}
                         type="button"
                         className={selectedPartId === part.id ? 'active' : ''}
-                        onClick={() => setSelectedPartId(part.id)}
+                        onClick={() => onSelectPart(part.id)}
                       >
                         {part.label || part.id}
                       </button>
@@ -1237,36 +1337,47 @@ function App() {
 
         {hasModel && !cutting && (
           <div className="inspector">
-            <strong>{selectedPart?.label ?? 'Parts'}</strong>
-            {selectedPart ? (
-              <>
-                <p className="gizmo-hint">Click an arrow or coloured plane, then drag. Click empty space to orbit — this part stays selected.</p>
-                <label>
-                  Colour
-                  <input
-                    type="color"
-                    value={selectedColor}
-                    onPointerDown={() => commitHistory()}
-                    onChange={(e) => {
-                      const color = e.target.value
-                      setSpec((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              parts: prev.parts.map((p) =>
-                                p.id === selectedPart.id ? { ...p, color } : p,
-                              ),
-                            }
-                          : prev,
-                      )
-                      viewRef.current?.updatePart(selectedPart.id, { color })
-                    }}
-                  />
-                </label>
-              </>
+            <strong>{selectedNode?.label ?? 'Parts'}</strong>
+            {selectedNode ? (
+              <p className="gizmo-hint">
+                {selectedIsGroup
+                  ? 'This group moves as one. Click a child in the list or on the mesh to edit a piece.'
+                  : 'Click an arrow or coloured plane, then drag. Shift-click to add to a group. Double-click a part to select its group.'}
+              </p>
             ) : (
               <p className="gizmo-hint">Add a shape, or click a part to select it.</p>
             )}
+            {selectedPart && !selectedIsGroup ? (
+              <label>
+                Colour
+                <input
+                  type="color"
+                  value={selectedColor}
+                  onPointerDown={() => commitHistory()}
+                  onChange={(e) => {
+                    const color = e.target.value
+                    const id = selectedPart.id
+                    setSpec((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            parts: prev.parts.map((p) => (p.id === id ? { ...p, color } : p)),
+                          }
+                        : prev,
+                    )
+                    viewRef.current?.updatePart(id, { color })
+                  }}
+                />
+              </label>
+            ) : null}
+            <div className="part-list">
+              <button type="button" disabled={selectedPartIds.length < 1} onClick={onGroup}>
+                Group
+              </button>
+              <button type="button" disabled={!selectedIsGroup} onClick={onUngroup}>
+                Ungroup
+              </button>
+            </div>
             <span className="label">Add shape</span>
             <div className="part-list">
               {PART_SHAPES.map((shape) => (
@@ -1275,19 +1386,17 @@ function App() {
                 </button>
               ))}
             </div>
-            <div className="part-list">
-              {(spec?.parts ?? liveParts).map((part) => (
+            <span className="label">Objects</span>
+            <div className="outliner">
+              {outliner.map((node) => (
                 <button
-                  key={part.id}
+                  key={node.id}
                   type="button"
-                  className={part.id === selectedPartId ? 'active' : ''}
-                  onClick={() => {
-                    setSelectedPartId(part.id)
-                    setEditing(true)
-                    setTool((current) => (current === 'orbit' ? 'translate' : current))
-                  }}
+                  className={`${node.kind}${selectedPartIds.includes(node.id) ? ' active' : ''}${node.id === selectedPartId ? ' primary' : ''}`}
+                  style={{ paddingLeft: `${0.45 + node.depth * 0.7}rem` }}
+                  onClick={(event) => onSelectPart(node.id, { additive: event.shiftKey })}
                 >
-                  {part.label}
+                  {node.kind === 'group' ? `▸ ${node.label}` : node.label}
                 </button>
               ))}
             </div>
@@ -1324,7 +1433,7 @@ function App() {
                     value={piece.label}
                     placeholder={`e.g. ${index === 0 ? 'head' : index === 1 ? 'body' : 'shard'}`}
                     onFocus={() => {
-                      setSelectedPartId(piece.id)
+                      onSelectPart(piece.id)
                       viewRef.current?.updatePart(piece.id, {})
                     }}
                     onChange={(e) => {

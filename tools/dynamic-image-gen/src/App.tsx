@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { mountToolSwitch } from '@easeupmush/shared/tool-switch'
 import {
   fetchHealth,
   generateSprite,
@@ -45,6 +46,7 @@ function App() {
   const [current, setCurrent] = useState<GenerateDone | null>(null)
   const [gallery, setGallery] = useState<GalleryItem[]>([])
   const [checker, setChecker] = useState(true)
+  const brandRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   const size = SIZE_PRESETS[sizeIndex]
@@ -55,6 +57,12 @@ function App() {
     pose,
     transparentHint: chromaKey,
   })
+
+  useEffect(() => {
+    const el = brandRef.current
+    if (!el) return
+    return mountToolSwitch(el, 'spritebench')
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -136,7 +144,7 @@ function App() {
     <div className="app">
       <div className="backdrop" aria-hidden />
       <header className="top">
-        <div className="brand">
+        <div className="brand" ref={brandRef}>
           <span className="brand-mark" aria-hidden />
           <div>
             <p className="brand-name">Spritebench</p>

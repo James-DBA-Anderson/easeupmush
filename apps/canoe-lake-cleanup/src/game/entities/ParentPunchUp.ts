@@ -6,35 +6,11 @@ import { groundHeight } from "../world/terrain";
 import { gateOutside, nearestGate } from "../world/pathRoute";
 import { Face } from "./Face";
 import { Grumble } from "../effects/Grumble";
+import { lines } from "../../dialogue";
 
 const COATS = [0x2f4f7f, 0x8b3a3a, 0x3f6b4a, 0x5a4a7a, 0x2b2b33, 0xb06a2c, 0xd8c8a0];
 const TROUSERS = [0x2b3038, 0x4a4a52, 0x6b5a44, 0x1a3a6a];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
-
-const ROWS = [
-  "YOUR KID STARTED IT",
-  "HE PUSHED MINE!",
-  "COME ON THEN",
-  "OUTSIDE, NOW",
-  "I'LL HAVE YOU",
-  "SAY THAT AGAIN",
-  "DON'T YOU TOUCH HIM",
-  "YOU WHAT MATE",
-];
-const HOSED = [
-  "OI THAT'S COLD",
-  "YOU'VE SOAKED ME",
-  "RIGHT WE'RE GOING",
-  "THIS ISN'T OVER",
-  "LOOK AT MY BLOUSE",
-  "YOU CAN'T DO THAT",
-];
-const BROKEN = [
-  "ALL RIGHT, ALL RIGHT",
-  "KIDS, WE'RE GOING",
-  "THIS IS EMBARRASSING",
-  "COME ON, LEAVE IT",
-];
 
 const COUNT = 4;
 const RING = 1.35;
@@ -189,7 +165,7 @@ export class ParentPunchUp {
       hit = true;
       parent.soak = Math.min(1, parent.soak + (heavy ? 0.55 : 0.28));
       parent.face.setMood("shocked");
-      this.say(parent, HOSED);
+      this.say(parent, lines('parent', 'hosed'));
       if (parent.soak >= SOAK_NEED && parent.phase !== "stunned") {
         parent.phase = "stunned";
         parent.stun = 0.85;
@@ -278,7 +254,7 @@ export class ParentPunchUp {
       parent.face.setMood("disgusted");
     }
     const lead = this.parents[0];
-    if (lead) this.say(lead, BROKEN);
+    if (lead) this.say(lead, lines('parent', 'broken'));
   }
 
   private tickParent(parent: Parent, delta: number, player: THREE.Vector3): void {
@@ -364,7 +340,7 @@ export class ParentPunchUp {
       parent.swing = 0.5;
       parent.swung = false;
       this.hitFrom = here.clone();
-      this.say(parent, ["COME HERE YOU", "I'LL HAVE YOU", "OUT THE WAY"]);
+      this.say(parent, lines('parent', 'chase'));
       return;
     }
   }
@@ -451,7 +427,7 @@ export class ParentPunchUp {
       parent.shoutIn -= delta;
       if (parent.shoutIn > 0) continue;
       parent.shoutIn = 2.4 + Math.random() * 3.6;
-      if (Math.random() < 0.55) this.say(parent, ROWS);
+      if (Math.random() < 0.55) this.say(parent, lines('parent', 'rows'));
     }
   }
 
@@ -463,6 +439,7 @@ export class ParentPunchUp {
       this.scene,
       lines[Math.floor(Math.random() * lines.length)]!,
       at,
+      "parent",
     );
   }
 

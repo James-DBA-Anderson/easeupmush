@@ -2,7 +2,6 @@ import * as THREE from "three";
 import type { Game } from "./Game";
 import { MobileControls } from "./MobileControls";
 import { WaterJet } from "./effects/WaterJet";
-import { LitterPicker } from "./effects/LitterPicker";
 import { isInLake, WATER_Y, wadeFootY } from "./world/lake";
 import { groundHeight } from "./world/terrain";
 import { insidePark } from "./world/fence";
@@ -35,17 +34,10 @@ const BOB_HEIGHT = 0.032;
 const BOB_SWAY = 0.018;
 const BOB_ROLL = 0.014;
 
-/** How far in front of the boots the spike can reach. */
-const PICKER_REACH = 2;
-
-/** How long a tool takes to come up or go down. */
+/** How long the hose takes to come up after intro, or swap heavy/regular. */
 const SWAP_TIME = 0.28;
-/** How long with no rubbish about before the picker goes back for the jet. */
-const PICKER_PUT_AWAY = 2;
-/** Picking a tool by hand holds off the automatic swapping for a bit. */
-const MANUAL_HOLD = 10;
 
-export type Tool = "hose" | "picker" | "heavyHose";
+export type Tool = "hose" | "heavyHose";
 
 /** Two minutes of full-bore heavy hose on the van tank. */
 const HEAVY_TANK = 120;
@@ -56,7 +48,6 @@ export class Player {
   private game: Game;
   private mobileControls: MobileControls;
   private jet: WaterJet;
-  private picker: LitterPicker;
   /** What's in their hands, what's wanted next, and how far through the
    * business of swapping over they are: 0 up and ready, 1 down out of sight. */
   private tool: Tool | null = null;
@@ -66,10 +57,6 @@ export class Player {
   }
   private wanted: Tool | null = null;
   private holster = 0;
-  /** Seconds with nothing to do in front of them, and how long the last
-   * hand-picked tool stays picked. */
-  private idle = 0;
-  private manual = 0;
 
   private moveForward = false;
   private moveBackward = false;
@@ -137,9 +124,6 @@ export class Player {
         this.game.sprayHitsBody(point, dirty, direction),
       onFaceHit: (dirty) => this.game.splashFace(dirty),
     });
-    this.picker = new LitterPicker(camera);
-    this.picker.setStowed(true);
-
     this.setupPointerLock();
     this.setupEventListeners();
   }
@@ -218,15 +202,6 @@ export class Player {
       case "ShiftRight":
         this.sprinting = true;
         break;
-      case "Digit1":
-        this.pickTool("hose", true);
-        break;
-      case "Digit2":
-        this.pickTool("picker", true);
-        break;
-      case "KeyQ":
-        this.pickTool(this.wanted === "picker" ? "hose" : "picker", true);
-        break;
       case "KeyE":
         event.preventDefault();
         if (this.game.isIntroPlaying()) break;
@@ -253,17 +228,23 @@ export class Player {
   }
 
   /**
-   * Calls for a different tool. It isn't in their hands straight away: the
-   * one they're holding goes down first, then the new one comes up.
+   * Calls for a hose. Heavy and regular swap in place — the lance stays in
+   * their hands the whole shift once they're on duty.
    */
-  private pickTool(tool: Tool | null, byHand = false): void {
+  private pickTool(tool: Tool | null): void {
     if (!this.game.hasClockedOn() && tool !== null) return;
-    // While the heavy reel's still got water, it's the hose on their belt.
+    // While the heavy reel's still got water, that's the lance they're holding.
     if (this.heavyTank > 0 && tool === "hose") tool = "heavyHose";
-    if (byHand) this.manual = MANUAL_HOLD;
     if (tool === this.wanted) return;
     this.wanted = tool;
     this.setSpraying(false);
+    if (tool === "hose" || tool === "heavyHose") {
+      this.tool = tool;
+      this.holster = 0;
+      this.jet.setStowed(false);
+      this.jet.setHolster(0);
+      this.game.showTool(this.tool);
+    }
   }
 
   /** Mission 4 — heavy reel from the van load bay. */
@@ -271,7 +252,7 @@ export class Player {
     this.heavyTank = HEAVY_TANK;
     this.jet.setHeavyMode(true);
     this.jet.setPressure(1);
-    this.pickTool("heavyHose", true);
+    this.pickTool("heavyHose");
   }
 
   public isHeavyHoseActive(): boolean {
@@ -284,7 +265,7 @@ export class Player {
 
   /** Hose out once they've stepped onto the path. */
   public pickStartingTool(): void {
-    this.pickTool("hose", true);
+    this.pickTool("hose");
   }
 
   /** Sit quietly while the third-person arrival plays. */
@@ -294,7 +275,7 @@ export class Player {
     this.tool = null;
     this.holster = 1;
     this.jet.setStowed(true);
-    this.picker.setStowed(true);
+    this.setSpraying(false);
   }
 
   public endIntro(): void {
@@ -332,8 +313,8 @@ export class Player {
   }
 
   /**
-   * Runs the swap. Whatever's in their hands drops out of sight, the belt
-   * changes over at the bottom of the move, and the new one comes back up.
+   * Keeps the lance holstered during intro, then holds it up once they're
+   * on duty. Heavy/regular swaps snap in place so the hose stays in hand.
    */
   private swapTools(delta: number): void {
     const changing = this.tool !== this.wanted;
@@ -352,48 +333,12 @@ export class Player {
 
     const hosingTool = this.tool === "hose" || this.tool === "heavyHose";
     this.jet.setStowed(!hosingTool);
-    this.picker.setStowed(this.tool !== "picker");
     if (hosingTool) this.jet.setHolster(this.holster);
-    if (this.tool === "picker") this.picker.setHolster(this.holster);
   }
 
   /** True once whatever they're holding is up and usable. */
   private ready(): boolean {
     return this.tool !== null && this.tool === this.wanted && this.holster < 0.2;
-  }
-
-  /**
-   * Watches what they're looking at and has the right thing in their hands
-   * for it, so the shift runs without fiddling with the number keys. The jet
-   * is what they hold by default; the picker goes back once the rubbish is done.
-   */
-  private readTheJob(delta: number): void {
-    if (this.wanted === "picker") {
-      this.idle = this.game.rubbishNear(this.camera.position)
-        ? 0
-        : this.idle + delta;
-      if (this.idle > PICKER_PUT_AWAY) {
-        this.idle = 0;
-        this.manual = 0;
-        this.pickTool("hose");
-        return;
-      }
-    } else {
-      this.idle = 0;
-    }
-
-    if (this.manual > 0) {
-      this.manual -= delta;
-      return;
-    }
-
-    const forward = this.camera
-      .getWorldDirection(new THREE.Vector3())
-      .setY(0)
-      .normalize();
-    const job = this.game.jobInSight(this.camera.position, forward, this.wanted);
-
-    if (job) this.pickTool(job);
   }
 
   private onKeyUp(event: KeyboardEvent): void {
@@ -431,8 +376,7 @@ export class Player {
     this.use(true);
   }
 
-  /** Trigger pulled. Empty-handed, the lance comes out; once it's up, spray
-   * or jab depending on what's in their hands. */
+  /** Trigger pulled. The hose is already in their hands — spray. */
   private use(down: boolean): void {
     if (!down) {
       this.setSpraying(false);
@@ -459,22 +403,14 @@ export class Player {
       return;
     }
 
-    // Put away or mid-stow — fire always draws the lance.
     if (this.wanted === null || this.tool === null) {
-      this.idle = 0;
-      this.pickTool(this.heavyTank > 0 ? "heavyHose" : "hose", true);
+      this.pickTool(this.heavyTank > 0 ? "heavyHose" : "hose");
       return;
     }
 
-    // Still coming up off the belt — hold it there and wait.
-    if (!this.ready()) {
-      this.idle = 0;
-      this.manual = Math.max(this.manual, MANUAL_HOLD);
-      return;
-    }
+    if (!this.ready()) return;
 
-    if (this.tool === "picker") this.picker.strike();
-    else this.setSpraying(true);
+    this.setSpraying(true);
   }
 
   private onMouseUp(event: MouseEvent): void {
@@ -554,18 +490,15 @@ export class Player {
         if (!riding) this.camera.quaternion.setFromEuler(this.euler);
       }
       if (!riding) {
-        // Spray stick: hold draws the tool; push past the deadzone to hose (or jab).
+        // Spray stick: hold to board a nearby swan, push past the deadzone to hose.
         const held = this.mobileControls.isSprayHeld();
         const aim = this.mobileControls.getSprayAim();
-        
+
         // Check if near a pedalo first - holding spray stick should allow boarding
-        if (held && aim === null && !isPedaloHired() && 
+        if (held && aim === null && !isPedaloHired() &&
             pedaloInReach(this.camera.position.x, this.camera.position.z)) {
           this.togglePedalo();
-        } else if (this.tool === "picker") {
-          if (held) this.use(true);
         } else if (held) {
-          // Empty-handed or still drawing — same as the old fire button.
           if (this.wanted === null || this.tool === null || !this.ready()) {
             this.use(true);
           } else if (aim !== null && !this.isSpraying) {
@@ -587,7 +520,6 @@ export class Player {
       this.bobAmount = 0;
       this.bobRoll = 0;
       this.jet.setStowed(true);
-      this.picker.setStowed(true);
       this.applyShake(delta);
       return;
     }
@@ -616,7 +548,7 @@ export class Player {
         if (sprayHeld) {
           if (this.wanted === null || this.tool === null) {
             if (aim !== null) {
-              this.pickTool(this.heavyTank > 0 ? "heavyHose" : "hose", true);
+              this.pickTool(this.heavyTank > 0 ? "heavyHose" : "hose");
             }
           } else if (aim !== null && !this.isSpraying) {
             this.setSpraying(true);
@@ -714,7 +646,7 @@ export class Player {
           if (this.heavyTank <= 0) {
             this.jet.setHeavyMode(false);
             this.game.onHeavyHoseEmpty();
-            this.pickTool("hose", true);
+            this.pickTool("hose");
           }
         }
         this.game.showTool("heavyHose");
@@ -778,7 +710,6 @@ export class Player {
       this.applyShake(delta);
     }
 
-    if (active) this.readTheJob(delta);
     this.swapTools(delta);
 
     const hosing =
@@ -798,14 +729,10 @@ export class Player {
         if (this.heavyTank <= 0) {
           this.jet.setHeavyMode(false);
           this.game.onHeavyHoseEmpty();
-          this.pickTool("hose", true);
+          this.pickTool("hose");
         }
       }
       this.game.showTool("heavyHose");
-    }
-
-    if (this.picker.update(delta) && this.game.spearLitter(this.reachPoint())) {
-      this.picker.stow();
     }
   }
 
@@ -966,23 +893,6 @@ export class Player {
       this.wakeAcc = 0;
     }
     this.wasWading = wading;
-  }
-
-  /** The patch of ground the spike comes down on. */
-  private reachPoint(): THREE.Vector3 {
-    const forward = this.camera
-      .getWorldDirection(new THREE.Vector3())
-      .setY(0)
-      .normalize();
-    return this.camera.position
-      .clone()
-      .addScaledVector(forward, PICKER_REACH)
-      .setY(0);
-  }
-
-  /** Where a speared bit of rubbish is heading. */
-  public sackPoint(): THREE.Vector3 {
-    return this.picker.sackPoint();
   }
 
   /** Axis-by-axis so brushing a wall glances off instead of sticking. */

@@ -12,7 +12,7 @@ import {
   pickNorthwestPathIndex,
 } from "../world/lake";
 import { atRailings, insidePark, parkGates } from "../world/fence";
-import { binStations, cafeQueueSpot } from "../world/park";
+import { binStations, cafeEnterSpot } from "../world/park";
 import { stepWalk, clearWalkSpot } from "../world/blocking";
 import { groundHeight } from "../world/terrain";
 import {
@@ -27,6 +27,7 @@ import {
 import { Grumble } from "../effects/Grumble";
 import { MuckFlecks } from "../effects/MuckFlecks";
 import { Dog } from "./Dog";
+import { line, lines } from "../../dialogue";
 import { Face, type Mood } from "./Face";
 import type { Tread } from "./Footprint";
 
@@ -38,117 +39,6 @@ type Temper = "meek" | "narky" | "handy";
 const COATS = [0x2f4f7f, 0x8b3a3a, 0x3f6b4a, 0x5a4a7a, 0x2b2b33, 0xb06a2c];
 const TROUSERS = [0x2b3038, 0x4a4a52, 0x6b5a44];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
-
-const COMPLAINTS = [
-  "OH, COME ON!",
-  "MY SHOES!",
-  "BLOODY SWANS!",
-  "URGH!",
-  "NOT AGAIN!",
-  "LOOK AT THE STATE OF THAT",
-  "THAT IS DISGUSTING",
-  "WHO CLEANS UP ROUND HERE?",
-  "I'VE COPPED THE NEEDLE WITH THIS",
-  "SWEET AS NUT, THAT ISN'T",
-];
-
-const FACE_MUCK = [
-  "IT'S ON MY FACE!",
-  "GET IT OFF ME!",
-  "URGH — MY FACE!",
-  "I CAN TASTE IT!",
-  "LOOK AT MY FACE!",
-  "WIPE IT OFF — WIPE IT OFF!",
-];
-
-const SOAKED = [
-  "OI! WATCH IT!",
-  "I AM SOAKED!",
-  "DO YOU MIND?",
-  "THAT WAS MY COAT!",
-  "WHAT ARE YOU PLAYING AT?",
-  "I'VE COPPED THAT FULL IN THE FACE",
-  "I'LL LAY YOU OUT, MUSH",
-];
-
-const BACK_OFF = [
-  "ALRIGHT! ALRIGHT!",
-  "I'M GOING!",
-  "WATCH IT WITH THAT!",
-  "YOU WIN!",
-  "PUT IT DOWN!",
-  "BLOODY HELL!",
-];
-
-const GOTCHA = [
-  "THAT'LL TEACH YOU!",
-  "AND STAY DOWN!",
-  "HOW'D YOU LIKE THAT?!",
-  "RIGHT — SORTED!",
-  "DON'T YOU COME NEAR ME AGAIN!",
-  "HA!",
-];
-
-const CHASE_BORED = [
-  "NOT WORTH IT",
-  "FORGET IT",
-  "I'VE HAD ENOUGH",
-  "BLOODY WASTE OF TIME",
-  "COME ON — WE'RE GOING",
-];
-
-const DUTY_LINES = [
-  "WHERE'S THE DOG?!",
-  "COME HERE — NOW!",
-  "MY KID!",
-  "LEAVE IT — HEEL!",
-  "OI, STOP RUNNING OFF!",
-];
-
-const FOULED = [
-  "THAT'S GOT POO ON IT!",
-  "YOU FILTHY SOD!",
-  "LOOK AT MY BLOODY COAT!",
-  "THAT'S DISGUSTING!",
-  "YOU'VE COVERED ME!",
-  "I'VE COPPED THE NEEDLE WITH YOU",
-  "WASH THAT OFF ME!",
-];
-
-const SQUARE_UP = [
-  "COME HERE THEN!",
-  "I'LL LAY YOU OUT, MUSH!",
-  "RIGHT, YOU'RE HAVING IT!",
-  "WANT SOME, DO YOU?",
-  "I'LL HAVE YOUR JOB AND YOUR TEETH!",
-];
-
-const BIKE_CRASH = [
-  "I'LL HAVE YOU FOR THAT!",
-  "MY BIKE — COME HERE!",
-  "YOU KNOCKED ME OFF!",
-  "RIGHT, YOU'RE HAVING IT!",
-  "I'LL LAY YOU OUT, MUSH!",
-  "LOOK WHAT YOU'VE DONE!",
-];
-
-const HANDBAG_LINES = [
-  "TAKE THAT!",
-  "HOW DARE YOU!",
-  "I'LL GIVE YOU WHAT FOR!",
-  "YOU RUDE LITTLE SOD!",
-  "THAT'S MY BEST COAT!",
-];
-
-const DUNKED = [
-  "GET ME OUT!",
-  "MY PHONE!",
-  "YOU ABSOLUTE...",
-  "I'LL HAVE YOUR JOB",
-  "IT'S FREEZING!",
-  "I NEEDED A SLASH, NOT A SWIM",
-  "I'LL LAY HIM OUT, MUSH",
-];
 
 /** How close a foot has to get, and how long the strop lasts. */
 const TREAD_RANGE = 0.5;
@@ -167,29 +57,10 @@ const CLIMB_TIME = 2.9;
 /** How long they walk round dripping afterwards. */
 const DRYING = 45;
 
-const CLIMBED_OUT = [
-  "I'M SOAKING!",
-  "LOOK AT THE STATE OF ME!",
-  "THAT WAS FREEZING!",
-  "I'LL HAVE YOUR JOB!",
-  "RUINED — THE LOT OF IT!",
-  "NEVER AGAIN!",
-  "I'M DRIPPING!",
-];
-
 /** A fair few of the park's regulars are only here to walk the dog. */
 const DOG_CHANCE = 0.35;
 /** How often a soaking loosens their grip on the lead. */
 const LEAD_SLIPS = 0.95;
-
-const BARGED = [
-  "MIND OUT!",
-  "GET THAT DOG ON A LEAD!",
-  "BLOODY THING!",
-  "WHOSE IS THAT?",
-  "I'VE COPPED THE NEEDLE WITH THAT DOG",
-  "I'LL LAY IT OUT, MUSH",
-];
 
 /** A fair few of them can't be doing with finding a bin. */
 const LITTERBUG_CHANCE = 0.22;
@@ -197,39 +68,7 @@ const LITTER_EVERY = 75;
 
 /** About two in five would rather not share the path with a mute swan. */
 const SWAN_SHY_CHANCE = 0.4;
-const SCARED = [
-  "KEEP IT AWAY FROM ME",
-  "THAT THING'S THE SIZE OF A DOG",
-  "LOOK AT THE WINGS ON IT",
-  "I'M NOT GOING NEAR THAT",
-  "IT'S COMING RIGHT AT US",
-  "BLOODY HELL!",
-  "MUM SAID THEY BITE",
-  "I'LL LAY IT OUT IF IT COMES NEAR",
-];
-
-const FIRE_PANIC = [
-  "FIRE!",
-  "THE GRASS IS ALIGHT!",
-  "GET BACK!",
-  "SOMEONE CALL THE BRIGADE!",
-  "RUN!",
-  "IT'S SPREADING!",
-  "LEAVE IT — GET CLEAR!",
-  "BLOODY BARBECUES!",
-];
-
 /** Watching two birds have a go at each other over the bread. */
-const BIRD_FIGHT = [
-  "LOOK AT THEM GO!",
-  "THEY'RE HAVING A RIGHT GO",
-  "OI OI, SWAN FIGHT",
-  "THAT ONE'S PROPER NASTY",
-  "LEAVE IT, THEY'RE MENTAL",
-  "DON'T GET BETWEEN THEM",
-  "HA! LOOK AT THAT",
-  "THEY'LL HAVE SOMEONE'S FINGER OFF",
-];
 /** How long a stroll lasts before they head for a gate. */
 const VISIT_MIN = 90;
 const VISIT_MAX = 220;
@@ -238,14 +77,6 @@ const VISIT_MAX = 220;
  * lip (~PATH_OUTER − 1); walking that band gets them stuck against the seats.
  */
 const STROLL_OUTER = PATH_OUTER - 3.5;
-const SHIFTY = [
-  "NOBODY SAW THAT",
-  "THE COUNCIL CAN GET IT",
-  "THERE'S NEVER A BIN",
-  "IT'S BIODEGRADABLE, THAT",
-  "JUST OFF FOR A SLASH ANYWAY",
-];
-
 /** Most bird food turns up on the NW bank; rare elsewhere. */
 const FOOD_CHANCE = 0.48;
 const HANDFULS = 3;
@@ -266,76 +97,8 @@ export function setPigeonFeeders(on: boolean): void {
   pigeonFeeders = on;
 }
 
-const FEEDING_LINES = [
-  "HERE YOU GO",
-  "THERE YOU ARE",
-  "GO ON THEN",
-  "STEADY ON!",
-  "HAVE SOME GRUB",
-  "SWEET AS NUT, LOOK AT HIM",
-];
-const SCATTER_LINES = [
-  "GO ON, SPRINKLE IT",
-  "NOT ALL AT ONCE!",
-  "LOOK AT THEM ALL",
-  "MIND YOUR FINGERS",
-  "CHUCK THE GRUB IN",
-  "SWEET AS NUT, THAT",
-];
-const PIGEON_FAN_LINES = [
-  "COME ON MY BEAUTIES",
-  "GET STUCK IN",
-  "LOOK AT THE LITTLE LUVS",
-  "MORE FOR YOU",
-  "DON'T FIGHT — THERE'S LOADS",
-  "YES! YES! COME ON!",
-];
-const PIGEON_FAN_SOAKED = [
-  "YOU'VE RUINED IT!",
-  "MY BIRDS!",
-  "THAT WAS FOR THE PIGEONS!",
-  "OI — THAT'S THEIR DINNER!",
-];
-const PIGEON_FAN_DONE = [
-  "RIGHT — I'M OFF",
-  "YOU CAN FEED 'EM THEN",
-  "NOT STANDING FOR THIS",
-  "THEY'LL STARVE NOW!",
-];
-const PIGEON_FAN_MOAN = [
-  "GERROFF",
-  "I'M ALREADY DOWN",
-  "LEAVE IT",
-  "OW — THAT'S ENOUGH",
-  "YOU'VE MADE YOUR POINT",
-];
 const PIGEON_SOAK_GIVE_UP = 3;
 const PIGEON_LIE_Y = 0.42;
-
-const ICE_BUY = [
-  "TWO NINETY PLEASE",
-  "99 WITH A FLAKE",
-  "ONE FOR HIM AS WELL",
-  "VANILLA — NO, BOTH",
-  "ANY SPRINKLES?",
-];
-const ICE_DROPPED = [
-  "YOU'VE DROPPED IT!",
-  "THAT WAS TWO QUID!",
-  "LOOK AT THE STATE OF IT!",
-  "HE JUST BOUGHT THAT!",
-  "YOU'VE RUINED HIS ICE CREAM!",
-  "THAT'S COMING OUT YOUR WAGES!",
-];
-const ICE_OWN = ["MY ICE CREAM!", "OI — THAT WAS MINE!", "LOOK AT IT!"];
-
-const HELI_LINES = [
-  "LOOK — A HELICOPTER!",
-  "LOOK UP!",
-  "IT'S GOING TO THE ISLAND!",
-  "WAVE!",
-  "CHOPPER!",
-];
 
 /** How many prints one bootful of it is good for. */
 const TRACKED_PRINTS = 6;
@@ -503,13 +266,15 @@ export class Person {
   private depositAt: THREE.Vector3 | null = null;
   private binFor: THREE.Vector2 | null = null;
 
-  /** Ice cream run — peel off to a café hatch, then stroll with a cone. */
+  /** Café run — in the door, out with coffee and/or a 99. */
   private iceCreamWait = 25 + Math.random() * 55;
   private iceBuyLeft = 0;
   private cafeFor: THREE.Vector2 | null = null;
   private adultCone: THREE.Object3D | null = null;
+  private adultCup: THREE.Object3D | null = null;
   private kidCone: THREE.Object3D | null = null;
-  private coneDropAt: THREE.Vector3 | null = null;
+  private spills: { x: number; z: number; kind: "coffee" | "ice" }[] = [];
+  private kidGrumble: Grumble | null = null;
 
   /** Some of them want nothing to do with a swan on the bank. */
   private swanShy = Math.random() < SWAN_SHY_CHANCE;
@@ -620,7 +385,7 @@ export class Person {
     this.pendingLunge = attacker.clone();
     this.enrage(attacker, 1.6);
     this.showMood("angry");
-    this.say(BIKE_CRASH);
+    this.say(lines('public', 'bike-crash'));
   }
 
   /** Lined up outside a gate, walking in toward the nearest bit of path. */
@@ -728,6 +493,7 @@ export class Person {
 
   public dispose(): void {
     this.grumble?.dispose();
+    this.kidGrumble?.dispose();
     this.dog?.dispose();
     this.flecks.dispose();
     for (const drop of this.drips) {
@@ -912,14 +678,14 @@ export class Person {
     this.group.rotation.x = 0;
 
     if (reason === "satisfied") {
-      this.say(GOTCHA);
+      this.say(lines('public', 'gotcha'));
       this.pleasedHold = 2.8;
       this.showMood("pleased");
       this.swingCool = Math.max(this.swingCool, 2.5);
       return;
     }
     if (reason === "tired") {
-      this.say(BACK_OFF);
+      this.say(lines('public', 'back-off'));
       this.swingCool = Math.max(this.swingCool, 3.5);
       this.strop = STROP_TIME * 0.6;
       this.stropFor = this.strop;
@@ -927,14 +693,14 @@ export class Person {
       return;
     }
     if (reason === "duty") {
-      this.say(DUTY_LINES);
+      this.say(lines('public', 'duty'));
       this.swingCool = Math.max(this.swingCool, 1.5);
       if (this.kid) this.resetKidPose();
       this.showMood("shocked");
       return;
     }
     // Bored of the chase.
-    this.say(CHASE_BORED);
+    this.say(lines('public', 'chase-bored'));
     this.swingCool = Math.max(this.swingCool, 2);
     this.showMood("disgusted");
     this.strop = STROP_TIME * 0.45;
@@ -1429,7 +1195,7 @@ export class Person {
     if (this.pigeonDown) {
       this.pigeonFlinch = Math.max(this.pigeonFlinch, 0.55);
       if (this.sprayTalkCool <= 0) {
-        this.say(PIGEON_FAN_MOAN);
+        this.say(lines('public', 'pigeon-moan'));
         this.sprayTalkCool = 1.4 + Math.random() * 0.8;
       }
       this.showMood("angry");
@@ -1448,7 +1214,7 @@ export class Person {
     this.getUpTip = Math.random() < 0.5 ? 1 : -1;
 
     this.dumpBagInTheAir(from);
-    this.say(PIGEON_FAN_SOAKED);
+    this.say(lines('public', 'pigeon-soaked'));
     this.sprayTalkCool = 1.6;
     this.showMood("angry");
     if (from) this.faceToward(from.x, from.z);
@@ -1595,14 +1361,14 @@ export class Person {
     }
     this.group.position.y = this.pigeonStandY();
     if (this.pigeonSoakCount >= PIGEON_SOAK_GIVE_UP) {
-      this.say(PIGEON_FAN_DONE);
+      this.say(lines('public', 'pigeon-done'));
       this.showMood("angry");
       this.speed = Math.max(this.speed, 2.15);
       this.headHome();
       return;
     }
     this.stockForPigeonMission();
-    this.say(PIGEON_FAN_LINES);
+    this.say(lines('public', 'pigeon-fan'));
     this.showMood("pleased");
   }
 
@@ -1911,11 +1677,11 @@ export class Person {
     this.place();
   }
 
-  /** Peel off toward the nearest café for a 99. */
+  /** Peel off toward the café door — in for coffee, and a 99 if there's a kid. */
   private startIceCream(): void {
-    if (this.adultCone || this.kidCone) return;
+    if (this.adultCone || this.adultCup || this.kidCone) return;
     if (this.errand !== "strolling") return;
-    const spot = cafeQueueSpot(this.group.position);
+    const spot = cafeEnterSpot(this.group.position);
     if (!spot) return;
     this.errand = "icecream";
     this.cafeFor = new THREE.Vector2(spot.x, spot.z);
@@ -1929,24 +1695,28 @@ export class Person {
     );
   }
 
-  /** Paid up — cones in hand, back onto the circuit. */
+  /** Paid up — back out the door with a cup and/or a cone. */
   private finishIceCream(): void {
     this.cafeFor = null;
     this.iceBuyLeft = 0;
     this.errand = "strolling";
+    this.group.visible = true;
 
     if (this.kid) {
       this.kidCone = this.makeCone();
-      // Right hand, dangling out in front where everyone can see it.
       this.kidArms[1]!.add(this.kidCone);
       this.kidCone.position.set(0.02, -0.26, 0.08);
       this.kidCone.rotation.x = 0.35;
-      // Mum or dad often gets one too.
-      if (Math.random() < 0.55) this.giveAdultCone();
+      if (Math.random() < 0.7) this.giveAdultCup();
+      else if (Math.random() < 0.45) this.giveAdultCone();
+      this.say(lines("public", this.adultCup ? "coffee-buy" : "ice-buy"));
+    } else if (Math.random() < 0.72) {
+      this.giveAdultCup();
+      this.say(lines('public', 'coffee-buy'));
     } else {
       this.giveAdultCone();
+      this.say(lines('public', 'ice-buy'));
     }
-    this.say(ICE_BUY);
     this.showMood("pleased");
 
     const here = new THREE.Vector2(this.group.position.x, this.group.position.z);
@@ -1971,6 +1741,38 @@ export class Person {
     hand.add(this.adultCone);
     this.adultCone.position.set(0.04, -0.28, 0.1);
     this.adultCone.rotation.x = 0.4;
+  }
+
+  private giveAdultCup(): void {
+    if (this.adultCup) return;
+    this.adultCup = this.makeCup();
+    const hand = this.arms[0]!.children[1]!;
+    hand.add(this.adultCup);
+    this.adultCup.position.set(-0.03, -0.26, 0.08);
+    this.adultCup.rotation.x = 0.15;
+  }
+
+  private makeCup(): THREE.Group {
+    const cup = new THREE.Group();
+    const paper = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.035, 0.028, 0.11, 8),
+      new THREE.MeshStandardMaterial({ color: 0xf2ede2, roughness: 0.9 }),
+    );
+    paper.position.y = 0.055;
+    cup.add(paper);
+    const band = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.038, 0.038, 0.03, 8),
+      new THREE.MeshStandardMaterial({ color: 0x3a2a1c, roughness: 0.85 }),
+    );
+    band.position.y = 0.05;
+    cup.add(band);
+    const lid = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.038, 0.038, 0.018, 8),
+      new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.7 }),
+    );
+    lid.position.y = 0.115;
+    cup.add(lid);
+    return cup;
   }
 
   private makeCone(): THREE.Group {
@@ -2005,62 +1807,74 @@ export class Person {
     return cone;
   }
 
-  /**
-   * Cone hits the deck. If you caused it (spray) and they've got a kid,
-   * parents can properly lose it.
-   */
-  private spillCone(attacker?: THREE.Vector3): void {
-    const hadKidCone = !!this.kidCone;
-    if (this.kidCone) {
-      this.kidCone.removeFromParent();
-      this.kidCone = null;
-    } else if (this.adultCone) {
-      this.adultCone.removeFromParent();
-      this.adultCone = null;
-    } else {
-      return;
-    }
+  /** In the café — mesh hidden at the door while they queue. */
+  private insideCafe(): boolean {
+    return this.errand === "icecream" && this.iceBuyLeft > 0;
+  }
 
-    // Adult keeps theirs unless the jet got that too.
-    if (attacker && this.adultCone && Math.random() < 0.4) {
-      this.adultCone.removeFromParent();
-      this.adultCone = null;
-    }
+  /**
+   * Cone or coffee hits the deck. If you caused it (spray) and they've got a
+   * kid, parents can properly lose it. Kids howl about the 99.
+   */
+  private dropHeldTreats(
+    attacker: THREE.Vector3 | undefined,
+    drop: { kid?: boolean; cone?: boolean; cup?: boolean },
+  ): void {
+    const loseKid = !!(drop.kid && this.kidCone);
+    const loseCone = !!(drop.cone && this.adultCone);
+    const loseCup = !!(drop.cup && this.adultCup);
+    if (!loseKid && !loseCone && !loseCup) return;
 
     const here = this.group.position;
-    this.coneDropAt = new THREE.Vector3(
-      here.x + (Math.random() - 0.5) * 0.5,
-      0,
-      here.z + (Math.random() - 0.5) * 0.5,
-    );
+    const dropAt = (kind: "coffee" | "ice") => {
+      this.spills.push({
+        x: here.x + (Math.random() - 0.5) * 0.55,
+        z: here.z + (Math.random() - 0.5) * 0.55,
+        kind,
+      });
+    };
 
-    if (hadKidCone) {
-      this.say(ICE_DROPPED);
-    } else {
-      this.say(ICE_OWN);
+    if (loseKid && this.kidCone) {
+      this.kidCone.removeFromParent();
+      this.kidCone = null;
+      dropAt("ice");
+      this.sayKid(lines("kid", "ice-lost"));
+      this.kidFace?.setMood("shocked");
     }
+    if (loseCone && this.adultCone) {
+      this.adultCone.removeFromParent();
+      this.adultCone = null;
+      dropAt("ice");
+    }
+    if (loseCup && this.adultCup) {
+      this.adultCup.removeFromParent();
+      this.adultCup = null;
+      dropAt("coffee");
+    }
+
+    if (loseKid) this.say(lines("public", "ice-dropped"));
+    else if (loseCup) this.say(lines("public", "coffee-dropped"));
+    else if (loseCone) this.say(lines("public", "ice-own"));
 
     if (!attacker || this.dunk > 0 || this.lungeLeft > 0) {
       if (this.lungeLeft <= 0) {
         this.strop = Math.max(this.strop, STROP_TIME * 1.2);
         this.stropFor = Math.max(this.stropFor, this.strop);
       }
-      this.showMood("angry");
+      this.showMood(loseKid ? "shocked" : "angry");
       return;
     }
-    // Ruining a kid's 99 is a proper fight-starter — even meek sorts can snap.
-    if (this.tryLunge(attacker, hadKidCone ? 1.6 : 0.85)) {
-      this.enrage(attacker, hadKidCone ? 1.8 : 1);
+    if (this.tryLunge(attacker, loseKid ? 1.6 : 0.85)) {
+      this.enrage(attacker, loseKid ? 1.8 : 1);
       return;
     }
-    this.enrage(attacker, hadKidCone ? 1.4 : 0.8);
+    this.enrage(attacker, loseKid ? 1.4 : 0.8);
   }
 
-  /** Dropped cone for the game to spawn as litter. */
-  public claimConeDrop(): THREE.Vector3 | null {
-    const spot = this.coneDropAt;
-    this.coneDropAt = null;
-    return spot;
+  public claimSpills(): { x: number; z: number; kind: "coffee" | "ice" }[] {
+    const list = this.spills;
+    this.spills = [];
+    return list;
   }
 
   /** A small one holding on beside them, walking with shorter, quicker steps. */
@@ -2161,8 +1975,9 @@ export class Person {
     this.grumble?.dispose();
     this.grumble = new Grumble(
       this.scene,
-      FEEDING_LINES[Math.floor(Math.random() * FEEDING_LINES.length)]!,
+      line('public', 'feeding'),
       this.group.position,
+      "public",
     );
 
     if (this.handfuls === 0) this.emptyHanded();
@@ -2170,6 +1985,7 @@ export class Person {
 
   /** Did a droplet catch them? */
   public soakedBy(point: THREE.Vector3): boolean {
+    if (this.insideCafe()) return false;
     const here = this.group.position;
     const dx = point.x - here.x;
     const dz = point.z - here.z;
@@ -2212,8 +2028,23 @@ export class Person {
     return this.dunk > 0;
   }
 
+  /** Queuing inside — not on the path, not a hose target. */
+  public isInCafe(): boolean {
+    return this.insideCafe();
+  }
+
   public getDog(): Dog | null {
     return this.dog;
+  }
+
+  /** Owner yelling after a runner — balloon and voice stay on them, not the dog. */
+  public callTheDog(): void {
+    if (!this.dog) return;
+    this.say([`${this.dog.getName()}!`]);
+  }
+
+  public recallDog(): void {
+    this.say(lines('public', 'recall'));
   }
 
   public getHeading(): number {
@@ -2226,7 +2057,8 @@ export class Person {
    * Returns true if it's worth a complaint.
    */
   public barge(from: THREE.Vector3): boolean {
-    if (this.dunk > 0 || this.strop > 0 || this.scareLeft > 0) return false;
+    if (this.dunk > 0 || this.strop > 0 || this.scareLeft > 0 || this.insideCafe())
+      return false;
 
     // They only go in if the shove sends them that way.
     const here = this.group.position;
@@ -2246,7 +2078,7 @@ export class Person {
 
     this.strop = STROP_TIME;
     this.stropFor = this.strop;
-    this.say(BARGED);
+    this.say(lines('public', 'barged'));
     return true;
   }
 
@@ -2259,6 +2091,9 @@ export class Person {
       this.dunk > 0 ||
       this.madLeft > 0 ||
       this.lungeLeft > 0 ||
+      this.insideCafe() ||
+      this.pigeonFeed ||
+      this.pigeonDown ||
       this.errand === "arriving" ||
       this.errand === "leaving"
     )
@@ -2300,8 +2135,13 @@ export class Person {
     );
     this.scareAway.normalize();
 
-    if (wingsOut || Math.random() < 0.6) this.say(SCARED);
+    if (wingsOut || Math.random() < 0.6) this.say(lines('public', 'scared'));
     this.showMood("shocked");
+    this.dropHeldTreats(undefined, {
+      kid: true,
+      cone: Math.random() < 0.7,
+      cup: Math.random() < 0.85,
+    });
   }
 
   /**
@@ -2310,6 +2150,7 @@ export class Person {
   public panicFromFire(at: THREE.Vector3): void {
     if (
       this.dunk > 0 ||
+      this.insideCafe() ||
       this.errand === "arriving" ||
       this.errand === "leaving"
     )
@@ -2343,8 +2184,9 @@ export class Person {
     this.scareAway.addScaledVector(new THREE.Vector3(out.x, 0, out.y), 0.7);
     this.scareAway.normalize();
 
-    if (Math.random() < 0.7) this.say(FIRE_PANIC);
+    if (Math.random() < 0.7) this.say(lines('public', 'fire'));
     this.showMood("shocked");
+    this.dropHeldTreats(undefined, { kid: true, cone: true, cup: true });
   }
 
   /**
@@ -2364,7 +2206,12 @@ export class Person {
       this.gawpCool > 0
     )
       return;
-    if (this.errand === "arriving" || this.errand === "leaving") return;
+    if (
+      this.insideCafe() ||
+      this.errand === "arriving" ||
+      this.errand === "leaving"
+    )
+      return;
 
     const gap = this.group.position.distanceTo(at);
     if (gap > 14 || gap < 1.5) return;
@@ -2378,7 +2225,7 @@ export class Person {
     this.gawpCool = 8 + Math.random() * 6;
     this.gawpAt.copy(at);
     this.heliWave = false;
-    this.say(BIRD_FIGHT);
+    this.say(lines('public', 'bird-fight'));
     this.showMood(Math.random() < 0.45 ? "shocked" : "pleased");
   }
 
@@ -2404,7 +2251,12 @@ export class Person {
       this.gawpLeft > 0
     )
       return;
-    if (this.errand === "arriving" || this.errand === "leaving") return;
+    if (
+      this.insideCafe() ||
+      this.errand === "arriving" ||
+      this.errand === "leaving"
+    )
+      return;
 
     const here = this.group.position;
     const gap = Math.hypot(at.x - here.x, at.z - here.z);
@@ -2416,7 +2268,7 @@ export class Person {
     this.gawpAt.copy(at);
     this.heliWave = true;
     this.heliWavePhase = Math.random() * Math.PI * 2;
-    if (Math.random() < 0.7) this.say(HELI_LINES);
+    if (Math.random() < 0.7) this.say(lines('public', 'heli'));
     this.showMood("pleased");
     this.kidFace?.setMood("pleased");
   }
@@ -2433,7 +2285,7 @@ export class Person {
    * if you keep the lance on them.
    */
   public drench(from?: THREE.Vector3): void {
-    if (this.dunk > 0) return;
+    if (this.dunk > 0 || this.insideCafe()) return;
     if (this.lungeLeft > 0) {
       this.hoseOff(from);
       return;
@@ -2442,15 +2294,23 @@ export class Person {
     this.wet = DRYING;
 
     // Hands go up, and more often than not the lead goes with them.
+    let slipped = false;
     if (this.dog && !this.dog.isLoose() && Math.random() < LEAD_SLIPS) {
       this.dog.slipTheLead();
+      slipped = true;
     }
 
     // Ice cream and a jet don't mix — kids drop theirs straight away.
     if (this.kidCone && Math.random() < (first ? 0.82 : 0.45)) {
-      this.spillCone(from);
+      this.dropHeldTreats(from, {
+        kid: true,
+        cone: !!this.adultCone && Math.random() < 0.4,
+        cup: !!this.adultCup && Math.random() < 0.35,
+      });
     } else if (this.adultCone && Math.random() < (first ? 0.4 : 0.18)) {
-      this.spillCone(from);
+      this.dropHeldTreats(from, { cone: true });
+    } else if (this.adultCup && Math.random() < (first ? 0.55 : 0.25)) {
+      this.dropHeldTreats(from, { cup: true });
     }
 
     // Hose the feeders off the NW stretch — bag ditched, they're done.
@@ -2477,14 +2337,16 @@ export class Person {
       // Already steaming, or narky enough to stay mad without swinging yet.
       if (this.madLeft > 0 || this.temper !== "meek") {
         this.enrage(from, heat * 0.7);
-        this.reactToSpray(SOAKED, first);
+        if (slipped) this.callTheDog();
+        else this.reactToSpray(lines('public', 'soaked'), first);
         return;
       }
     }
 
     this.strop = Math.max(this.strop, STROP_TIME);
     this.stropFor = Math.max(this.stropFor, this.strop);
-    this.reactToSpray(SOAKED, first);
+    if (slipped) this.callTheDog();
+    else this.reactToSpray(lines('public', 'soaked'), first);
   }
 
   /**
@@ -2494,7 +2356,7 @@ export class Person {
    * Returns whether they've started a dig.
    */
   public foul(attacker: THREE.Vector3): boolean {
-    if (this.dunk > 0) return false;
+    if (this.dunk > 0 || this.insideCafe()) return false;
     if (this.lungeLeft > 0) {
       this.hoseOff(attacker);
       return false;
@@ -2504,17 +2366,25 @@ export class Person {
     this.wet = DRYING;
     this.fouled = Math.max(this.fouled, 18);
 
+    let slipped = false;
     if (this.dog && !this.dog.isLoose() && Math.random() < LEAD_SLIPS) {
       this.dog.slipTheLead();
+      slipped = true;
     }
 
     if (first) this.ditchFeederBag();
 
     // Filthy jet + ice cream is a red rag — drop it and come for you.
     if (this.kidCone && Math.random() < (first ? 0.9 : 0.55)) {
-      this.spillCone(attacker);
+      this.dropHeldTreats(attacker, {
+        kid: true,
+        cone: !!this.adultCone && Math.random() < 0.45,
+        cup: !!this.adultCup && Math.random() < 0.4,
+      });
     } else if (this.adultCone && Math.random() < (first ? 0.55 : 0.25)) {
-      this.spillCone(attacker);
+      this.dropHeldTreats(attacker, { cone: true });
+    } else if (this.adultCup && Math.random() < (first ? 0.65 : 0.3)) {
+      this.dropHeldTreats(attacker, { cup: true });
     }
 
     if (this.kid) this.haulKidAlong();
@@ -2526,7 +2396,8 @@ export class Person {
     }
 
     this.strop = 0;
-    this.reactToSpray(FOULED, first);
+    if (slipped) this.callTheDog();
+    else this.reactToSpray(lines('public', 'fouled'), first);
     if (this.lungeLeft > 0) return true;
 
     if (this.tryLunge(attacker, first ? 1.35 : 0.55)) {
@@ -2571,7 +2442,7 @@ export class Person {
     this.visitLeft = Math.max(this.visitLeft, 55);
     this.pleasedHold = 0;
     if (this.kid) this.haulKidAlong();
-    if (shout) this.say(this.handbag ? HANDBAG_LINES : SQUARE_UP);
+    if (shout) this.say(this.handbag ? lines('public', 'handbag') : lines('public', 'square-up'));
     this.showMood("angry");
   }
 
@@ -2647,9 +2518,13 @@ export class Person {
 
   /** Heavy hose — knocked flat or into the lake. */
   public knockDown(from?: THREE.Vector3): void {
-    if (this.dunk > 0) return;
+    if (this.dunk > 0 || this.insideCafe()) return;
     this.wet = DRYING;
-    if (this.dog && !this.dog.isLoose()) this.dog.slipTheLead();
+    let slipped = false;
+    if (this.dog && !this.dog.isLoose()) {
+      this.dog.slipTheLead();
+      slipped = true;
+    }
     this.strop = STROP_TIME * 1.4;
     this.stropFor = this.strop;
     if (from) {
@@ -2663,7 +2538,8 @@ export class Person {
       }
       this.barge(from);
     }
-    this.say(BARGED);
+    if (slipped) this.callTheDog();
+    else this.say(lines('public', 'barged'));
     this.showMood("shocked");
   }
 
@@ -2676,8 +2552,9 @@ export class Person {
     this.scattering = 0;
     this.feeding = 0;
     this.strop = 0;
-    // Cone goes in with them.
-    if (this.kidCone || this.adultCone) this.spillCone();
+    if (this.kidCone || this.adultCone || this.adultCup) {
+      this.dropHeldTreats(undefined, { kid: true, cone: true, cup: true });
+    }
     this.resetKidPose();
 
     const here = this.group.position;
@@ -2690,7 +2567,7 @@ export class Person {
     this.climbSplashLate = false;
     // Soaked the moment they go in — clothes darken while they thrash.
     this.wet = DRYING;
-    this.say(DUNKED);
+    this.say(lines('public', 'dunked'));
     this.showMood("shocked");
   }
 
@@ -2763,7 +2640,7 @@ export class Person {
       this.rejoinPath();
       this.wet = DRYING;
       this.strop = 0;
-      this.say(CLIMBED_OUT);
+      this.say(lines('public', 'climbed-out'));
       this.sprayTalkCool = 2.6;
       // Still steaming from the dunk — come for whoever shoved them in if close.
       this.enrage(undefined, 1.3);
@@ -2961,11 +2838,25 @@ export class Person {
   }
 
   private say(lines: readonly string[]): void {
+    if (this.insideCafe()) return;
     this.grumble?.dispose();
     this.grumble = new Grumble(
       this.scene,
       lines[Math.floor(Math.random() * lines.length)]!,
       this.speechAnchor(),
+      "public",
+    );
+  }
+
+  private sayKid(lines: readonly string[]): void {
+    if (!this.kid || this.insideCafe()) return;
+    this.kidGrumble?.dispose();
+    this.kid.getWorldPosition(this.speechTmp);
+    this.kidGrumble = new Grumble(
+      this.scene,
+      lines[Math.floor(Math.random() * lines.length)]!,
+      this.speechTmp,
+      "kid",
     );
   }
 
@@ -3083,6 +2974,16 @@ export class Person {
       ) === false
         ? null
         : this.grumble;
+    if (this.kid) {
+      this.kid.getWorldPosition(this.speechTmp);
+      this.kidGrumble =
+        this.kidGrumble?.update(delta, this.speechTmp, 1.15) === false
+          ? null
+          : this.kidGrumble;
+    } else if (this.kidGrumble) {
+      this.kidGrumble.dispose();
+      this.kidGrumble = null;
+    }
     this.dry(delta);
     this.flecks.update(delta);
     this.updateDrips(delta);
@@ -3219,15 +3120,14 @@ export class Person {
     if (this.errand === "icecream") {
       if (this.iceBuyLeft > 0) {
         this.iceBuyLeft -= delta;
+        this.group.visible = false;
         if (this.cafeFor) this.faceToward(this.cafeFor.x, this.cafeFor.y);
-        this.standAndWatch();
-        this.showMood("pleased");
         if (this.iceBuyLeft <= 0) this.finishIceCream();
         return -1;
       }
       if (!this.cafeFor || this.walkRouted(this.cafeFor, delta, 7) < 0.55) {
-        this.iceBuyLeft = 2.2 + Math.random() * 2.4;
-        this.say(ICE_BUY);
+        this.iceBuyLeft = 4.2 + Math.random() * 5.5;
+        this.group.visible = false;
       }
       return -1;
     }
@@ -3265,15 +3165,20 @@ export class Person {
 
     // Kids with a cone are accident-prone even without the hose.
     if (this.kidCone && Math.random() < delta * 0.012) {
-      this.spillCone();
+      this.dropHeldTreats(undefined, { kid: true });
     }
 
-    // Now and then peel off for a 99 — more often with a kid in tow.
+    // Now and then peel off for coffee, and a 99 if there's a kid in tow.
     this.iceCreamWait -= delta;
     if (this.iceCreamWait <= 0) {
-      this.iceCreamWait = 55 + Math.random() * 90;
-      if (!this.adultCone && !this.kidCone && !pigeonFeeders) {
-        const fancy = this.kid ? 0.58 : 0.2;
+      this.iceCreamWait = 45 + Math.random() * 80;
+      if (
+        !this.adultCone &&
+        !this.adultCup &&
+        !this.kidCone &&
+        !pigeonFeeders
+      ) {
+        const fancy = this.kid ? 0.62 : 0.38;
         if (Math.random() < fancy) this.startIceCream();
       }
     }
@@ -3370,8 +3275,9 @@ export class Person {
     this.grumble?.dispose();
     this.grumble = new Grumble(
       this.scene,
-      COMPLAINTS[Math.floor(Math.random() * COMPLAINTS.length)]!,
+      line('public', 'complaints'),
       this.group.position,
+      "public",
     );
   }
 
@@ -3417,8 +3323,9 @@ export class Person {
       this.grumble?.dispose();
       this.grumble = new Grumble(
         this.scene,
-        FACE_MUCK[Math.floor(Math.random() * FACE_MUCK.length)]!,
+        line('public', 'face-muck'),
         this.group.position,
+        "public",
       );
     }
 
@@ -3457,8 +3364,9 @@ export class Person {
     this.grumble?.dispose();
     this.grumble = new Grumble(
       this.scene,
-      SCATTER_LINES[Math.floor(Math.random() * SCATTER_LINES.length)]!,
+      line('public', 'scatter'),
       this.group.position,
+      "public",
     );
   }
 
@@ -3471,8 +3379,9 @@ export class Person {
     this.grumble?.dispose();
     this.grumble = new Grumble(
       this.scene,
-      SCATTER_LINES[Math.floor(Math.random() * SCATTER_LINES.length)]!,
+      line('public', 'scatter'),
       this.group.position,
+      "public",
     );
     if (this.handfuls <= 0) this.emptyHanded();
   }
@@ -3485,8 +3394,9 @@ export class Person {
     this.grumble?.dispose();
     this.grumble = new Grumble(
       this.scene,
-      PIGEON_FAN_LINES[Math.floor(Math.random() * PIGEON_FAN_LINES.length)]!,
+      line('public', 'pigeon-fan'),
       this.group.position,
+      "public",
     );
     if (this.handfuls <= 0 && this.bag) {
       this.bag.removeFromParent();
@@ -3598,7 +3508,7 @@ export class Person {
     );
     this.litterWait = LITTER_EVERY * (0.7 + Math.random());
     if (Math.random() < 0.4) {
-      this.say(SHIFTY);
+      this.say(lines('public', 'shifty'));
       this.showMood("shifty");
     }
   }
@@ -3791,7 +3701,7 @@ export class Person {
     if (!this.swingHit && t >= 0.42) {
       this.swingHit = true;
       this.swingReady = true;
-      if (bagging) this.say(HANDBAG_LINES);
+      if (bagging) this.say(lines('public', 'handbag'));
     }
     if (this.lungeLeft <= 0 && this.madLeft <= 0) {
       this.strop = STROP_TIME;

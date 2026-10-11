@@ -160,7 +160,7 @@ export function buildWarden(): WardenRig {
   const head = new THREE.Group();
   head.position.y = 0.74;
   torso.add(head);
-  const face = new Face(SKIN);
+  const face = new Face(SKIN, 1, true);
   head.add(face.group);
 
   // Navy cap: domed crown and a proper peak.

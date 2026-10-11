@@ -298,7 +298,7 @@ let roseGardenAt: {
   halfD: number;
 } | null = null;
 /** Café / kiosk poses — hatch faces local −Z, same as the boat house. */
-const cafeSpots: { x: number; z: number; yaw: number }[] = [];
+const cafeSpots: { x: number; z: number; yaw: number; door: boolean }[] = [];
 
 /** How close you must be to hop in. */
 const BOARD_RANGE = 2.4;
@@ -756,7 +756,7 @@ function placeCafe(
   seating: boolean,
 ): void {
   const at = { x: pl.x, z: pl.z, yaw: pl.yaw };
-  cafeSpots.push({ x: at.x, z: at.z, yaw: at.yaw });
+  cafeSpots.push({ x: at.x, z: at.z, yaw: at.yaw, door: seating });
   const group = new THREE.Group();
   group.position.set(at.x, footY(at.x, at.z), at.z);
   group.rotation.y = at.yaw;
@@ -797,6 +797,15 @@ function placeCafe(
   board.position.set(-3.4, 0.6, -DEEP / 2 - 1.6);
   board.rotation.set(0.2, 0.3, 0);
   group.add(board);
+
+  if (seating) {
+    const door = block(0.1, 2.15, 1.05, TIMBER_DARK);
+    door.position.set(WIDE / 2 + 0.06, 1.08, 0.35);
+    group.add(door);
+    const handle = block(0.04, 0.12, 0.04, STEEL);
+    handle.position.set(WIDE / 2 + 0.12, 1.05, 0.08);
+    group.add(handle);
+  }
 
   if (seating) {
     // Round tables out front under parasols.
@@ -1152,7 +1161,10 @@ const PLAY_BAR = new THREE.MeshStandardMaterial({
   metalness: 0.72,
 });
 
-/** Metal picket fence — same height as the old solid rails. */
+/**
+ * Metal picket fence — same height as the old solid rails.
+ * Runs along local Z so `yaw = atan2(dx, dz)` from the outline stays correct.
+ */
 function placePlayRail(
   scene: THREE.Scene,
   x: number,
@@ -1165,10 +1177,10 @@ function placePlayRail(
   group.position.set(x, y0, z);
   group.rotation.y = yaw;
 
-  const top = new THREE.Mesh(new THREE.BoxGeometry(length, 0.035, 0.045), PLAY_BAR);
+  const top = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.035, length), PLAY_BAR);
   top.position.set(0, PLAY_FENCE_H - 0.06, 0);
   group.add(top);
-  const sole = new THREE.Mesh(new THREE.BoxGeometry(length, 0.035, 0.045), PLAY_BAR);
+  const sole = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.035, length), PLAY_BAR);
   sole.position.set(0, 0.1, 0);
   group.add(sole);
 
@@ -1179,7 +1191,7 @@ function placePlayRail(
       new THREE.CylinderGeometry(0.014, 0.014, PLAY_FENCE_H - 0.18, 6),
       PLAY_BAR,
     );
-    post.position.set(along, PLAY_FENCE_H * 0.5 - 0.04, 0);
+    post.position.set(0, PLAY_FENCE_H * 0.5 - 0.04, along);
     group.add(post);
   }
   for (const end of [-length / 2, length / 2]) {
@@ -1187,7 +1199,7 @@ function placePlayRail(
       new THREE.BoxGeometry(0.05, PLAY_FENCE_H, 0.05),
       PLAY_BAR,
     );
-    leg.position.set(end, PLAY_FENCE_H / 2, 0);
+    leg.position.set(0, PLAY_FENCE_H / 2, end);
     group.add(leg);
   }
 
@@ -2458,11 +2470,7 @@ export function hatchQueueSpot(): THREE.Vector3 | null {
   );
 }
 
-/**
- * Queue spot in front of a café hatch. Pass `near` to pick the closest kiosk;
- * otherwise any will do.
- */
-export function cafeQueueSpot(near?: THREE.Vector3): THREE.Vector3 | null {
+function pickCafeSpot(near?: THREE.Vector3) {
   if (cafeSpots.length === 0) return null;
   let best = cafeSpots[0]!;
   if (near && cafeSpots.length > 1) {
@@ -2479,10 +2487,32 @@ export function cafeQueueSpot(near?: THREE.Vector3): THREE.Vector3 | null {
   } else if (!near) {
     best = cafeSpots[Math.floor(Math.random() * cafeSpots.length)]!;
   }
+  return best;
+}
+
+/**
+ * Queue spot in front of a café hatch. Pass `near` to pick the closest kiosk;
+ * otherwise any will do.
+ */
+export function cafeQueueSpot(near?: THREE.Vector3): THREE.Vector3 | null {
+  const best = pickCafeSpot(near);
+  if (!best) return null;
   // Hatch faces local −Z — same convention as the boat-house counter.
   const fx = -Math.sin(best.yaw);
   const fz = -Math.cos(best.yaw);
   return new THREE.Vector3(best.x + fx * 5.2, 0, best.z + fz * 5.2);
+}
+
+/** Side door on a sit-down café, or the hatch on a kiosk. */
+export function cafeEnterSpot(near?: THREE.Vector3): THREE.Vector3 | null {
+  const best = pickCafeSpot(near);
+  if (!best) return null;
+  if (best.door) {
+    const sx = Math.cos(best.yaw);
+    const sz = -Math.sin(best.yaw);
+    return new THREE.Vector3(best.x + sx * 5.85, 0, best.z + sz * 5.85);
+  }
+  return cafeQueueSpot(near);
 }
 
 /** Where the boatman loiters beside the hatch. */

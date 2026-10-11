@@ -10,7 +10,7 @@ export type ModelPart = {
   id: string
   label: string
   shape: PartShape
-  /** Parent part id. Position/rotation are local to that part, like canoe-lake groups. */
+  /** Parent group or part id. Position/rotation are local to that node. */
   parent?: string
   position: [number, number, number]
   rotation: [number, number, number]
@@ -20,12 +20,30 @@ export type ModelPart = {
   metalness: number
 }
 
+/** Empty pivot. Children move/rotate/scale with it; each child stays selectable. */
+export type ModelGroup = {
+  id: string
+  label: string
+  parent?: string
+  position: [number, number, number]
+  rotation: [number, number, number]
+  scale: [number, number, number]
+}
+
+export type SceneNodeInfo = {
+  id: string
+  label: string
+  kind: 'part' | 'group'
+  parent?: string
+}
+
 export type ModelSpec = {
   name: string
   kind: string
   style: string
   density: 'chunky' | 'medium' | 'fine'
   parts: ModelPart[]
+  groups?: ModelGroup[]
 }
 
 export const PART_SHAPES: PartShape[] = [

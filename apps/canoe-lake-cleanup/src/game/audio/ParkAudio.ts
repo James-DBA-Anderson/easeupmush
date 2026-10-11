@@ -60,6 +60,35 @@ class ParkAudioEngine {
   private unlocked = false;
   private muted = false;
 
+  /** Title track — plays once as the menu comes up, then hands off to the park bed. */
+  private titleWanted = false;
+  private titlePlaying = false;
+  private titleHandedOff = false;
+  private titleEl: HTMLAudioElement | null = null;
+  private titleGain: GainNode | null = null;
+  private titleFade: number | null = null;
+  /** Duck the sea bed while the title cue is up. */
+  private seaDuck: GainNode | null = null;
+
+  /** Quiet looping shift bed (Bob Bob) — in after half a minute on duty. */
+  private shiftWanted = false;
+  private shiftEl: HTMLAudioElement | null = null;
+  private shiftGain: GainNode | null = null;
+
+  /** Night theme — loops from 9pm until morning. */
+  private nightWanted = false;
+  private nightEl: HTMLAudioElement | null = null;
+  private nightGain: GainNode | null = null;
+
+  /** Tense cue — fire, racer crash, rebels on the sand. */
+  private tenseWanted = false;
+  private tenseEl: HTMLAudioElement | null = null;
+  private tenseGain: GainNode | null = null;
+  private tenseLevel = 1;
+  private tensePlays = 0;
+  /** `null` keeps looping until something stops it. */
+  private tenseMaxPlays: number | null = null;
+
   private seaNodes: { stop: () => void }[] = [];
   private seaRunning = false;
 
@@ -109,6 +138,11 @@ class ParkAudioEngine {
     if (this.ctx.state === "suspended") await this.ctx.resume();
     this.unlocked = true;
     this.startSea();
+    if (this.titleWanted && !this.titleHandedOff) this.startTitleBed();
+    if (this.tenseWanted) this.startTense();
+    if (this.nightWanted) this.startNightBed();
+    else if (this.shiftWanted) this.startShiftBed();
+    if (this.tenseWanted) this.duckUnderTense();
   }
 
   public setMuted(on: boolean): void {
@@ -118,6 +152,321 @@ class ParkAudioEngine {
 
   public isUnlocked(): boolean {
     return this.unlocked;
+  }
+
+  /**
+   * Jim's Title cue for the menu. Plays once from load (or the first gesture
+   * if the browser blocks autoplay), then fades into the sea / wind / birds.
+   */
+  public setTitleBed(on: boolean): void {
+    this.titleWanted = on;
+    if (on) {
+      if (!this.titleHandedOff) this.startTitleBed();
+    } else {
+      this.handoffTitleToAmbience();
+    }
+  }
+
+  private musicSrc(stem: string): string {
+    const base = import.meta.env.BASE_URL;
+    const probe = document.createElement("audio");
+    if (probe.canPlayType("audio/ogg; codecs=vorbis")) {
+      return `${base}music/${stem}.ogg`;
+    }
+    return `${base}music/${stem}.mp3`;
+  }
+
+  private startTitleBed(): void {
+    if (
+      !this.titleWanted ||
+      this.titleHandedOff ||
+      this.titlePlaying ||
+      !this.unlocked ||
+      !this.ctx ||
+      !this.master
+    ) {
+      return;
+    }
+    if (this.titleFade != null) {
+      window.clearTimeout(this.titleFade);
+      this.titleFade = null;
+    }
+    if (!this.titleEl) {
+      const el = new Audio(this.musicSrc("title"));
+      el.loop = false;
+      el.preload = "auto";
+      el.autoplay = true;
+      el.setAttribute("data-title-bed", "");
+      el.style.display = "none";
+      document.body.appendChild(el);
+      const src = this.ctx.createMediaElementSource(el);
+      const gain = this.ctx.createGain();
+      gain.gain.value = 0.0001;
+      src.connect(gain);
+      gain.connect(this.master);
+      this.titleEl = el;
+      this.titleGain = gain;
+      el.addEventListener("timeupdate", () => {
+        if (!el.duration || this.titleHandedOff) return;
+        if (el.duration - el.currentTime <= 5.5) this.handoffTitleToAmbience();
+      });
+      el.addEventListener("ended", () => this.handoffTitleToAmbience());
+    }
+    this.duckSea(true);
+    const t = this.ctx.currentTime;
+    const gain = this.titleGain!;
+    gain.gain.cancelScheduledValues(t);
+    gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), t);
+    gain.gain.exponentialRampToValueAtTime(0.38, t + 0.6);
+    void this.titleEl.play().then(
+      () => {
+        this.titlePlaying = true;
+      },
+      () => {
+        /* Autoplay blocked — unlock() on the next click retries. */
+      },
+    );
+  }
+
+  /** Title cue out, park bed in — used at the natural end and when they Start. */
+  private handoffTitleToAmbience(): void {
+    if (this.titleHandedOff) return;
+    this.titleHandedOff = true;
+    this.titleWanted = false;
+    this.titlePlaying = false;
+    if (!this.ctx) {
+      this.duckSea(false);
+      return;
+    }
+    const t = this.ctx.currentTime;
+    if (this.titleGain) {
+      this.titleGain.gain.cancelScheduledValues(t);
+      this.titleGain.gain.setValueAtTime(
+        Math.max(0.0001, this.titleGain.gain.value),
+        t,
+      );
+      this.titleGain.gain.exponentialRampToValueAtTime(0.0001, t + 4.2);
+    }
+    this.duckSea(false, 4.5);
+    if (this.titleFade != null) window.clearTimeout(this.titleFade);
+    this.titleFade = window.setTimeout(() => {
+      this.titleEl?.pause();
+      this.titleFade = null;
+    }, 4300);
+  }
+
+  private duckSea(duck: boolean, seconds = 0.4): void {
+    if (!this.seaDuck || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    const to = duck ? 0.0001 : 1;
+    this.seaDuck.gain.cancelScheduledValues(t);
+    this.seaDuck.gain.setValueAtTime(
+      Math.max(0.0001, this.seaDuck.gain.value),
+      t,
+    );
+    this.seaDuck.gain.exponentialRampToValueAtTime(to, t + seconds);
+  }
+
+  /** Quiet looping bed once they've been on shift a bit. Night takes over after 9. */
+  public setShiftBed(on: boolean): void {
+    if (this.shiftWanted === on) {
+      if (on && !this.nightWanted && !this.shiftEl) this.startShiftBed();
+      return;
+    }
+    this.shiftWanted = on;
+    if (on && !this.nightWanted) this.startShiftBed();
+    else this.stopShiftBed();
+  }
+
+  private startShiftBed(): void {
+    if (
+      !this.shiftWanted ||
+      this.nightWanted ||
+      !this.unlocked ||
+      !this.ctx ||
+      !this.master
+    ) {
+      return;
+    }
+    if (this.shiftEl) {
+      if (this.shiftEl.paused) void this.shiftEl.play().catch(() => {});
+      return;
+    }
+    const el = new Audio(this.musicSrc("bob-bob"));
+    el.loop = true;
+    el.preload = "auto";
+    el.setAttribute("data-shift-bed", "");
+    el.style.display = "none";
+    document.body.appendChild(el);
+    const src = this.ctx.createMediaElementSource(el);
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0.0001;
+    src.connect(gain);
+    gain.connect(this.master);
+    this.shiftEl = el;
+    this.shiftGain = gain;
+    this.fadeBed(gain, this.tenseWanted ? 0.0001 : 0.085, 3.2);
+    void el.play().catch(() => {
+      /* wait for the next unlock */
+    });
+  }
+
+  private stopShiftBed(): void {
+    this.fadeBed(this.shiftGain, 0.0001, 1.2);
+    if (this.shiftEl) window.setTimeout(() => this.shiftEl?.pause(), 1300);
+  }
+
+  /** Jim's night cue — loops from 9pm through to morning. */
+  public setNightBed(on: boolean): void {
+    if (this.nightWanted === on) {
+      if (on && !this.nightEl) this.startNightBed();
+      return;
+    }
+    this.nightWanted = on;
+    if (on) {
+      this.stopShiftBed();
+      this.startNightBed();
+    } else {
+      this.stopNightBed();
+    }
+  }
+
+  private startNightBed(): void {
+    if (!this.nightWanted || !this.unlocked || !this.ctx || !this.master) return;
+    if (this.nightEl) {
+      if (this.nightEl.paused) void this.nightEl.play().catch(() => {});
+      return;
+    }
+    const el = new Audio(this.musicSrc("night"));
+    el.loop = true;
+    el.preload = "auto";
+    el.setAttribute("data-night-bed", "");
+    el.style.display = "none";
+    document.body.appendChild(el);
+    const src = this.ctx.createMediaElementSource(el);
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0.0001;
+    src.connect(gain);
+    gain.connect(this.master);
+    this.nightEl = el;
+    this.nightGain = gain;
+    this.fadeBed(gain, this.tenseWanted ? 0.0001 : 0.085, 3.2);
+    void el.play().catch(() => {
+      /* wait for the next unlock */
+    });
+  }
+
+  private stopNightBed(): void {
+    this.fadeBed(this.nightGain, 0.0001, 1.2);
+    if (this.nightEl) window.setTimeout(() => this.nightEl?.pause(), 1300);
+  }
+
+  private fadeBed(gain: GainNode | null, to: number, seconds: number): void {
+    if (!gain || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    gain.gain.cancelScheduledValues(t);
+    gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), t);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, to), t + seconds);
+  }
+
+  private holdBeds(paused: boolean): void {
+    const hold = (el: HTMLAudioElement | null, wanted: boolean): void => {
+      if (!wanted || !el) return;
+      if (paused) el.pause();
+      else void el.play().catch(() => {});
+    };
+    hold(this.tenseEl, this.tenseWanted);
+    hold(this.nightEl, this.nightWanted);
+    hold(this.shiftEl, this.shiftWanted && !this.nightWanted);
+  }
+
+  /**
+   * Incident sting. Fire / rebels pass no `loops` (runs until faded). Racer
+   * crash passes `loops: 2`.
+   */
+  public setTense(on: boolean, opts?: { loops?: number }): void {
+    if (!on) {
+      this.stopTense();
+      return;
+    }
+    const unlimited = opts?.loops == null;
+    if (this.tenseWanted) {
+      if (unlimited) this.tenseMaxPlays = null;
+      if (!this.tenseEl) this.startTense();
+      return;
+    }
+    this.tenseWanted = true;
+    this.tensePlays = 0;
+    this.tenseMaxPlays = unlimited ? null : opts!.loops!;
+    this.tenseLevel = 1;
+    this.startTense();
+  }
+
+  /** 0–1 while the fire is dying — last few patches pull the sting down. */
+  public setTenseLevel(level: number): void {
+    const next = Math.max(0, Math.min(1, level));
+    if (Math.abs(next - this.tenseLevel) < 0.03) return;
+    this.tenseLevel = next;
+    if (!this.tenseWanted) return;
+    this.fadeBed(this.tenseGain, 0.2 * next, 0.5);
+  }
+
+  private startTense(): void {
+    if (!this.tenseWanted || !this.unlocked || !this.ctx || !this.master) return;
+    this.duckUnderTense();
+    if (this.tenseEl) {
+      if (this.tenseEl.paused) void this.tenseEl.play().catch(() => {});
+      this.fadeBed(this.tenseGain, 0.2 * this.tenseLevel, 0.7);
+      return;
+    }
+    const el = new Audio(this.musicSrc("tense"));
+    el.loop = false;
+    el.preload = "auto";
+    el.setAttribute("data-tense-bed", "");
+    el.style.display = "none";
+    document.body.appendChild(el);
+    const src = this.ctx.createMediaElementSource(el);
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0.0001;
+    src.connect(gain);
+    gain.connect(this.master);
+    this.tenseEl = el;
+    this.tenseGain = gain;
+    el.addEventListener("ended", () => this.onTenseEnded());
+    this.fadeBed(gain, 0.2 * this.tenseLevel, 0.7);
+    void el.play().catch(() => {
+      /* wait for the next unlock */
+    });
+  }
+
+  private onTenseEnded(): void {
+    this.tensePlays += 1;
+    if (!this.tenseWanted || !this.tenseEl) return;
+    if (this.tenseMaxPlays != null && this.tensePlays >= this.tenseMaxPlays) {
+      this.stopTense();
+      return;
+    }
+    this.tenseEl.currentTime = 0;
+    void this.tenseEl.play().catch(() => {});
+  }
+
+  private stopTense(): void {
+    if (!this.tenseWanted) return;
+    this.tenseWanted = false;
+    this.tenseMaxPlays = null;
+    this.fadeBed(this.tenseGain, 0.0001, 2.6);
+    if (this.tenseEl) window.setTimeout(() => this.tenseEl?.pause(), 2800);
+    this.restoreUnderTense();
+  }
+
+  private duckUnderTense(): void {
+    this.fadeBed(this.nightGain, 0.0001, 0.9);
+    this.fadeBed(this.shiftGain, 0.0001, 0.9);
+  }
+
+  private restoreUnderTense(): void {
+    if (this.nightWanted) this.fadeBed(this.nightGain, 0.085, 2.8);
+    else if (this.shiftWanted) this.fadeBed(this.shiftGain, 0.085, 2.8);
   }
 
   /**
@@ -150,14 +499,20 @@ class ParkAudioEngine {
       this.setPedalling(0);
       this.syncFlyovers([], listener, delta);
       this.syncTraffic([], listener, delta);
+      this.holdBeds(true);
       return;
     }
+
+    this.holdBeds(false);
 
     this.setLance(opts.hosing, !!opts.heavyHose);
     this.setSwanHiss(opts.swanAngry);
     this.setPedalling(opts.pedalling ?? 0);
     this.syncFlyovers(opts.flyovers ?? [], listener, delta);
     this.syncTraffic(opts.traffic ?? [], listener, delta);
+
+    // Hold bird / surf cues until the title cue has handed off to the park bed.
+    if (this.titlePlaying || (this.titleWanted && !this.titleHandedOff)) return;
 
     this.nextWave -= delta;
     if (this.nextWave <= 0) {
@@ -1071,9 +1426,14 @@ class ParkAudioEngine {
     if (!this.ctx || !this.master || this.seaRunning) return;
     this.seaRunning = true;
 
+    this.seaDuck = this.ctx.createGain();
+    this.seaDuck.gain.value =
+      this.titleWanted && !this.titleHandedOff ? 0.0001 : 1;
+    this.seaDuck.connect(this.master);
+
     const gain = this.ctx.createGain();
     gain.gain.value = 0.0001;
-    gain.connect(this.master);
+    gain.connect(this.seaDuck);
 
     // Soft bed — brownish noise through a low shelf.
     const bed = this.loopNoise(0.22, 480, 0.55);
@@ -1089,7 +1449,7 @@ class ParkAudioEngine {
     const lfo = this.ctx.createOscillator();
     const lfoG = this.ctx.createGain();
     lfo.frequency.value = 0.07;
-    lfoG.gain.value = 0.045;
+    lfoG.gain.value = 0.06;
     lfo.connect(lfoG);
     lfoG.connect(gain.gain);
     lfo.start();
@@ -1105,7 +1465,7 @@ class ParkAudioEngine {
 
     const t = this.ctx.currentTime;
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.11, t + 2.5);
+    gain.gain.exponentialRampToValueAtTime(0.15, t + 2.5);
   }
 
   /**
@@ -1459,14 +1819,14 @@ class ParkAudioEngine {
       src.stop(at + dur + 0.02);
     };
 
-    burst(0, 0.65, 300, 0.045);
-    burst(0.14, 0.8, 460, 0.032);
-    burst(0.32, 0.95, 200, 0.022);
+    burst(0, 0.65, 300, 0.06);
+    burst(0.14, 0.8, 460, 0.043);
+    burst(0.32, 0.95, 200, 0.03);
   }
 
   private gullCry(t: number, loud: boolean): void {
     if (!this.ctx || !this.master) return;
-    const peak = loud ? 0.055 : 0.032;
+    const peak = loud ? 0.074 : 0.043;
     const pan = (Math.random() - 0.5) * (loud ? 0.35 : 1.2);
     // Herring-gull “kee-yah”: two soft descending whistles, not a buzzsaw.
     const base = 980 + Math.random() * 180;
@@ -1490,8 +1850,8 @@ class ParkAudioEngine {
     const pan = (Math.random() - 0.5) * 1.1;
     const base = 280 + Math.random() * 60;
     // Soft nasal quack — short, low, filtered.
-    this.chirp(t, base * 1.15, base * 0.7, 0.07, 0.045, pan, 520);
-    this.chirp(t + 0.06, base, base * 0.55, 0.08, 0.038, pan, 480);
+    this.chirp(t, base * 1.15, base * 0.7, 0.07, 0.06, pan, 520);
+    this.chirp(t + 0.06, base, base * 0.55, 0.08, 0.05, pan, 480);
   }
 
   private swanCall(t: number, loud: boolean): void {

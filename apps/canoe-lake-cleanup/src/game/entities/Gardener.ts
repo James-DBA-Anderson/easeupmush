@@ -19,67 +19,7 @@ import type { Person } from "./Person";
 import type { Dog } from "./Dog";
 import type { Face } from "./Face";
 import { buildGardener } from "./StaffModel";
-
-const TEND_LINES = [
-  "THAT'LL DO YOU",
-  "NICE AND TIDY",
-  "DRINK UP, LOVELIES",
-  "COME ON THEN",
-  "BACK IN YOU GO",
-];
-const WATER_LINES = [
-  "THAT'S THE STUFF!",
-  "GOOD LAD — KEEP IT COMING",
-  "THEY NEEDED THAT",
-  "PROPER JOB, THAT",
-  "CHEERS FOR THE WATER",
-];
-const TRAMPLE_LINES = [
-  "OI! OFF MY BEDS!",
-  "GET OUT OF THEM FLOWERS!",
-  "YOU'RE TREADING THEM FLAT!",
-  "I'LL HAVE YOU FOR THAT!",
-  "MIND THE BLOOMS!",
-];
-const BLAST_LINES = [
-  "YOU'RE BLASTING THE HEADS OFF!",
-  "TOO CLOSE WITH THAT WASHER!",
-  "LOOK WHAT YOU'VE DONE!",
-  "COME HERE YOU VANDAL!",
-  "THOSE ARE COUNCIL FLOWERS!",
-];
-const GRUMPY_LINES = [
-  "LOOK AT THE STATE OF THAT",
-  "NOBODY MINDS THESE BEDS",
-  "COUNCIL CUTS, THIS IS",
-  "DO I LOOK LIKE I'VE GOT HELP?",
-  "EVERY BLOOM'S HAD IT",
-];
-const SPRAY_GRUMP = [
-  "OI — WATCH THAT WASHER",
-  "I'M WORKING HERE",
-  "YOU'VE SOAKED ME",
-  "DO YOU MIND?",
-  "THAT'S MY FLEECE",
-];
-const SPRAY_ANGRY = [
-  "I SAID WATCH IT",
-  "YOU'RE DOING THAT ON PURPOSE",
-  "KEEP THAT THING OFF ME",
-  "I'VE HAD ENOUGH OF THIS",
-];
-const SPRAY_MAD = [
-  "RIGHT — THAT'S IT",
-  "COME HERE WITH THAT THING",
-  "I'LL HAVE YOUR JOB",
-  "YOU'VE ASKED FOR THIS",
-];
-const HUNT_LINES = [
-  "GET BACK HERE!",
-  "I SAW THAT!",
-  "DON'T YOU RUN!",
-  "I'LL HAVE YOUR WAGES!",
-];
+import { line, lines } from "../../dialogue";
 
 type Job = "idle" | "toBed" | "tend" | "hunt";
 
@@ -155,7 +95,7 @@ export class Gardener {
     this.swingReady = false;
     this.swingCool = 2.4;
     this.swingsLanded += 1;
-    this.say(HUNT_LINES[Math.floor(Math.random() * HUNT_LINES.length)]!);
+    this.say(line('gardener', 'hunt'));
     if (this.swingsLanded >= 3) {
       this.huntLeft = Math.min(this.huntLeft, 1.2);
     }
@@ -166,12 +106,12 @@ export class Gardener {
   public noticeWatered(): void {
     if (this.praiseCool > 0 || this.job === "hunt") return;
     this.praiseCool = 8;
-    this.say(WATER_LINES[Math.floor(Math.random() * WATER_LINES.length)]!);
+    this.say(line('gardener', 'water'));
   }
 
   /** Close-range washer stripped petals — come for the cleaner. */
   public noticeBlasted(): void {
-    this.startHunt({ kind: "player" }, BLAST_LINES);
+    this.startHunt({ kind: "player" }, lines('gardener', 'blast'));
   }
 
   public soakedBy(point: THREE.Vector3, heavy = false): boolean {
@@ -203,18 +143,17 @@ export class Gardener {
 
     if (this.job === "hunt") {
       if (!this.grumble) {
-        this.say(SPRAY_MAD[Math.floor(Math.random() * SPRAY_MAD.length)]!);
+        this.say(line('gardener', 'spray-mad'));
       }
       return first;
     }
 
     if (this.soakCount >= 3) {
-      this.startHunt({ kind: "player" }, SPRAY_MAD);
+      this.startHunt({ kind: "player" }, lines('gardener', 'spray-mad'));
       return first;
     }
 
-    const lines = this.soakCount === 1 ? SPRAY_GRUMP : SPRAY_ANGRY;
-    this.say(lines[Math.floor(Math.random() * lines.length)]!);
+    this.say(line('gardener', this.soakCount === 1 ? 'spray-grump' : 'spray-angry'));
     return first;
   }
 
@@ -292,7 +231,7 @@ export class Gardener {
         this.timer = 5.5 + Math.random() * 4;
         this.tendRestoreIn = 1.2;
         this.faceBed(this.bed);
-        this.say(TEND_LINES[Math.floor(Math.random() * TEND_LINES.length)]!);
+        this.say(line('gardener', 'tend'));
       }
       return;
     }
@@ -325,7 +264,7 @@ export class Gardener {
 
     if (this.feetInBed(player.x, player.z)) {
       trampleFlowerBed(player.x, player.z);
-      this.startHunt({ kind: "player" }, TRAMPLE_LINES);
+      this.startHunt({ kind: "player" }, lines('gardener', 'trample'));
       return;
     }
 
@@ -333,7 +272,7 @@ export class Gardener {
       const at = person.getPosition();
       if (this.feetInBed(at.x, at.z)) {
         trampleFlowerBed(at.x, at.z);
-        this.startHunt({ kind: "person", person }, TRAMPLE_LINES);
+        this.startHunt({ kind: "person", person }, lines('gardener', 'trample'));
         return;
       }
       const dog = person.getDog();
@@ -341,7 +280,7 @@ export class Gardener {
       const paw = dog.getPosition();
       if (this.feetInBed(paw.x, paw.z)) {
         trampleFlowerBed(paw.x, paw.z);
-        this.startHunt({ kind: "dog", dog }, TRAMPLE_LINES);
+        this.startHunt({ kind: "dog", dog }, lines('gardener', 'trample'));
         return;
       }
     }
@@ -362,7 +301,7 @@ export class Gardener {
     return false;
   }
 
-  private startHunt(target: HuntTarget, lines: readonly string[]): void {
+  private startHunt(target: HuntTarget, shouts: readonly string[]): void {
     this.angerCool = 2.5;
     this.hunt = target;
     this.job = "hunt";
@@ -372,7 +311,7 @@ export class Gardener {
     this.swingCool = 0.35;
     this.shoutIn = 0;
     this.route.ready = false;
-    this.say(lines[Math.floor(Math.random() * lines.length)]!);
+    this.say(shouts[Math.floor(Math.random() * shouts.length)]!);
   }
 
   private chase(delta: number, player: THREE.Vector3): void {
@@ -388,7 +327,7 @@ export class Gardener {
     }
 
     if (this.shoutIn <= 0 && !this.grumble) {
-      this.say(HUNT_LINES[Math.floor(Math.random() * HUNT_LINES.length)]!);
+      this.say(line('gardener', 'hunt'));
       this.shoutIn = 3.2 + Math.random() * 2.8;
     }
 
@@ -427,7 +366,7 @@ export class Gardener {
         this.landHit(aim);
         this.swingCool = 2.4;
         this.swingsLanded += 1;
-        this.say(HUNT_LINES[Math.floor(Math.random() * HUNT_LINES.length)]!);
+        this.say(line('gardener', 'hunt'));
         if (this.swingsLanded >= 3) {
           this.huntLeft = Math.min(this.huntLeft, 1.2);
         }
@@ -580,8 +519,7 @@ export class Gardener {
   private idlePose(delta: number): void {
     this.chatIn -= delta;
     if (this.chatIn <= 0 && !this.grumble && this.job !== "hunt") {
-      const lines = GRUMPY_LINES;
-      this.say(lines[Math.floor(Math.random() * lines.length)]!);
+      this.say(line('gardener', 'grumpy'));
       this.chatIn = 18 + Math.random() * 28;
     }
     this.step += delta * 2;
@@ -623,6 +561,7 @@ export class Gardener {
       this.scene,
       text,
       this.group.position.clone().add(new THREE.Vector3(0, 2.15, 0)),
+      "gardener",
     );
   }
 

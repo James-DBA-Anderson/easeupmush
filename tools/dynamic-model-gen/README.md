@@ -28,7 +28,8 @@ Kind, style, pose, palette, and detail compile into a prompt the same way Sprite
 
 After a generate (or after dropping an OBJ/GLB on the viewport):
 
-- **Orbit / Move / Rotate / Scale** — gizmos on the whole model
+- **Orbit / Move / Rotate / Scale** — gizmos on the selected part or group
+- **Group** — Shift-click parts, then Group (Ctrl/Cmd+G). The group is a JSON pivot (`groups[]`); children stay selectable. Double-click a part to pick its group. Ungroup (Ctrl/Cmd+Shift+G) dissolves it.
 - **Cut** — click nodes along the cut (three or more). The amber plane is fitted through those nodes. Cut inserts new vertices on both pieces so the split sits on that plane. Name each new object.
 - **Nodes** — click a vertex, then drag axis gizmos. Right-click to insert a vertex. Zoom in on dense scans to see more nodes.
 - **Inflate / Smooth** — click-drag sculpt on the surface

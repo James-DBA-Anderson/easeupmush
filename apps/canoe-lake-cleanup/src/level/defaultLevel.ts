@@ -244,6 +244,8 @@ export const DEFAULT_LEVEL: LevelData = {
   elevationZones: [],
   /** Red-arrow mission anchors — picnic, geese, swanboat, punch-up, fire, rebels. */
   missionSpots: DEFAULT_MISSION_SPOTS.map((s) => ({ ...s })),
+  /** Empty → auto-scatter the opening tip near the van. */
+  overnightPiles: [] as XZ[],
 };
 
 export function cloneLevel(level: LevelData): LevelData {

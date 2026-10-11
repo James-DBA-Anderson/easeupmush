@@ -305,6 +305,9 @@ function normalizeLevel(raw: unknown): LevelData | null {
     trees: normalizeTrees(data.trees),
     elevationZones: normalizeElevationZones(data.elevationZones),
     missionSpots: normalizeMissionSpots(data.missionSpots),
+    overnightPiles: Array.isArray(data.overnightPiles)
+      ? data.overnightPiles.filter(isXZ).map((p) => [p[0], p[1]] as XZ)
+      : [],
   };
 }
 

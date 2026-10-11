@@ -8,6 +8,8 @@
     "./phraseology": {
       "types": "./phraseology.d.ts",
       "default": "./phraseology.json"
-    }
+    },
+    "./dialogue": "./dialogue.ts",
+    "./tool-switch": "./toolSwitch.ts"
   }
 }

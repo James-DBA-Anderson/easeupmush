@@ -457,6 +457,29 @@ export function liveTrees(): ReadonlyArray<LiveTree> {
   return liveCanopy;
 }
 
+/** Squared metres from the camera; `0` skips sway, `Infinity` rocks every planting. */
+let swayReachSq = 90 * 90;
+
+/** Graphics quality: how far from the camera trees still rock in the wind. */
+export function setTreeSwayReach(metres: number): void {
+  const next =
+    metres <= 0
+      ? 0
+      : Number.isFinite(metres)
+        ? metres * metres
+        : Number.POSITIVE_INFINITY;
+  if (next === swayReachSq) return;
+  swayReachSq = next;
+  if (next <= 0) restTrees();
+}
+
+function restTrees(): void {
+  for (const plant of swaying) {
+    plant.group.rotation.x = plant.baseX;
+    plant.group.rotation.z = plant.baseZ;
+  }
+}
+
 /**
  * Tip every planting with the park wind. Strength follows the breeze; each
  * tree keeps its own phase so the avenue doesn't flap in lockstep.
@@ -466,19 +489,23 @@ export function updateTrees(
   wind: THREE.Vector2,
   camera?: THREE.Vector3,
 ): void {
+  if (swayReachSq <= 0) return;
   const mag = Math.hypot(wind.x, wind.y);
   if (mag < 0.05) return;
   const nx = wind.x / mag;
   const nz = wind.y / mag;
   // A few m/s is a light breeze; Solent blows harder in the wet.
   const strength = Math.min(1.4, 0.4 + mag * 0.2);
-  const swayReachSq = 90 * 90;
 
   for (const plant of swaying) {
-    if (camera) {
+    if (camera && Number.isFinite(swayReachSq)) {
       const dx = plant.group.position.x - camera.x;
       const dz = plant.group.position.z - camera.z;
-      if (dx * dx + dz * dz > swayReachSq) continue;
+      if (dx * dx + dz * dz > swayReachSq) {
+        plant.group.rotation.x = plant.baseX;
+        plant.group.rotation.z = plant.baseZ;
+        continue;
+      }
     }
     const wave = Math.sin(time * plant.rate + plant.phase);
     const gust = Math.sin(time * 0.68 + plant.phase * 1.4);

@@ -12,6 +12,8 @@ shared/
   phraseology.json      # Pompey slang — all games + /mush/phraseology/
 tools/
   dynamic-image-gen/    # local sprite generator for asset creation
+  dynamic-model-gen/    # local 3D model generator
+  dialogue-record/      # Linebench — record game dialogue
 ```
 
 ## Play / develop
@@ -94,4 +96,12 @@ Local Meshbench UI for generating and editing 3D game models. Not part of the si
 npm run models          # → http://localhost:5174
 npm run setup:ollama    # once, Ollama + qwen2.5 for AI layouts
 npm run setup:models    # optional Shap-E venv
+```
+
+### [Dialogue record](tools/dialogue-record/)
+
+Linebench — pick a game and character, read their lines, record takes. Each game keeps spoken copy in `src/dialogue/`; Linebench imports those catalogs. Mark a take **Use in game** to copy it into that game's `public/voices/` for the next load; unmarked takes stay in `tools/dialogue-record/recordings/` (gitignored) and are not played.
+
+```bash
+npm run dialogue        # → http://localhost:5175
 ```

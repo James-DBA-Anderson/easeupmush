@@ -23,22 +23,22 @@ const TAPE = matt(0xe8e8e0);
  * Local space: palm faces −Y (down onto a handle), fingers curl toward −Y/−Z,
  * wrist cuff sits at −Z. Parent a sleeve at the cuff so the arm stays attached.
  */
-export function buildHand(
-  side: 1 | -1,
-  pose: "gun" | "picker" | "sack" = "gun",
-): THREE.Group {
+export function buildHand(side: 1 | -1): THREE.Group {
   const hand = new THREE.Group();
+  hand.name = "glove";
 
   // How hard the mitt curls around the handle.
-  const curl = pose === "sack" ? 0.55 : pose === "picker" ? 0.85 : 0.95;
+  const curl = 0.95;
 
   const palm = new THREE.Mesh(new THREE.BoxGeometry(0.078, 0.038, 0.09), GLOVE);
+  palm.name = "palm";
   palm.position.set(0, 0, 0.01);
   palm.castShadow = true;
   hand.add(palm);
 
   // Single wide finger pad instead of four separate digits.
   const mitt = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.034, 0.065), GLOVE);
+  mitt.name = "mitt";
   mitt.geometry.translate(0, 0, 0.03);
   mitt.position.set(0, -0.002, 0.048);
   mitt.rotation.x = curl;
@@ -47,6 +47,7 @@ export function buildHand(
 
   // Fat thumb on the inward side, wrapping the grip.
   const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.028, 0.048), GLOVE);
+  thumb.name = "thumb";
   thumb.geometry.translate(0, 0, 0.02);
   thumb.position.set(side * -0.045, 0.008, 0.0);
   thumb.rotation.set(0.45, side * 0.65, side * -0.7);
@@ -54,6 +55,7 @@ export function buildHand(
 
   // Wrist cuff — sleeve should meet this face.
   const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.052, 0.04), CUFF);
+  cuff.name = "cuff";
   cuff.position.set(0, 0, -0.052);
   hand.add(cuff);
 
@@ -67,8 +69,10 @@ export function buildHand(
  */
 export function buildSleeve(side: 1 | -1): THREE.Group {
   const sleeve = new THREE.Group();
+  sleeve.name = "sleeve";
 
   const arm = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.42), HIVIS);
+  arm.name = "forearm";
   // Pivot at the wrist end; length runs toward the camera and slightly down.
   arm.geometry.translate(side * 0.015, -0.05, 0.21);
   arm.rotation.x = 0.42;
@@ -78,6 +82,7 @@ export function buildSleeve(side: 1 | -1): THREE.Group {
 
   // Reflective tape band just back from the cuff.
   const tape = new THREE.Mesh(new THREE.BoxGeometry(0.108, 0.125, 0.05), TAPE);
+  tape.name = "tape";
   tape.geometry.translate(side * 0.015, -0.02, 0.0);
   tape.position.set(0, 0, 0.055);
   tape.rotation.x = 0.42;
@@ -88,11 +93,8 @@ export function buildSleeve(side: 1 | -1): THREE.Group {
 }
 
 /** Gloved hand with the hi-vis sleeve already snapped to the cuff. */
-export function buildArmedHand(
-  side: 1 | -1,
-  pose: "gun" | "picker" | "sack" = "gun",
-): THREE.Group {
-  const hand = buildHand(side, pose);
+export function buildArmedHand(side: 1 | -1): THREE.Group {
+  const hand = buildHand(side);
   const sleeve = buildSleeve(side);
   // Cuff centre is at z = −0.052; seat the sleeve origin on the cuff's back face.
   sleeve.position.set(0, 0, -0.072);

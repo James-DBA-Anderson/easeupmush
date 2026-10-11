@@ -194,6 +194,11 @@ export interface LevelData {
    * Always one entry per known mission id after normalize.
    */
   missionSpots: MissionSpot[];
+  /**
+   * Opening overnight heaps (first job). Empty → the game auto-scatters
+   * along the lake rim by the van.
+   */
+  overnightPiles: XZ[];
 }
 
 export const LEVEL_STORAGE_KEY = "canoe-lake-level-v1";

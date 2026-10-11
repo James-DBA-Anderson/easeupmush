@@ -4,53 +4,11 @@ import { stepWalk } from "../world/blocking";
 import { Grumble } from "../effects/Grumble";
 import { MuckFlecks } from "../effects/MuckFlecks";
 import type { GrassFire } from "../effects/GrassFire";
+import { lines } from "../../dialogue";
 
 const COATS = [0x2f4f7f, 0x8b3a3a, 0x3f6b4a, 0x5a4a7a, 0xb06a2c, 0xd8452f];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
 const BUCKETS = [0x3f8fd0, 0xd85a2f, 0xe8c33c, 0x4aa85a];
-
-const HITS = [
-  "GOT ONE!",
-  "IT'S A BIG UN",
-  "LOOK AT THAT!",
-  "ANOTHER ONE",
-  "SWEET AS NUT!",
-];
-const MISSES = [
-  "NOTHING AGAIN",
-  "HE LET GO",
-  "AW, MAN",
-  "I'VE COPPED THE NEEDLE WITH THIS",
-];
-const FIRE_LINES = [
-  "GET SOME WATER ON IT!",
-  "I'VE GOT THE BUCKET!",
-  "CHUCK IT!",
-  "PUT IT OUT!",
-  "QUICK — THE BUCKET!",
-];
-const REFILL_LINES = [
-  "MORE WATER!",
-  "I'LL GET SOME MORE!",
-  "BACK TO THE LAKE!",
-  "FILL IT UP!",
-];
-const SOAKED = [
-  "OI! WATCH IT!",
-  "YOU'RE SOAKING ME!",
-  "LEAVE OFF!",
-  "THAT WAS MY JUMPER!",
-  "STOP IT!",
-  "MUM — HE'S SPRAYING ME!",
-];
-const FOULED = [
-  "THAT'S POO!",
-  "DISGUSTING!",
-  "YOU'VE COVERED ME!",
-  "I'M COVERED IN IT!",
-  "GROSS!",
-  "I'M TELLING!",
-];
 
 /** Chance there's something on the line when they pull it up. */
 const CATCH_ODDS = 0.45;
@@ -375,7 +333,7 @@ export class Crabber {
     if (this.gone || this.phase === "leaving") return false;
     const first = this.wet <= 0;
     this.wet = DRYING;
-    this.reactToSpray(SOAKED, first);
+    this.reactToSpray(lines('kid', 'crab-soaked'), first);
     // Drop the haul and sit up for a second.
     if (
       first &&
@@ -400,7 +358,7 @@ export class Crabber {
     const first = this.fouled <= 0;
     this.wet = DRYING;
     this.fouled = Math.max(this.fouled, 14);
-    this.reactToSpray(FOULED, first);
+    this.reactToSpray(lines('kid', 'crab-fouled'), first);
     if (first && Math.random() < 0.6) {
       this.standPose();
       this.line.visible = false;
@@ -453,7 +411,7 @@ export class Crabber {
       this.crab.visible = false;
       this.chucksLeft = 4 + Math.floor(Math.random() * 3);
       this.liftBucket(true);
-      this.shout(FIRE_LINES);
+      this.shout(lines('kid', 'crab-fire'));
     }
 
     this.fireTarget.copy(flame);
@@ -464,7 +422,7 @@ export class Crabber {
       if (this.amble(to, delta, 3.8) < 1.15) {
         this.chucksLeft = 4 + Math.floor(Math.random() * 3);
         this.phase = "toFire";
-        this.shout(REFILL_LINES);
+        this.shout(lines('kid', 'crab-refill'));
       }
       this.updateSplashes(delta);
       return;
@@ -507,10 +465,10 @@ export class Crabber {
         this.resumeCrabbing();
       } else if (this.chucksLeft <= 0) {
         this.phase = "toWater";
-        this.shout(REFILL_LINES);
+        this.shout(lines('kid', 'crab-refill'));
       } else {
         this.timer = 0.4 + Math.random() * 0.22;
-        if (Math.random() < 0.45) this.shout(FIRE_LINES);
+        if (Math.random() < 0.45) this.shout(lines('kid', 'crab-fire'));
       }
     }
     this.updateSplashes(delta);
@@ -714,7 +672,7 @@ export class Crabber {
     this.phase = "showing";
     this.timer = SHOW_TIME;
     this.crab.visible = this.hooked;
-    this.shout(this.hooked ? HITS : MISSES);
+    this.shout(this.hooked ? lines('kid', 'crab-hit') : lines('kid', 'crab-miss'));
   }
 
   /** Catch goes in the bucket, and the line goes back in the water. */
@@ -736,6 +694,7 @@ export class Crabber {
       this.scene,
       lines[Math.floor(Math.random() * lines.length)]!,
       this.group.position,
+      "kid",
     );
   }
 

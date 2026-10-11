@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { WATER_Y, isInLake, nearestShore, outwardAt } from "../world/lake";
 import { parkAudio } from "../audio/ParkAudio";
 import { Grumble } from "../effects/Grumble";
+import { lines } from "../../dialogue";
 
 const HULLS = [0xd8452f, 0x2f6fd8, 0xe8e4dc, 0xe0b83c];
 const COATS = [0x2f4f7f, 0x8b3a3a, 0x3f6b4a, 0x5a4a7a, 0xb06a2c];
@@ -13,22 +14,6 @@ const CRUISE = 3.4;
 /** Continuous jet time to put her under, roughly. */
 const FILL_PER_HIT = 0.0024;
 const HIT_RADIUS = 0.55;
-
-const NARKED = [
-  "OI!",
-  "Leave my boat!",
-  "You're filling it!",
-  "Stop that!",
-  "Mum!",
-  "Not the boat!",
-];
-const SUNK_LINES = [
-  "You've sunk it!",
-  "Noooo!",
-  "That cost a tenner!",
-  "I'm telling!",
-  "Ruined!",
-];
 
 /** A kid on the bank running a radio boat about on the water. */
 export class RcBoat {
@@ -295,12 +280,13 @@ export class RcBoat {
     if (!sunk && now - this.lastNark < 1600) return;
     this.lastNark = now;
     this.narkedAt = this.bilge;
-    const lines = sunk ? SUNK_LINES : NARKED;
+    const shouts = sunk ? lines('kid', 'rc-sunk') : lines('kid', 'rc-narked');
     this.grumble?.dispose();
     this.grumble = new Grumble(
       this.scene,
-      lines[Math.floor(Math.random() * lines.length)]!,
+      shouts[Math.floor(Math.random() * shouts.length)]!,
       this.kid.position,
+      "kid",
     );
   }
 

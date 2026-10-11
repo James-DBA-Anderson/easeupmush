@@ -22,43 +22,11 @@ import { Face } from "./Face";
 import { Grumble } from "../effects/Grumble";
 import { PATH_Y } from "../world/lake";
 import type { GrassFire } from "../effects/GrassFire";
+import { lines } from "../../dialogue";
 
 const COATS = [0x2f4f7f, 0x8b3a3a, 0x3f6b4a, 0x5a4a7a, 0x2b2b33, 0xb06a2c, 0xd8c8a0];
 const TROUSERS = [0x2b3038, 0x4a4a52, 0x6b5a44, 0x3a5a6a];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
-
-const CHAT = [
-  "NICE ONE",
-  "PASS US THAT",
-  "SMELLS GOOD",
-  "WHO WANTS A BURGER?",
-  "NEARLY DONE",
-  "CRACKING DAY FOR IT",
-  "MIND THE SMOKE",
-  "ANOTHER SAUSAGE?",
-];
-
-const DOUSED = [
-  "OI! MY SAUSAGES!",
-  "YOU'VE PUT THE BLOODY BBQ OUT!",
-  "WHAT ARE YOU PLAYING AT?",
-  "THAT'S OUR TEA!",
-  "GET OFF OUR GRILL!",
-  "I'LL LAY YOU OUT, MUSH!",
-  "YOU ABSOLUTE MELT!",
-  "LOOK WHAT YOU'VE DONE!",
-];
-
-const PANIC = [
-  "FIRE!",
-  "THE GRASS IS ALIGHT!",
-  "GET BACK!",
-  "SOMEONE CALL THE BRIGADE!",
-  "IT'S SPREADING!",
-  "THE BBQ'S GONE UP!",
-  "MIND THE FLAMES!",
-  "WE'RE GOING TO CATCH!",
-];
 
 /** True if (x,z) sits on the play-park wood chips. */
 function inPlayPark(x: number, z: number): boolean {
@@ -273,7 +241,7 @@ export class BbqParty {
         guest.group.position.x - this.spot.x,
       );
       guest.face.setMood("shocked");
-      this.say(guest, PANIC);
+      this.say(guest, lines('bbq', 'panic'));
     }
   }
 
@@ -295,7 +263,7 @@ export class BbqParty {
     for (const guest of this.guests) {
       if (guest.phase === "leaving" || !guest.group.visible) continue;
       guest.phase = "leaving";
-      this.say(guest, PANIC);
+      this.say(guest, lines('bbq', 'panic'));
     }
   }
 
@@ -333,7 +301,7 @@ export class BbqParty {
       this.shoutCool = 1.1;
       const speaker =
         this.guests.find((g) => g.phase === "cooking") ?? this.guests[0];
-      if (speaker) this.say(speaker, DOUSED);
+      if (speaker) this.say(speaker, lines('bbq', 'doused'));
     }
 
     if (this.complained) return false;
@@ -422,7 +390,7 @@ export class BbqParty {
         guest.chatIn -= delta;
         if (guest.chatIn <= 0) {
           guest.chatIn = 8 + Math.random() * 16;
-          if (Math.random() < 0.55) this.say(guest, CHAT);
+          if (Math.random() < 0.55) this.say(guest, lines('bbq', 'chat'));
         }
       }
     }
@@ -779,7 +747,7 @@ export class BbqParty {
     guest.chatIn -= delta;
     if (guest.chatIn <= 0) {
       guest.chatIn = 3.5 + Math.random() * 6;
-      if (Math.random() < 0.7) this.say(guest, PANIC);
+      if (Math.random() < 0.7) this.say(guest, lines('bbq', 'panic'));
     }
   }
 
@@ -900,6 +868,7 @@ export class BbqParty {
       this.scene,
       lines[Math.floor(Math.random() * lines.length)]!,
       guest.group.position,
+      "bbq",
     );
   }
 }

@@ -59,6 +59,7 @@
       font-weight: 700;
       letter-spacing: 0.08em;
       margin-right: 4px;
+      cursor: pointer;
     }
     #titlebar .file-actions {
       display: flex;
@@ -137,6 +138,10 @@
       text-transform: uppercase;
       color: var(--muted);
       font-weight: 600;
+    }
+    .ribbon-group[hidden],
+    .group-row[hidden] {
+      display: none !important;
     }
     .ribbon-group .group-row {
       display: flex;
@@ -719,13 +724,13 @@
                 <button type="button" id="add-mission" title="Add a named placeholder pin">Add</button>
                 <button type="button" id="del-mission" class="btn" title="Remove placeholder (built-ins stay)">Delete</button>
               </div>
-              <div class="group-row">
+              <div class="group-row" id="mission-name-row">
                 <label class="hint">Name
                   <input type="text" id="mission-name" maxlength="48" placeholder="Mission name" title="Display name" />
                 </label>
               </div>
             </div>
-            <div class="ribbon-group">
+            <div class="ribbon-group" id="mission-when-group">
               <span class="group-label">When</span>
               <div class="group-row">
                 <label class="hint">Start
@@ -737,6 +742,10 @@
               </div>
               <p class="ribbon-hint">Window on the shift clock. Game start / game end follow clock-on and end of shift; times are local park hours (wraps past midnight).</p>
             </div>
+            <div class="ribbon-group" id="overnight-heaps-group" hidden>
+              <span class="group-label">Overnight poo</span>
+              <p class="ribbon-hint"><span class="swatch" style="background:#8b5a2b"></span>Click the paving to drop a heap. Drag / arrows move; Delete removes. Leave empty and the game still auto-scatters near the van.</p>
+            </div>
             <div class="ribbon-group">
               <span class="group-label">Test</span>
               <div class="group-row">
@@ -746,7 +755,7 @@
             </div>
             <div class="ribbon-group">
               <span class="group-label">Edit</span>
-              <p class="ribbon-hint"><span class="swatch" style="background:#e82a1a"></span>Red pins = wired jobs. <span class="swatch" style="background:#c45a18"></span>Amber pins = placeholders (name + window only — fill in later). Drag / arrows move; Delete removes placeholders.</p>
+              <p class="ribbon-hint"><span class="swatch" style="background:#8b5a2b"></span>Brown blobs = overnight heaps (first job). <span class="swatch" style="background:#e82a1a"></span>Red pins = wired jobs. <span class="swatch" style="background:#c45a18"></span>Amber pins = placeholders. Drag / arrows move; Delete removes heaps and placeholders.</p>
             </div>
           </div>
         </div>

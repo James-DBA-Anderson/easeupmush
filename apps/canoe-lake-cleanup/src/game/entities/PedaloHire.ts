@@ -16,17 +16,11 @@ import {
   pedaloIsSunk,
 } from "../world/park";
 import type { Boatman } from "./Boatman";
+import { line } from "../../dialogue";
 
 const COATS = [0x2f4f7f, 0xd8452f, 0x3f6b4a, 0xe0b83c, 0x5a4a7a, 0xd8c8a0];
 const TROUSERS = [0x2b3038, 0x4a4a52, 0x3a5a6a, 0x6b5a44];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
-
-const VISITOR_LINES = [
-  "TWO PLEASE",
-  "JUST THE ONE",
-  "HOW MUCH FOR AN HOUR?",
-  "WE'LL TAKE A SWAN",
-];
 
 type Phase =
   | "arriving"
@@ -156,7 +150,7 @@ export class PedaloHire {
       this.timer = 3.2;
       this.boatman.takePayment();
       this.say(
-        VISITOR_LINES[Math.floor(Math.random() * VISITOR_LINES.length)]!,
+        line('public', 'pedalo'),
       );
     }
   }
@@ -393,6 +387,7 @@ export class PedaloHire {
       this.scene,
       text,
       lead.group.position.clone().add(new THREE.Vector3(0, 2.05, 0)),
+      "public",
     );
   }
 

@@ -1,12 +1,12 @@
 # Canoe Lake Clean Up
 
-3D first-person shift at Canoe Lake, Southsea — wash swan mess, pick litter, and answer radio jobs while the park keeps making more of both.
+3D first-person shift at Canoe Lake, Southsea — hose swan mess and graffiti, and answer radio jobs while the park keeps making more of both.
 
 **Status:** Playable prototype (Vite + TypeScript + Three.js). Design notes and a detailed build inventory live in `PLAN.md`.
 
 ## What you do
 
-Clock on at the cleaner van after a heavy overnight tip on the paving. Hose droppings and graffiti, jab litter and overflowing bins with the picker, keep the cleanliness meter up, and deal with scripted missions as the 24‑minute day cycle runs from 06:00 round to the next morning.
+Clock on at the cleaner van after a heavy overnight tip on the paving. Hose droppings and graffiti, keep the cleanliness meter up, and deal with scripted missions as the 24‑minute day cycle runs from 06:00 round to the next morning.
 
 The park is busy: swans (and cygnets), mallards, gulls, dogs, cyclists, BBQ parties, crabbing kids, foxes at night, and a phone full of Pompey depot texts. Slang is the shared glossary in `shared/phraseology.json`.
 
@@ -22,6 +22,12 @@ Authored pins in the level editor; windows are on the shift clock.
 | `fire` | Disposable BBQ grass fire |
 | `racers` | Boy racers on the parade |
 | `rebels` | Late‑night Gosport lot over the esplanade |
+
+## Dialogue
+
+Spoken lines live in `src/dialogue/` — one catalog Linebench imports, the game picks from at runtime. Add a line there (with `pack('set', [...])`) rather than a local string array.
+
+Recorded takes play in-game only if you mark them **Use in game** in Linebench, then reload. Title screen **Audio settings** can turn voices off (on by default).
 
 ## Development
 
@@ -54,14 +60,13 @@ Mobile play needs **landscape**. Portrait shows a rotate prompt. In DevTools, pi
 
 **Desktop**
 - **WASD** — move · **Shift** — run
-- **Mouse** — look · **Click** — spray / jab
-- **1** / **2** / **Q** — hose · picker · swap (belt also auto‑picks from what’s ahead)
+- **Mouse** — look · **Click** — spray
 - **E** — grab heavy hose at the van (mission) · hire / board a pedalo when available
 - **ESC** — pause
 
 **Mobile (landscape)**
 - Left stick — move
-- Spray stick — aim and fire / jab (hold centred to climb out of the lake)
+- Spray stick — aim and fire (hold centred to climb out of the lake)
 - Far right stick — look
 - Pause — pause
 

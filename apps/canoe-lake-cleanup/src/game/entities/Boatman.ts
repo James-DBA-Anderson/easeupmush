@@ -10,34 +10,8 @@ import {
 import { groundHeight } from "../world/terrain";
 import type { Face } from "./Face";
 import { buildBoatman } from "./StaffModel";
+import { line } from "../../dialogue";
 
-const PAY_LINES = [
-  "THAT'LL BE A TENNER",
-  "TEN POUND HIRE",
-  "CASH ONLY, MUSH",
-  "SIGN HERE — AND WATCH THE STEP",
-];
-const HELP_LINES = [
-  "WATCH YOUR STEP",
-  "IN YOU GET",
-  "HAND ON THE NECK",
-  "STEADY NOW",
-  "THAT'S IT — SIT TIGHT",
-];
-const IDLE_LINES = ["NEXT!", "SWAN BOATS THIS WAY", "HIRE HERE"];
-const MAD_LINES = [
-  "YOU'VE SUNK MY BLOODY SWAN!",
-  "OI — THAT BOAT COSTS MONEY!",
-  "COME HERE YOU MENACE!",
-  "I'LL HAVE YOUR WAGES FOR THAT!",
-  "LOOK WHAT YOU'VE DONE!",
-];
-const HUNT_LINES = [
-  "GET BACK HERE!",
-  "DON'T YOU RUN!",
-  "I SAW THAT!",
-  "PAY FOR THAT HULL!",
-];
 
 type Job = "idle" | "toBoat" | "helping" | "back" | "hunt";
 
@@ -84,7 +58,7 @@ export class Boatman {
   public takePayment(): void {
     if (this.job !== "idle") return;
     this.faceToward(hatchQueueSpot() ?? this.stand);
-    this.say(PAY_LINES[Math.floor(Math.random() * PAY_LINES.length)]!);
+    this.say(line('boatman', 'hire'));
     this.timer = 2.2 + Math.random() * 1.2;
   }
 
@@ -117,7 +91,7 @@ export class Boatman {
     this.swingReady = false;
     this.swingCool = 0.4;
     this.shoutIn = 0;
-    this.say(MAD_LINES[Math.floor(Math.random() * MAD_LINES.length)]!);
+    this.say(line('boatman', 'mad'));
   }
 
   public isBusy(): boolean {
@@ -134,7 +108,7 @@ export class Boatman {
     this.swingReady = false;
     this.swingCool = 2.8;
     this.swingsLanded += 1;
-    this.say(HUNT_LINES[Math.floor(Math.random() * HUNT_LINES.length)]!);
+    this.say(line('boatman', 'hunt'));
     if (this.swingsLanded >= 2) {
       this.huntLeft = Math.min(this.huntLeft, 1.5);
     }
@@ -190,7 +164,7 @@ export class Boatman {
         this.job = "helping";
         this.timer = 1.8;
         this.helpStuck = 0;
-        this.say(HELP_LINES[Math.floor(Math.random() * HELP_LINES.length)]!);
+        this.say(line('boatman', 'help'));
         this.helpPose(true);
       }
       return;
@@ -235,7 +209,7 @@ export class Boatman {
 
     this.shoutIn -= delta;
     if (this.shoutIn <= 0 && !this.grumble) {
-      this.say(HUNT_LINES[Math.floor(Math.random() * HUNT_LINES.length)]!);
+      this.say(line('boatman', 'hunt'));
       this.shoutIn = 3.5 + Math.random() * 3;
     }
 
@@ -299,7 +273,7 @@ export class Boatman {
     this.helpPose(false);
     this.chatIn -= delta;
     if (this.chatIn <= 0 && !this.grumble) {
-      this.say(IDLE_LINES[Math.floor(Math.random() * IDLE_LINES.length)]!);
+      this.say(line('boatman', 'idle'));
       this.chatIn = 22 + Math.random() * 35;
     }
     this.step += delta * 2.2;
@@ -385,6 +359,7 @@ export class Boatman {
       this.scene,
       text,
       this.group.position.clone().add(new THREE.Vector3(0, 2.15, 0)),
+      "boatman",
     );
   }
 

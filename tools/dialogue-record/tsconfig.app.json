@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "es2023",
+    "lib": ["ES2023", "DOM"],
+    "module": "esnext",
+    "types": ["vite/client"],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": {
+      "@canoe-lake/*": ["../../apps/canoe-lake-cleanup/src/game/*"],
+      "@easeupmush/canoe-lake-cleanup/dialogue": [
+        "../../apps/canoe-lake-cleanup/src/dialogue/index.ts"
+      ],
+      "@easeupmush/shared/dialogue": ["../../shared/dialogue.ts"],
+      "@easeupmush/shared/tool-switch": ["../../shared/toolSwitch.ts"]
+    }
+  },
+  "include": ["src"]
+}

@@ -84,8 +84,9 @@ export function expandRecipes(parts: ModelPart[], raw: unknown): ModelPart[] {
   return next.slice(0, 24)
 }
 
-export function dropBadParents(parts: ModelPart[]): ModelPart[] {
+export function dropBadParents(parts: ModelPart[], extraIds: Iterable<string> = []): ModelPart[] {
   const ids = new Set(parts.map((part) => part.id))
+  for (const id of extraIds) ids.add(id)
   return parts.map((part) => {
     const parent = part.parent
     if (!parent || parent === part.id || !ids.has(parent)) {

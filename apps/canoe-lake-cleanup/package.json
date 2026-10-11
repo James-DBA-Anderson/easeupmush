@@ -10,8 +10,12 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },
+  "exports": {
+    "./dialogue": "./src/dialogue/index.ts"
+  },
   "dependencies": {
     "@easeupmush/phraseology": "*",
+    "@easeupmush/shared": "*",
     "three": "^0.170.0"
   },
   "devDependencies": {

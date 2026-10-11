@@ -12,6 +12,7 @@ import {
 import { stepWalk } from "../world/blocking";
 import { Face } from "./Face";
 import { Grumble } from "../effects/Grumble";
+import { lines } from "../../dialogue";
 
 const COATS = [0x2f4f7f, 0x8b3a3a, 0x3f6b4a, 0x5a4a7a, 0x2b2b33, 0xb06a2c, 0xd8c8a0];
 const ELDER_COATS = [0x6b5a4a, 0x3a4a5a, 0x5a4a58, 0x8a7a68, 0x2f3a48, 0x7a5a4a];
@@ -27,77 +28,6 @@ const HIP_Y = 0.92;
 const SIT_FORWARD = 0.08;
 /** Stand here to walk up, then hop onto the seat (clear of the back blocker). */
 const APPROACH_FORWARD = 1.05;
-
-const CHAT = [
-  "NICE DAY FOR IT",
-  "YOU SEEN THE SWANS?",
-  "PASSING THROUGH?",
-  "LOVELY SPOT THIS",
-  "HEARD ABOUT THE FOX?",
-  "KEEPS YOU YOUNG",
-];
-
-const ELDER_CHAT = [
-  "LOVELY ROSES",
-  "REMINDS ME OF MUM",
-  "NICE TO SIT",
-  "PROPER GARDEN THIS",
-  "COME HERE EVERY WEEK",
-  "SMELLS LOVELY",
-  "QUIET OUT HERE",
-];
-
-const PHONE_CHAT = [
-  "NO SIGNAL",
-  "LOOK AT THIS",
-  "JUST A SEC",
-  "THEY'RE ONLINE",
-];
-
-const BOOK_CHAT = [
-  "GOOD BIT THIS",
-  "ONE MORE CHAPTER",
-  "QUIET HERE",
-];
-
-const PHONE_WET = [
-  "MY PHONE!",
-  "YOU'VE SOAKED IT!",
-  "IT'LL BE RUINED!",
-  "GET OFF!",
-  "THAT'S A NEW ONE!",
-];
-
-const BOOK_WET = [
-  "MY BOOK!",
-  "YOU'VE WRECKED IT!",
-  "THE PAGES!",
-  "OI! WATCH IT!",
-  "THAT WAS LIBRARY!",
-];
-
-const CHAT_WET = [
-  "OI!",
-  "WATCH THE WASHER!",
-  "WE'RE SITTING HERE!",
-  "GET THAT AWAY!",
-];
-
-const FEED_CHAT = [
-  "HERE YOU ARE LOVE",
-  "COME ON THEN",
-  "WHO'S A GREEDY ONE",
-  "BIT OF BREAD",
-  "THEY KNOW THE TIME",
-  "DON'T FIGHT",
-];
-
-const FEED_WET = [
-  "YOU'VE SOAKED THE BAG!",
-  "THAT WAS FOR THE BIRDS!",
-  "OI — THE BREAD!",
-  "NOW LOOK AT IT!",
-];
 
 const HANDFULS = 5;
 const FEED_ANIM = 1.8;
@@ -259,7 +189,7 @@ export class BenchSit {
     if (!feeder) return false;
     feeder.handfuls -= 1;
     feeder.feeding = FEED_ANIM;
-    this.say(feeder, FEED_CHAT);
+    this.say(feeder, lines('bench', 'feed'));
     feeder.face.setMood("pleased");
     if (feeder.handfuls <= 0) this.hideProp(feeder);
     return true;
@@ -296,17 +226,17 @@ export class BenchSit {
         hitPrecious = true;
         this.say(
           guest,
-          guest.pastime === "phone" ? PHONE_WET : BOOK_WET,
+          guest.pastime === "phone" ? lines('bench', 'phone-wet') : lines('bench', 'book-wet'),
         );
         guest.face.setMood("shocked");
         this.hideProp(guest);
       } else if (guest.pastime === "feed") {
-        this.say(guest, FEED_WET);
+        this.say(guest, lines('bench', 'feed-wet'));
         guest.face.setMood("angry");
         guest.handfuls = 0;
         this.hideProp(guest);
       } else {
-        this.say(guest, CHAT_WET);
+        this.say(guest, lines('bench', 'wet'));
         guest.face.setMood("angry");
       }
     }
@@ -367,17 +297,17 @@ export class BenchSit {
       if (guest.chatIn <= 0) {
         guest.chatIn = 8 + Math.random() * 14;
         if (Math.random() < 0.45) {
-          const lines =
+          const chatter =
             guest.pastime === "phone"
-              ? PHONE_CHAT
+              ? lines('bench', 'phone')
               : guest.pastime === "book"
-                ? BOOK_CHAT
+                ? lines('bench', 'book')
                 : guest.pastime === "feed"
-                  ? FEED_CHAT
+                  ? lines('bench', 'feed')
                   : this.seat.crowd === "elder"
-                    ? ELDER_CHAT
-                    : CHAT;
-          this.say(guest, lines);
+                    ? lines('bench', 'elder')
+                    : lines('bench', 'chat');
+          this.say(guest, chatter);
         }
       }
     }
@@ -471,14 +401,14 @@ export class BenchSit {
 
     if (elder) {
       const hair = new THREE.Mesh(
-        new THREE.SphereGeometry(0.17, 8, 6),
+        new THREE.SphereGeometry(0.14, 8, 6),
         new THREE.MeshStandardMaterial({
           color: pick(HAIR),
           roughness: 0.95,
         }),
       );
-      hair.position.set(0, 0.12, -0.02);
-      hair.scale.set(1.05, 0.7, 1.1);
+      hair.position.set(0, 0.1, -0.12);
+      hair.scale.set(0.9, 0.55, 0.75);
       head.add(hair);
     }
 
@@ -626,7 +556,7 @@ export class BenchSit {
     guest.handfuls -= 1;
     guest.feeding = FEED_ANIM;
     this.tossAt = this.tossIntoPond(guest);
-    this.say(guest, FEED_CHAT);
+    this.say(guest, lines('bench', 'feed'));
     guest.face.setMood("pleased");
     if (guest.handfuls <= 0) this.hideProp(guest);
   }
@@ -775,7 +705,7 @@ export class BenchSit {
     const line = lines[Math.floor(Math.random() * lines.length)]!;
     const at = guest.group.position.clone();
     at.y = 2.05;
-    this.grumble = new Grumble(this.scene, line, at);
+    this.grumble = new Grumble(this.scene, line, at, "bench");
   }
 }
 

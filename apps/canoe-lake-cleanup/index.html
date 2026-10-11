@@ -672,8 +672,7 @@
       line-height: 1.6;
     }
 
-    #restart,
-    #resume {
+    #restart {
       margin-top: 8px;
       padding: 12px 26px;
       font: inherit;
@@ -686,8 +685,7 @@
       cursor: pointer;
     }
 
-    #restart:hover,
-    #resume:hover {
+    #restart:hover {
       background: #ffe27a;
     }
 
@@ -792,7 +790,11 @@
     }
 
     #title-home,
-    #title-graphics-panel {
+    #title-graphics-panel,
+    #title-audio-panel,
+    #pause-home,
+    #pause-graphics-panel,
+    #pause-audio-panel {
       display: none;
       flex-direction: column;
       align-items: center;
@@ -800,11 +802,16 @@
     }
 
     #title-home.on,
-    #title-graphics-panel.on {
+    #title-graphics-panel.on,
+    #title-audio-panel.on,
+    #pause-home.on,
+    #pause-graphics-panel.on,
+    #pause-audio-panel.on {
       display: flex;
     }
 
-    #title-screen button {
+    #title-screen button,
+    #pause-menu button {
       min-width: 240px;
       padding: 12px 26px;
       font: inherit;
@@ -817,24 +824,34 @@
       cursor: pointer;
     }
 
-    #title-screen button:hover {
+    #title-screen button:hover,
+    #pause-menu button:hover {
       background: #ffe27a;
     }
 
-    #title-graphics-panel fieldset {
+    #title-graphics-panel fieldset,
+    #title-audio-panel fieldset,
+    #pause-graphics-panel fieldset,
+    #pause-audio-panel fieldset {
       border: 2px solid rgba(255, 255, 255, 0.35);
       border-radius: 10px;
       padding: 14px 22px 16px;
       min-width: 240px;
     }
 
-    #title-graphics-panel legend {
+    #title-graphics-panel legend,
+    #title-audio-panel legend,
+    #pause-graphics-panel legend,
+    #pause-audio-panel legend {
       padding: 0 8px;
       letter-spacing: 1px;
       font-size: 13px;
     }
 
-    #title-graphics-panel label {
+    #title-graphics-panel label,
+    #title-audio-panel label,
+    #pause-graphics-panel label,
+    #pause-audio-panel label {
       display: flex;
       align-items: center;
       gap: 10px;
@@ -845,10 +862,34 @@
       text-align: left;
     }
 
-    #title-graphics-panel input {
+    #title-graphics-panel input,
+    #title-audio-panel input,
+    #pause-graphics-panel input,
+    #pause-audio-panel input {
       width: 18px;
       height: 18px;
       accent-color: #ffd23a;
+    }
+
+    #title-graphics-panel fieldset + fieldset,
+    #pause-graphics-panel fieldset + fieldset {
+      margin-top: 14px;
+    }
+
+    #title-graphics-panel .settings-hint,
+    #pause-graphics-panel .settings-hint {
+      margin: 6px 4px 0;
+      font-size: 12px;
+      letter-spacing: 0.6px;
+      opacity: 0.72;
+      text-align: left;
+      max-width: 260px;
+    }
+
+    #title-graphics-panel label:has(input:disabled),
+    #pause-graphics-panel label:has(input:disabled) {
+      opacity: 0.45;
+      cursor: default;
     }
 
     body.title-screen #hud,
@@ -1258,24 +1299,51 @@
       <div id="title-home" class="on">
         <button type="button" id="title-start">START</button>
         <button type="button" id="title-graphics">GRAPHICS SETTINGS</button>
+        <button type="button" id="title-audio">AUDIO SETTINGS</button>
       </div>
       <div id="title-graphics-panel">
         <fieldset>
-          <legend>Draw distance</legend>
+          <legend>Quality</legend>
           <label>
-            <input type="radio" name="draw-distance" value="high" />
+            <input type="radio" name="draw-distance" data-setting="draw-distance" value="high" />
             High
           </label>
           <label>
-            <input type="radio" name="draw-distance" value="normal" checked />
+            <input type="radio" name="draw-distance" data-setting="draw-distance" value="normal" checked />
             Normal
           </label>
           <label>
-            <input type="radio" name="draw-distance" value="low" />
+            <input type="radio" name="draw-distance" data-setting="draw-distance" value="low" />
             Low
+          </label>
+          <p class="settings-hint">Draw distance, shadows, sharpness, and tree sway.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Distant tree sway</legend>
+          <label>
+            <input type="radio" name="distant-tree-sway" data-setting="distant-tree-sway" value="on" />
+            On
+          </label>
+          <label>
+            <input type="radio" name="distant-tree-sway" data-setting="distant-tree-sway" value="off" checked />
+            Off
           </label>
         </fieldset>
         <button type="button" id="title-graphics-back">BACK</button>
+      </div>
+      <div id="title-audio-panel">
+        <fieldset>
+          <legend>Voices</legend>
+          <label>
+            <input type="radio" name="voices" data-setting="voices" value="on" checked />
+            Enabled
+          </label>
+          <label>
+            <input type="radio" name="voices" data-setting="voices" value="off" />
+            Disabled
+          </label>
+        </fieldset>
+        <button type="button" id="title-audio-back">BACK</button>
       </div>
     </div>
     <button type="button" id="record-btn">RECORD</button>
@@ -1283,7 +1351,55 @@
     <div id="pause-menu">
       <h1>PAUSED</h1>
       <p>Take five. The park will wait.</p>
-      <button type="button" id="resume">BACK ON SHIFT</button>
+      <div id="pause-home" class="on">
+        <button type="button" id="resume">BACK ON SHIFT</button>
+        <button type="button" id="pause-graphics">GRAPHICS SETTINGS</button>
+        <button type="button" id="pause-audio">AUDIO SETTINGS</button>
+      </div>
+      <div id="pause-graphics-panel">
+        <fieldset>
+          <legend>Quality</legend>
+          <label>
+            <input type="radio" name="pause-draw-distance" data-setting="draw-distance" value="high" />
+            High
+          </label>
+          <label>
+            <input type="radio" name="pause-draw-distance" data-setting="draw-distance" value="normal" checked />
+            Normal
+          </label>
+          <label>
+            <input type="radio" name="pause-draw-distance" data-setting="draw-distance" value="low" />
+            Low
+          </label>
+          <p class="settings-hint">Draw distance, shadows, sharpness, and tree sway.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Distant tree sway</legend>
+          <label>
+            <input type="radio" name="pause-distant-tree-sway" data-setting="distant-tree-sway" value="on" />
+            On
+          </label>
+          <label>
+            <input type="radio" name="pause-distant-tree-sway" data-setting="distant-tree-sway" value="off" checked />
+            Off
+          </label>
+        </fieldset>
+        <button type="button" id="pause-graphics-back">BACK</button>
+      </div>
+      <div id="pause-audio-panel">
+        <fieldset>
+          <legend>Voices</legend>
+          <label>
+            <input type="radio" name="pause-voices" data-setting="voices" value="on" checked />
+            Enabled
+          </label>
+          <label>
+            <input type="radio" name="pause-voices" data-setting="voices" value="off" />
+            Disabled
+          </label>
+        </fieldset>
+        <button type="button" id="pause-audio-back">BACK</button>
+      </div>
     </div>
     <div id="game-over">
       <h1>PECKED TO DEATH</h1>

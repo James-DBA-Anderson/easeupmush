@@ -13,21 +13,12 @@ import { Face } from "./Face";
 import { Grumble } from "../effects/Grumble";
 import { PATH_Y } from "../world/lake";
 import { groundHeight } from "../world/terrain";
+import { lines } from "../../dialogue";
 
 const COATS = [0x2f4f7f, 0x8b3a3a, 0x3f6b4a, 0x5a4a7a, 0x2b2b33, 0xb06a2c, 0xd8c8a0];
 const TROUSERS = [0x2b3038, 0x4a4a52, 0x6b5a44, 0x3a5a6a];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
 const CANOPIES = [0xd8d2c4, 0xc45a4a, 0x3a6a8a, 0xe8c86a, 0x5a7a5a];
-
-const CHAT = [
-  "NICE BIT OF SHADE",
-  "PASS US A DRINK",
-  "BETTER THAN THE SUN",
-  "WHO BROUGHT THE CHAIRS?",
-  "THIS'LL DO",
-  "KEEP THE WIND OFF",
-  "CRACKING GAZEBO",
-];
 
 type Phase = "toGate" | "arriving" | "settled" | "toExit" | "leaving";
 
@@ -180,7 +171,7 @@ export class Gazebo {
       guest.chatIn -= delta;
       if (guest.chatIn <= 0) {
         guest.chatIn = 9 + Math.random() * 16;
-        if (Math.random() < 0.5) this.say(guest, CHAT);
+        if (Math.random() < 0.5) this.say(guest, lines('gazebo', 'chat'));
       }
     }
 
@@ -491,6 +482,6 @@ export class Gazebo {
     const line = lines[Math.floor(Math.random() * lines.length)]!;
     const at = guest.group.position.clone();
     at.y = 2.1;
-    this.grumble = new Grumble(this.scene, line, at);
+    this.grumble = new Grumble(this.scene, line, at, "gazebo");
   }
 }

@@ -13,3 +13,5 @@ __pycache__/
 *.pyc
 .huggingface
 tools/**/generated/
+tools/dialogue-record/recordings/
+apps/*/public/voices/

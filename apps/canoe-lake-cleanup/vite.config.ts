@@ -58,6 +58,12 @@ function levelSavePlugin(): Plugin {
 export default defineConfig({
   base,
   plugins: [levelSavePlugin()],
+  resolve: {
+    alias: {
+      "@easeupmush/shared/dialogue": resolve(root, "../../shared/dialogue.ts"),
+      "@easeupmush/shared/tool-switch": resolve(root, "../../shared/toolSwitch.ts"),
+    },
+  },
   server: {
     port: 5304,
     strictPort: true,

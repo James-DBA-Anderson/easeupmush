@@ -67,11 +67,15 @@ export class Face {
       nape.castShadow = true;
       this.group.add(nape);
     } else if (Math.random() < 0.85) {
+      // Cap only — a full-front slice sits over the eyes. Tip it back so the
+      // hairline stays above the brows and the nape still covers the skull.
       const hair = new THREE.Mesh(
-        new THREE.SphereGeometry(0.152, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
+        new THREE.SphereGeometry(0.158, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.46),
         hairMat,
       );
-      hair.position.y = 0.02;
+      hair.position.set(0, 0.045, -0.03);
+      hair.rotation.x = -0.42;
+      hair.scale.set(1.08, 0.92, 1);
       hair.castShadow = true;
       this.group.add(hair);
     }

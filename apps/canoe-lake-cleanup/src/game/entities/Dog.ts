@@ -50,14 +50,6 @@ const NAMES = [
   "BELLA",
 ];
 
-const RECALLS = [
-  "COME HERE!",
-  "LEAVE IT!",
-  "HEEL!",
-  "GET BACK HERE!",
-  "DROP IT!",
-];
-
 /** How long a loose dog gets before it runs out of steam and is caught. */
 const RUN_TIME = 9;
 /** Close enough to put a swan up, and to shoulder somebody out of the way. */
@@ -69,6 +61,20 @@ const STANDOFF = 1.7;
 const CLEAR = 1.45;
 /** It won't cross the whole park for a bird; it goes for whatever is near. */
 const HUNT_RANGE = 34;
+/** Dropped lead — length on the ground, then a short lift to the collar. */
+const LEAD_LINKS = 12;
+const LEAD_LENGTH = 1.65;
+const LEAD_RADIUS = 0.012;
+const LEAD_GRAVITY = 22;
+const LEAD_DAMP = 0.94;
+const LEAD_ITERS = 10;
+const LEAD_LIFT = 0.018;
+const LEAD_UP = new THREE.Vector3(0, 1, 0);
+const LEAD_MAT = new THREE.MeshStandardMaterial({
+  color: 0x3a322c,
+  roughness: 0.9,
+});
+const LEAD_GEO = new THREE.CylinderGeometry(LEAD_RADIUS, LEAD_RADIUS, 1, 5);
 
 type Mode = "heel" | "loose" | "hunt" | "attack" | "coming" | "down";
 
@@ -91,8 +97,11 @@ export class Dog {
   private legs: THREE.Mesh[] = [];
   private tail!: THREE.Mesh;
   private head!: THREE.Group;
-  private lead: THREE.Line;
-  private leadPoints: THREE.BufferAttribute;
+  /** Verlet nodes from collar to handle — drapes, then trails on the floor. */
+  private leadNodes: { pos: THREE.Vector3; prev: THREE.Vector3 }[] = [];
+  private leadLinks: THREE.Mesh[] = [];
+  private leadDir = new THREE.Vector3();
+  private leadHeld = new THREE.Vector3();
 
   private mode: Mode = "heel";
   private looseFor = 0;
@@ -124,16 +133,9 @@ export class Dog {
     this.flecks = new MuckFlecks(this.group, 16);
     scene.add(this.group);
 
-    const geometry = new THREE.BufferGeometry();
-    this.leadPoints = new THREE.BufferAttribute(new Float32Array(6), 3);
-    geometry.setAttribute("position", this.leadPoints);
-    this.lead = new THREE.Line(
-      geometry,
-      new THREE.LineBasicMaterial({ color: 0x2f2a25 }),
-    );
-    scene.add(this.lead);
-
     this.group.position.copy(owner.getPosition());
+    this.plantUp();
+    this.buildLead();
   }
 
   private build(): void {
@@ -219,6 +221,10 @@ export class Dog {
     return this.mode !== "heel";
   }
 
+  public getName(): string {
+    return this.name;
+  }
+
   public getPosition(): THREE.Vector3 {
     return this.group.position.clone();
   }
@@ -264,7 +270,7 @@ export class Dog {
       this.mode = "hunt";
     }
     this.quarry = null;
-    this.shout(`${this.name}!`);
+    this.shout("WOOF!");
   }
 
   /**
@@ -282,7 +288,7 @@ export class Dog {
         this.mode = "hunt";
       }
       this.quarry = null;
-      this.shout(`${this.name}!`);
+      this.shout("WOOF!");
     }
     // Pin them on the shore if they were already edging toward the water.
     const here = this.group.position;
@@ -348,14 +354,18 @@ export class Dog {
   public update(delta: number, world: DogWorld): void {
     this.flecks.update(delta);
     this.grumble =
-      this.grumble?.update(delta, this.group.position) === false
+      this.grumble?.update(
+        delta,
+        this.group.position,
+        0.7 + this.breed.size,
+      ) === false
         ? null
         : this.grumble;
     if (this.biteCool > 0) this.biteCool = Math.max(0, this.biteCool - delta);
 
     if (this.mode === "down") {
       this.updateDown(delta);
-      this.drawLead();
+      this.drawLead(delta);
       return;
     }
 
@@ -370,7 +380,7 @@ export class Dog {
       this.runAbout(delta, world);
     }
 
-    this.drawLead();
+    this.drawLead(delta);
   }
 
   private updateDown(delta: number): void {
@@ -430,7 +440,7 @@ export class Dog {
     this.looseFor -= delta;
     if (this.looseFor <= 0 && this.mode !== "coming") {
       this.mode = "coming";
-      this.shout(RECALLS[Math.floor(Math.random() * RECALLS.length)]!);
+      this.owner.recallDog();
     }
 
     if (this.mode === "coming") {
@@ -677,38 +687,164 @@ export class Dog {
     this.plantUp(Math.abs(Math.sin(this.stride)) * 0.02 * effort);
   }
 
-  /** Taut to the owner's hand on the lead, trailing on the floor off it. */
-  private drawLead(): void {
-    const collar = this.group.position;
-    const held = this.owner.getPosition();
-    const from = this.isLoose()
-      ? new THREE.Vector3(
-          collar.x - Math.sin(this.heading) * this.breed.size * 2.4,
-          0.03,
-          collar.z - Math.cos(this.heading) * this.breed.size * 2.4,
-        )
-      : new THREE.Vector3(held.x, 0.95, held.z);
+  private collarPoint(into: THREE.Vector3): THREE.Vector3 {
+    const s = this.group.scale.x;
+    const h = this.heading;
+    into.set(
+      this.group.position.x + Math.sin(h) * 0.22 * s,
+      this.group.position.y + 0.78 * s,
+      this.group.position.z + Math.cos(h) * 0.22 * s,
+    );
+    return into;
+  }
 
-    const array = this.leadPoints.array as Float32Array;
-    array[0] = from.x;
-    array[1] = from.y;
-    array[2] = from.z;
-    array[3] = collar.x;
-    array[4] = collar.y + this.breed.size * 1.4;
-    array[5] = collar.z;
-    this.leadPoints.needsUpdate = true;
-    this.lead.geometry.computeBoundingSphere();
+  private handPoint(into: THREE.Vector3): THREE.Vector3 {
+    const held = this.owner.getPosition();
+    const face = this.owner.getHeading();
+    into.set(
+      held.x + Math.cos(face) * this.side * 0.28 + Math.sin(face) * 0.1,
+      held.y + 0.92,
+      held.z - Math.sin(face) * this.side * 0.28 + Math.cos(face) * 0.1,
+    );
+    return into;
+  }
+
+  private buildLead(): void {
+    const collar = this.collarPoint(new THREE.Vector3());
+    const hand = this.handPoint(new THREE.Vector3());
+    this.leadNodes = [];
+    this.leadLinks = [];
+    for (let i = 0; i <= LEAD_LINKS; i++) {
+      const t = i / LEAD_LINKS;
+      const pos = collar.clone().lerp(hand, t);
+      // Soft hang while they're still on the lead.
+      pos.y -= 4 * t * (1 - t) * 0.22;
+      this.leadNodes.push({ pos, prev: pos.clone() });
+    }
+    for (let i = 0; i < LEAD_LINKS; i++) {
+      const link = new THREE.Mesh(LEAD_GEO, LEAD_MAT);
+      link.castShadow = false;
+      this.scene.add(link);
+      this.leadLinks.push(link);
+    }
+    this.paintLead();
+  }
+
+  /** Taut to the owner's hand on the lead, trailing on the floor off it. */
+  private drawLead(delta: number): void {
+    if (this.leadNodes.length === 0) return;
+    const dt = Math.min(0.05, Math.max(0.008, delta));
+    const collar = this.collarPoint(this.leadDir);
+    const held = this.isLoose() ? null : this.handPoint(this.leadHeld);
+    const first = this.leadNodes[0]!;
+    first.pos.copy(collar);
+    first.prev.copy(collar);
+
+    const damp = Math.pow(LEAD_DAMP, dt * 60);
+    const gy = LEAD_GRAVITY * dt * dt;
+    for (let i = 1; i < this.leadNodes.length; i++) {
+      const node = this.leadNodes[i]!;
+      const vx = (node.pos.x - node.prev.x) * damp;
+      const vy = (node.pos.y - node.prev.y) * damp;
+      const vz = (node.pos.z - node.prev.z) * damp;
+      node.prev.copy(node.pos);
+      node.pos.x += vx;
+      node.pos.y += vy - gy;
+      node.pos.z += vz;
+      this.groundLead(node, vx, vz);
+    }
+
+    if (held) {
+      const last = this.leadNodes[this.leadNodes.length - 1]!;
+      last.pos.copy(held);
+      last.prev.copy(held);
+    }
+
+    const rest = LEAD_LENGTH / LEAD_LINKS;
+    const lastI = this.leadNodes.length - 1;
+    for (let iter = 0; iter < LEAD_ITERS; iter++) {
+      for (let i = 0; i < lastI; i++) {
+        const a = this.leadNodes[i]!;
+        const b = this.leadNodes[i + 1]!;
+        const dx = b.pos.x - a.pos.x;
+        const dy = b.pos.y - a.pos.y;
+        const dz = b.pos.z - a.pos.z;
+        const dist = Math.hypot(dx, dy, dz) || 0.0001;
+        const pull = (dist - rest) / dist;
+        const pinA = i === 0;
+        const pinB = !!held && i + 1 === lastI;
+        const share = pinA || pinB ? 1 : 0.5;
+        if (!pinA) {
+          a.pos.x += dx * pull * share;
+          a.pos.y += dy * pull * share;
+          a.pos.z += dz * pull * share;
+        }
+        if (!pinB) {
+          b.pos.x -= dx * pull * share;
+          b.pos.y -= dy * pull * share;
+          b.pos.z -= dz * pull * share;
+        }
+      }
+      first.pos.copy(collar);
+      if (held) {
+        const last = this.leadNodes[lastI]!;
+        last.pos.copy(held);
+      }
+      for (let i = 1; i < this.leadNodes.length; i++) {
+        if (held && i === lastI) continue;
+        this.groundLead(this.leadNodes[i]!, 0, 0);
+      }
+    }
+
+    this.paintLead();
+  }
+
+  private groundLead(
+    node: { pos: THREE.Vector3; prev: THREE.Vector3 },
+    vx: number,
+    vz: number,
+  ): void {
+    const floor = groundHeight(node.pos.x, node.pos.z) + LEAD_LIFT;
+    if (node.pos.y >= floor) return;
+    node.pos.y = floor;
+    node.prev.y = floor;
+    // Drag, don't skate — the handle end should slither behind them.
+    node.prev.x = node.pos.x - vx * 0.28;
+    node.prev.z = node.pos.z - vz * 0.28;
+  }
+
+  private paintLead(): void {
+    for (let i = 0; i < this.leadLinks.length; i++) {
+      const link = this.leadLinks[i]!;
+      const a = this.leadNodes[i]!.pos;
+      const b = this.leadNodes[i + 1]!.pos;
+      const len = Math.max(0.01, a.distanceTo(b));
+      link.position.set((a.x + b.x) * 0.5, (a.y + b.y) * 0.5, (a.z + b.z) * 0.5);
+      this.leadDir.subVectors(b, a);
+      if (this.leadDir.lengthSq() < 1e-8) {
+        link.visible = false;
+        continue;
+      }
+      link.visible = true;
+      link.quaternion.setFromUnitVectors(
+        LEAD_UP,
+        this.leadDir.normalize(),
+      );
+      link.scale.set(1, len, 1);
+    }
   }
 
   private shout(line: string): void {
     this.grumble?.dispose();
-    this.grumble = new Grumble(this.scene, line, this.owner.getPosition());
+    this.grumble = new Grumble(this.scene, line, this.group.position);
   }
 
   public dispose(): void {
+    this.grumble?.dispose();
     this.flecks.dispose();
     this.scene.remove(this.group);
-    this.scene.remove(this.lead);
-    this.lead.geometry.dispose();
+    for (const link of this.leadLinks) this.scene.remove(link);
+    this.leadLinks = [];
+    this.leadNodes = [];
   }
 }

@@ -4,6 +4,7 @@ import { BENCH_SEAT_H } from "../world/bench";
 import { stepWalk } from "../world/blocking";
 import { Face } from "./Face";
 import { Grumble } from "../effects/Grumble";
+import { line, lines } from "../../dialogue";
 
 const COATS = [0x2f4f7f, 0xd8452f, 0x3f6b4a, 0xe0b83c, 0x5a4a7a, 0xd8c8a0];
 const ADULT_COATS = [0x2f4f7f, 0x8b3a3a, 0x3f6b4a, 0x5a4a7a, 0x2b2b33, 0xb06a2c];
@@ -14,34 +15,6 @@ const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
 const PARENT_HIP_Y = 0.78;
 const SIT_FORWARD = 0.08;
 const APPROACH_FORWARD = 1.0;
-
-const YELLS = [
-  "WATCH THIS!",
-  "MY TURN!",
-  "HIGHER!",
-  "RACE YOU!",
-  "I'M KING OF THE SLIDE!",
-  "NO PUSHING!",
-  "AGAIN!",
-];
-
-const KID_WET = [
-  "I'M SOAKED!",
-  "MUM!",
-  "DAD!",
-  "IT'S COLD!",
-  "STOP IT!",
-  "MY JUMPER!",
-];
-
-const PARENT_MAD = [
-  "OI — THAT'S MY KID!",
-  "LEAVE THEM ALONE!",
-  "WHAT DO YOU THINK YOU'RE DOING?!",
-  "I'LL HAVE YOUR JOB!",
-  "COME HERE YOU!",
-  "DON'T YOU DARE!",
-];
 
 type Activity = "swing" | "slide" | "spring" | "run";
 type Phase = "arriving" | "playing" | "leaving";
@@ -312,7 +285,7 @@ export class PlayVisit {
       nearestKid.arms[0]!.rotation.x = -1.6;
       nearestKid.arms[1]!.rotation.x = -1.6;
       if (this.sprayTalkCool <= 0) {
-        this.say(nearestKid.group.position, KID_WET);
+        this.say(nearestKid.group.position, 'kid', lines('kid', 'wet'));
         this.sprayTalkCool = 1.8;
       }
     }
@@ -357,7 +330,7 @@ export class PlayVisit {
     if (any) {
       const mum = this.parents.find((p) => p.group.visible);
       if (mum && this.sprayTalkCool <= 0.5) {
-        this.say(mum.group.position, PARENT_MAD);
+        this.say(mum.group.position, 'parent', lines('parent', 'mad'));
         this.sprayTalkCool = 2.4;
       }
     }
@@ -419,12 +392,17 @@ export class PlayVisit {
     return this.swingFrom.clone();
   }
 
-  private say(at: THREE.Vector3, lines: readonly string[]): void {
+  private say(
+    at: THREE.Vector3,
+    characterId: string,
+    lines: readonly string[],
+  ): void {
     this.grumble?.dispose();
     this.grumble = new Grumble(
       this.scene,
       lines[Math.floor(Math.random() * lines.length)]!,
       at,
+      characterId,
     );
   }
 
@@ -607,7 +585,7 @@ export class PlayVisit {
       parent.swingHit = true;
       this.swingReady = true;
       this.swingFrom.copy(here);
-      this.say(here, PARENT_MAD);
+      this.say(here, 'parent', lines('parent', 'mad'));
       parent.chaseLeft = Math.min(parent.chaseLeft, 1.8);
     }
   }
@@ -941,8 +919,9 @@ export class PlayVisit {
     this.grumble?.dispose();
     this.grumble = new Grumble(
       this.scene,
-      YELLS[Math.floor(Math.random() * YELLS.length)]!,
+      line('kid', 'play'),
       kid.group.position,
+      "kid",
     );
   }
 }

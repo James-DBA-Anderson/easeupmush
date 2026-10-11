@@ -95,10 +95,11 @@ export class MiniMap {
       maxZ = Math.max(maxZ, p.y);
     }
     const pad = 12;
-    this.scale = Math.min(
-      this.width / (maxX - minX + pad * 2),
-      this.height / (maxZ - minZ + pad * 2),
-    );
+    this.scale =
+      Math.min(
+        this.width / (maxX - minX + pad * 2),
+        this.height / (maxZ - minZ + pad * 2),
+      ) * 1.4;
   }
 
   /** World XZ → map pixels. +Z (north) is up; +X (east) is right. */

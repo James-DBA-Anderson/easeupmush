@@ -1,3 +1,5 @@
+import { voices } from "../audio/Voices";
+
 /**
  * The work phone. Jobs come in as texts from the depot and from the public,
  * stacking in the top right and fading out once they're stale.
@@ -31,6 +33,7 @@ export class Messages {
 
     this.notes.push({ element, left: life });
     while (this.notes.length > MAX_ON_SCREEN) this.drop(0);
+    voices.playSender(from, text);
   }
 
   public update(delta: number): void {

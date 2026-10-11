@@ -4,28 +4,11 @@ import { insidePark } from "../world/fence";
 import { stepWalk } from "../world/blocking";
 import { gateOutside, nearestGate } from "../world/pathRoute";
 import { Grumble } from "../effects/Grumble";
+import { lines } from "../../dialogue";
 
 const COATS = [0x2a2a32, 0x3a3a44, 0x4a3a2a, 0x1e2a38, 0x5a2a2a, 0x2f4a3a];
 const TROUSERS = [0x1a1a22, 0x2b3038, 0x3a3428];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
-
-const BANTER = [
-  "ONE MORE, LADS",
-  "PARK'S QUIET TONIGHT",
-  "PASS US THAT CAN",
-  "SWEET AS NUT",
-  "WHO'S GOT THE TIZZY?",
-  "AIN'T GOING NOWHERE",
-  "LOVELY SPOT THIS",
-];
-const MOVED = [
-  "ALRIGHT, WE'RE GOING",
-  "KEEP YOUR HAIR ON",
-  "WE'RE MOVING, MUSH",
-  "NIGHT, THEN",
-  "ALRIGHT OFFICER",
-  "WE HEAR YA",
-];
 
 /** How near you have to get before they pack it in. */
 const CHASE_OFF = 7.5;
@@ -188,7 +171,7 @@ export class Drunks {
     if (this.phase === "leaving") return;
     this.phase = "leaving";
     if (byPlayer) this.credited = true;
-    this.say(MOVED);
+    this.say(lines('drunks', 'moved'));
     for (const guest of this.guests) {
       guest.arms[0]!.rotation.x = 0;
       guest.arms[1]!.rotation.x = -0.55;
@@ -201,6 +184,7 @@ export class Drunks {
       this.scene,
       lines[Math.floor(Math.random() * lines.length)]!,
       this.root.position.clone().setY(1.8),
+      "drunks",
     );
   }
 
@@ -237,7 +221,7 @@ export class Drunks {
     this.chatIn -= delta;
     if (this.chatIn <= 0) {
       this.chatIn = 8 + Math.random() * 12;
-      this.say(BANTER);
+      this.say(lines('drunks', 'banter'));
     }
 
     for (const guest of this.guests) {

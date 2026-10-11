@@ -12,6 +12,7 @@ import {
   waterSpot,
 } from "../world/lake";
 import { groundHeight } from "../world/terrain";
+import { line } from "../../dialogue";
 import {
   boathouseSpot,
   drivePedaloIndex,
@@ -32,17 +33,6 @@ import {
 const COATS = [0x1a1a22, 0xc8c8d0, 0x2a4a8a, 0xd4a018, 0x6b2030];
 const TROUSERS = [0x1e2228, 0x3a3a42, 0x4a5a38];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b];
-
-const TAUNTS = [
-  "CAN'T CATCH US",
-  "YOURS NOW MATE",
-  "PEDAL FASTER",
-  "COME ON THEN",
-  "FREE RIDE LADS",
-  "HAVE A CAN!",
-];
-
-const ABANDON_LINES = ["SHE'S GOING!", "OUT OUT OUT", "LEG IT"];
 
 /** Hose flecks — needs a long, hard wash before she goes under. */
 const FLOOD_SPRAY = 0.000425;
@@ -351,7 +341,7 @@ export class StolenSwanboat {
       if (freePedaloCount() < 1) {
         this.waitSayIn -= delta;
         if (this.waitSayIn <= 0) {
-          this.say("WHERE'S A SWAN");
+          this.say(line('swanboat-thieves', 'look'));
           this.waitSayIn = 5;
         }
         return;
@@ -361,7 +351,7 @@ export class StolenSwanboat {
       this.phase = "boarding";
       this.boardWait = 0;
       this.pathReady = false;
-      this.say("NICK THAT ONE");
+      this.say(line('swanboat-thieves', 'nick'));
     }
   }
 
@@ -401,7 +391,7 @@ export class StolenSwanboat {
       this.phase = "fleeing";
       this.markStolen();
       this.pickFleeTarget(boat, boat);
-      this.say("GO GO GO");
+      this.say(line('swanboat-thieves', 'go'));
     }
   }
 
@@ -423,7 +413,7 @@ export class StolenSwanboat {
     this.tauntIn -= delta;
     this.throwIn -= delta;
     if (this.tauntIn <= 0) {
-      this.say(TAUNTS[Math.floor(Math.random() * TAUNTS.length)]!);
+      this.say(line('swanboat-thieves', 'taunts'));
       this.tauntIn = 5 + Math.random() * 7;
     }
 
@@ -476,7 +466,7 @@ export class StolenSwanboat {
     this.throughGate = false;
     this.phase = "wading";
     this.pathReady = false;
-    this.say(ABANDON_LINES[Math.floor(Math.random() * ABANDON_LINES.length)]!);
+    this.say(line('swanboat-thieves', 'abandon'));
   }
 
   private wade(delta: number): void {
@@ -589,7 +579,7 @@ export class StolenSwanboat {
     const vy = (eyeY - oy) / flight + 4.5 * flight;
 
     this.cans.push({ mesh: can, vx, vy, vz, life: flight + 0.9 });
-    this.say("HAVE A CAN!");
+    this.say(line('swanboat-thieves', 'can'));
   }
 
   private updateCans(delta: number, player: THREE.Vector3): void {
@@ -754,6 +744,7 @@ export class StolenSwanboat {
       this.scene,
       text,
       lead.group.position.clone().add(new THREE.Vector3(0, 2.05, 0)),
+      "swanboat-thieves",
     );
   }
 

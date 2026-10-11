@@ -2,6 +2,14 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { hitsAny, type Footprint } from "./collision";
 import { groundHeight } from "./terrain";
+import {
+  assembleStreetCar,
+  pickStreetCarKind,
+  streetCarPaint,
+  STREET_PAINT_COLORS,
+  type CarPart,
+  type CarSink,
+} from "./streetCar";
 
 /**
  * What you can see from Canoe Lake, roughly where it really is.
@@ -55,16 +63,53 @@ const LIGHT_REAR = new THREE.MeshStandardMaterial({
   emissive: 0x3a0808,
   emissiveIntensity: 0.4,
 });
-const CAR_PAINT = [
-  new THREE.MeshStandardMaterial({ color: 0xc45c4a, roughness: 0.42, metalness: 0.28 }),
-  new THREE.MeshStandardMaterial({ color: 0x3d5a7a, roughness: 0.42, metalness: 0.28 }),
-  new THREE.MeshStandardMaterial({ color: 0xd8d4cc, roughness: 0.4, metalness: 0.32 }),
-  new THREE.MeshStandardMaterial({ color: 0x2f2f32, roughness: 0.42, metalness: 0.3 }),
-  new THREE.MeshStandardMaterial({ color: 0xb8a05a, roughness: 0.42, metalness: 0.28 }),
-  new THREE.MeshStandardMaterial({ color: 0x5a7a5c, roughness: 0.42, metalness: 0.28 }),
-  new THREE.MeshStandardMaterial({ color: 0x6a7c8c, roughness: 0.4, metalness: 0.35 }),
-  new THREE.MeshStandardMaterial({ color: 0x5c3a4a, roughness: 0.42, metalness: 0.28 }),
-];
+const CAR_PAINT = STREET_PAINT_COLORS.map(
+  (color) =>
+    new THREE.MeshStandardMaterial({
+      color,
+      roughness: 0.42,
+      metalness: 0.28,
+    }),
+);
+const CAR_PAINT_TAXI = new THREE.MeshStandardMaterial({
+  color: 0x1a1a1c,
+  roughness: 0.42,
+  metalness: 0.28,
+});
+const CAR_PAINT_VAN = new THREE.MeshStandardMaterial({
+  color: 0xe8e4dc,
+  roughness: 0.45,
+  metalness: 0.22,
+});
+const CAR_AMBER = new THREE.MeshStandardMaterial({
+  color: 0xf0a020,
+  roughness: 0.4,
+  emissive: 0x402008,
+  emissiveIntensity: 0.3,
+});
+const CAR_PLATE_F = new THREE.MeshStandardMaterial({
+  color: 0xf4f1ea,
+  roughness: 0.7,
+});
+const CAR_PLATE_R = new THREE.MeshStandardMaterial({
+  color: 0xf0cc3a,
+  roughness: 0.7,
+});
+const CAR_CHROME = new THREE.MeshStandardMaterial({
+  color: 0xc8ccd0,
+  roughness: 0.28,
+  metalness: 0.75,
+});
+const CAR_TRIM = new THREE.MeshStandardMaterial({
+  color: 0x1c1c1e,
+  roughness: 0.65,
+});
+const CAR_SIGN = new THREE.MeshStandardMaterial({
+  color: 0xf0c12a,
+  roughness: 0.45,
+  emissive: 0x403008,
+  emissiveIntensity: 0.25,
+});
 const SAND = new THREE.MeshStandardMaterial({ color: 0xc9bb9a, roughness: 1 });
 const SEA = new THREE.MeshStandardMaterial({ color: 0x466b7d, roughness: 0.5 });
 const HAZE = new THREE.MeshStandardMaterial({ color: 0x6d7f8c, roughness: 1 });
@@ -185,8 +230,52 @@ export function distanceToNearestRoad(x: number, z: number): number {
 }
 
 /**
+ * Where parade-road centre-lines actually cut A→B (not merely run beside it).
+ * Returns [distance along A→B, gate width] so a fence can open at a crossing
+ * without vanishing along a roadside.
+ */
+export function roadCrossingsAlong(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): [number, number][] {
+  const len = Math.hypot(bx - ax, bz - az);
+  if (len < 1 || roadPolylines.length === 0) return [];
+  const fdx = (bx - ax) / len;
+  const fdz = (bz - az) / len;
+  const corridor = ROAD_WIDTH + PAVEMENT_WIDTH * 2 + KERB_WIDTH * 2 + 1.2;
+  const hits: [number, number][] = [];
+
+  for (const line of roadPolylines) {
+    for (let i = 0; i < line.length - 1; i++) {
+      const a = line[i]!;
+      const b = line[i + 1]!;
+      const rdx = b[0] - a[0];
+      const rdz = b[1] - a[1];
+      const rlen = Math.hypot(rdx, rdz);
+      if (rlen < 0.5) continue;
+      const den = (ax - bx) * (a[1] - b[1]) - (az - bz) * (a[0] - b[0]);
+      if (Math.abs(den) < 1e-9) continue;
+      const t =
+        ((ax - a[0]) * (a[1] - b[1]) - (az - a[1]) * (a[0] - b[0])) / den;
+      const u =
+        -((ax - bx) * (az - a[1]) - (az - bz) * (ax - a[0])) / den;
+      if (t < -0.04 || t > 1.04 || u < -0.04 || u > 1.04) continue;
+      const dot = Math.abs(fdx * (rdx / rlen) + fdz * (rdz / rlen));
+      // Parallel roadside — keep the fence. Only punch a gate at a real cut.
+      if (dot > 0.88) continue;
+      const sine = Math.sqrt(Math.max(0, 1 - dot * dot));
+      const width = Math.min(24, corridor / Math.max(sine, 0.42));
+      hits.push([t * len - width / 2, width]);
+    }
+  }
+  return hits;
+}
+
+/**
  * Intervals along A→B (distance from A, then width) that sit inside a road
- * corridor. Used to gap terraces, fences and paths where a road crosses.
+ * corridor. Used to gap terraces and paths where a road crosses.
  */
 export function roadGapsAlong(
   ax: number,
@@ -490,6 +579,30 @@ function yawTowardPark(
   return Math.atan2(-pickX, -pickZ);
 }
 
+const ROAD_OUTER = ROAD_WIDTH * 0.5 + KERB_WIDTH + PAVEMENT_WIDTH;
+
+function unitXZ(
+  dx: number,
+  dz: number,
+): { x: number; z: number } | null {
+  const len = Math.hypot(dx, dz);
+  if (len < 1e-6) return null;
+  return { x: dx / len, z: dz / len };
+}
+
+/** How far to run a strip past a bend so the outer pavement edges meet. */
+function miterPad(
+  into: { x: number; z: number },
+  out: { x: number; z: number },
+  radius: number,
+): number {
+  const dot = Math.min(1, Math.max(-1, into.x * out.x + into.z * out.z));
+  const phi = Math.acos(dot);
+  if (phi < 0.02) return 0.12;
+  if (phi > 2.7) return radius * 0.35;
+  return Math.min(radius * 1.2, Math.max(0.12, radius * Math.tan(phi / 2)));
+}
+
 /** Axis-aligned box can't follow a diagonal — rotate a strip onto the segment. */
 function roadStrip(
   yard: Yard,
@@ -497,21 +610,40 @@ function roadStrip(
   az: number,
   bx: number,
   bz: number,
+  prev?: readonly [number, number],
+  next?: readonly [number, number],
 ): void {
   const dx = bx - ax;
   const dz = bz - az;
   const len = Math.hypot(dx, dz);
   if (len < 0.5) return;
 
-  // Short flat chunks so asphalt follows berms instead of floating under them.
-  const chunks = Math.max(1, Math.ceil(len / 3.5));
   const ux = dx / len;
   const uz = dz / len;
+  const along = { x: ux, z: uz };
+  let padA = 0.12;
+  let padB = 0.12;
+  if (prev) {
+    const into = unitXZ(ax - prev[0], az - prev[1]);
+    if (into) padA = miterPad(into, along, ROAD_OUTER);
+  }
+  if (next) {
+    const out = unitXZ(next[0] - bx, next[1] - bz);
+    if (out) padB = miterPad(along, out, ROAD_OUTER);
+  }
+
+  // Short flat chunks so asphalt follows berms instead of floating under them.
+  const chunks = Math.max(1, Math.ceil(len / 3.5));
   const yaw = Math.atan2(-dz, dx);
+  const overlap = 0.1;
 
   for (let c = 0; c < chunks; c++) {
-    const t0 = (c / chunks) * len;
-    const t1 = ((c + 1) / chunks) * len;
+    let t0 = (c / chunks) * len;
+    let t1 = ((c + 1) / chunks) * len;
+    if (c === 0) t0 -= padA;
+    else t0 -= overlap;
+    if (c === chunks - 1) t1 += padB;
+    else t1 += overlap;
     const seg = t1 - t0;
     const x0 = ax + ux * t0;
     const z0 = az + uz * t0;
@@ -527,23 +659,23 @@ function roadStrip(
     asphalt.translate(mx, gy + 0.04, mz);
     yard.add(ASPHALT, asphalt);
 
-    // Pavement and kerb on both sides — offset along the road normal.
+    // Pavement and kerb overlap the tarmac a hair so height steps don't slit.
     const nx = -uz;
     const nz = ux;
     for (const side of [-1, 1] as const) {
-      const kerbOff = ROAD_WIDTH * 0.5 + KERB_WIDTH * 0.5;
-      const paveOff = ROAD_WIDTH * 0.5 + KERB_WIDTH + PAVEMENT_WIDTH * 0.5;
+      const kerbOff = ROAD_WIDTH * 0.5 + KERB_WIDTH * 0.5 - 0.03;
+      const paveOff = ROAD_WIDTH * 0.5 + KERB_WIDTH + PAVEMENT_WIDTH * 0.5 - 0.04;
       const kx = mx + nx * kerbOff * side;
       const kz = mz + nz * kerbOff * side;
       const px = mx + nx * paveOff * side;
       const pz = mz + nz * paveOff * side;
 
-      const kerb = new THREE.BoxGeometry(seg, 0.26, KERB_WIDTH);
+      const kerb = new THREE.BoxGeometry(seg, 0.26, KERB_WIDTH + 0.08);
       kerb.rotateY(yaw);
       kerb.translate(kx, gy + 0.14, kz);
       yard.add(KERB_STONE, kerb);
 
-      const pave = new THREE.BoxGeometry(seg, 0.14, PAVEMENT_WIDTH);
+      const pave = new THREE.BoxGeometry(seg, 0.14, PAVEMENT_WIDTH + 0.08);
       pave.rotateY(yaw);
       pave.translate(px, gy + 0.16, pz);
       yard.add(PAVING, pave);
@@ -565,110 +697,82 @@ function roadStrip(
   }
 }
 
-/**
- * Cheap hatch or saloon, nose toward local +X. Built from a few boxes and
- * disc wheels so it reads from the path without looking like a fridge.
- */
-function parkedCar(rand: () => number): Yard {
-  const yard = new Yard();
-  const paint = CAR_PAINT[Math.floor(rand() * CAR_PAINT.length)]!;
-  const hatch = rand() < 0.45;
-  const length = hatch ? 3.9 + rand() * 0.25 : 4.25 + rand() * 0.35;
-  const width = 1.72 + rand() * 0.1;
-  const ride = 0.34;
-
-  // Sill / undertray.
-  yard.box(BUMPER, [length * 0.9, 0.1, width * 0.82], [0, ride * 0.45, 0]);
-
-  // Main body waist.
-  yard.box(paint, [length, 0.52, width], [0, ride + 0.28, 0]);
-
-  // Bonnet — lower and shorter than the cabin.
-  yard.box(
-    paint,
-    [length * 0.3, 0.2, width * 0.96],
-    [length * 0.3, ride + 0.58, 0],
-  );
-
-  // Boot / tailgate.
-  const bootLen = hatch ? length * 0.18 : length * 0.24;
-  yard.box(
-    paint,
-    [bootLen, hatch ? 0.42 : 0.26, width * 0.96],
-    [-length * (hatch ? 0.32 : 0.34), ride + (hatch ? 0.72 : 0.62), 0],
-  );
-
-  // Cabin shell.
-  const cabinLen = hatch ? length * 0.48 : length * 0.4;
-  const cabinX = hatch ? -length * 0.04 : -length * 0.02;
-  yard.box(
-    paint,
-    [cabinLen, 0.48, width * 0.9],
-    [cabinX, ride + 0.88, 0],
-  );
-
-  // Glazing — thin panes, not a solid brick of glass.
-  yard.box(
-    GLASS,
-    [cabinLen * 0.72, 0.36, width * 0.84],
-    [cabinX + length * 0.02, ride + 0.92, 0],
-  );
-  // Windscreen face.
-  yard.box(
-    GLASS,
-    [0.06, 0.34, width * 0.8],
-    [cabinX + cabinLen * 0.48, ride + 0.9, 0],
-  );
-  // Rear screen.
-  yard.box(
-    GLASS,
-    [0.06, hatch ? 0.38 : 0.3, width * 0.78],
-    [cabinX - cabinLen * 0.48, ride + (hatch ? 0.88 : 0.9), 0],
-  );
-
-  // Bumpers.
-  yard.box(BUMPER, [0.18, 0.22, width * 0.98], [length * 0.5 - 0.05, ride + 0.28, 0]);
-  yard.box(BUMPER, [0.18, 0.22, width * 0.98], [-length * 0.5 + 0.05, ride + 0.28, 0]);
-
-  // Lights.
-  for (const side of [-1, 1]) {
-    yard.box(
-      LIGHT_FRONT,
-      [0.08, 0.12, 0.28],
-      [length * 0.48, ride + 0.42, side * width * 0.32],
-    );
-    yard.box(
-      LIGHT_REAR,
-      [0.07, 0.12, 0.3],
-      [-length * 0.48, ride + 0.42, side * width * 0.32],
-    );
+function parkedCarPart(
+  paint: THREE.MeshStandardMaterial,
+  part: CarPart,
+): THREE.Material {
+  switch (part) {
+    case "paint":
+      return paint;
+    case "glass":
+      return GLASS;
+    case "bumper":
+      return BUMPER;
+    case "tyre":
+      return TYRE;
+    case "hub":
+      return HUB;
+    case "lightFront":
+      return LIGHT_FRONT;
+    case "lightRear":
+      return LIGHT_REAR;
+    case "amber":
+      return CAR_AMBER;
+    case "plateFront":
+      return CAR_PLATE_F;
+    case "plateRear":
+      return CAR_PLATE_R;
+    case "chrome":
+      return CAR_CHROME;
+    case "trim":
+      return CAR_TRIM;
+    case "sign":
+      return CAR_SIGN;
   }
+}
 
-  // Door crease — thin darker strip so the side isn't a blank slab.
-  yard.box(
-    BUMPER,
-    [cabinLen * 0.7, 0.03, width * 1.01],
-    [cabinX, ride + 0.5, 0],
-  );
-
-  // Wheels — discs on an axle, not tyre-shaped boxes.
-  const wheelX = length * 0.3;
-  const wheelZ = width * 0.5 - 0.06;
-  for (const lx of [-wheelX, wheelX]) {
-    for (const lz of [-wheelZ, wheelZ]) {
-      const tyre = new THREE.CylinderGeometry(0.33, 0.33, 0.26, 9);
+function parkedCarSink(
+  yard: Yard,
+  paint: THREE.MeshStandardMaterial,
+): CarSink {
+  return {
+    box(part, size, at) {
+      yard.box(parkedCarPart(paint, part), [...size], [...at]);
+    },
+    wheel(x, y, z, radius, thick) {
+      const tyre = new THREE.CylinderGeometry(radius, radius, thick, 9);
       tyre.rotateX(Math.PI / 2);
-      tyre.translate(lx, 0.33, lz);
+      tyre.translate(x, y, z);
       yard.add(TYRE, tyre);
-
-      const hub = new THREE.CylinderGeometry(0.14, 0.14, 0.28, 7);
+      const hub = new THREE.CylinderGeometry(radius * 0.42, radius * 0.42, thick + 0.02, 7);
       hub.rotateX(Math.PI / 2);
-      hub.translate(lx, 0.33, lz);
+      hub.translate(x, y, z);
       yard.add(HUB, hub);
-    }
-  }
+    },
+  };
+}
 
-  return yard;
+/**
+ * Street car, nose toward local +X. Hatch, saloon, estate, mini, SUV, MPV,
+ * van or taxi — same kit the moving traffic uses.
+ */
+function parkedCar(rand: () => number): {
+  yard: Yard;
+  length: number;
+  width: number;
+} {
+  const yard = new Yard();
+  const kind = pickStreetCarKind(rand);
+  const color = streetCarPaint(kind, rand);
+  const paint =
+    kind === "taxi"
+      ? CAR_PAINT_TAXI
+      : color === 0xe8e4dc
+        ? CAR_PAINT_VAN
+        : (CAR_PAINT.find((m) => m.color.getHex() === color) ??
+          CAR_PAINT[Math.floor(rand() * CAR_PAINT.length)]!);
+  const size = assembleStreetCar(parkedCarSink(yard, paint), kind, rand);
+  return { yard, length: size.length, width: size.width };
 }
 
 /** Kerb-side cars along long straight parade sections. */
@@ -709,16 +813,29 @@ function parkCarsOnStraight(
     }
     const x = ax + ux * t + nx * kerb;
     const z = az + uz * t + nz * kerb;
-    parkedCar(rand).place(x, z, yaw).drain(yard);
+    const car = parkedCar(rand);
+    car.yard.place(x, z, yaw).drain(yard);
     surrounds.push({
       x,
       z,
-      halfWide: 2.2,
-      halfDeep: 1.0,
+      halfWide: car.length * 0.5 + 0.15,
+      halfDeep: car.width * 0.5 + 0.12,
       yaw,
     });
     t += 6.2 + rand() * 5;
   }
+}
+
+function roadVertexCap(yard: Yard, x: number, z: number): void {
+  const gy = groundHeight(x, z);
+  const asphalt = new THREE.CylinderGeometry(
+    ROAD_WIDTH * 0.5,
+    ROAD_WIDTH * 0.5,
+    0.18,
+    18,
+  );
+  asphalt.translate(x, gy + 0.04, z);
+  yard.add(ASPHALT, asphalt);
 }
 
 function buildRoads(yard: Yard, rand: () => number): void {
@@ -726,8 +843,13 @@ function buildRoads(yard: Yard, rand: () => number): void {
     for (let i = 0; i < line.length - 1; i++) {
       const a = line[i]!;
       const b = line[i + 1]!;
-      roadStrip(yard, a[0], a[1], b[0], b[1]);
+      const prev = i > 0 ? line[i - 1] : undefined;
+      const next = i + 2 < line.length ? line[i + 2] : undefined;
+      roadStrip(yard, a[0], a[1], b[0], b[1], prev, next);
       parkCarsOnStraight(yard, a[0], a[1], b[0], b[1], rand);
+    }
+    for (const [x, z] of line) {
+      roadVertexCap(yard, x, z);
     }
   }
 }
@@ -860,12 +982,13 @@ function buildCarPark(scene: THREE.Scene, yard: Yard, rand: () => number): void 
       if (rand() < 0.4) continue;
       // Most nose-in; the odd one backed in.
       const face = yaw + (rand() < 0.15 ? Math.PI : 0);
-      parkedCar(rand).place(x, z, face).drain(yard);
+      const car = parkedCar(rand);
+      car.yard.place(x, z, face).drain(yard);
       surrounds.push({
         x,
         z,
-        halfWide: 2.2,
-        halfDeep: 1.0,
+        halfWide: car.length * 0.5 + 0.15,
+        halfDeep: car.width * 0.5 + 0.12,
         yaw: face,
       });
     }

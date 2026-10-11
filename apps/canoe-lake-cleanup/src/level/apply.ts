@@ -7,6 +7,7 @@ import { applySurroundLayout } from "../game/world/buildings";
 import { applyElevationZones } from "../game/world/terrain";
 import { applyFairyLightRuns } from "../game/world/fairyLights";
 import { applyMissionSpots } from "../game/world/missions";
+import { applyOvernightPiles } from "../game/world/overnight";
 
 /** Push level geometry into the world modules before `new Game()`. */
 export function applyLevel(level: LevelData): void {
@@ -23,4 +24,5 @@ export function applyLevel(level: LevelData): void {
   applyElevationZones(level.elevationZones ?? []);
   applyFairyLightRuns(level.fairyLightRuns ?? []);
   applyMissionSpots(level.missionSpots ?? []);
+  applyOvernightPiles(level.overnightPiles ?? []);
 }

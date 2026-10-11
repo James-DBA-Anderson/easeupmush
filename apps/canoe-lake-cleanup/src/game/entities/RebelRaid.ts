@@ -1,33 +1,12 @@
 import * as THREE from "three";
 import { Grumble } from "../effects/Grumble";
 import { MuckFlecks } from "../effects/MuckFlecks";
+import { lines } from "../../dialogue";
 
 const COATS = [0x1a2a1a, 0x2a3a28, 0x1e2a22, 0x243028, 0x2f2a1a];
 const TROUSERS = [0x1a1a1c, 0x222428, 0x2a2a22];
 const SKIN = [0xf0c8a0, 0xd9a066, 0x8d5a3b, 0x5c3a26];
 const MASK = [0x1a1a1a, 0x2a2a2a, 0x1e2418];
-
-const CHARGE = [
-  "GOSPORT FREE STATE!",
-  "CANOE LAKE IS OURS!",
-  "DOWN WITH THE DEPOT!",
-  "FOR THE HARBOUR!",
-  "NO MORE POMPEY RULE!",
-  "TAKE THE PARK!",
-];
-const HIT = [
-  "ARGH — THE LANCE!",
-  "THEY'VE GOT A WASHER!",
-  "FALL BACK!",
-  "I'M SOAKED!",
-  "THAT BATTERY'S LIVE!",
-];
-const FLEE = [
-  "RETREAT!",
-  "BACK TO THE BEACH!",
-  "THEY'RE TOO STRONG!",
-  "GOSPORT WITHDRAWS!",
-];
 
 /** How hard the hose has to hit before they scarper. */
 const HOSE_TO_BREAK = 5;
@@ -65,6 +44,8 @@ export class RebelRaid {
   private spawnZ: number;
   private cleared = false;
   private gone = false;
+  /** First wave just came over the sand — for the tense sting. */
+  private landedQueued = false;
 
   constructor(
     scene: THREE.Scene,
@@ -93,6 +74,13 @@ export class RebelRaid {
 
   public isGone(): boolean {
     return this.gone;
+  }
+
+  /** True once when the first wave hits the beach. */
+  public claimLanded(): boolean {
+    if (!this.landedQueued) return false;
+    this.landedQueued = false;
+    return true;
   }
 
   /** True once when a fighter lands a dig. */
@@ -125,9 +113,9 @@ export class RebelRaid {
 
       if (fighter.hoseHits >= HOSE_TO_BREAK) {
         fighter.mode = "flee";
-        this.say(FLEE, here);
+        this.say(lines('rebels', 'flee'), here);
       } else if (Math.random() < 0.45) {
-        this.say(HIT, here);
+        this.say(lines('rebels', 'hit'), here);
       }
       return true;
     }
@@ -183,7 +171,7 @@ export class RebelRaid {
       fighter.shoutIn -= delta;
       if (fighter.shoutIn <= 0) {
         fighter.shoutIn = 5 + Math.random() * 8;
-        if (Math.random() < 0.55) this.say(CHARGE, fighter.group.position);
+        if (Math.random() < 0.55) this.say(lines('rebels', 'charge'), fighter.group.position);
       }
     }
 
@@ -206,6 +194,7 @@ export class RebelRaid {
       const z = this.spawnZ - Math.random() * 25;
       this.fighters.push(this.buildFighter(new THREE.Vector3(x, 0, z)));
     }
+    if (this.wave === 1) this.landedQueued = true;
     this.spawnIn = this.wave < this.waves ? 14 + Math.random() * 8 : 9999;
   }
 
@@ -368,6 +357,7 @@ export class RebelRaid {
       this.scene,
       lines[Math.floor(Math.random() * lines.length)]!,
       at.clone().setY(2.1),
+      "rebels",
     );
   }
 

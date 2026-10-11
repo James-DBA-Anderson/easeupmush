@@ -2,9 +2,12 @@ import * as THREE from "three";
 import type { FairyLightColor, FairyLightRun, XZ } from "../../level/types";
 import { groundHeight } from "./terrain";
 
-/** 12 ft poles. */
+/** 12 ft — where the fairy-light strings tie on. */
 export const FAIRY_POLE_H = 12 * 0.3048;
-/** Sag never drops more than 20% below the pole top. */
+/** Extra shaft above the wire so the lantern sits like a lamp-post. */
+const LAMP_RISE = 0.95;
+const POST_H = FAIRY_POLE_H + LAMP_RISE;
+/** Sag never drops more than 20% below the string tie. */
 export const FAIRY_MAX_SAG_FRAC = 0.2;
 
 let runs: FairyLightRun[] = [];
@@ -20,6 +23,19 @@ const POLE = new THREE.MeshStandardMaterial({
   color: 0x3a3e42,
   roughness: 0.75,
   metalness: 0.35,
+});
+const LANTERN_METAL = new THREE.MeshStandardMaterial({
+  color: 0x2a2c30,
+  roughness: 0.55,
+  metalness: 0.45,
+});
+/** Warm globe — unlit by day, punches on with the strings. */
+const LANTERN_GLASS = new THREE.MeshStandardMaterial({
+  color: 0x6a6458,
+  emissive: 0xffe6b0,
+  emissiveIntensity: 0,
+  roughness: 0.28,
+  metalness: 0.05,
 });
 const WIRE = new THREE.MeshStandardMaterial({
   color: 0x2a2a2e,
@@ -86,6 +102,7 @@ const GLOW_BLUE = new THREE.SpriteMaterial({
 });
 
 const glowSprites: THREE.Sprite[] = [];
+const poleLamps: { spot: THREE.SpotLight; fill: THREE.PointLight }[] = [];
 /** Wire spots birds can sit on — filled when the strings are built. */
 const perches: THREE.Vector3[] = [];
 /** Perches grouped by pole-to-pole span (one “section” of lights). */
@@ -123,6 +140,15 @@ export function lightFairyBulbs(amount: number): void {
   for (const sprite of glowSprites) {
     sprite.visible = on;
     sprite.scale.setScalar(scale);
+  }
+
+  LANTERN_GLASS.emissiveIntensity = lit * 2.6;
+  LANTERN_GLASS.color.setHex(on ? 0xfff4d4 : 0x6a6458);
+  const spotI = lit * 10.5;
+  const fillI = lit * 3.2;
+  for (const lamp of poleLamps) {
+    lamp.spot.intensity = spotI;
+    lamp.fill.intensity = fillI;
   }
 }
 
@@ -174,16 +200,75 @@ function placePole(scene: THREE.Scene, x: number, z: number, y0: number): number
   const group = new THREE.Group();
   group.position.set(x, y0, z);
   const post = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.06, 0.08, FAIRY_POLE_H, 8),
+    new THREE.CylinderGeometry(0.055, 0.09, POST_H, 8),
     POLE,
   );
-  post.position.y = FAIRY_POLE_H / 2;
+  post.position.y = POST_H / 2;
   post.castShadow = true;
   group.add(post);
 
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), POLE);
-  cap.position.y = FAIRY_POLE_H;
-  group.add(cap);
+  // Collar where the string ties on, below the lantern.
+  const collar = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.12, 0.12, 0.07, 8),
+    LANTERN_METAL,
+  );
+  collar.position.y = FAIRY_POLE_H;
+  group.add(collar);
+  for (const yaw of [0, Math.PI / 2]) {
+    const stub = new THREE.Mesh(
+      new THREE.BoxGeometry(0.28, 0.04, 0.04),
+      LANTERN_METAL,
+    );
+    stub.position.y = FAIRY_POLE_H;
+    stub.rotation.y = yaw;
+    group.add(stub);
+  }
+
+  const neck = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.04, 0.05, LAMP_RISE * 0.55, 8),
+    POLE,
+  );
+  neck.position.y = FAIRY_POLE_H + LAMP_RISE * 0.28;
+  group.add(neck);
+
+  const pan = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.18, 0.12, 0.05, 10),
+    LANTERN_METAL,
+  );
+  pan.position.y = POST_H - 0.12;
+  group.add(pan);
+
+  const globe = new THREE.Mesh(
+    new THREE.SphereGeometry(0.16, 10, 8),
+    LANTERN_GLASS,
+  );
+  globe.position.y = POST_H + 0.02;
+  group.add(globe);
+
+  const hood = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.04, 0.22, 0.1, 10),
+    LANTERN_METAL,
+  );
+  hood.position.y = POST_H + 0.16;
+  group.add(hood);
+  const finial = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), LANTERN_METAL);
+  finial.position.y = POST_H + 0.23;
+  group.add(finial);
+
+  const lampY = POST_H + 0.02;
+  const spot = new THREE.SpotLight(0xffe6b0, 0, 15, 0.92, 0.6, 2);
+  spot.position.set(0, lampY, 0);
+  spot.target.position.set(0, 0, 0);
+  spot.castShadow = false;
+  group.add(spot);
+  group.add(spot.target);
+
+  const fill = new THREE.PointLight(0xffe8c4, 0, 8.5, 2);
+  fill.position.set(0, lampY, 0);
+  fill.castShadow = false;
+  group.add(fill);
+  poleLamps.push({ spot, fill });
+
   scene.add(group);
   poles.push({
     group,
@@ -306,6 +391,7 @@ function clearLightWreck(): void {
   }
   poles.length = 0;
   spanRecs.length = 0;
+  poleLamps.length = 0;
   poleKnocked = false;
 }
 

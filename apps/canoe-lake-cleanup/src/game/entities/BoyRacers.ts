@@ -14,6 +14,7 @@ import { smashFencesAlong } from "../world/fence";
 import { smashBenchesAlong } from "../world/bench";
 import { knockFairyPoleAlong } from "../world/fairyLights";
 import { smashBinsAlong } from "./Bin";
+import { line } from "../../dialogue";
 
 /** UK left lane offset. */
 const LANE = ROAD_WIDTH * 0.22;
@@ -80,7 +81,6 @@ export type RacerPhase =
   | "sinking"
   | "done";
 
-const PANIC_LINES = ["HELP!", "THE DOORS!", "GET ME OUT!", "I CAN'T SWIM!"];
 
 /**
  * Night job: Skylines with underglow thrashing the esplanade, then one of them
@@ -275,7 +275,7 @@ export class BoyRacers {
     this.doorGrumbleAt = now;
     const spot = this.crashCar.group.position.clone();
     spot.y += 1.7;
-    new Grumble(this.scene, "IT WON'T OPEN!", spot);
+    new Grumble(this.scene, "IT WON'T OPEN!", spot, "boy-racer");
   }
 
   public getPositions(): THREE.Vector3[] {
@@ -741,10 +741,10 @@ export class BoyRacers {
     this.nextShout -= delta;
     if (this.nextShout <= 0) {
       this.nextShout = 2.4 + Math.random() * 1.4;
-      const line = PANIC_LINES[Math.floor(Math.random() * PANIC_LINES.length)]!;
+      const shout = line('boy-racer', 'panic');
       const spot = car.group.position.clone();
       spot.y += 1.85;
-      new Grumble(this.scene, line, spot);
+      new Grumble(this.scene, shout, spot, "boy-racer");
     }
   }
 

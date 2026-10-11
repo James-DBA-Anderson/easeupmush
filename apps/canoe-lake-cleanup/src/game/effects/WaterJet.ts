@@ -279,7 +279,7 @@ export class WaterJet {
     gun.add(hose);
 
     // Right hand on the grip, sleeve parented so the forearm stays attached.
-    const hand = buildArmedHand(1, "gun");
+    const hand = buildArmedHand(1);
     // Sit the palm on the orange grip; mitt curls under, thumb wraps the side.
     hand.position.set(0.0, -0.07, 0.035);
     hand.rotation.set(-0.15, 0.08, 0.2);

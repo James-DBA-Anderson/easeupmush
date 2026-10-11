@@ -17,7 +17,12 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@easeupmush/shared/dialogue": ["../../shared/dialogue.ts"],
+      "@easeupmush/shared/tool-switch": ["../../shared/toolSwitch.ts"]
+    }
   },
   "include": ["src", "src/vite-env.d.ts"]
 }
