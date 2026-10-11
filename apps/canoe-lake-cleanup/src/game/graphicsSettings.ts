@@ -1,26 +1,22 @@
-/** Graphics quality presets. High / Normal / Low also gate sway, shadows, and sharpness. */
+/** Graphics quality presets. High / Medium / Low gate view, sway, shadows, and sharpness. */
 
-export type DrawDistance = "high" | "normal" | "low";
+export type DrawDistance = "high" | "medium" | "low";
 
-const DISTANCE_KEY = "canoe-lake-draw-distance";
-const DISTANT_SWAY_KEY = "canoe-lake-distant-tree-sway";
+const KEY = "canoe-lake-draw-distance";
 
-/** Nearby plantings still rock in the wind; beyond this they stay put unless distant sway is on. */
+/** Nearby plantings still rock in the wind on Medium; High rocks the lot. */
 export const NEAR_TREE_SWAY_METRES = 90;
 
 export const DRAW_DISTANCE_LABELS: Record<DrawDistance, string> = {
   high: "High",
-  normal: "Normal",
+  medium: "Medium",
   low: "Low",
 };
 
 export interface GraphicsProfile {
   cameraFar: number;
   fog: { scale: number; near?: number; far?: number };
-  /**
-   * Metres from the camera that trees still sway. `0` skips sway entirely.
-   * Distant sway (when on) lifts this to Infinity on High / Normal.
-   */
+  /** Metres from the camera that trees still sway. `0` skips sway. */
   treeSwayReach: number;
   shadows: boolean;
   shadowMap: number;
@@ -32,13 +28,13 @@ export const GRAPHICS: Record<DrawDistance, GraphicsProfile> = {
   high: {
     cameraFar: 4500,
     fog: { scale: 1.75 },
-    treeSwayReach: NEAR_TREE_SWAY_METRES,
+    treeSwayReach: Number.POSITIVE_INFINITY,
     shadows: true,
     shadowMap: 2048,
     shadowSoft: true,
     pixelRatioCap: 2,
   },
-  normal: {
+  medium: {
     cameraFar: 2500,
     fog: { scale: 1 },
     treeSwayReach: NEAR_TREE_SWAY_METRES,
@@ -61,7 +57,7 @@ export const GRAPHICS: Record<DrawDistance, GraphicsProfile> = {
 /** Camera far plane. */
 export const DRAW_CAMERA_FAR: Record<DrawDistance, number> = {
   high: GRAPHICS.high.cameraFar,
-  normal: GRAPHICS.normal.cameraFar,
+  medium: GRAPHICS.medium.cameraFar,
   low: GRAPHICS.low.cameraFar,
 };
 
@@ -74,62 +70,30 @@ export const DRAW_FOG: Record<
   { scale: number; near?: number; far?: number }
 > = {
   high: GRAPHICS.high.fog,
-  normal: GRAPHICS.normal.fog,
+  medium: GRAPHICS.medium.fog,
   low: GRAPHICS.low.fog,
 };
 
 export function isDrawDistance(v: unknown): v is DrawDistance {
-  return v === "high" || v === "normal" || v === "low";
+  return v === "high" || v === "medium" || v === "low";
 }
 
 export function readDrawDistance(): DrawDistance {
   try {
-    const raw = localStorage.getItem(DISTANCE_KEY);
+    const raw = localStorage.getItem(KEY);
     if (isDrawDistance(raw)) return raw;
+    // Older builds stored Medium as "normal".
+    if (raw === "normal") return "medium";
   } catch {
     /* private mode */
   }
-  return "normal";
+  return "medium";
 }
 
 export function writeDrawDistance(level: DrawDistance): void {
   try {
-    localStorage.setItem(DISTANCE_KEY, level);
+    localStorage.setItem(KEY, level);
   } catch {
     /* private mode */
   }
-}
-
-/** High turns distant sway on; Normal / Low turn it off. User can override. */
-export function defaultDistantTreeSway(level: DrawDistance): boolean {
-  return level === "high";
-}
-
-export function readDistantTreeSway(level: DrawDistance): boolean {
-  try {
-    const raw = localStorage.getItem(DISTANT_SWAY_KEY);
-    if (raw === "on") return true;
-    if (raw === "off") return false;
-  } catch {
-    /* private mode */
-  }
-  return defaultDistantTreeSway(level);
-}
-
-export function writeDistantTreeSway(on: boolean): void {
-  try {
-    localStorage.setItem(DISTANT_SWAY_KEY, on ? "on" : "off");
-  } catch {
-    /* private mode */
-  }
-}
-
-/** Metres of tree sway for this quality + distant-sway flag. */
-export function treeSwayReachMetres(
-  level: DrawDistance,
-  distantSway: boolean,
-): number {
-  const near = GRAPHICS[level].treeSwayReach;
-  if (near <= 0) return 0;
-  return distantSway ? Number.POSITIVE_INFINITY : near;
 }

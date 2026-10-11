@@ -64,7 +64,7 @@ class ParkAudioEngine {
   private titleWanted = false;
   private titlePlaying = false;
   private titleHandedOff = false;
-  private titleEl: HTMLAudioElement | null = null;
+  private titleSrc: AudioBufferSourceNode | null = null;
   private titleGain: GainNode | null = null;
   private titleFade: number | null = null;
   /** Duck the sea bed while the title cue is up. */
@@ -72,22 +72,33 @@ class ParkAudioEngine {
 
   /** Quiet looping shift bed (Bob Bob) — in after half a minute on duty. */
   private shiftWanted = false;
-  private shiftEl: HTMLAudioElement | null = null;
+  private shiftSrc: AudioBufferSourceNode | null = null;
   private shiftGain: GainNode | null = null;
+  private shiftStartedAt = 0;
+  private shiftOffset = 0;
 
   /** Night theme — loops from 9pm until morning. */
   private nightWanted = false;
-  private nightEl: HTMLAudioElement | null = null;
+  private nightSrc: AudioBufferSourceNode | null = null;
   private nightGain: GainNode | null = null;
+  private nightStartedAt = 0;
+  private nightOffset = 0;
 
   /** Tense cue — fire, racer crash, rebels on the sand. */
   private tenseWanted = false;
-  private tenseEl: HTMLAudioElement | null = null;
+  private tenseSrc: AudioBufferSourceNode | null = null;
   private tenseGain: GainNode | null = null;
+  private tenseStartedAt = 0;
+  private tenseOffset = 0;
   private tenseLevel = 1;
   private tensePlays = 0;
   /** `null` keeps looping until something stops it. */
   private tenseMaxPlays: number | null = null;
+  private bedsHeld = false;
+
+  /** Decoded beds — HTML audio + Range fails on Cloudflare Workers assets. */
+  private musicBufs = new Map<string, AudioBuffer>();
+  private musicLoads = new Map<string, Promise<AudioBuffer | null>>();
 
   private seaNodes: { stop: () => void }[] = [];
   private seaRunning = false;
@@ -135,9 +146,13 @@ class ParkAudioEngine {
       this.master.connect(this.ctx.destination);
       this.noiseBuf = this.buildNoise(this.ctx);
     }
-    if (this.ctx.state === "suspended") await this.ctx.resume();
+    // Resume without awaiting — BufferSource can start once the context is
+    // running, and awaiting here used to lose the click that unlocked it.
+    if (this.ctx.state === "suspended") void this.ctx.resume();
     this.unlocked = true;
     this.startSea();
+    void this.ensureMusic("title");
+    void this.ensureMusic("bob-bob");
     if (this.titleWanted && !this.titleHandedOff) this.startTitleBed();
     if (this.tenseWanted) this.startTense();
     if (this.nightWanted) this.startNightBed();
@@ -176,8 +191,98 @@ class ParkAudioEngine {
     return `${base}music/${stem}.mp3`;
   }
 
+  private ensureMusic(stem: string): Promise<AudioBuffer | null> {
+    const have = this.musicBufs.get(stem);
+    if (have) return Promise.resolve(have);
+    let load = this.musicLoads.get(stem);
+    if (!load) {
+      load = this.fetchMusic(stem);
+      this.musicLoads.set(stem, load);
+    }
+    return load;
+  }
+
+  private async fetchMusic(stem: string): Promise<AudioBuffer | null> {
+    if (!this.ctx) return null;
+    try {
+      const res = await fetch(this.musicSrc(stem));
+      if (!res.ok) return null;
+      const raw = await res.arrayBuffer();
+      const buf = await this.ctx.decodeAudioData(raw.slice(0));
+      this.musicBufs.set(stem, buf);
+      return buf;
+    } catch {
+      return null;
+    }
+  }
+
+  private bedGain(existing: GainNode | null): GainNode {
+    if (existing) return existing;
+    const gain = this.ctx!.createGain();
+    gain.gain.value = 0.0001;
+    gain.connect(this.master!);
+    return gain;
+  }
+
+  private kickSource(
+    buffer: AudioBuffer,
+    gain: GainNode,
+    loop: boolean,
+    offset: number,
+    onEnded?: () => void,
+  ): AudioBufferSourceNode {
+    const src = this.ctx!.createBufferSource();
+    src.buffer = buffer;
+    src.loop = loop;
+    src.connect(gain);
+    if (onEnded) src.addEventListener("ended", onEnded);
+    const max = Math.max(0, buffer.duration - 0.02);
+    src.start(0, loop ? offset % buffer.duration : Math.min(offset, max));
+    return src;
+  }
+
+  private stopSrc(src: AudioBufferSourceNode | null): void {
+    if (!src) return;
+    try {
+      src.stop();
+    } catch {
+      /* already stopped */
+    }
+    try {
+      src.disconnect();
+    } catch {
+      /* already gone */
+    }
+  }
+
+  private captureOffset(
+    src: AudioBufferSourceNode | null,
+    startedAt: number,
+    offset: number,
+    buffer: AudioBuffer | undefined,
+  ): number {
+    if (!src || !this.ctx || !buffer) return offset;
+    return (offset + this.ctx.currentTime - startedAt) % buffer.duration;
+  }
+
   private startTitleBed(): void {
     if (
+      !this.titleWanted ||
+      this.titleHandedOff ||
+      this.titlePlaying ||
+      !this.unlocked ||
+      !this.ctx ||
+      !this.master
+    ) {
+      return;
+    }
+    void this.runTitleBed();
+  }
+
+  private async runTitleBed(): Promise<void> {
+    const buf = await this.ensureMusic("title");
+    if (
+      !buf ||
       !this.titleWanted ||
       this.titleHandedOff ||
       this.titlePlaying ||
@@ -191,40 +296,18 @@ class ParkAudioEngine {
       window.clearTimeout(this.titleFade);
       this.titleFade = null;
     }
-    if (!this.titleEl) {
-      const el = new Audio(this.musicSrc("title"));
-      el.loop = false;
-      el.preload = "auto";
-      el.autoplay = true;
-      el.setAttribute("data-title-bed", "");
-      el.style.display = "none";
-      document.body.appendChild(el);
-      const src = this.ctx.createMediaElementSource(el);
-      const gain = this.ctx.createGain();
-      gain.gain.value = 0.0001;
-      src.connect(gain);
-      gain.connect(this.master);
-      this.titleEl = el;
-      this.titleGain = gain;
-      el.addEventListener("timeupdate", () => {
-        if (!el.duration || this.titleHandedOff) return;
-        if (el.duration - el.currentTime <= 5.5) this.handoffTitleToAmbience();
-      });
-      el.addEventListener("ended", () => this.handoffTitleToAmbience());
-    }
+    this.stopSrc(this.titleSrc);
+    this.titleGain = this.bedGain(this.titleGain);
+    this.titleSrc = this.kickSource(buf, this.titleGain, false, 0, () =>
+      this.handoffTitleToAmbience(),
+    );
+    this.titlePlaying = true;
     this.duckSea(true);
-    const t = this.ctx.currentTime;
-    const gain = this.titleGain!;
-    gain.gain.cancelScheduledValues(t);
-    gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), t);
-    gain.gain.exponentialRampToValueAtTime(0.38, t + 0.6);
-    void this.titleEl.play().then(
-      () => {
-        this.titlePlaying = true;
-      },
-      () => {
-        /* Autoplay blocked — unlock() on the next click retries. */
-      },
+    this.fadeBed(this.titleGain, 0.38, 0.6);
+    const untilHandoff = Math.max(0, buf.duration - 5.5);
+    this.titleFade = window.setTimeout(
+      () => this.handoffTitleToAmbience(),
+      untilHandoff * 1000,
     );
   }
 
@@ -238,19 +321,12 @@ class ParkAudioEngine {
       this.duckSea(false);
       return;
     }
-    const t = this.ctx.currentTime;
-    if (this.titleGain) {
-      this.titleGain.gain.cancelScheduledValues(t);
-      this.titleGain.gain.setValueAtTime(
-        Math.max(0.0001, this.titleGain.gain.value),
-        t,
-      );
-      this.titleGain.gain.exponentialRampToValueAtTime(0.0001, t + 4.2);
-    }
+    this.fadeBed(this.titleGain, 0.0001, 4.2);
     this.duckSea(false, 4.5);
     if (this.titleFade != null) window.clearTimeout(this.titleFade);
     this.titleFade = window.setTimeout(() => {
-      this.titleEl?.pause();
+      this.stopSrc(this.titleSrc);
+      this.titleSrc = null;
       this.titleFade = null;
     }, 4300);
   }
@@ -270,7 +346,7 @@ class ParkAudioEngine {
   /** Quiet looping bed once they've been on shift a bit. Night takes over after 9. */
   public setShiftBed(on: boolean): void {
     if (this.shiftWanted === on) {
-      if (on && !this.nightWanted && !this.shiftEl) this.startShiftBed();
+      if (on && !this.nightWanted && !this.shiftSrc) this.startShiftBed();
       return;
     }
     this.shiftWanted = on;
@@ -282,44 +358,30 @@ class ParkAudioEngine {
     if (
       !this.shiftWanted ||
       this.nightWanted ||
+      this.bedsHeld ||
       !this.unlocked ||
       !this.ctx ||
       !this.master
     ) {
       return;
     }
-    if (this.shiftEl) {
-      if (this.shiftEl.paused) void this.shiftEl.play().catch(() => {});
-      return;
-    }
-    const el = new Audio(this.musicSrc("bob-bob"));
-    el.loop = true;
-    el.preload = "auto";
-    el.setAttribute("data-shift-bed", "");
-    el.style.display = "none";
-    document.body.appendChild(el);
-    const src = this.ctx.createMediaElementSource(el);
-    const gain = this.ctx.createGain();
-    gain.gain.value = 0.0001;
-    src.connect(gain);
-    gain.connect(this.master);
-    this.shiftEl = el;
-    this.shiftGain = gain;
-    this.fadeBed(gain, this.tenseWanted ? 0.0001 : 0.085, 3.2);
-    void el.play().catch(() => {
-      /* wait for the next unlock */
-    });
+    if (this.shiftSrc) return;
+    void this.runLoopBed("bob-bob", "shift");
   }
 
   private stopShiftBed(): void {
     this.fadeBed(this.shiftGain, 0.0001, 1.2);
-    if (this.shiftEl) window.setTimeout(() => this.shiftEl?.pause(), 1300);
+    window.setTimeout(() => {
+      this.stopSrc(this.shiftSrc);
+      this.shiftSrc = null;
+      this.shiftOffset = 0;
+    }, 1300);
   }
 
   /** Jim's night cue — loops from 9pm through to morning. */
   public setNightBed(on: boolean): void {
     if (this.nightWanted === on) {
-      if (on && !this.nightEl) this.startNightBed();
+      if (on && !this.nightSrc) this.startNightBed();
       return;
     }
     this.nightWanted = on;
@@ -332,33 +394,54 @@ class ParkAudioEngine {
   }
 
   private startNightBed(): void {
-    if (!this.nightWanted || !this.unlocked || !this.ctx || !this.master) return;
-    if (this.nightEl) {
-      if (this.nightEl.paused) void this.nightEl.play().catch(() => {});
+    if (
+      !this.nightWanted ||
+      this.bedsHeld ||
+      !this.unlocked ||
+      !this.ctx ||
+      !this.master
+    ) {
       return;
     }
-    const el = new Audio(this.musicSrc("night"));
-    el.loop = true;
-    el.preload = "auto";
-    el.setAttribute("data-night-bed", "");
-    el.style.display = "none";
-    document.body.appendChild(el);
-    const src = this.ctx.createMediaElementSource(el);
-    const gain = this.ctx.createGain();
-    gain.gain.value = 0.0001;
-    src.connect(gain);
-    gain.connect(this.master);
-    this.nightEl = el;
-    this.nightGain = gain;
-    this.fadeBed(gain, this.tenseWanted ? 0.0001 : 0.085, 3.2);
-    void el.play().catch(() => {
-      /* wait for the next unlock */
-    });
+    if (this.nightSrc) return;
+    void this.runLoopBed("night", "night");
   }
 
   private stopNightBed(): void {
     this.fadeBed(this.nightGain, 0.0001, 1.2);
-    if (this.nightEl) window.setTimeout(() => this.nightEl?.pause(), 1300);
+    window.setTimeout(() => {
+      this.stopSrc(this.nightSrc);
+      this.nightSrc = null;
+      this.nightOffset = 0;
+    }, 1300);
+  }
+
+  private async runLoopBed(
+    stem: "bob-bob" | "night",
+    which: "shift" | "night",
+  ): Promise<void> {
+    const buf = await this.ensureMusic(stem);
+    if (!buf || !this.unlocked || !this.ctx || !this.master || this.bedsHeld) {
+      return;
+    }
+    if (which === "shift") {
+      if (!this.shiftWanted || this.nightWanted || this.shiftSrc) return;
+      this.shiftGain = this.bedGain(this.shiftGain);
+      this.shiftSrc = this.kickSource(
+        buf,
+        this.shiftGain,
+        true,
+        this.shiftOffset,
+      );
+      this.shiftStartedAt = this.ctx.currentTime;
+      this.fadeBed(this.shiftGain, this.tenseWanted ? 0.0001 : 0.085, 3.2);
+      return;
+    }
+    if (!this.nightWanted || this.nightSrc) return;
+    this.nightGain = this.bedGain(this.nightGain);
+    this.nightSrc = this.kickSource(buf, this.nightGain, true, this.nightOffset);
+    this.nightStartedAt = this.ctx.currentTime;
+    this.fadeBed(this.nightGain, this.tenseWanted ? 0.0001 : 0.085, 3.2);
   }
 
   private fadeBed(gain: GainNode | null, to: number, seconds: number): void {
@@ -370,14 +453,38 @@ class ParkAudioEngine {
   }
 
   private holdBeds(paused: boolean): void {
-    const hold = (el: HTMLAudioElement | null, wanted: boolean): void => {
-      if (!wanted || !el) return;
-      if (paused) el.pause();
-      else void el.play().catch(() => {});
-    };
-    hold(this.tenseEl, this.tenseWanted);
-    hold(this.nightEl, this.nightWanted);
-    hold(this.shiftEl, this.shiftWanted && !this.nightWanted);
+    if (this.bedsHeld === paused) return;
+    this.bedsHeld = paused;
+    if (paused) {
+      this.shiftOffset = this.captureOffset(
+        this.shiftSrc,
+        this.shiftStartedAt,
+        this.shiftOffset,
+        this.musicBufs.get("bob-bob"),
+      );
+      this.nightOffset = this.captureOffset(
+        this.nightSrc,
+        this.nightStartedAt,
+        this.nightOffset,
+        this.musicBufs.get("night"),
+      );
+      this.tenseOffset = this.captureOffset(
+        this.tenseSrc,
+        this.tenseStartedAt,
+        this.tenseOffset,
+        this.musicBufs.get("tense"),
+      );
+      this.stopSrc(this.shiftSrc);
+      this.stopSrc(this.nightSrc);
+      this.stopSrc(this.tenseSrc);
+      this.shiftSrc = null;
+      this.nightSrc = null;
+      this.tenseSrc = null;
+      return;
+    }
+    if (this.tenseWanted) this.startTense();
+    if (this.nightWanted) this.startNightBed();
+    else if (this.shiftWanted) this.startShiftBed();
   }
 
   /**
@@ -392,11 +499,12 @@ class ParkAudioEngine {
     const unlimited = opts?.loops == null;
     if (this.tenseWanted) {
       if (unlimited) this.tenseMaxPlays = null;
-      if (!this.tenseEl) this.startTense();
+      if (!this.tenseSrc) this.startTense();
       return;
     }
     this.tenseWanted = true;
     this.tensePlays = 0;
+    this.tenseOffset = 0;
     this.tenseMaxPlays = unlimited ? null : opts!.loops!;
     this.tenseLevel = 1;
     this.startTense();
@@ -412,42 +520,59 @@ class ParkAudioEngine {
   }
 
   private startTense(): void {
-    if (!this.tenseWanted || !this.unlocked || !this.ctx || !this.master) return;
+    if (
+      !this.tenseWanted ||
+      this.bedsHeld ||
+      !this.unlocked ||
+      !this.ctx ||
+      !this.master
+    ) {
+      return;
+    }
     this.duckUnderTense();
-    if (this.tenseEl) {
-      if (this.tenseEl.paused) void this.tenseEl.play().catch(() => {});
+    if (this.tenseSrc) {
       this.fadeBed(this.tenseGain, 0.2 * this.tenseLevel, 0.7);
       return;
     }
-    const el = new Audio(this.musicSrc("tense"));
-    el.loop = false;
-    el.preload = "auto";
-    el.setAttribute("data-tense-bed", "");
-    el.style.display = "none";
-    document.body.appendChild(el);
-    const src = this.ctx.createMediaElementSource(el);
-    const gain = this.ctx.createGain();
-    gain.gain.value = 0.0001;
-    src.connect(gain);
-    gain.connect(this.master);
-    this.tenseEl = el;
-    this.tenseGain = gain;
-    el.addEventListener("ended", () => this.onTenseEnded());
-    this.fadeBed(gain, 0.2 * this.tenseLevel, 0.7);
-    void el.play().catch(() => {
-      /* wait for the next unlock */
-    });
+    void this.runTense();
+  }
+
+  private async runTense(): Promise<void> {
+    const buf = await this.ensureMusic("tense");
+    if (
+      !buf ||
+      !this.tenseWanted ||
+      this.bedsHeld ||
+      this.tenseSrc ||
+      !this.unlocked ||
+      !this.ctx ||
+      !this.master
+    ) {
+      return;
+    }
+    this.tenseGain = this.bedGain(this.tenseGain);
+    const loop = this.tenseMaxPlays == null;
+    this.tenseSrc = this.kickSource(
+      buf,
+      this.tenseGain,
+      loop,
+      this.tenseOffset,
+      loop ? undefined : () => this.onTenseEnded(),
+    );
+    this.tenseStartedAt = this.ctx.currentTime;
+    this.fadeBed(this.tenseGain, 0.2 * this.tenseLevel, 0.7);
   }
 
   private onTenseEnded(): void {
+    this.tenseSrc = null;
+    if (this.bedsHeld || !this.tenseWanted) return;
     this.tensePlays += 1;
-    if (!this.tenseWanted || !this.tenseEl) return;
+    this.tenseOffset = 0;
     if (this.tenseMaxPlays != null && this.tensePlays >= this.tenseMaxPlays) {
       this.stopTense();
       return;
     }
-    this.tenseEl.currentTime = 0;
-    void this.tenseEl.play().catch(() => {});
+    this.startTense();
   }
 
   private stopTense(): void {
@@ -455,7 +580,11 @@ class ParkAudioEngine {
     this.tenseWanted = false;
     this.tenseMaxPlays = null;
     this.fadeBed(this.tenseGain, 0.0001, 2.6);
-    if (this.tenseEl) window.setTimeout(() => this.tenseEl?.pause(), 2800);
+    window.setTimeout(() => {
+      this.stopSrc(this.tenseSrc);
+      this.tenseSrc = null;
+      this.tenseOffset = 0;
+    }, 2800);
     this.restoreUnderTense();
   }
 

@@ -76,12 +76,8 @@ import {
   DRAW_CAMERA_FAR,
   DRAW_FOG,
   GRAPHICS,
-  defaultDistantTreeSway,
   isDrawDistance,
-  readDistantTreeSway,
   readDrawDistance,
-  treeSwayReachMetres,
-  writeDistantTreeSway,
   writeDrawDistance,
   type DrawDistance,
 } from "./graphicsSettings";
@@ -441,9 +437,7 @@ export class Game {
   private paused = false;
   /** `?debug=1` — shorter fog / camera far plane. */
   private debugShortDraw = false;
-  private drawDistance: DrawDistance = "normal";
-  /** High quality (or the override) rocks trees past the nearby sway radius. */
-  private distantTreeSway = false;
+  private drawDistance: DrawDistance = "medium";
   /** Quality-gated; sun still fades shadows under cloud. */
   private graphicsShadows = true;
   /** Title overlay is up — shift hasn't started. */
@@ -592,14 +586,6 @@ export class Game {
         });
       });
     document
-      .querySelectorAll<HTMLInputElement>('input[data-setting="distant-tree-sway"]')
-      .forEach((input) => {
-        input.addEventListener("change", () => {
-          if (!input.checked) return;
-          this.setDistantTreeSway(input.value === "on");
-        });
-      });
-    document
       .querySelectorAll<HTMLInputElement>('input[data-setting="voices"]')
       .forEach((input) => {
         input.addEventListener("change", () => {
@@ -646,9 +632,6 @@ export class Game {
     this.setupLights();
     this.debugShortDraw = readDebugBoot() !== null;
     this.drawDistance = this.debugShortDraw ? "low" : readDrawDistance();
-    this.distantTreeSway = this.debugShortDraw
-      ? false
-      : readDistantTreeSway(this.drawDistance);
     this.applyDrawDistance();
     this.applyGraphicsQuality();
     this.puddles = new Puddles(this.scene);
@@ -3473,10 +3456,10 @@ export class Game {
     );
   }
 
-  /** Shadows, pixel ratio, and tree sway — applied when quality or the sway toggle changes. */
+  /** Shadows, pixel ratio, and tree sway — applied when quality changes. */
   private applyGraphicsQuality(): void {
     const profile = GRAPHICS[this.drawDistance];
-    setTreeSwayReach(treeSwayReachMetres(this.drawDistance, this.distantTreeSway));
+    setTreeSwayReach(profile.treeSwayReach);
     const dpr = window.devicePixelRatio || 1;
     const nextRatio = Math.min(dpr, profile.pixelRatioCap);
     if (this.renderer.getPixelRatio() !== nextRatio) {
@@ -3511,7 +3494,6 @@ export class Game {
     root?.classList.add("on");
     this.showTitleHome();
     this.syncDrawDistanceRadios();
-    this.syncDistantTreeSwayRadios();
     this.syncVoicesRadios();
     parkAudio.setTitleBed(true);
     void parkAudio.unlock();
@@ -3595,34 +3577,13 @@ export class Game {
       });
   }
 
-  private syncDistantTreeSwayRadios(): void {
-    const value = this.distantTreeSway ? "on" : "off";
-    const locked = this.drawDistance === "low";
-    document
-      .querySelectorAll<HTMLInputElement>('input[data-setting="distant-tree-sway"]')
-      .forEach((input) => {
-        input.checked = input.value === value;
-        input.disabled = locked;
-      });
-  }
-
   private setDrawDistance(level: DrawDistance): void {
     this.drawDistance = level;
     writeDrawDistance(level);
-    this.distantTreeSway = defaultDistantTreeSway(level);
-    writeDistantTreeSway(this.distantTreeSway);
     this.syncDrawDistanceRadios();
-    this.syncDistantTreeSwayRadios();
     this.applyDrawDistance();
     this.applyGraphicsQuality();
     this.applyTimeAndWeather(0);
-  }
-
-  private setDistantTreeSway(on: boolean): void {
-    this.distantTreeSway = on;
-    writeDistantTreeSway(on);
-    this.syncDistantTreeSwayRadios();
-    this.applyGraphicsQuality();
   }
 
   private syncVoicesRadios(): void {
@@ -6095,7 +6056,6 @@ export class Game {
     if (on) {
       this.showPauseHome();
       this.syncDrawDistanceRadios();
-      this.syncDistantTreeSwayRadios();
       this.syncVoicesRadios();
       this.player.halt();
     } else {

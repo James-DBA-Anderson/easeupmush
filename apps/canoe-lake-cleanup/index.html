@@ -871,27 +871,6 @@
       accent-color: #ffd23a;
     }
 
-    #title-graphics-panel fieldset + fieldset,
-    #pause-graphics-panel fieldset + fieldset {
-      margin-top: 14px;
-    }
-
-    #title-graphics-panel .settings-hint,
-    #pause-graphics-panel .settings-hint {
-      margin: 6px 4px 0;
-      font-size: 12px;
-      letter-spacing: 0.6px;
-      opacity: 0.72;
-      text-align: left;
-      max-width: 260px;
-    }
-
-    #title-graphics-panel label:has(input:disabled),
-    #pause-graphics-panel label:has(input:disabled) {
-      opacity: 0.45;
-      cursor: default;
-    }
-
     body.title-screen #hud,
     body.title-screen #pause-btn,
     body.title-screen #record-btn,
@@ -1309,24 +1288,12 @@
             High
           </label>
           <label>
-            <input type="radio" name="draw-distance" data-setting="draw-distance" value="normal" checked />
-            Normal
+            <input type="radio" name="draw-distance" data-setting="draw-distance" value="medium" checked />
+            Medium
           </label>
           <label>
             <input type="radio" name="draw-distance" data-setting="draw-distance" value="low" />
             Low
-          </label>
-          <p class="settings-hint">Draw distance, shadows, sharpness, and tree sway.</p>
-        </fieldset>
-        <fieldset>
-          <legend>Distant tree sway</legend>
-          <label>
-            <input type="radio" name="distant-tree-sway" data-setting="distant-tree-sway" value="on" />
-            On
-          </label>
-          <label>
-            <input type="radio" name="distant-tree-sway" data-setting="distant-tree-sway" value="off" checked />
-            Off
           </label>
         </fieldset>
         <button type="button" id="title-graphics-back">BACK</button>
@@ -1364,24 +1331,12 @@
             High
           </label>
           <label>
-            <input type="radio" name="pause-draw-distance" data-setting="draw-distance" value="normal" checked />
-            Normal
+            <input type="radio" name="pause-draw-distance" data-setting="draw-distance" value="medium" checked />
+            Medium
           </label>
           <label>
             <input type="radio" name="pause-draw-distance" data-setting="draw-distance" value="low" />
             Low
-          </label>
-          <p class="settings-hint">Draw distance, shadows, sharpness, and tree sway.</p>
-        </fieldset>
-        <fieldset>
-          <legend>Distant tree sway</legend>
-          <label>
-            <input type="radio" name="pause-distant-tree-sway" data-setting="distant-tree-sway" value="on" />
-            On
-          </label>
-          <label>
-            <input type="radio" name="pause-distant-tree-sway" data-setting="distant-tree-sway" value="off" checked />
-            Off
           </label>
         </fieldset>
         <button type="button" id="pause-graphics-back">BACK</button>
