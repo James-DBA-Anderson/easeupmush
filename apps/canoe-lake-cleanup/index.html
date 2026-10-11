@@ -789,6 +789,7 @@
       margin: -6px 16px 8px;
     }
 
+    #title-tap,
     #title-home,
     #title-graphics-panel,
     #title-audio-panel,
@@ -801,6 +802,7 @@
       gap: 12px;
     }
 
+    #title-tap.on,
     #title-home.on,
     #title-graphics-panel.on,
     #title-audio-panel.on,
@@ -911,6 +913,10 @@
     #mobile-controls.visible,
     body.touch-ui #mobile-controls {
       display: block;
+    }
+
+    body.title-screen #mobile-controls {
+      display: none;
     }
 
     .stick {
@@ -1275,7 +1281,10 @@
     <div id="title-screen">
       <h1>CANOE LAKE CLEAN UP</h1>
       <p class="title-sub">Southsea · Council shift</p>
-      <div id="title-home" class="on">
+      <div id="title-tap">
+        <button type="button" id="title-tap-btn">TAP</button>
+      </div>
+      <div id="title-home">
         <button type="button" id="title-start">START</button>
         <button type="button" id="title-graphics">GRAPHICS SETTINGS</button>
         <button type="button" id="title-audio">AUDIO SETTINGS</button>

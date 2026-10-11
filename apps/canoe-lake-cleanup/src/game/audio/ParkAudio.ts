@@ -99,6 +99,10 @@ class ParkAudioEngine {
   /** Decoded beds — HTML audio + Range fails on Cloudflare Workers assets. */
   private musicBufs = new Map<string, AudioBuffer>();
   private musicLoads = new Map<string, Promise<AudioBuffer | null>>();
+  private musicRaw = new Map<string, ArrayBuffer>();
+  private musicRawLoads = new Map<string, Promise<ArrayBuffer | null>>();
+  private watchingContext = false;
+  private unlockEl: HTMLAudioElement | null = null;
 
   private seaNodes: { stop: () => void }[] = [];
   private seaRunning = false;
@@ -133,24 +137,139 @@ class ParkAudioEngine {
 
   private noiseBuf: AudioBuffer | null = null;
 
-  /** First click / key — browsers block audio until a gesture. */
+  /**
+   * Pull the title / shift files before anyone taps. Do not create an
+   * AudioContext here — iOS Safari often cannot resume one born off-gesture.
+   */
+  public warm(): void {
+    void this.prefetchMusic("title");
+    void this.prefetchMusic("bob-bob");
+    this.tryAutoplay();
+  }
+
+  /**
+   * First tap / key. Create the graph in this turn, blip a silent buffer so
+   * iOS actually unlocks, and only then start beds.
+   */
   public async unlock(): Promise<void> {
-    if (!this.ctx) {
-      const Ctx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext })
-          .webkitAudioContext;
-      this.ctx = new Ctx();
-      this.master = this.ctx.createGain();
-      this.master.gain.value = this.muted ? 0 : 0.55;
-      this.master.connect(this.ctx.destination);
-      this.noiseBuf = this.buildNoise(this.ctx);
+    this.ensureGraph();
+    if (!this.ctx) return;
+    this.htmlUnlock();
+    this.silentBlip();
+    if (this.ctx.state === "running") {
+      this.onRunning();
+      return;
     }
-    // Resume without awaiting — BufferSource can start once the context is
-    // running, and awaiting here used to lose the click that unlocked it.
-    if (this.ctx.state === "suspended") void this.ctx.resume();
+    void this.ctx.resume().then(() => {
+      if (this.ctx?.state === "running") this.onRunning();
+    });
+  }
+
+  private tryAutoplay(): void {
+    const Ctx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
+    if (!Ctx) return;
+    let probe: AudioContext;
+    try {
+      probe = new Ctx();
+    } catch {
+      return;
+    }
+    if (probe.state === "running") {
+      this.adoptContext(probe);
+      this.onRunning();
+      return;
+    }
+    // A suspended context created off-tap poisons iOS resume. Drop it.
+    try {
+      void probe.close();
+    } catch {
+      /* old webkit */
+    }
+  }
+
+  private ensureGraph(): void {
+    if (this.ctx) {
+      this.watchContext();
+      return;
+    }
+    const Ctx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
+    this.adoptContext(new Ctx());
+  }
+
+  private adoptContext(ctx: AudioContext): void {
+    this.ctx = ctx;
+    this.master = this.ctx.createGain();
+    this.master.gain.value = this.muted ? 0 : 0.55;
+    this.master.connect(this.ctx.destination);
+    this.noiseBuf = this.buildNoise(this.ctx);
+    this.watchContext();
+  }
+
+  private watchContext(): void {
+    if (!this.ctx || this.watchingContext) return;
+    this.watchingContext = true;
+    this.ctx.addEventListener("statechange", () => {
+      if (this.ctx?.state === "running") this.onRunning();
+      else this.noteInterrupted();
+    });
+    const kick = () => {
+      if (!this.ctx || this.ctx.state === "running") return;
+      void this.ctx.resume().then(() => {
+        if (this.ctx?.state === "running") this.onRunning();
+      });
+    };
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") kick();
+    });
+    window.addEventListener("orientationchange", kick);
+    window.addEventListener("pageshow", kick);
+  }
+
+  /** iOS uses `interrupted` as well as `suspended` — both need a resume. */
+  private noteInterrupted(): void {
+    if (!this.ctx || this.ctx.state === "running") return;
+    if (this.titleSrc) {
+      this.stopSrc(this.titleSrc);
+      this.titleSrc = null;
+      this.titlePlaying = false;
+    }
+    this.shiftOffset = this.captureOffset(
+      this.shiftSrc,
+      this.shiftStartedAt,
+      this.shiftOffset,
+      this.musicBufs.get("bob-bob"),
+    );
+    this.nightOffset = this.captureOffset(
+      this.nightSrc,
+      this.nightStartedAt,
+      this.nightOffset,
+      this.musicBufs.get("night"),
+    );
+    this.tenseOffset = this.captureOffset(
+      this.tenseSrc,
+      this.tenseStartedAt,
+      this.tenseOffset,
+      this.musicBufs.get("tense"),
+    );
+    this.stopSrc(this.shiftSrc);
+    this.stopSrc(this.nightSrc);
+    this.stopSrc(this.tenseSrc);
+    this.shiftSrc = null;
+    this.nightSrc = null;
+    this.tenseSrc = null;
+  }
+
+  private onRunning(): void {
+    if (!this.ctx || this.ctx.state !== "running" || !this.master) return;
+    const first = !this.unlocked;
     this.unlocked = true;
-    this.startSea();
+    if (first) this.startSea();
     void this.ensureMusic("title");
     void this.ensureMusic("bob-bob");
     if (this.titleWanted && !this.titleHandedOff) this.startTitleBed();
@@ -158,6 +277,37 @@ class ParkAudioEngine {
     if (this.nightWanted) this.startNightBed();
     else if (this.shiftWanted) this.startShiftBed();
     if (this.tenseWanted) this.duckUnderTense();
+  }
+
+  /** Empty buffer in the same turn as the tap — WebKit's unlock handshake. */
+  private silentBlip(): void {
+    if (!this.ctx || !this.master) return;
+    const buf = this.ctx.createBuffer(1, 1, this.ctx.sampleRate);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(this.master);
+    try {
+      src.start(0);
+    } catch {
+      /* already started */
+    }
+  }
+
+  /** HTML media unlock — some iOS versions need this as well as Web Audio. */
+  private htmlUnlock(): void {
+    if (!this.unlockEl) {
+      const el = new Audio();
+      el.setAttribute("playsinline", "");
+      el.preload = "auto";
+      el.muted = false;
+      el.volume = 0.01;
+      // Tiny valid wav; blob music still uses a full fetch (no Range).
+      el.src =
+        "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+      this.unlockEl = el;
+    }
+    this.unlockEl.currentTime = 0;
+    void this.unlockEl.play().catch(() => {});
   }
 
   public setMuted(on: boolean): void {
@@ -182,13 +332,50 @@ class ParkAudioEngine {
     }
   }
 
-  private musicSrc(stem: string): string {
+  /** iPhone / iPad (including desktop-UA iPads) cannot decode Vorbis. */
+  private appleMobile(): boolean {
+    const ua = navigator.userAgent;
+    if (/iPhone|iPod|iPad/i.test(ua)) return true;
+    return navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+  }
+
+  private musicCandidates(stem: string): string[] {
     const base = import.meta.env.BASE_URL;
+    const ogg = `${base}music/${stem}.ogg`;
+    const mp3 = `${base}music/${stem}.mp3`;
+    if (this.appleMobile()) return [mp3];
     const probe = document.createElement("audio");
-    if (probe.canPlayType("audio/ogg; codecs=vorbis")) {
-      return `${base}music/${stem}.ogg`;
+    if (probe.canPlayType("audio/ogg; codecs=vorbis")) return [ogg, mp3];
+    return [mp3, ogg];
+  }
+
+  private prefetchMusic(stem: string): void {
+    const url = this.musicCandidates(stem)[0];
+    if (!url || this.musicRaw.has(url) || this.musicRawLoads.has(url)) return;
+    this.musicRawLoads.set(url, this.fetchUrl(url));
+  }
+
+  private async fetchUrl(url: string): Promise<ArrayBuffer | null> {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const raw = await res.arrayBuffer();
+      this.musicRaw.set(url, raw);
+      return raw;
+    } catch {
+      return null;
     }
-    return `${base}music/${stem}.mp3`;
+  }
+
+  private bytesFor(url: string): Promise<ArrayBuffer | null> {
+    const have = this.musicRaw.get(url);
+    if (have) return Promise.resolve(have);
+    let load = this.musicRawLoads.get(url);
+    if (!load) {
+      load = this.fetchUrl(url);
+      this.musicRawLoads.set(url, load);
+    }
+    return load;
   }
 
   private ensureMusic(stem: string): Promise<AudioBuffer | null> {
@@ -196,24 +383,52 @@ class ParkAudioEngine {
     if (have) return Promise.resolve(have);
     let load = this.musicLoads.get(stem);
     if (!load) {
-      load = this.fetchMusic(stem);
+      load = this.decodeMusic(stem).then((buf) => {
+        if (!buf) this.musicLoads.delete(stem);
+        return buf;
+      });
       this.musicLoads.set(stem, load);
     }
     return load;
   }
 
-  private async fetchMusic(stem: string): Promise<AudioBuffer | null> {
+  private async decodeMusic(stem: string): Promise<AudioBuffer | null> {
     if (!this.ctx) return null;
-    try {
-      const res = await fetch(this.musicSrc(stem));
-      if (!res.ok) return null;
-      const raw = await res.arrayBuffer();
-      const buf = await this.ctx.decodeAudioData(raw.slice(0));
-      this.musicBufs.set(stem, buf);
-      return buf;
-    } catch {
-      return null;
+    for (const url of this.musicCandidates(stem)) {
+      const raw = await this.bytesFor(url);
+      if (!raw || !this.ctx) continue;
+      try {
+        const buf = await this.decodeRaw(raw);
+        if (buf.duration > 0) {
+          this.musicBufs.set(stem, buf);
+          return buf;
+        }
+      } catch {
+        continue;
+      }
     }
+    return null;
+  }
+
+  private decodeRaw(raw: ArrayBuffer): Promise<AudioBuffer> {
+    const ctx = this.ctx!;
+    return new Promise((resolve, reject) => {
+      const fail = (err?: unknown) => reject(err ?? new Error("decode failed"));
+      try {
+        const p = ctx.decodeAudioData(raw.slice(0));
+        if (p && typeof p.then === "function") {
+          void p.then(resolve, fail);
+          return;
+        }
+      } catch {
+        /* old webkit wants callbacks */
+      }
+      try {
+        ctx.decodeAudioData(raw.slice(0), resolve, fail);
+      } catch (err) {
+        fail(err);
+      }
+    });
   }
 
   private bedGain(existing: GainNode | null): GainNode {
@@ -272,6 +487,7 @@ class ParkAudioEngine {
       this.titlePlaying ||
       !this.unlocked ||
       !this.ctx ||
+      this.ctx.state !== "running" ||
       !this.master
     ) {
       return;
@@ -288,6 +504,7 @@ class ParkAudioEngine {
       this.titlePlaying ||
       !this.unlocked ||
       !this.ctx ||
+      this.ctx.state !== "running" ||
       !this.master
     ) {
       return;
@@ -361,6 +578,7 @@ class ParkAudioEngine {
       this.bedsHeld ||
       !this.unlocked ||
       !this.ctx ||
+      this.ctx.state !== "running" ||
       !this.master
     ) {
       return;
@@ -399,6 +617,7 @@ class ParkAudioEngine {
       this.bedsHeld ||
       !this.unlocked ||
       !this.ctx ||
+      this.ctx.state !== "running" ||
       !this.master
     ) {
       return;
@@ -421,7 +640,14 @@ class ParkAudioEngine {
     which: "shift" | "night",
   ): Promise<void> {
     const buf = await this.ensureMusic(stem);
-    if (!buf || !this.unlocked || !this.ctx || !this.master || this.bedsHeld) {
+    if (
+      !buf ||
+      !this.unlocked ||
+      !this.ctx ||
+      this.ctx.state !== "running" ||
+      !this.master ||
+      this.bedsHeld
+    ) {
       return;
     }
     if (which === "shift") {
@@ -525,6 +751,7 @@ class ParkAudioEngine {
       this.bedsHeld ||
       !this.unlocked ||
       !this.ctx ||
+      this.ctx.state !== "running" ||
       !this.master
     ) {
       return;
@@ -546,6 +773,7 @@ class ParkAudioEngine {
       this.tenseSrc ||
       !this.unlocked ||
       !this.ctx ||
+      this.ctx.state !== "running" ||
       !this.master
     ) {
       return;
@@ -620,7 +848,14 @@ class ParkAudioEngine {
       paused: boolean;
     },
   ): void {
-    if (!this.unlocked || !this.ctx || !this.master) return;
+    if (
+      !this.unlocked ||
+      !this.ctx ||
+      this.ctx.state !== "running" ||
+      !this.master
+    ) {
+      return;
+    }
     const listener = opts.listener ?? { x: 0, y: 0, z: 0 };
     if (opts.paused) {
       this.setLance(false);

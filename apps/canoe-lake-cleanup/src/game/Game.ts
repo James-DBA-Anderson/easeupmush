@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { Player, type Tool } from "./Player";
+import { isMobilePlay } from "./MobileControls";
 import { Swan, setSwanFeederRush } from "./entities/Swan";
 import { Person, setFeederRush, setPigeonFeeders } from "./entities/Person";
 import { Dropping, MAX_PILES, type DropKind } from "./entities/Dropping";
@@ -465,6 +466,7 @@ export class Game {
   private instructionsElement: HTMLElement;
 
   constructor() {
+    parkAudio.warm();
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x9fc4d8);
     this.scene.fog = new THREE.Fog(0x9fc4d8, 220, 520);
@@ -3430,14 +3432,12 @@ export class Game {
   }
 
   private wireIntroAudio(): void {
-    /* First click / key — browsers block Web Audio until a gesture. */
-    if (parkAudio.isUnlocked()) return;
+    /* touchend / click — iOS will not resume a context born on touchstart. */
     const onGesture = () => {
-      window.removeEventListener("pointerdown", onGesture);
-      window.removeEventListener("keydown", onGesture);
       void parkAudio.unlock();
     };
-    window.addEventListener("pointerdown", onGesture);
+    window.addEventListener("pointerup", onGesture);
+    window.addEventListener("touchend", onGesture, { passive: true });
     window.addEventListener("keydown", onGesture);
   }
 
@@ -3492,16 +3492,36 @@ export class Game {
     document.body.classList.add("title-screen");
     const root = document.getElementById("title-screen");
     root?.classList.add("on");
-    this.showTitleHome();
     this.syncDrawDistanceRadios();
     this.syncVoicesRadios();
-    parkAudio.setTitleBed(true);
-    void parkAudio.unlock();
+    parkAudio.warm();
+    if (isMobilePlay()) {
+      this.showTitleTap();
+    } else {
+      parkAudio.setTitleBed(true);
+      this.showTitleHome();
+    }
+    const tapBtn = document.getElementById("title-tap-btn");
+    const tap = (ev: Event) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.enterTitleFromTap();
+    };
+    // iOS only unlocks audio on touchend / click — pointerdown hides this
+    // button before click fires, so the title bed never starts.
+    tapBtn?.addEventListener("touchend", tap, { passive: false });
+    tapBtn?.addEventListener("click", tap);
+    document.getElementById("title-start")?.addEventListener("pointerdown", () => {
+      void parkAudio.unlock();
+    });
     document.getElementById("title-start")?.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
       void parkAudio.unlock();
       this.beginFromTitle();
+    });
+    document.getElementById("title-graphics")?.addEventListener("pointerdown", () => {
+      void parkAudio.unlock();
     });
     document.getElementById("title-graphics")?.addEventListener("click", (ev) => {
       ev.preventDefault();
@@ -3517,6 +3537,9 @@ export class Game {
         this.showTitleHome();
       },
     );
+    document.getElementById("title-audio")?.addEventListener("pointerdown", () => {
+      void parkAudio.unlock();
+    });
     document.getElementById("title-audio")?.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
@@ -3533,19 +3556,35 @@ export class Game {
     );
   }
 
+  private showTitleTap(): void {
+    document.getElementById("title-tap")?.classList.add("on");
+    document.getElementById("title-home")?.classList.remove("on");
+    document.getElementById("title-graphics-panel")?.classList.remove("on");
+    document.getElementById("title-audio-panel")?.classList.remove("on");
+  }
+
+  private enterTitleFromTap(): void {
+    parkAudio.setTitleBed(true);
+    void parkAudio.unlock();
+    this.showTitleHome();
+  }
+
   private showTitleHome(): void {
+    document.getElementById("title-tap")?.classList.remove("on");
     document.getElementById("title-home")?.classList.add("on");
     document.getElementById("title-graphics-panel")?.classList.remove("on");
     document.getElementById("title-audio-panel")?.classList.remove("on");
   }
 
   private showTitleGraphics(): void {
+    document.getElementById("title-tap")?.classList.remove("on");
     document.getElementById("title-home")?.classList.remove("on");
     document.getElementById("title-graphics-panel")?.classList.add("on");
     document.getElementById("title-audio-panel")?.classList.remove("on");
   }
 
   private showTitleAudio(): void {
+    document.getElementById("title-tap")?.classList.remove("on");
     document.getElementById("title-home")?.classList.remove("on");
     document.getElementById("title-graphics-panel")?.classList.remove("on");
     document.getElementById("title-audio-panel")?.classList.add("on");
