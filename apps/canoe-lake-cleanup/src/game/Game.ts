@@ -679,6 +679,7 @@ export class Game {
     const debug = readDebugBoot();
     if (debug) {
       this.shiftIntro = null;
+      this.dismissTitleShell();
       this.applyDebugBoot(debug.from);
       this.wireIntroAudio();
       document.body.classList.add("debug-boot");
@@ -692,6 +693,7 @@ export class Game {
         this.showTitleScreen();
       } else {
         this.shiftIntro = null;
+        this.dismissTitleShell();
         this.forceClockOn();
       }
       this.wireIntroAudio();
@@ -3790,7 +3792,7 @@ export class Game {
   private beginFromTitle(): void {
     if (!this.titleOpen) return;
     this.titleOpen = false;
-    document.getElementById("title-screen")?.classList.remove("on");
+    this.hideTitleOverlay();
     void parkAudio.unlock();
     parkAudio.setTitleBed(false);
     this.updateMusicBeds();
@@ -3986,7 +3988,18 @@ export class Game {
     if (eye) this.player.takeOverFromIntro(eye.x, eye.y, eye.z, eye.yaw);
     else this.player.endIntro();
     this.clockOn();
+    this.dismissTitleShell();
+  }
+
+  private hideTitleOverlay(): void {
+    document.getElementById("title-screen")?.classList.remove("on");
+  }
+
+  /** Drop the title chrome so HUD and sticks can show. */
+  private dismissTitleShell(): void {
+    this.titleOpen = false;
     document.body.classList.remove("title-screen");
+    this.hideTitleOverlay();
   }
 
   private clockOn(opts?: { quiet?: boolean }): void {

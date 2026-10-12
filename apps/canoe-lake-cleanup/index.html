@@ -28,6 +28,11 @@
       -webkit-touch-callout: none;
     }
 
+    /* First paint is the title, not a flash of HUD on an empty canvas. */
+    body.title-screen {
+      background: #0c1c16;
+    }
+
     html.touch-device,
     body.touch-device,
     html.touch-ui,
@@ -1399,7 +1404,7 @@
     }
   </style>
 </head>
-<body>
+<body class="title-screen">
   <div id="game-container">
     <div id="hud">
       <div id="messages"></div>
@@ -1458,7 +1463,7 @@
       <div id="pressure-meter"><div id="pressure-fill"></div></div>
       <div id="pressure-pct">100%</div>
     </div>
-    <div id="title-screen">
+    <div id="title-screen" class="on">
       <h1>CANOE LAKE CLEAN UP</h1>
       <p class="title-sub">Southsea · Council shift</p>
       <div id="title-tap">
