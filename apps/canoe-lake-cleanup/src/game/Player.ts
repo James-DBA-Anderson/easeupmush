@@ -21,18 +21,17 @@ import {
 } from "./world/park";
 import { parkAudio } from "./audio/ParkAudio";
 
-const WALK_SPEED = 9;
-const SPRINT_SPEED = 15;
-/** Chest-deep slog across the bed — no sprinting through swan soup. */
-const WADE_SPEED = 2.8;
+const WALK_SPEED = 20.6;
+/** Chest-deep slog across the bed — slower than the path, not a crawl. */
+const WADE_SPEED = 8.75;
 const WORLD_LIMIT = 200;
 const EYE_HEIGHT = 1.7;
 
-/** Head-bob: steps per metre, and how far the view dips and sways. */
-const BOB_STEP = 1.55;
-const BOB_HEIGHT = 0.032;
-const BOB_SWAY = 0.018;
-const BOB_ROLL = 0.014;
+/** Head-bob: radians per metre — about two footfalls a second at walk speed. */
+const BOB_STEP = 0.34;
+const BOB_HEIGHT = 0.038;
+const BOB_SWAY = 0.016;
+const BOB_ROLL = 0.012;
 
 /** How long the hose takes to come up after intro, or swap heavy/regular. */
 const SWAP_TIME = 0.28;
@@ -62,7 +61,6 @@ export class Player {
   private moveBackward = false;
   private moveLeft = false;
   private moveRight = false;
-  private sprinting = false;
   private isSpraying = false;
 
   private velocity = new THREE.Vector3();
@@ -83,6 +81,10 @@ export class Player {
   private bobAmount = 0;
   private bobOffset = new THREE.Vector3();
   private bobRoll = 0;
+  /** Last foot-plant index so steps fire once per stride. */
+  private lastFoot = -1;
+  /** Damped eye height so kerbs and lumps don't pop the camera. */
+  private eyeY: number | null = null;
 
   /** Extra eye height while stood on a stacked mess lump. */
   private groundLift = 0;
@@ -198,10 +200,6 @@ export class Player {
         event.preventDefault();
         this.moveRight = true;
         break;
-      case "ShiftLeft":
-      case "ShiftRight":
-        this.sprinting = true;
-        break;
       case "KeyE":
         event.preventDefault();
         if (this.game.isIntroPlaying()) break;
@@ -222,7 +220,6 @@ export class Player {
     this.moveBackward = false;
     this.moveLeft = false;
     this.moveRight = false;
-    this.sprinting = false;
     this.setSpraying(false);
     if (this.locked) document.exitPointerLock();
   }
@@ -296,6 +293,9 @@ export class Player {
     this.euler.set(0, Math.atan2(-fx, -fz), 0);
     this.camera.quaternion.setFromEuler(this.euler);
     this.velocity.set(0, 0, 0);
+    this.eyeY = y;
+    this.bobAmount = 0;
+    this.bobRoll = 0;
   }
 
   public isInVan(): boolean {
@@ -363,10 +363,6 @@ export class Player {
       case "ArrowRight":
         event.preventDefault();
         this.moveRight = false;
-        break;
-      case "ShiftLeft":
-      case "ShiftRight":
-        this.sprinting = false;
         break;
     }
   }
@@ -674,11 +670,7 @@ export class Player {
       if (this.direction.lengthSq() > 0) this.direction.normalize();
 
       const wading = isInLake(this.camera.position.x, this.camera.position.z);
-      const speed = wading
-        ? WADE_SPEED
-        : this.sprinting
-          ? SPRINT_SPEED
-          : WALK_SPEED;
+      const speed = wading ? WADE_SPEED : WALK_SPEED;
       const wanted = this.direction.clone().multiplyScalar(speed);
       this.velocity.lerp(wanted, Math.min(1, (wading ? 6 : 12) * delta));
     } else {
@@ -702,7 +694,10 @@ export class Player {
     const wading = isInLake(px, pz);
     const foot = wading ? wadeFootY(px, pz) : groundHeight(px, pz);
     const lift = wading ? 0 : this.groundLift;
-    this.camera.position.y = EYE_HEIGHT + lift + foot;
+    const wantY = EYE_HEIGHT + lift + foot;
+    if (this.eyeY == null) this.eyeY = wantY;
+    this.eyeY = THREE.MathUtils.damp(this.eyeY, wantY, 12, delta);
+    this.camera.position.y = this.eyeY;
     this.trackWading(delta, wading);
     this.applyBob(delta, wading);
 
@@ -845,10 +840,18 @@ export class Player {
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
     const ref = wading ? WADE_SPEED : WALK_SPEED;
     const target = THREE.MathUtils.clamp(speed / ref, 0, 1.25);
-    this.bobAmount = THREE.MathUtils.damp(this.bobAmount, target, 8, delta);
+    this.bobAmount = THREE.MathUtils.damp(this.bobAmount, target, 6, delta);
 
     if (this.bobAmount > 0.02) {
       this.bobPhase += delta * speed * BOB_STEP * (wading ? 0.7 : 1);
+    }
+
+    if (this.bobAmount > 0.18 && !this.inVan) {
+      const plant = Math.floor((this.bobPhase - Math.PI * 0.75) / Math.PI);
+      if (plant !== this.lastFoot) {
+        this.lastFoot = plant;
+        parkAudio.quietStep(plant % 2 === 0, wading);
+      }
     }
 
     const a = this.bobAmount * (wading ? 0.55 : 1);

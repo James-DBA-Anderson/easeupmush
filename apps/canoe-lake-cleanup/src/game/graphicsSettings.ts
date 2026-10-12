@@ -4,8 +4,8 @@ export type DrawDistance = "high" | "medium" | "low";
 
 const KEY = "canoe-lake-draw-distance";
 
-/** Nearby plantings still rock in the wind on Medium; High rocks the lot. */
-export const NEAR_TREE_SWAY_METRES = 90;
+/** Nearby plantings still rock in the wind; far trunks stay put. */
+export const NEAR_TREE_SWAY_METRES = 48;
 
 export const DRAW_DISTANCE_LABELS: Record<DrawDistance, string> = {
   high: "High",
@@ -22,26 +22,42 @@ export interface GraphicsProfile {
   shadowMap: number;
   shadowSoft: boolean;
   pixelRatioCap: number;
+  /** Full-rate people / birds / cars inside this radius. */
+  simFull: number;
+  /** Hide walking/swimming actors past this. */
+  hideActors: number;
+  /** Shadow map refresh, in frames. `0` leaves shadows off. */
+  shadowInterval: number;
+  /** Lake mirror pass, in frames. */
+  mirrorEvery: number;
 }
 
 export const GRAPHICS: Record<DrawDistance, GraphicsProfile> = {
   high: {
-    cameraFar: 4500,
+    cameraFar: 1100,
     fog: { scale: 1.75 },
-    treeSwayReach: Number.POSITIVE_INFINITY,
+    treeSwayReach: 70,
     shadows: true,
     shadowMap: 2048,
     shadowSoft: true,
-    pixelRatioCap: 2,
+    pixelRatioCap: 1.5,
+    simFull: 50,
+    hideActors: 130,
+    shadowInterval: 1,
+    mirrorEvery: 2,
   },
   medium: {
-    cameraFar: 2500,
+    cameraFar: 640,
     fog: { scale: 1 },
     treeSwayReach: NEAR_TREE_SWAY_METRES,
     shadows: true,
-    shadowMap: 2048,
+    shadowMap: 1024,
     shadowSoft: false,
-    pixelRatioCap: 1.5,
+    pixelRatioCap: 1.25,
+    simFull: 36,
+    hideActors: 85,
+    shadowInterval: 2,
+    mirrorEvery: 3,
   },
   low: {
     cameraFar: 120,
@@ -51,6 +67,10 @@ export const GRAPHICS: Record<DrawDistance, GraphicsProfile> = {
     shadowMap: 512,
     shadowSoft: false,
     pixelRatioCap: 1,
+    simFull: 24,
+    hideActors: 55,
+    shadowInterval: 0,
+    mirrorEvery: 8,
   },
 };
 

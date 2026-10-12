@@ -44,6 +44,7 @@ import {
   WATER_Y,
   buildGround,
   buildLake,
+  setWaterMirrorEvery,
   buildPaths,
   distanceToShore,
   isInLake,
@@ -153,8 +154,6 @@ const MISSION_HOLD_MAX = 150;
 const PIGEON_FLOCK = 24;
 /** Feeders linger ~two minutes unless sprayed dry first. */
 const PIGEON_FEEDER_FOR = 120;
-/** Path patch around the mission pin where birds pile in. */
-const PIGEON_MISSION_RADIUS = 13;
 const PIGEON_BREAD_RADIUS = 11;
 /** Pedalo bird kills before a revenge V-formation flies in. */
 const BIRD_KILL_REVENGE = 4;
@@ -258,9 +257,9 @@ export class Game {
   private puddles: Puddles;
   private bread: Bread[] = [];
   private cyclists: Cyclist[] = [];
-  private nextCyclist = 45 + Math.random() * 40;
+  private nextCyclist = 50 + Math.random() * 44;
   private scooters: Scooter[] = [];
-  private nextScooter = 50 + Math.random() * 50;
+  private nextScooter = 56 + Math.random() * 56;
   private traffic: TrafficCar[] = [];
   private nextTraffic = 3 + Math.random() * 6;
   private boats: RcBoat[] = [];
@@ -338,6 +337,9 @@ export class Game {
   /** The player's view, worked out afresh each frame. */
   private view = new THREE.Frustum();
   private viewMatrix = new THREE.Matrix4();
+  private simTick = 0;
+  private frameDelta = 0.016;
+  private shadowBeat = 0;
 
   private clock: THREE.Clock;
   /** Seconds of play, for anything that just needs a steady wave in it. */
@@ -428,6 +430,10 @@ export class Game {
   private pigeonRetreatHomes: THREE.Vector3[] = [];
   private debugTape: DebugTape | null = null;
   private debugTapeSample = 0;
+  private fpsEl: HTMLElement | null = null;
+  private fpsFrames = 0;
+  private fpsWindow = 0;
+  private fpsLastAt = 0;
 
   private health = HEALTH_MAX;
   private sincePecked = HEAL_DELAY;
@@ -489,7 +495,8 @@ export class Game {
       preserveDrawingBuffer: readDebugBoot() !== null,
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(dpr, 1.5));
+    this.renderer.setPixelRatio(Math.min(dpr, 1.25));
+    this.renderer.shadowMap.autoUpdate = false;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
@@ -663,6 +670,7 @@ export class Game {
       this.wireIntroAudio();
       document.body.classList.add("debug-boot");
       this.wireDebugTape();
+      this.fpsEl = document.getElementById("fps");
     } else {
       this.shiftIntro = new ShiftIntro(this.scene, this.camera);
       if (this.shiftIntro.start()) {
@@ -787,6 +795,7 @@ export class Game {
     this.weather.setRainAllowed(this.rainUnlocked());
     this.applyDrawDistance();
     this.weather.update(delta, sky);
+    this.clipCameraToFog();
     updateTrees(this.elapsed, this.weather.getWind(), this.camera.position);
     updateFlowerBeds(delta);
 
@@ -846,6 +855,61 @@ export class Game {
       this.camera.matrixWorldInverse,
     );
     this.view.setFromProjectionMatrix(this.viewMatrix);
+  }
+
+  /**
+   * Fog already hides the far park — don't keep a kilometre of geometry in
+   * the camera frustum past that.
+   */
+  private clipCameraToFog(): void {
+    const fog = this.scene.fog;
+    const cap = GRAPHICS[this.drawDistance].cameraFar;
+    const fogFar = fog instanceof THREE.Fog ? fog.far : cap;
+    const far = Math.min(cap, Math.max(80, fogFar * 1.12 + 20));
+    if (Math.abs(this.camera.far - far) < 2) return;
+    this.camera.far = far;
+    this.camera.updateProjectionMatrix();
+  }
+
+  /**
+   * Near actors tick every frame; mid-range every third; far ones hide and
+   * only keep a slow sim so they don't teleport when you turn.
+   * `smooth` keeps a visible actor on the full tick — flying birds hitch
+   * badly if their flap is stepped.
+   */
+  private actorLod(
+    x: number,
+    z: number,
+    slot: number,
+    urgent = false,
+    smooth = false,
+  ): { dt: number; show: boolean } {
+    const d = this.frameDelta;
+    if (urgent) return { dt: d, show: true };
+    const p = GRAPHICS[this.drawDistance];
+    const dx = x - this.camera.position.x;
+    const dz = z - this.camera.position.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 <= p.simFull * p.simFull) return { dt: d, show: true };
+    const show = d2 <= p.hideActors * p.hideActors;
+    if (smooth && show) return { dt: d, show: true };
+    const every = show ? 3 : 8;
+    if ((this.simTick + slot) % every !== 0) return { dt: 0, show };
+    return { dt: d * every, show };
+  }
+
+  private refreshShadows(): void {
+    const interval = GRAPHICS[this.drawDistance].shadowInterval;
+    if (!this.graphicsShadows || interval <= 0) {
+      this.renderer.shadowMap.needsUpdate = false;
+      return;
+    }
+    if (interval === 1) {
+      this.renderer.shadowMap.needsUpdate = true;
+      return;
+    }
+    this.renderer.shadowMap.needsUpdate = this.shadowBeat % interval === 0;
+    this.shadowBeat += 1;
   }
 
   /**
@@ -1094,16 +1158,27 @@ export class Game {
 
     for (let i = this.people.length - 1; i >= 0; i--) {
       const person = this.people[i]!;
+      const at = person.getPosition();
+      const dog = person.getDog();
+      const lod = this.actorLod(
+        at.x,
+        at.z,
+        i,
+        person.isPigeonFanaticFeeder() ||
+          person.isInTheDrink() ||
+          !!dog?.isLoose(),
+      );
+      person.setCulled(!lod.show);
+      if (lod.dt <= 0) continue;
       for (const swan of this.swans) {
         if (!swan.isAshore() && !swan.isCharging()) continue;
         person.spook(swan.getPosition(), swan.isWingsOut());
       }
-      const at = person.getPosition();
       const watched =
         person.isPigeonFanaticFeeder() &&
         this.inShot(at.x, at.z, at.y + 0.7);
       const stepped = person.update(
-        delta,
+        lod.dt,
         mess,
         this.camera.position,
         this.weather.isWet(),
@@ -1162,9 +1237,8 @@ export class Game {
         });
       }
 
-      const dog = person.getDog();
       if (dog) {
-        dog.update(delta, {
+        dog.update(lod.dt, {
           swans: this.swans,
           people: this.people,
           player: this.camera.position,
@@ -1482,10 +1556,6 @@ export class Game {
     for (const gull of this.gulls) {
       if (Math.random() < 0.55) gull.watchOver(pin.x, pin.z);
     }
-
-    this.callouts.raise("jobs", this.dayCycle.clockFace(), marked);
-    this.missionArrow.pulse(9);
-    this.miniMap.pulseMissions(9);
   }
 
   private updateFeederRush(delta: number): void {
@@ -1994,17 +2064,11 @@ export class Game {
     if (this.pigeonBuildup || this.pigeonMissionStarted) {
       this.updatePigeonFeeders(delta);
       this.dispatchPigeonFlockBuildup(delta);
-      const spot = getMissionSpot("pigeons");
-      const birds = this.pigeonMissionBirds.filter((b) => !b.isGone());
       if (this.pigeonFlockSurge > 0) this.pigeonFlockSurge -= delta;
-      const at = this.countPigeonsAtMission(spot);
-      const need = Math.ceil(Math.max(1, birds.length) * 0.5);
       if (
         this.pigeonBuildup &&
         !this.pigeonMissionStarted &&
-        this.pigeonFeederHasLaid &&
-        birds.length > 0 &&
-        at >= need
+        this.pigeonFeederHasLaid
       ) {
         this.activatePigeonMission();
       }
@@ -2169,15 +2233,6 @@ export class Game {
       if (person.isPigeonFeederScattering()) return true;
     }
     return false;
-  }
-
-  private countPigeonsAtMission(spot: { x: number; z: number }): number {
-    let n = 0;
-    for (const bird of this.pigeonMissionBirds) {
-      if (bird.isGone()) continue;
-      if (bird.isAtMission(spot.x, spot.z, PIGEON_MISSION_RADIUS)) n += 1;
-    }
-    return n;
   }
 
   /** Staggered peel-off from the wires; more follow as others fly over. */
@@ -3069,7 +3124,12 @@ export class Game {
 
     for (let i = this.ducks.length - 1; i >= 0; i--) {
       const duck = this.ducks[i]!;
-      duck.update(delta, this.camera.position);
+      const at = duck.getPosition();
+      const flying = !duck.isOnWater();
+      const lod = this.actorLod(at.x, at.z, i, false, flying);
+      duck.getMesh().visible = lod.show;
+      if (lod.dt <= 0) continue;
+      duck.update(lod.dt, this.camera.position);
       if (!duck.isGone()) continue;
       duck.dispose();
       this.ducks.splice(i, 1);
@@ -3110,8 +3170,14 @@ export class Game {
 
     let mobbing = false;
 
-    for (const gull of this.gulls) {
-      gull.update(delta, this.camera.position, scraps);
+    for (let i = 0; i < this.gulls.length; i++) {
+      const gull = this.gulls[i]!;
+      const at = gull.getPosition();
+      const aground = gull.isAground();
+      const lod = this.actorLod(at.x, at.z, i, aground, !aground);
+      if (!gull.isGone()) gull.getMesh().visible = lod.show;
+      if (lod.dt <= 0) continue;
+      gull.update(lod.dt, this.camera.position, scraps);
       if (gull.isAground()) mobbing = true;
       // A third of beakfuls come back out within the minute, near enough —
       // picnic raids almost always leave a calling card.
@@ -3136,9 +3202,13 @@ export class Game {
    * will cross the park for a chip paper nobody's watching and take it up a
    * trunk to eat, which saves you a job you'd rather have had yourself.
    */
-  private updateSquirrels(delta: number, scraps: readonly Scrap[]): void {
-    for (const squirrel of this.squirrels) {
-      squirrel.update(delta, this.camera.position, scraps);
+  private updateSquirrels(_delta: number, scraps: readonly Scrap[]): void {
+    for (let i = 0; i < this.squirrels.length; i++) {
+      const squirrel = this.squirrels[i]!;
+      const at = squirrel.getPosition();
+      const lod = this.actorLod(at.x, at.z, i);
+      if (lod.dt <= 0) continue;
+      squirrel.update(lod.dt, this.camera.position, scraps);
     }
   }
 
@@ -3385,7 +3455,7 @@ export class Game {
     }
     this.instructionsElement.innerHTML = mobile
       ? "Left stick: Move | Look stick: Look | Spray (above look): Aim & fire | Near swan boat: tap spray to board"
-      : "WASD: Move | Shift: Run | Click: Spray | E: Swan boat | ESC: Unlock mouse";
+      : "WASD: Move | Click: Spray | E: Swan boat | ESC: Unlock mouse";
   }
 
   /** Fade the top controls strip once they've had twenty seconds on shift. */
@@ -3393,26 +3463,28 @@ export class Game {
     if (!this.onDuty) {
       this.dutyFor = 0;
       this.instructionsElement.classList.remove("faded");
+    } else {
+      this.dutyFor += delta;
+      this.instructionsElement.classList.toggle("faded", this.dutyFor >= 20);
+    }
+    this.updateMusicBeds();
+  }
+
+  /** Night theme from 9pm; days are park bed only. */
+  private updateMusicBeds(): void {
+    if (this.titleOpen) {
       parkAudio.setNightBed(false);
       parkAudio.setShiftBed(false);
       parkAudio.setTense(false);
       return;
     }
-    this.dutyFor += delta;
-    this.instructionsElement.classList.toggle("faded", this.dutyFor >= 20);
-    this.updateMusicBeds();
-  }
-
-  /** Bob Bob after 30s on days; night theme loops from 9pm through to morning. */
-  private updateMusicBeds(): void {
     const hour = this.dayCycle.hour;
+    parkAudio.setShiftBed(false);
     if (hour >= 21 || hour < 6) {
       parkAudio.setNightBed(true);
-      parkAudio.setShiftBed(false);
       return;
     }
     parkAudio.setNightBed(false);
-    if (this.dutyFor >= 30) parkAudio.setShiftBed(true);
   }
 
   public isIntroPlaying(): boolean {
@@ -3460,8 +3532,12 @@ export class Game {
   private applyGraphicsQuality(): void {
     const profile = GRAPHICS[this.drawDistance];
     setTreeSwayReach(profile.treeSwayReach);
+    setWaterMirrorEvery(profile.mirrorEvery);
     const dpr = window.devicePixelRatio || 1;
-    const nextRatio = Math.min(dpr, profile.pixelRatioCap);
+    const cap = isMobilePlay()
+      ? Math.min(profile.pixelRatioCap, 1.15)
+      : profile.pixelRatioCap;
+    const nextRatio = Math.min(dpr, cap);
     if (this.renderer.getPixelRatio() !== nextRatio) {
       this.renderer.setPixelRatio(nextRatio);
       this.onWindowResize();
@@ -3646,6 +3722,7 @@ export class Game {
     document.getElementById("title-screen")?.classList.remove("on");
     void parkAudio.unlock();
     parkAudio.setTitleBed(false);
+    this.updateMusicBeds();
     this.shiftIntro?.beginArrival();
     this.showTool(null);
     this.renderer.domElement.requestPointerLock();
@@ -3873,7 +3950,7 @@ export class Game {
         this.cyclists.push(
           new Cyclist(this.scene, from, lads ? "ebike" : "cyclist"),
         );
-        this.nextCyclist = 45 + Math.random() * 70;
+        this.nextCyclist = 50 + Math.random() * 78;
         if (lads) {
           const at = loopPoint(from);
           this.callouts.raise("ebike", this.dayCycle.clockFace(), {
@@ -3991,7 +4068,10 @@ export class Game {
 
     for (let i = this.traffic.length - 1; i >= 0; i--) {
       const car = this.traffic[i]!;
-      car.update(delta);
+      const at = car.getPosition();
+      const lod = this.actorLod(at.x, at.z, i);
+      if (lod.dt <= 0) continue;
+      car.update(lod.dt);
       if (car.isGone()) {
         car.dispose();
         this.traffic.splice(i, 1);
@@ -4016,7 +4096,7 @@ export class Game {
         this.nextScooter = WAIT_AND_SEE;
       } else {
         this.scooters.push(new Scooter(this.scene, from));
-        this.nextScooter = 40 + Math.random() * 80;
+        this.nextScooter = 44 + Math.random() * 89;
       }
     }
 
@@ -4838,6 +4918,7 @@ export class Game {
 
   private completeMission(id: MissionId): void {
     this.missionBanner.show(MISSION_LABELS[id], 5.2, "done");
+    parkAudio.congrats();
   }
 
   /**
@@ -5591,6 +5672,7 @@ export class Game {
 
   private animate = (): void => {
     requestAnimationFrame(this.animate);
+    this.tickFps();
 
     if (this.frozen) {
       this.clock.getDelta();
@@ -5612,6 +5694,8 @@ export class Game {
     }
 
     const delta = Math.min(this.clock.getDelta(), 0.05);
+    this.frameDelta = delta;
+    this.simTick += 1;
 
     if (this.dead) {
       parkAudio.update(delta, {
@@ -5644,9 +5728,20 @@ export class Game {
 
     const crowd = this.people.map((person) => person.getPosition());
     crowd.push(this.camera.position);
-    for (const swan of this.swans) {
+    for (let i = 0; i < this.swans.length; i++) {
+      const swan = this.swans[i]!;
+      const at = swan.getPosition();
+      const lod = this.actorLod(
+        at.x,
+        at.z,
+        i,
+        swan.isCharging() || swan.isWingsOut(),
+        swan.isFlying(),
+      );
+      swan.getMesh().visible = lod.show;
+      if (lod.dt <= 0) continue;
       swan.noticeCrowd(crowd);
-      swan.update(delta, this.camera.position, this.swans);
+      swan.update(lod.dt, this.camera.position, this.swans);
       if (swan.shouldDrop()) this.addDropping(swan.getPosition().clone());
       if (swan.wantsStrike()) this.takeStrike(swan.getPosition());
     }
@@ -5703,7 +5798,6 @@ export class Game {
     this.updateBins(delta);
     this.updateGraffiti(delta);
     this.updateGraffitiMission(delta);
-    this.refreshWalkCrowd();
     this.updateDrunks(delta);
     this.watchForAttacks();
     this.watchTheState();
@@ -5769,6 +5863,7 @@ export class Game {
     );
 
     this.refreshPressureGauge();
+    this.refreshShadows();
     this.renderer.render(this.scene, this.camera);
     this.sampleDebugTape(delta);
   };
@@ -5895,10 +5990,7 @@ export class Game {
       if (aim) spots.push(aim);
     }
 
-    if (
-      (this.pigeonBuildup || this.pigeonMissionStarted) &&
-      !this.pigeonMissionDone
-    ) {
+    if (this.pigeonMissionStarted && !this.pigeonMissionDone) {
       const feeder = this.pigeonFeederPeople.find(
         (p) => !p.isGone() && p.isPigeonFanaticFeeder(),
       );
@@ -6009,6 +6101,20 @@ export class Game {
     // Camera local +X after a Yaw spin — positive is the player's right.
     const right = dx * Math.cos(yaw) + dz * -Math.sin(yaw);
     return THREE.MathUtils.clamp(right / 5.5, -1, 1);
+  }
+
+  private tickFps(): void {
+    if (!this.fpsEl) return;
+    const now = performance.now();
+    const dt = this.fpsLastAt ? (now - this.fpsLastAt) / 1000 : 0;
+    this.fpsLastAt = now;
+    this.fpsFrames += 1;
+    this.fpsWindow += dt;
+    if (this.fpsWindow < 0.4) return;
+    const fps = this.fpsFrames / Math.max(0.001, this.fpsWindow);
+    this.fpsEl.textContent = `${Math.round(fps)} FPS`;
+    this.fpsFrames = 0;
+    this.fpsWindow = 0;
   }
 
   private wireDebugTape(): void {

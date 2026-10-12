@@ -437,6 +437,7 @@ interface SwayPlant {
   rate: number;
   /** How much extra tip the wind can put on, in radians. */
   flex: number;
+  rocking: boolean;
 }
 
 const swaying: SwayPlant[] = [];
@@ -475,8 +476,10 @@ export function setTreeSwayReach(metres: number): void {
 
 function restTrees(): void {
   for (const plant of swaying) {
+    if (!plant.rocking) continue;
     plant.group.rotation.x = plant.baseX;
     plant.group.rotation.z = plant.baseZ;
+    plant.rocking = false;
   }
 }
 
@@ -502,8 +505,11 @@ export function updateTrees(
       const dx = plant.group.position.x - camera.x;
       const dz = plant.group.position.z - camera.z;
       if (dx * dx + dz * dz > swayReachSq) {
-        plant.group.rotation.x = plant.baseX;
-        plant.group.rotation.z = plant.baseZ;
+        if (plant.rocking) {
+          plant.group.rotation.x = plant.baseX;
+          plant.group.rotation.z = plant.baseZ;
+          plant.rocking = false;
+        }
         continue;
       }
     }
@@ -516,6 +522,7 @@ export function updateTrees(
       plant.flex * strength * (0.95 * wave + 0.4 * gust + 0.2 * flutter);
     plant.group.rotation.x = plant.baseX + nz * (lean + rock);
     plant.group.rotation.z = plant.baseZ - nx * (lean + rock);
+    plant.rocking = true;
   }
 }
 
@@ -568,6 +575,7 @@ export function plantTrees(scene: THREE.Scene): void {
       phase: rand() * Math.PI * 2,
       rate: hasBranches ? 0.45 + rand() * 0.55 : 0.85 + rand() * 0.9,
       flex: hasBranches ? 0.08 + rand() * 0.05 : 0.14 + rand() * 0.08,
+      rocking: false,
     });
   };
 

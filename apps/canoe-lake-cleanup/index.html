@@ -73,6 +73,22 @@
       flex-shrink: 0;
     }
 
+    #fps {
+      display: none;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 6px 12px;
+      border-radius: 8px;
+      text-align: right;
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 1px;
+      font-size: 13px;
+    }
+
+    body.debug-boot #fps {
+      display: block;
+    }
+
     #cleaned {
       font-size: 12px;
       opacity: 0.8;
@@ -1231,6 +1247,7 @@
   <div id="game-container">
     <div id="hud">
       <div id="messages"></div>
+      <div id="fps">— FPS</div>
       <div id="score-panel">
         <div id="cleaned">Cleaned: <span id="cleaned-value">0</span></div>
         <div id="complaints-line">Complaints: <span id="complaints">0</span></div>
@@ -1371,7 +1388,7 @@
       <button id="restart">BACK TO WORK</button>
     </div>
     <div id="instructions">
-      WASD: Move | Shift: Run | Mouse: Look | Click: Spray | ESC: Pause
+      WASD: Move | Mouse: Look | Click: Spray | ESC: Pause
     </div>
     <div id="rotate-prompt">
       <div class="rotate-card">

@@ -59,7 +59,7 @@ Mobile play needs **landscape**. Portrait shows a rotate prompt. In DevTools, pi
 ### Controls
 
 **Desktop**
-- **WASD** — move · **Shift** — run
+- **WASD** — move
 - **Mouse** — look · **Click** — spray
 - **E** — grab heavy hose at the van (mission) · hire / board a pedalo when available
 - **ESC** — pause

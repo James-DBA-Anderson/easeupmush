@@ -228,6 +228,10 @@ export class Gull {
     return this.group.position.clone();
   }
 
+  public getMesh(): THREE.Group {
+    return this.group;
+  }
+
   public isGone(): boolean {
     return this.mode === "gone";
   }

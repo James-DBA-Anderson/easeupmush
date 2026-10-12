@@ -1204,12 +1204,15 @@ function placePlayRail(
   }
 
   scene.add(group);
+  // Footprints rotate the other way to Three.js Yaw — same `yaw` as the mesh
+  // puts a diagonal bay at right angles to the rail. Negate so the thin
+  // axis stays across the fence.
   addProp({
     x,
     z,
-    halfWide: 0.18,
+    halfWide: 0.07,
     halfDeep: length / 2,
-    yaw,
+    yaw: -yaw,
   });
 }
 

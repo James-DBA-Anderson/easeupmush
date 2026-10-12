@@ -6,6 +6,9 @@
 
 type BirdCue = "gull" | "duck" | "swan";
 
+/** Looping shift / night beds — loud enough to sit under the sea, under title. */
+const LOOP_BED_GAIN = 0.22;
+
 export type FlyoverKind = "jet" | "light" | "spitfire" | "heli";
 
 export interface FlyoverCue {
@@ -70,12 +73,14 @@ class ParkAudioEngine {
   /** Duck the sea bed while the title cue is up. */
   private seaDuck: GainNode | null = null;
 
-  /** Quiet looping shift bed (Bob Bob) — in after half a minute on duty. */
+  /** Quiet looping shift bed (Bob Bob) — in once the shift has started. */
   private shiftWanted = false;
   private shiftSrc: AudioBufferSourceNode | null = null;
   private shiftGain: GainNode | null = null;
   private shiftStartedAt = 0;
   private shiftOffset = 0;
+  private shiftStopGen = 0;
+  private shiftStarting = false;
 
   /** Night theme — loops from 9pm until morning. */
   private nightWanted = false;
@@ -83,6 +88,8 @@ class ParkAudioEngine {
   private nightGain: GainNode | null = null;
   private nightStartedAt = 0;
   private nightOffset = 0;
+  private nightStopGen = 0;
+  private nightStarting = false;
 
   /** Tense cue — fire, racer crash, rebels on the sand. */
   private tenseWanted = false;
@@ -134,8 +141,27 @@ class ParkAudioEngine {
   private lastSplashAt = 0;
   private lastWingAt = 0;
   private lastWashAt = 0;
+  private lastStepAt = 0;
+  private lastClickAt = 0;
+  private lastRadioAt = 0;
+  private lastCongratsAt = 0;
 
   private noiseBuf: AudioBuffer | null = null;
+
+  constructor() {
+    document.addEventListener(
+      "click",
+      (event) => {
+        const node = event.target;
+        if (!(node instanceof Element)) return;
+        const btn = node.closest("button");
+        if (!btn || btn.disabled) return;
+        void this.unlock();
+        this.uiClick();
+      },
+      true,
+    );
+  }
 
   /**
    * Pull the title / shift files before anyone taps. Do not create an
@@ -143,7 +169,6 @@ class ParkAudioEngine {
    */
   public warm(): void {
     void this.prefetchMusic("title");
-    void this.prefetchMusic("bob-bob");
     this.tryAutoplay();
   }
 
@@ -271,7 +296,6 @@ class ParkAudioEngine {
     this.unlocked = true;
     if (first) this.startSea();
     void this.ensureMusic("title");
-    void this.ensureMusic("bob-bob");
     if (this.titleWanted && !this.titleHandedOff) this.startTitleBed();
     if (this.tenseWanted) this.startTense();
     if (this.nightWanted) this.startNightBed();
@@ -583,13 +607,17 @@ class ParkAudioEngine {
     ) {
       return;
     }
-    if (this.shiftSrc) return;
+    if (this.shiftSrc || this.shiftStarting) return;
+    this.shiftStopGen += 1;
     void this.runLoopBed("bob-bob", "shift");
   }
 
   private stopShiftBed(): void {
+    this.shiftStarting = false;
+    const gen = ++this.shiftStopGen;
     this.fadeBed(this.shiftGain, 0.0001, 1.2);
     window.setTimeout(() => {
+      if (gen !== this.shiftStopGen) return;
       this.stopSrc(this.shiftSrc);
       this.shiftSrc = null;
       this.shiftOffset = 0;
@@ -622,13 +650,17 @@ class ParkAudioEngine {
     ) {
       return;
     }
-    if (this.nightSrc) return;
+    if (this.nightSrc || this.nightStarting) return;
+    this.nightStopGen += 1;
     void this.runLoopBed("night", "night");
   }
 
   private stopNightBed(): void {
+    this.nightStarting = false;
+    const gen = ++this.nightStopGen;
     this.fadeBed(this.nightGain, 0.0001, 1.2);
     window.setTimeout(() => {
+      if (gen !== this.nightStopGen) return;
       this.stopSrc(this.nightSrc);
       this.nightSrc = null;
       this.nightOffset = 0;
@@ -639,7 +671,11 @@ class ParkAudioEngine {
     stem: "bob-bob" | "night",
     which: "shift" | "night",
   ): Promise<void> {
+    if (which === "shift") this.shiftStarting = true;
+    else this.nightStarting = true;
     const buf = await this.ensureMusic(stem);
+    if (which === "shift") this.shiftStarting = false;
+    else this.nightStarting = false;
     if (
       !buf ||
       !this.unlocked ||
@@ -660,14 +696,22 @@ class ParkAudioEngine {
         this.shiftOffset,
       );
       this.shiftStartedAt = this.ctx.currentTime;
-      this.fadeBed(this.shiftGain, this.tenseWanted ? 0.0001 : 0.085, 3.2);
+      this.fadeBed(
+        this.shiftGain,
+        this.tenseWanted ? 0.0001 : LOOP_BED_GAIN,
+        3.2,
+      );
       return;
     }
     if (!this.nightWanted || this.nightSrc) return;
     this.nightGain = this.bedGain(this.nightGain);
     this.nightSrc = this.kickSource(buf, this.nightGain, true, this.nightOffset);
     this.nightStartedAt = this.ctx.currentTime;
-    this.fadeBed(this.nightGain, this.tenseWanted ? 0.0001 : 0.085, 3.2);
+    this.fadeBed(
+      this.nightGain,
+      this.tenseWanted ? 0.0001 : LOOP_BED_GAIN,
+      3.2,
+    );
   }
 
   private fadeBed(gain: GainNode | null, to: number, seconds: number): void {
@@ -822,8 +866,8 @@ class ParkAudioEngine {
   }
 
   private restoreUnderTense(): void {
-    if (this.nightWanted) this.fadeBed(this.nightGain, 0.085, 2.8);
-    else if (this.shiftWanted) this.fadeBed(this.shiftGain, 0.085, 2.8);
+    if (this.nightWanted) this.fadeBed(this.nightGain, LOOP_BED_GAIN, 2.8);
+    else if (this.shiftWanted) this.fadeBed(this.shiftGain, LOOP_BED_GAIN, 2.8);
   }
 
   /**
@@ -1029,6 +1073,106 @@ class ParkAudioEngine {
     }
   }
 
+  /** Short menu tick — title, pause, and the other HUD buttons. */
+  public uiClick(): void {
+    if (!this.ctx || !this.master || this.muted) return;
+    const now = performance.now();
+    if (now - this.lastClickAt < 40) return;
+    this.lastClickAt = now;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = "triangle";
+    const g = this.ctx.createGain();
+    osc.frequency.setValueAtTime(1860, t);
+    osc.frequency.exponentialRampToValueAtTime(740, t + 0.045);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.028, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.055);
+    osc.connect(g);
+    g.connect(this.master);
+    osc.start(t);
+    osc.stop(t + 0.07);
+    if (this.noiseBuf) this.crashBurst(t, 0.022, 2800, 0.012, 1.2);
+  }
+
+  /** Short walkie pip when a radio text lands in the HUD. */
+  public radioPing(): void {
+    if (!this.ctx || !this.master || this.muted) return;
+    const now = performance.now();
+    if (now - this.lastRadioAt < 90) return;
+    this.lastRadioAt = now;
+    const t = this.ctx.currentTime;
+    if (this.noiseBuf) this.crashBurst(t, 0.035, 2800, 0.014, 1.3);
+    const pip = (at: number, hz: number, peak: number, dur: number) => {
+      if (!this.ctx || !this.master) return;
+      const osc = this.ctx.createOscillator();
+      osc.type = "sine";
+      const g = this.ctx.createGain();
+      osc.frequency.setValueAtTime(hz, at);
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(peak, at + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+      osc.connect(g);
+      g.connect(this.master);
+      osc.start(at);
+      osc.stop(at + dur + 0.02);
+    };
+    pip(t + 0.012, 1180, 0.026, 0.055);
+    pip(t + 0.072, 880, 0.02, 0.07);
+  }
+
+  /** Short major sting when a scripted mission wraps. */
+  public congrats(): void {
+    if (!this.ctx || !this.master || this.muted) return;
+    const now = performance.now();
+    if (now - this.lastCongratsAt < 500) return;
+    this.lastCongratsAt = now;
+    const t = this.ctx.currentTime;
+    const steps = [523.25, 659.25, 783.99, 1046.5];
+    steps.forEach((hz, i) => {
+      this.fanfareNote(t + i * 0.12, hz, 0.2, 0.04);
+    });
+    const hold = t + 0.5;
+    for (const hz of [261.63, 329.63, 392.0, 523.25, 659.25, 783.99]) {
+      this.fanfareNote(hold, hz, 0.95, hz < 400 ? 0.028 : 0.022);
+    }
+    if (this.noiseBuf) this.crashBurst(hold, 0.28, 3800, 0.016, 0.85);
+  }
+
+  private fanfareNote(at: number, hz: number, dur: number, peak: number): void {
+    if (!this.ctx || !this.master) return;
+    const mix = this.ctx.createGain();
+    mix.gain.setValueAtTime(0.0001, at);
+    mix.gain.exponentialRampToValueAtTime(peak, at + 0.018);
+    mix.gain.exponentialRampToValueAtTime(peak * 0.55, at + dur * 0.35);
+    mix.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    mix.connect(this.master);
+
+    const tri = this.ctx.createOscillator();
+    tri.type = "triangle";
+    tri.frequency.setValueAtTime(hz, at);
+    const tg = this.ctx.createGain();
+    tg.gain.value = 0.85;
+    tri.connect(tg);
+    tg.connect(mix);
+    tri.start(at);
+    tri.stop(at + dur + 0.02);
+
+    const edge = this.ctx.createOscillator();
+    edge.type = "square";
+    edge.frequency.setValueAtTime(hz, at);
+    const eg = this.ctx.createGain();
+    eg.gain.value = 0.12;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = Math.min(2400, hz * 3);
+    edge.connect(eg);
+    eg.connect(lp);
+    lp.connect(mix);
+    edge.start(at);
+    edge.stop(at + dur + 0.02);
+  }
+
   /** Soft boot on paving — used while walking off the van. */
   public footstep(soft = false): void {
     if (!this.ctx || !this.master || this.muted || !this.noiseBuf) return;
@@ -1036,6 +1180,37 @@ class ParkAudioEngine {
     const peak = soft ? 0.028 : 0.042;
     this.crashBurst(t, 0.07, soft ? 280 : 360, peak, 0.55);
     this.crashBurst(t + 0.01, 0.05, 110, peak * 0.7, 0.4);
+  }
+
+  /**
+   * Quiet first-person stride — sits under the sea bed. `left` nudges
+   * the pan; `wet` muffles it into a short slosh in the lake.
+   */
+  public quietStep(left = false, wet = false): void {
+    if (!this.ctx || !this.master || this.muted || !this.noiseBuf) return;
+    const now = performance.now();
+    if (now - this.lastStepAt < 90) return;
+    this.lastStepAt = now;
+    const t = this.ctx.currentTime;
+    const pan = this.panNode(left ? -0.14 : 0.14);
+    const jitter = 0.82 + Math.random() * 0.36;
+    const peak = (wet ? 0.009 : 0.014) * jitter;
+    this.crashBurst(
+      t,
+      wet ? 0.08 : 0.05,
+      (wet ? 380 : 520) * jitter,
+      peak,
+      wet ? 0.55 : 0.75,
+      pan,
+    );
+    this.crashBurst(
+      t + 0.008,
+      wet ? 0.07 : 0.04,
+      wet ? 95 : 130,
+      peak * 0.8,
+      0.4,
+      pan,
+    );
   }
 
   /**
@@ -1264,28 +1439,38 @@ class ParkAudioEngine {
     let flutterGain: GainNode | null = null;
 
     if (kind === "spitfire") {
-      // Merlin: mid rumble + prop flutter — clear from the ground.
+      // Merlin: mid rumble + a bit of crackle + prop flutter — it should
+      // cut through the sea bed when it comes down the front.
       const body = ctx.createGain();
       body.gain.value = 1;
       body.connect(pan);
 
-      const noise = this.loopNoise(0.55, 900, 0.6);
+      const noise = this.loopNoise(0.9, 1100, 0.55);
       const bp = ctx.createBiquadFilter();
       bp.type = "bandpass";
-      bp.frequency.value = 380;
-      bp.Q.value = 0.7;
+      bp.frequency.value = 340;
+      bp.Q.value = 0.65;
       noise.out.connect(bp);
       bp.connect(body);
       nodes.push(noise);
+
+      const crackle = this.loopNoise(0.38, 2400, 0.4);
+      const crackleBp = ctx.createBiquadFilter();
+      crackleBp.type = "bandpass";
+      crackleBp.frequency.value = 1250;
+      crackleBp.Q.value = 0.8;
+      crackle.out.connect(crackleBp);
+      crackleBp.connect(body);
+      nodes.push(crackle);
 
       tone = ctx.createOscillator();
       tone.type = "sawtooth";
       tone.frequency.value = 95;
       toneGain = ctx.createGain();
-      toneGain.gain.value = 0.22;
+      toneGain.gain.value = 0.4;
       const lp = ctx.createBiquadFilter();
       lp.type = "lowpass";
-      lp.frequency.value = 420;
+      lp.frequency.value = 480;
       lp.Q.value = 0.5;
       tone.connect(lp);
       lp.connect(toneGain);
@@ -1306,7 +1491,7 @@ class ParkAudioEngine {
       flutter.type = "sine";
       flutter.frequency.value = 28;
       flutterGain = ctx.createGain();
-      flutterGain.gain.value = 0.35;
+      flutterGain.gain.value = 0.42;
       flutter.connect(flutterGain);
       flutterGain.connect(body.gain);
       flutter.start();
@@ -1320,28 +1505,41 @@ class ParkAudioEngine {
         },
       });
     } else if (kind === "heli") {
-      // Chop-chop: broadband wash + a slow amplitude pulse for the blades.
+      // Rotor wash + a square chop on a brighter slap so it reads as blades,
+      // not another bit of sea. Tail whine sits on top.
       const body = ctx.createGain();
       body.gain.value = 1;
       body.connect(pan);
 
-      const noise = this.loopNoise(0.7, 700, 0.55);
-      const bp = ctx.createBiquadFilter();
-      bp.type = "bandpass";
-      bp.frequency.value = 160;
-      bp.Q.value = 0.55;
-      noise.out.connect(bp);
-      bp.connect(body);
-      nodes.push(noise);
+      const wash = this.loopNoise(0.85, 900, 0.45);
+      const washBp = ctx.createBiquadFilter();
+      washBp.type = "bandpass";
+      washBp.frequency.value = 220;
+      washBp.Q.value = 0.5;
+      wash.out.connect(washBp);
+      washBp.connect(body);
+      nodes.push(wash);
+
+      const slap = this.loopNoise(0.7, 3200, 0.35);
+      const slapBp = ctx.createBiquadFilter();
+      slapBp.type = "bandpass";
+      slapBp.frequency.value = 980;
+      slapBp.Q.value = 0.85;
+      slap.out.connect(slapBp);
+      const slapG = ctx.createGain();
+      slapG.gain.value = 0.55;
+      slapBp.connect(slapG);
+      slapG.connect(body);
+      nodes.push(slap);
 
       tone = ctx.createOscillator();
       tone.type = "sawtooth";
-      tone.frequency.value = 62;
+      tone.frequency.value = 58;
       toneGain = ctx.createGain();
-      toneGain.gain.value = 0.14;
+      toneGain.gain.value = 0.22;
       const lp = ctx.createBiquadFilter();
       lp.type = "lowpass";
-      lp.frequency.value = 280;
+      lp.frequency.value = 240;
       tone.connect(lp);
       lp.connect(toneGain);
       toneGain.connect(body);
@@ -1356,13 +1554,39 @@ class ParkAudioEngine {
         },
       });
 
+      const tail = ctx.createOscillator();
+      tail.type = "triangle";
+      tail.frequency.value = 520;
+      const tailG = ctx.createGain();
+      tailG.gain.value = 0.09;
+      const tailLp = ctx.createBiquadFilter();
+      tailLp.type = "lowpass";
+      tailLp.frequency.value = 1400;
+      tail.connect(tailLp);
+      tailLp.connect(tailG);
+      tailG.connect(body);
+      tail.start();
+      nodes.push({
+        stop: () => {
+          try {
+            tail.stop();
+          } catch {
+            /* already */
+          }
+        },
+      });
+
       flutter = ctx.createOscillator();
-      flutter.type = "sine";
-      flutter.frequency.value = 18;
+      flutter.type = "square";
+      flutter.frequency.value = 14;
       flutterGain = ctx.createGain();
-      flutterGain.gain.value = 0.55;
+      flutterGain.gain.value = 0.48;
       flutter.connect(flutterGain);
       flutterGain.connect(body.gain);
+      const slapMod = ctx.createGain();
+      slapMod.gain.value = 0.42;
+      flutter.connect(slapMod);
+      slapMod.connect(slapG.gain);
       flutter.start();
       nodes.push({
         stop: () => {
@@ -1469,21 +1693,22 @@ class ParkAudioEngine {
     const dz = plane.z - listener.z;
     const horiz = Math.hypot(dx, dz);
     const height = Math.max(40, plane.y - listener.y);
+    const dist = Math.hypot(horiz, height);
 
     // Spitfire is close and loud; jets are a distant wash high up.
     const reach =
       voice.kind === "spitfire"
-        ? 520
+        ? 720
         : voice.kind === "heli"
-          ? 480
+          ? 640
           : voice.kind === "light"
             ? 700
             : 900;
     const peak =
       voice.kind === "spitfire"
-        ? 0.2
+        ? 0.62
         : voice.kind === "heli"
-          ? 0.16
+          ? 0.48
           : voice.kind === "light"
             ? 0.055
             : 0.028;
@@ -1494,7 +1719,8 @@ class ParkAudioEngine {
           ? Math.max(0.25, Math.min(1, 1.15 - height / 900))
           : Math.max(0.15, Math.min(0.55, 1.05 - height / 1600));
 
-    const near = Math.max(0, 1 - horiz / reach);
+    const span = voice.kind === "spitfire" || voice.kind === "heli" ? dist : horiz;
+    const near = Math.max(0, 1 - span / reach);
     const curve = near * near;
     const level = Math.max(0.0001, peak * curve * heightFade);
 
@@ -1514,14 +1740,14 @@ class ParkAudioEngine {
         voice.kind === "spitfire"
           ? 95
           : voice.kind === "heli"
-            ? 62
+            ? 58
             : voice.kind === "light"
               ? 78
               : 52;
       voice.tone.frequency.setTargetAtTime(base + doppler, t, 0.1);
     }
     if (voice.flutter && (voice.kind === "spitfire" || voice.kind === "heli")) {
-      const blade = voice.kind === "heli" ? 18 : 28;
+      const blade = voice.kind === "heli" ? 14 : 28;
       voice.flutter.frequency.setTargetAtTime(
         blade + doppler * 0.15,
         t,

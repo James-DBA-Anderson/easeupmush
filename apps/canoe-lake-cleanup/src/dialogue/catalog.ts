@@ -44,7 +44,7 @@ export const catalog: DialogueCatalog = {
           'Sweet as nut up there. You\'re clued up, I\'ll give you that.',
         ]),
         ...pack('pigeons-half', [
-          'That\'s half the flock on the path with that feeder. Hose them off before it gets worse.',
+          'Feeder\'s throwing bread on the path. Birds\'ll be down in a second — hose them off before they carpet it.',
         ]),
         ...pack('pigeons-clear', [
           'Path\'s clear of the bread. Flock\'s had it.',

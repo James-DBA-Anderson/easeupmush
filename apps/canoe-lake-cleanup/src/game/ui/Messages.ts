@@ -1,3 +1,4 @@
+import { parkAudio } from "../audio/ParkAudio";
 import { voices } from "../audio/Voices";
 
 /**
@@ -33,6 +34,7 @@ export class Messages {
 
     this.notes.push({ element, left: life });
     while (this.notes.length > MAX_ON_SCREEN) this.drop(0);
+    parkAudio.radioPing();
     voices.playSender(from, text);
   }
 

@@ -17,13 +17,13 @@ const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 
 /** Continuous lance — thin to match the brass tip (~12mm). */
-const STREAM_SEGS = 200;
+const STREAM_SEGS = 360;
 const STREAM_RADIUS = 0.011;
 const STREAM_STEP = 0.024;
 /** Motion drips overlaid on the solid stream. */
 const STREAK_RADIUS = 0.016;
 /** Dense ribbon samples so swing waves stay smooth short links. */
-const RIBBON_RATE = 240;
+const RIBBON_RATE = 400;
 
 interface Droplet {
   mesh: THREE.Mesh;
@@ -135,7 +135,7 @@ export class WaterJet {
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
-    const tube = new THREE.CylinderGeometry(1, 1, 1, 5, 1, true);
+    const tube = new THREE.CylinderGeometry(1, 1, 1, 8, 1, true);
     tube.translate(0, 0.5, 0);
     for (let i = 0; i < STREAM_SEGS; i++) {
       const mesh = new THREE.Mesh(tube, this.streamMat);
@@ -653,7 +653,7 @@ export class WaterJet {
       if (len < 0.0005) continue;
 
       // Split long gaps so a fast swing doesn't leave one fat kink.
-      const pieces = Math.min(5, Math.max(1, Math.ceil(len / 0.08)));
+      const pieces = Math.min(8, Math.max(1, Math.ceil(len / 0.04)));
       for (let p = 0; p < pieces && used < STREAM_SEGS; p++) {
         const t0 = p / pieces;
         const t1 = (p + 1) / pieces;

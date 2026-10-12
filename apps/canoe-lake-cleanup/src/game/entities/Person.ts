@@ -58,7 +58,7 @@ const CLIMB_TIME = 2.9;
 const DRYING = 45;
 
 /** A fair few of the park's regulars are only here to walk the dog. */
-const DOG_CHANCE = 0.35;
+const DOG_CHANCE = 0.315;
 /** How often a soaking loosens their grip on the lead. */
 const LEAD_SLIPS = 0.95;
 
@@ -2031,6 +2031,12 @@ export class Person {
   /** Queuing inside — not on the path, not a hose target. */
   public isInCafe(): boolean {
     return this.insideCafe();
+  }
+
+  /** Far from the camera — skip drawing, keep cafe hide intact. */
+  public setCulled(hidden: boolean): void {
+    if (this.insideCafe()) return;
+    this.group.visible = !hidden;
   }
 
   public getDog(): Dog | null {

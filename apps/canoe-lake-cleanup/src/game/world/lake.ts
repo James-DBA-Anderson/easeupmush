@@ -18,6 +18,14 @@ import {
  * −Z sea. Shore + path spurs come from the level file / editor.
  */
 
+let waterMirrorEvery = 2;
+let waterMirrorBeat = 0;
+
+/** How often the lake mirror re-renders the park. 1 = every frame. */
+export function setWaterMirrorEvery(frames: number): void {
+  waterMirrorEvery = Math.max(1, Math.floor(frames));
+}
+
 function computeShore(outline: ReadonlyArray<XZ>): THREE.Vector2[] {
   const curve = new THREE.CatmullRomCurve3(
     outline.map(([x, z]) => new THREE.Vector3(x, 0, z)),
@@ -662,8 +670,8 @@ export function buildLake(scene: THREE.Scene): LakeSurface {
   // is world up. (Plain XZ fill leaves the mirror vertical and reflects the
   // far bank onto the near one.)
   const water = new Water(waterMirrorGeometry(fill), {
-    textureWidth: 256,
-    textureHeight: 256,
+    textureWidth: 128,
+    textureHeight: 128,
     waterNormals: waterNormalsTexture(),
     sunDirection: new THREE.Vector3(0.4, 0.8, 0.2).normalize(),
     sunColor: 0xffffff,
@@ -680,6 +688,14 @@ export function buildLake(scene: THREE.Scene): LakeSurface {
   waterMat.depthWrite = true;
   water.rotation.x = -Math.PI / 2;
   water.position.y = WATER_Y;
+  const drawMirror = water.onBeforeRender;
+  water.onBeforeRender = (renderer, scene, camera, geometry, material, group) => {
+    waterMirrorBeat += 1;
+    if (waterMirrorEvery > 1 && waterMirrorBeat % waterMirrorEvery !== 1) {
+      return;
+    }
+    drawMirror.call(water, renderer, scene, camera, geometry, material, group);
+  };
   scene.add(water);
 
   buildMargin(scene);
