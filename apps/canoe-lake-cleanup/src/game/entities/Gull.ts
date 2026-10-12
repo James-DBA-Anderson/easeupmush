@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { Grumble } from "../effects/Grumble";
 import { parkAudio } from "../audio/ParkAudio";
 import { isInLake, WATER_Y } from "../world/lake";
+import { groundHeight } from "../world/terrain";
 import { addEyes } from "./eyes";
 import { MuckFlecks } from "../effects/MuckFlecks";
 
@@ -31,7 +32,16 @@ const RAID_SPOOKED = 2.1;
 
 const SHRIEKS = ["EEEE-AH!", "AH-AH-AH!", "KYOW!", "EEEE-AH-AH!"];
 
-type Mode = "in" | "cruise" | "stoop" | "feed" | "up" | "gone";
+type Mode =
+  | "in"
+  | "cruise"
+  | "stoop"
+  | "feed"
+  | "up"
+  | "fall"
+  | "down"
+  | "shake"
+  | "gone";
 
 /** Something on the ground worth a look. */
 export interface Scrap {
@@ -89,6 +99,9 @@ export class Gull {
   private nextLowPass = 8 + Math.random() * 28;
   private flecks!: MuckFlecks;
   private leavingPark = false;
+  private fallVel = new THREE.Vector3();
+  private fallSpin = new THREE.Vector3();
+  private shakeFor = 0;
 
   constructor(scene: THREE.Scene, over: THREE.Vector2, already = false) {
     this.scene = scene;
@@ -252,12 +265,19 @@ export class Gull {
    */
   public hitBy(point: THREE.Vector3, heavy = false): boolean {
     const here = this.group.position;
-    if (this.mode === "stoop" || this.mode === "up") {
+    if (
+      this.mode === "stoop" ||
+      this.mode === "up" ||
+      this.mode === "fall"
+    ) {
       const r = heavy ? 7.5 : 4.0;
       const dx = here.x - point.x;
       const dy = here.y - point.y;
       const dz = here.z - point.z;
       return dx * dx + dy * dy * 0.45 + dz * dz < r * r;
+    }
+    if (this.mode === "down" || this.mode === "shake") {
+      return here.distanceTo(point) < (heavy ? 3.6 : 2.6);
     }
     if (this.mode === "cruise" || this.mode === "in") {
       const low = here.y < 14;
@@ -280,9 +300,51 @@ export class Gull {
     return true;
   }
 
+  public isStunned(): boolean {
+    return this.mode === "fall" || this.mode === "down" || this.mode === "shake";
+  }
+
+  /**
+   * Lance while they're flying — they fold up and hit the deck. Returns true
+   * if this blast actually brought them down.
+   */
+  public knockDown(): boolean {
+    if (this.isStunned() || this.mode === "gone" || this.mode === "feed") {
+      return false;
+    }
+    if (
+      this.mode !== "in" &&
+      this.mode !== "cruise" &&
+      this.mode !== "stoop" &&
+      this.mode !== "up"
+    ) {
+      return false;
+    }
+    this.scrap = null;
+    this.lowPass = 0;
+    this.raidCircle = false;
+    this.mode = "fall";
+    const here = this.group.position;
+    this.fallVel.set(
+      Math.sin(this.heading) * 5.5,
+      1.2,
+      Math.cos(this.heading) * 5.5,
+    );
+    this.fallSpin.set(
+      (Math.random() - 0.5) * 9,
+      (Math.random() < 0.5 ? -1 : 1) * (4 + Math.random() * 5),
+      (Math.random() - 0.5) * 8,
+    );
+    this.height = here.y;
+    this.shriek();
+    parkAudio.bird("gull", true);
+    parkAudio.wingFlap(0.95);
+    return true;
+  }
+
   /** Up and off, with the usual racket — hose works in the air too. */
   public flush(): void {
-    if (this.mode === "gone" || this.mode === "up") return;
+    if (this.mode === "gone" || this.mode === "up" || this.isStunned()) return;
     this.scrap = null;
     this.lowPass = 0;
     this.nextLowPass = 14 + Math.random() * 30;
@@ -301,6 +363,7 @@ export class Gull {
     this.leavingPark = true;
     this.raidCircle = false;
     this.scrap = null;
+    if (this.isStunned()) return;
     if (this.mode !== "up") {
       this.mode = "up";
       this.shriek();
@@ -315,6 +378,7 @@ export class Gull {
     this.leavingPark = true;
     this.raidCircle = false;
     this.scrap = null;
+    if (this.isStunned()) return;
     if (this.mode !== "up") {
       if (this.wetFeed) parkAudio.waterPlop(0.3);
       parkAudio.wingFlap(0.55);
@@ -326,7 +390,7 @@ export class Gull {
   public raidPicnic(at: THREE.Vector3, onLand?: () => void): void {
     if (this.mode === "gone") return;
     // Climbing away after a flush — wait until they're back on the circle.
-    if (this.mode === "up") return;
+    if (this.mode === "up" || this.isStunned()) return;
     this.raidCircle = true;
     this.height = Math.min(this.height, this.cruiseY());
     this.scrap = {
@@ -391,7 +455,11 @@ export class Gull {
         ? null
         : this.grumble;
 
-    if (this.mode !== "gone" && this.group.position.distanceTo(player) < SPOOKED) {
+    if (
+      this.mode !== "gone" &&
+      !this.isStunned() &&
+      this.group.position.distanceTo(player) < SPOOKED
+    ) {
       // Diving / blanket raiders only flush when you're on top of them —
       // otherwise walk-up spook puts them above the lance forever.
       if (this.isRaiding()) {
@@ -421,6 +489,15 @@ export class Gull {
         break;
       case "up":
         this.climbAway(delta);
+        break;
+      case "fall":
+        this.tumble(delta);
+        break;
+      case "down":
+        this.lieThere(delta);
+        break;
+      case "shake":
+        this.shakeOff(delta);
         break;
     }
   }
@@ -596,6 +673,98 @@ export class Gull {
       parkAudio.wingFlap(0.6);
       this.mode = "up";
     }
+  }
+
+  private deckAt(x: number, z: number): { y: number; wet: boolean } {
+    const wet = isInLake(x, z);
+    return { y: wet ? WATER_Y + 0.12 : groundHeight(x, z) + 0.42, wet };
+  }
+
+  /** Tumble out of the air — wings flopping, spinning, then a thud. */
+  private tumble(delta: number): void {
+    const here = this.group.position;
+    this.fallVel.y -= 26 * delta;
+    this.fallVel.y = Math.max(this.fallVel.y, -32);
+    this.fallVel.x *= 1 - Math.min(1, 0.35 * delta);
+    this.fallVel.z *= 1 - Math.min(1, 0.35 * delta);
+    here.addScaledVector(this.fallVel, delta);
+    this.group.rotation.x += this.fallSpin.x * delta;
+    this.group.rotation.y += this.fallSpin.y * delta;
+    this.group.rotation.z += this.fallSpin.z * delta;
+    this.flap += delta * 22;
+    const flop = Math.sin(this.flap) * 1.1;
+    this.wings[0]!.rotation.z = flop;
+    this.wings[1]!.rotation.z = flop * 0.55 - 0.4;
+    this.spreadWings(0.9);
+    this.height = here.y;
+
+    const deck = this.deckAt(here.x, here.z);
+    if (here.y > deck.y) return;
+
+    here.y = deck.y;
+    this.height = deck.y;
+    this.wetFeed = deck.wet;
+    this.heading = Math.atan2(this.fallVel.x, this.fallVel.z);
+    this.group.rotation.set(1.05, this.heading, 0.55);
+    this.mode = "down";
+    this.hold = 2.1 + Math.random() * 1.4;
+    for (const leg of this.legs) leg.visible = !deck.wet;
+    this.splay();
+    this.shriek();
+    parkAudio.shoveHit(0.7);
+    if (deck.wet) parkAudio.waterPlop(0.75);
+    else parkAudio.wingFlap(0.45);
+  }
+
+  /** Stunned on the paving (or bobbing), twitching. */
+  private lieThere(delta: number): void {
+    this.hold -= delta;
+    this.step += delta * 5;
+    const twitch = Math.sin(this.step * 2.4) * 0.08;
+    this.group.rotation.set(1.05 + twitch, this.heading, 0.55 + twitch * 0.6);
+    const deck = this.deckAt(this.group.position.x, this.group.position.z);
+    this.group.position.y = deck.y + Math.abs(Math.sin(this.step)) * 0.02;
+    this.splay();
+    if (this.hold > 0) return;
+    this.mode = "shake";
+    this.shakeFor = 1.35 + Math.random() * 0.55;
+    this.hold = this.shakeFor;
+    parkAudio.wingFlap(0.6);
+  }
+
+  /** On its feet, a wet-dog shake, then back up onto the beat. */
+  private shakeOff(delta: number): void {
+    this.hold -= delta;
+    this.step += delta * 22;
+    const elapsed = this.shakeFor - this.hold;
+    const rise = Math.min(1, elapsed / 0.38);
+    const shake = Math.sin(this.step) * (1 - rise * 0.15);
+    this.group.rotation.set(
+      THREE.MathUtils.lerp(1.05, 0.08, rise) + shake * 0.22,
+      this.heading + shake * 0.18,
+      THREE.MathUtils.lerp(0.55, 0, rise) + shake * 0.4,
+    );
+    this.wings[0]!.rotation.z = 0.25 + shake * 0.9;
+    this.wings[1]!.rotation.z = -0.25 - shake * 0.9;
+    this.spreadWings(0.75);
+    const deck = this.deckAt(this.group.position.x, this.group.position.z);
+    this.group.position.y =
+      deck.y + THREE.MathUtils.lerp(0, 0.12, rise) + Math.abs(shake) * 0.05;
+    for (const leg of this.legs) leg.visible = !deck.wet;
+    if (this.hold > 0) return;
+    this.height = this.group.position.y;
+    this.wetFeed = deck.wet;
+    parkAudio.wingFlap(0.8);
+    if (deck.wet) parkAudio.waterPlop(0.3);
+    this.mode = "up";
+  }
+
+  /** Wings thrown out after a crash, not the tidy stand-and-feed fold. */
+  private splay(): void {
+    this.wings[0]!.rotation.set(0.15, 0.45, 0.85);
+    this.wings[1]!.rotation.set(-0.2, -0.2, -0.15);
+    this.wings[0]!.scale.x = 0.85;
+    this.wings[1]!.scale.x = 0.7;
   }
 
   /** Straight up off the deck and back round to circling height. */

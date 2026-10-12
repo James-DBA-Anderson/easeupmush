@@ -184,8 +184,11 @@ export class Crabber {
     // Line hangs from the working (right) hand.
     this.arms[1]!.add(this.hand);
     this.hand.position.set(0, -0.36, 0);
+    const leftHand = new THREE.Mesh(new THREE.SphereGeometry(0.038, 6, 5), skin);
+    leftHand.position.set(0, -0.32, 0);
+    this.arms[0]!.add(leftHand);
 
-    // The bucket, sat on the paving beside them with an inch of lake in it.
+    // The bucket — carried by the handle on the walk, parked once they kneel.
     const pail = new THREE.Mesh(
       new THREE.CylinderGeometry(0.17, 0.13, 0.26, 10, 1, true),
       new THREE.MeshStandardMaterial({
@@ -206,7 +209,17 @@ export class Crabber {
     water.position.y = 0.19;
     this.bucket.add(water);
 
-    this.bucket.position.copy(this.bucketHome);
+    const handle = new THREE.Mesh(
+      new THREE.TorusGeometry(0.11, 0.012, 5, 12, Math.PI),
+      new THREE.MeshStandardMaterial({
+        color: 0x9aa0a6,
+        metalness: 0.55,
+        roughness: 0.35,
+      }),
+    );
+    handle.position.y = 0.26;
+    this.bucket.add(handle);
+
     this.group.add(this.bucket);
 
     // Their catch so far, shuffling about in the bottom.
@@ -245,6 +258,7 @@ export class Crabber {
       arm.position.set(side * 0.2, 1.1, 0);
       arm.rotation.x = 0.12;
     }
+    this.holdBucket();
   }
 
   /** Crouched on the coping with the line out. */
@@ -265,6 +279,7 @@ export class Crabber {
     this.arms[0]!.rotation.x = 0.5;
     this.arms[1]!.position.set(0.19, 0.76, 0.04);
     this.arms[1]!.rotation.x = 1.0;
+    this.parkBucket();
   }
 
   private buildCrab(): THREE.Group {
@@ -410,7 +425,6 @@ export class Crabber {
       this.line.visible = false;
       this.crab.visible = false;
       this.chucksLeft = 4 + Math.floor(Math.random() * 3);
-      this.liftBucket(true);
       this.shout(lines('kid', 'crab-fire'));
     }
 
@@ -444,6 +458,7 @@ export class Crabber {
       if (this.amble(to, delta, 3.8) < CHUCK_RANGE) {
         this.phase = "chucking";
         this.timer = 0.28;
+        this.presentBucket();
       }
       this.updateSplashes(delta);
       return;
@@ -455,6 +470,7 @@ export class Crabber {
       this.fireTarget.z - this.group.position.z,
     );
     const swing = Math.sin(Math.max(0, 0.35 - this.timer) * 14) * 0.8;
+    this.arms[0]!.rotation.set(-0.55 - swing * 0.5, 0.15, 0.35);
     this.bucket.rotation.x = -0.4 - swing;
     this.bucket.position.set(-0.15, 0.75 + swing * 0.15, 0.35);
 
@@ -465,6 +481,7 @@ export class Crabber {
         this.resumeCrabbing();
       } else if (this.chucksLeft <= 0) {
         this.phase = "toWater";
+        this.holdBucket();
         this.shout(lines('kid', 'crab-refill'));
       } else {
         this.timer = 0.4 + Math.random() * 0.22;
@@ -569,18 +586,35 @@ export class Crabber {
     }
   }
 
-  private liftBucket(up: boolean): void {
-    if (up) {
-      this.bucket.position.set(-0.15, 0.7, 0.25);
-      this.bucket.rotation.set(-0.5, 0, 0.2);
-    } else {
-      this.bucket.position.copy(this.bucketHome);
-      this.bucket.rotation.set(0, 0, 0);
+  /** Pail in the left hand, hanging from the handle, kept upright. */
+  private holdBucket(): void {
+    if (this.bucket.parent !== this.arms[0]) {
+      this.arms[0]!.attach(this.bucket);
     }
+    this.arms[0]!.rotation.set(0.38, 0.06, 0.22);
+    this.bucket.position.set(0.02, -0.68, 0.02);
+    this.bucket.rotation.set(-0.38, 0.12, -0.16);
+  }
+
+  /** Set it down on the paving beside them once they're knelt. */
+  private parkBucket(): void {
+    if (this.bucket.parent !== this.group) {
+      this.group.attach(this.bucket);
+    }
+    this.bucket.position.copy(this.bucketHome);
+    this.bucket.rotation.set(0, 0, 0);
+  }
+
+  /** Unhook from the arm so the chuck can swing it in front. */
+  private presentBucket(): void {
+    if (this.bucket.parent !== this.group) {
+      this.group.attach(this.bucket);
+    }
+    this.bucket.position.set(-0.15, 0.75, 0.35);
+    this.bucket.rotation.set(-0.4, 0, 0.2);
   }
 
   private resumeCrabbing(): void {
-    this.liftBucket(false);
     this.standPose();
     this.chucksLeft = 0;
     this.line.visible = false;
@@ -656,7 +690,7 @@ export class Crabber {
     const swing = Math.sin(this.step) * 0.7;
     this.legs[0]!.rotation.x = swing;
     this.legs[1]!.rotation.x = -swing;
-    this.arms[0]!.rotation.x = -swing * 0.8;
+    this.holdBucket();
     this.arms[1]!.rotation.x = swing * 0.8;
     this.group.position.y = Math.abs(Math.sin(this.step)) * 0.05;
     return Math.hypot(to.x - here.x, to.z - here.z);

@@ -103,10 +103,11 @@ export class Gardener {
   }
 
   /** Distant watering — he likes that, even if he won't smile. */
-  public noticeWatered(): void {
-    if (this.praiseCool > 0 || this.job === "hunt") return;
+  public noticeWatered(): boolean {
+    if (this.praiseCool > 0 || this.job === "hunt") return false;
     this.praiseCool = 8;
     this.say(line('gardener', 'water'));
+    return true;
   }
 
   /** Close-range washer stripped petals — come for the cleaner. */

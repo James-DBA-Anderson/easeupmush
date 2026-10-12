@@ -145,6 +145,8 @@ class ParkAudioEngine {
   private lastClickAt = 0;
   private lastRadioAt = 0;
   private lastCongratsAt = 0;
+  private lastPersonSplashAt = 0;
+  private lastChoreAt = 0;
 
   private noiseBuf: AudioBuffer | null = null;
 
@@ -1121,6 +1123,36 @@ class ParkAudioEngine {
     pip(t + 0.072, 880, 0.02, 0.07);
   }
 
+  /** Tiny rising tick — a pile, a tag, or another small job wrapping. */
+  public choreDone(): void {
+    if (!this.ctx || !this.master || this.muted) return;
+    const now = performance.now();
+    if (now - this.lastChoreAt < 85) return;
+    this.lastChoreAt = now;
+    const t = this.ctx.currentTime;
+    const ping = (at: number, hz: number, peak: number, dur: number) => {
+      if (!this.ctx || !this.master) return;
+      const osc = this.ctx.createOscillator();
+      osc.type = "triangle";
+      const g = this.ctx.createGain();
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = hz * 2.4;
+      osc.frequency.setValueAtTime(hz, at);
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(peak, at + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+      osc.connect(lp);
+      lp.connect(g);
+      g.connect(this.master);
+      osc.start(at);
+      osc.stop(at + dur + 0.02);
+    };
+    ping(t, 784, 0.016, 0.055);
+    ping(t + 0.045, 1175, 0.022, 0.09);
+    if (this.noiseBuf) this.crashBurst(t + 0.04, 0.05, 3200, 0.01, 1.1);
+  }
+
   /** Short major sting when a scripted mission wraps. */
   public congrats(): void {
     if (!this.ctx || !this.master || this.muted) return;
@@ -1243,6 +1275,43 @@ class ParkAudioEngine {
     g.connect(pan);
     osc.start(t);
     osc.stop(t + 0.42);
+  }
+
+  /**
+   * Someone going in off the bank — slap, displacement, spray, then a glug.
+   * `distance` metres from the listener so a far dunk doesn't sit in your ear.
+   */
+  public personSplash(panAmt = 0, distance = 8): void {
+    if (!this.ctx || !this.master || this.muted || !this.noiseBuf) return;
+    const now = performance.now();
+    if (now - this.lastPersonSplashAt < 160) return;
+    this.lastPersonSplashAt = now;
+    const t = this.ctx.currentTime;
+    const pan = this.panNode(panAmt);
+    const near = 1 / (1 + (Math.max(0, distance) / 14) ** 1.35);
+    const gain = 0.22 + 0.78 * Math.max(0.16, Math.min(1, near));
+    const jitter = 0.92 + Math.random() * 0.16;
+
+    // Palm / chest slap on the surface.
+    this.filteredNoise(t, 0.07, 2400, 0.16 * gain, 0.65, pan, "highpass");
+    this.crashBurst(t, 0.055, 780, 0.12 * gain, 0.85, pan);
+
+    // Displaced water — the weight of a body going under.
+    this.filteredNoise(t, 0.55, 140, 0.22 * gain, 0.45, pan, "lowpass");
+    this.filteredNoise(t + 0.02, 0.38, 280, 0.14 * gain, 0.55, pan, "lowpass");
+    this.glug(t, 78 * jitter, 32, 0.62, 0.09 * gain, pan);
+    this.glug(t + 0.03, 132 * jitter, 48, 0.28, 0.055 * gain, pan);
+
+    // White spray hanging in the air.
+    this.filteredNoise(t + 0.05, 0.62, 4800, 0.11 * gain, 0.55, pan, "highpass");
+    this.crashBurst(t + 0.08, 0.42, 1600, 0.08 * gain, 0.8, pan);
+    this.crashBurst(t + 0.16, 0.5, 2800, 0.055 * gain, 1.05, pan);
+
+    // Bubbles as they go under, then a second wave slap.
+    this.glug(t + 0.22, 190 * jitter, 70, 0.16, 0.04 * gain, pan);
+    this.glug(t + 0.38, 150 * jitter, 55, 0.2, 0.032 * gain, pan);
+    this.filteredNoise(t + 0.34, 0.4, 360, 0.07 * gain, 0.5, pan, "lowpass");
+    this.crashBurst(t + 0.42, 0.22, 900, 0.05 * gain, 0.7, pan);
   }
 
   /** Smaller plop — bird bank cross, wade wake, duck put-down. */
@@ -1382,22 +1451,61 @@ class ParkAudioEngine {
     q: number,
     dest: AudioNode | null = null,
   ): void {
+    this.filteredNoise(t, dur, cutoff, peak, q, dest, "bandpass");
+  }
+
+  private filteredNoise(
+    t: number,
+    dur: number,
+    cutoff: number,
+    peak: number,
+    q: number,
+    dest: AudioNode | null,
+    type: BiquadFilterType,
+  ): void {
     if (!this.ctx || !this.master || !this.noiseBuf) return;
     const src = this.ctx.createBufferSource();
     src.buffer = this.noiseBuf;
     const f = this.ctx.createBiquadFilter();
-    f.type = "bandpass";
+    f.type = type;
     f.frequency.value = cutoff;
     f.Q.value = q;
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(peak, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), t + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     src.connect(f);
     f.connect(g);
     g.connect(dest ?? this.master);
     src.start(t);
     src.stop(t + dur + 0.02);
+  }
+
+  private glug(
+    t: number,
+    fromHz: number,
+    toHz: number,
+    dur: number,
+    peak: number,
+    dest: AudioNode,
+  ): void {
+    if (!this.ctx || !this.master) return;
+    const osc = this.ctx.createOscillator();
+    osc.type = "sine";
+    const g = this.ctx.createGain();
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = Math.max(120, fromHz * 2.2);
+    osc.frequency.setValueAtTime(Math.max(40, fromHz), t);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(28, toHz), t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(lp);
+    lp.connect(g);
+    g.connect(dest);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
   }
 
   /** Match live flyovers to voices; fade anything that has left the sky. */

@@ -83,9 +83,12 @@ export class Graffiti {
   private localFrom = new THREE.Vector3();
   private localDir = new THREE.Vector3();
   private invQuat = new THREE.Quaternion();
+  private word: Tag = TAGS[0];
+  private site: Wall["site"];
 
   constructor(scene: THREE.Scene, wall: Wall, word?: Tag) {
     this.scene = scene;
+    this.site = wall.site;
 
     // Fit entirely on the wall — never overhang the brickwork.
     const maxW = Math.max(0.55, wall.width - WALL_PAD * 2);
@@ -145,6 +148,14 @@ export class Graffiti {
 
   public getPosition(): THREE.Vector3 {
     return this.mesh.position.clone();
+  }
+
+  public getWord(): Tag {
+    return this.word;
+  }
+
+  public getSite(): Wall["site"] {
+    return this.site;
   }
 
   /**
@@ -301,6 +312,7 @@ export class Graffiti {
     this.mask.fill(0);
 
     const word = chosen ?? TAGS[Math.floor(Math.random() * TAGS.length)]!;
+    this.word = word;
     const style = pickStyle(word, this.wide);
     if (style === "handstyle") this.paintHandstyle(word);
     else this.paintPiece(word.toUpperCase(), style);

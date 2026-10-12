@@ -69,22 +69,34 @@ export function buildPreviewMesh(id: PlaceableId): THREE.Group {
   const group = new THREE.Group();
   switch (id) {
     case "boathouse": {
-      const timber = mat(0x8b6914);
-      const dark = mat(0x5c4510);
+      const blue = mat(0xa9cce8);
       const felt = mat(0x2a2a2a);
-      const paint = mat(0xc94f3d);
-      group.add(box(8, 2.8, 5, timber, 0, 1.4, 0));
-      for (let y = 0.25; y < 2.7; y += 0.45) {
-        group.add(box(8.12, 0.1, 5.12, dark, 0, y, 0));
+      const white = mat(0xf4f6fa);
+      group.add(box(9, 2.5, 5.2, blue, 0, 1.25, 0));
+      const gable = new THREE.Shape();
+      gable.moveTo(-2.25, 0);
+      gable.lineTo(2.25, 0);
+      gable.lineTo(0, 1.85);
+      gable.closePath();
+      const gableGeo = new THREE.ShapeGeometry(gable);
+      for (const bay of [-2.25, 2.25] as const) {
+        group.add(box(1.95, 2.15, 0.08, white, bay, 1.08, 2.64));
+        const roofL = box(2.8, 0.1, 5.5, felt, bay - 1.05, 3.3, 0);
+        roofL.rotation.z = 0.7;
+        group.add(roofL);
+        const roofR = box(2.8, 0.1, 5.5, felt, bay + 1.05, 3.3, 0);
+        roofR.rotation.z = -0.7;
+        group.add(roofR);
+        for (const [z, rotY] of [
+          [-2.61, Math.PI],
+          [2.61, 0],
+        ] as const) {
+          const face = new THREE.Mesh(gableGeo, blue);
+          face.position.set(bay, 2.5, z);
+          face.rotation.y = rotY;
+          group.add(face);
+        }
       }
-      group.add(box(3.2, 1.4, 0.2, felt, 0, 1.2, -2.55));
-      group.add(box(5.5, 0.7, 0.16, paint, 0, 3.35, -2.35));
-      const roofL = box(8.5, 0.12, 3.2, felt, 0, 3.2, -1.2);
-      roofL.rotation.x = 0.4;
-      group.add(roofL);
-      const roofR = box(8.5, 0.12, 3.2, felt, 0, 3.2, 1.2);
-      roofR.rotation.x = -0.4;
-      group.add(roofR);
       break;
     }
     case "cafe":

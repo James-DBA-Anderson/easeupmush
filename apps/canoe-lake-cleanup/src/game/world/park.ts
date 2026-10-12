@@ -78,6 +78,23 @@ const BUS_BLUE = new THREE.MeshStandardMaterial({
   color: 0x1f4e9a,
   roughness: 0.55,
 });
+/** Canoe Lake hire hut — pale blue weatherboard like the real pair of gables. */
+const HUT_BLUE = new THREE.MeshStandardMaterial({
+  color: 0xa9cce8,
+  roughness: 0.9,
+});
+const HUT_BLUE_LINE = new THREE.MeshStandardMaterial({
+  color: 0x8eb6d4,
+  roughness: 0.95,
+});
+const DOOR_WHITE = new THREE.MeshStandardMaterial({
+  color: 0xf4f6fa,
+  roughness: 0.72,
+});
+const HUT_VOID = new THREE.MeshStandardMaterial({
+  color: 0x1c2228,
+  roughness: 1,
+});
 
 /**
  * Bark / wood-chip mulch under the play kit — speckled browns, not wet-pour rubber.
@@ -287,8 +304,34 @@ let sinkEject: { x: number; z: number } | null = null;
 /** True once when a player-wrecked boat finishes sinking. */
 let wreckPending = false;
 
-/** Hire office pose — hatch faces local −Z. */
+/** Hire office pose — doors face local +Z. */
 let boatHouseAt: { x: number; z: number; yaw: number } | null = null;
+/** Twin gable bays; the right-hand pair swings out in hire hours. */
+let boatDoorLeaves: { left: THREE.Group; right: THREE.Group }[] = [];
+let boatHouseOpen = false;
+const HUT_BAY = 4.5;
+const HUT_WIDE = HUT_BAY * 2;
+const HUT_DEEP = 5.2;
+const HUT_WALL = 2.5;
+const HUT_RISE = 1.85;
+/** Local +X bay — the one that opens, and where the boatman stands. */
+const HUT_OPEN_BAY = 1;
+const HUT_OPEN_ALONG = HUT_OPEN_BAY * (HUT_BAY / 2);
+
+/** Local +Z is the door face; +X runs along the front. */
+function boatHouseWorld(along: number, out: number): THREE.Vector3 | null {
+  if (!boatHouseAt) return null;
+  const yaw = boatHouseAt.yaw;
+  const fx = Math.sin(yaw);
+  const fz = Math.cos(yaw);
+  const sx = Math.cos(yaw);
+  const sz = -Math.sin(yaw);
+  return new THREE.Vector3(
+    boatHouseAt.x + fx * out + sx * along,
+    0,
+    boatHouseAt.z + fz * out + sz * along,
+  );
+}
 /** Formal rose beds east of the play park — for benches and the editor pin. */
 let roseGardenAt: {
   x: number;
@@ -297,7 +340,7 @@ let roseGardenAt: {
   halfW: number;
   halfD: number;
 } | null = null;
-/** Café / kiosk poses — hatch faces local −Z, same as the boat house. */
+/** Café / kiosk poses — hatch faces local −Z. */
 const cafeSpots: { x: number; z: number; yaw: number; door: boolean }[] = [];
 
 /** How close you must be to hop in. */
@@ -402,6 +445,51 @@ function gable(width: number, depth: number, rise: number): THREE.Group {
   return roof;
 }
 
+/** Twin beach-hut roof — ridge along depth, peak up, gable on the ends. */
+function endGable(width: number, depth: number, rise: number): THREE.Group {
+  const roof = new THREE.Group();
+  const slope = Math.atan2(rise, width / 2);
+  const length = Math.hypot(rise, width / 2) + 0.18;
+  for (const side of [-1, 1]) {
+    const slab = block(length, 0.11, depth + 0.35, FELT);
+    slab.position.set((side * width) / 4, rise / 2, 0);
+    slab.rotation.z = -side * slope;
+    roof.add(slab);
+  }
+  return roof;
+}
+
+/** Pale-blue boarded triangle that closes a gable end. */
+function addHutGableFace(
+  group: THREE.Group,
+  bayX: number,
+  width: number,
+  wallH: number,
+  rise: number,
+  z: number,
+  outward: number,
+): void {
+  const shape = new THREE.Shape();
+  shape.moveTo(-width / 2, 0);
+  shape.lineTo(width / 2, 0);
+  shape.lineTo(0, rise);
+  shape.closePath();
+  const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), HUT_BLUE);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.position.set(bayX, wallH, z);
+  if (outward < 0) mesh.rotation.y = Math.PI;
+  group.add(mesh);
+
+  for (let y = 0.08; y < rise - 0.06; y += 0.16) {
+    const half = (width / 2) * ((rise - y) / rise) - 0.04;
+    if (half < 0.12) continue;
+    const board = block(half * 2, 0.04, 0.04, HUT_BLUE_LINE);
+    board.position.set(bayX, wallH + y, z + outward * 0.02);
+    group.add(board);
+  }
+}
+
 /** Timber picnic set in café-local space — table with a bench either side. */
 function placePicnicSet(
   cafe: THREE.Group,
@@ -439,8 +527,8 @@ function placePicnicSet(
   const cos = Math.cos(cy);
   const sin = Math.sin(cy);
   addProp({
-    x: cafe.position.x + cos * x - sin * z,
-    z: cafe.position.z + sin * x + cos * z,
+    x: cafe.position.x + cos * x + sin * z,
+    z: cafe.position.z - sin * x + cos * z,
     halfWide: 1.05,
     halfDeep: 0.95,
     yaw: cy + yaw,
@@ -448,8 +536,9 @@ function placePicnicSet(
 }
 
 /**
- * The boat house: a small timber hire office on the green by the hire path.
- * Swan pedalos raft on the shore next to wherever this sits.
+ * The boat house: a pair of pale-blue gable huts with white double doors.
+ * Closed overnight. The boatman walks in early and swings the working bay
+ * open; he stands by that opening through hire hours.
  */
 function boatHouse(scene: THREE.Scene): void {
   const placed = placeable("boathouse");
@@ -460,40 +549,43 @@ function boatHouse(scene: THREE.Scene): void {
   group.position.set(at.x, footY(at.x, at.z), at.z);
   group.rotation.y = at.yaw;
 
-  const WIDE = 8;
-  const DEEP = 5;
+  const WIDE = HUT_WIDE;
+  const DEEP = HUT_DEEP;
+  const WALL = HUT_WALL;
+  const RISE = HUT_RISE;
+  const doorW = 2.05;
+  const doorH = 2.15;
+  const frontZ = DEEP / 2;
 
-  const walls = block(WIDE, 2.8, DEEP, TIMBER);
-  walls.position.y = 1.4;
-  group.add(walls);
+  const body = block(WIDE, WALL, DEEP, HUT_BLUE);
+  body.position.y = WALL / 2;
+  group.add(body);
 
-  // Boarding, so the timber reads as clapboard rather than a plain box.
-  for (let y = 0.25; y < 2.7; y += 0.45) {
-    const board = block(WIDE + 0.12, 0.1, DEEP + 0.12, TIMBER_DARK);
+  for (let y = 0.16; y < WALL - 0.08; y += 0.16) {
+    const board = block(WIDE + 0.08, 0.04, DEEP + 0.08, HUT_BLUE_LINE);
     board.position.y = y;
     group.add(board);
   }
 
-  // Serving hatch facing the path / water.
-  const hatch = block(3.2, 1.4, 0.2, FELT);
-  hatch.position.set(0, 1.2, -DEEP / 2 - 0.05);
-  group.add(hatch);
+  // Party wall between the two huts.
+  const split = block(0.1, WALL + 0.05, DEEP + 0.06, HUT_BLUE_LINE);
+  split.position.y = WALL / 2;
+  group.add(split);
 
-  const lintel = block(3.6, 0.28, 0.35, PAINT);
-  lintel.position.set(0, 2.05, -DEEP / 2 - 0.08);
-  group.add(lintel);
+  boatDoorLeaves = [];
+  for (const bay of [-1, 1] as const) {
+    const cx = bay * (HUT_BAY / 2);
+    const roof = endGable(HUT_BAY, DEEP, RISE);
+    roof.position.set(cx, WALL, 0);
+    group.add(roof);
+    addHutGableTrim(group, cx, HUT_BAY, DEEP, WALL, RISE);
 
-  const roof = gable(WIDE, DEEP, 1.2);
-  roof.position.y = 2.8;
-  group.add(roof);
-
-  // The board over the hatch.
-  const sign = block(5.5, 0.7, 0.16, PAINT);
-  sign.position.set(0, 3.35, -DEEP / 2 + 0.15);
-  group.add(sign);
-  const lettering = block(4.6, 0.24, 0.08, CREAM);
-  lettering.position.set(0, 3.35, -DEEP / 2 + 0.04);
-  group.add(lettering);
+    const opening = block(doorW + 0.08, doorH + 0.08, 0.1, HUT_VOID);
+    opening.position.set(cx, doorH / 2, frontZ + 0.02);
+    group.add(opening);
+    const doors = addDoubleDoors(group, cx, frontZ + 0.08, doorW, doorH);
+    boatDoorLeaves.push(doors);
+  }
 
   scene.add(group);
   solids.push({
@@ -504,11 +596,89 @@ function boatHouse(scene: THREE.Scene): void {
     yaw: at.yaw,
   });
 
-  taggable(at, 0, DEEP / 2 + 0.1, 0, WIDE, 1.4, "boathouse");
+  taggable(at, 0, -(DEEP / 2 + 0.1), Math.PI, WIDE, 1.4, "boathouse");
   taggable(at, WIDE / 2 + 0.1, 0, Math.PI / 2, DEEP, 1.4, "boathouse");
 
   boatHouseAt = { x: at.x, z: at.z, yaw: at.yaw };
+  boatHouseOpen = false;
   moorPedalos(scene, at);
+}
+
+function addHutGableTrim(
+  group: THREE.Group,
+  bayX: number,
+  width: number,
+  deep: number,
+  wallH: number,
+  rise: number,
+): void {
+  const slope = Math.atan2(rise, width / 2);
+  const rafter = Math.hypot(rise, width / 2);
+  for (const end of [-1, 1] as const) {
+    addHutGableFace(
+      group,
+      bayX,
+      width,
+      wallH,
+      rise,
+      end * (deep / 2 + 0.01),
+      end,
+    );
+    const z = end * (deep / 2 + 0.05);
+    for (const side of [-1, 1] as const) {
+      const barge = block(rafter + 0.22, 0.09, 0.07, WHITE);
+      barge.position.set(bayX + side * (width / 4), wallH + rise / 2, z);
+      barge.rotation.z = -side * slope;
+      group.add(barge);
+    }
+    const finial = block(0.07, 0.42, 0.07, WHITE);
+    finial.position.set(bayX, wallH + rise + 0.2, z);
+    group.add(finial);
+    const peak = block(0.05, 0.16, 0.05, WHITE);
+    peak.position.set(bayX, wallH + rise + 0.46, z);
+    group.add(peak);
+  }
+}
+
+function addDoubleDoors(
+  parent: THREE.Group,
+  cx: number,
+  z: number,
+  w: number,
+  h: number,
+): { left: THREE.Group; right: THREE.Group } {
+  const leafW = w / 2 - 0.03;
+  const makeLeaf = (hingeX: number, dir: number): THREE.Group => {
+    const hinge = new THREE.Group();
+    hinge.position.set(hingeX, h / 2, z);
+    const leaf = new THREE.Group();
+    leaf.position.x = dir * (leafW / 2);
+    const panel = block(leafW, h, 0.07, DOOR_WHITE);
+    leaf.add(panel);
+    const mid = block(0.05, h * 0.92, 0.08, WHITE);
+    leaf.add(mid);
+    const handle = block(0.045, 0.28, 0.06, STEEL);
+    handle.position.set(dir * leafW * 0.28, 0.05, 0.06);
+    leaf.add(handle);
+    hinge.add(leaf);
+    parent.add(hinge);
+    return hinge;
+  };
+  return {
+    left: makeLeaf(cx - w / 2, 1),
+    right: makeLeaf(cx + w / 2, -1),
+  };
+}
+
+/** Swing the working bay open or shut. The boatman opens up; night shuts it. */
+export function setBoathouseOpen(on: boolean): void {
+  if (boatHouseOpen === on) return;
+  boatHouseOpen = on;
+  const bay = boatDoorLeaves[HUT_OPEN_BAY];
+  if (!bay) return;
+  const swing = on ? 1.95 : 0;
+  bay.left.rotation.y = -swing;
+  bay.right.rotation.y = swing;
 }
 
 /** Consecutive shore samples centred on `centre`, spanning ~`halfSpan` metres. */
@@ -558,9 +728,15 @@ function shoreBandAround(
  */
 function moorPedalos(
   scene: THREE.Scene,
-  hire: { x: number; z: number },
+  hire: { x: number; z: number; yaw: number },
 ): void {
-  const near = nearestShore(hire.x, hire.z);
+  // Raft on the stretch of bank the doors look at, not a nearest bite behind.
+  const fx = Math.sin(hire.yaw);
+  const fz = Math.cos(hire.yaw);
+  const near = nearestShore(
+    hire.x + fx * (HUT_DEEP / 2 + 10),
+    hire.z + fz * (HUT_DEEP / 2 + 10),
+  );
   const band = shoreBandAround(near, 12);
   if (band.length < 2) return;
 
@@ -863,8 +1039,12 @@ function placeCafe(
     }
   }
 
-  taggable(at, 0, DEEP / 2 + 0.1, 0, WIDE, 1.5, "cafe");
-  taggable(at, WIDE / 2 + 0.1, 0, Math.PI / 2, DEEP, 1.5, "cafe");
+  // Sit-down café on the north-east green stays clean — tags go on kiosks
+  // and the boat house instead.
+  if (!seating) {
+    taggable(at, 0, DEEP / 2 + 0.1, 0, WIDE, 1.5, "cafe");
+    taggable(at, WIDE / 2 + 0.1, 0, Math.PI / 2, DEEP, 1.5, "cafe");
+  }
 
   scene.add(group);
   solids.push({
@@ -2083,6 +2263,8 @@ export function buildParkBuildings(scene: THREE.Scene): void {
   sinkEject = null;
   wreckPending = false;
   boatHouseAt = null;
+  boatDoorLeaves = [];
+  boatHouseOpen = false;
   roseGardenAt = null;
   cafeSpots.length = 0;
   walls.length = 0;
@@ -2460,17 +2642,9 @@ export function boathouseSpot(): { x: number; z: number; yaw: number } | null {
   return boatHouseAt;
 }
 
-/** Spot in front of the hatch where visitors queue to pay. */
+/** Spot in front of the working doors where visitors queue to pay. */
 export function hatchQueueSpot(): THREE.Vector3 | null {
-  if (!boatHouseAt) return null;
-  const yaw = boatHouseAt.yaw;
-  const fx = -Math.sin(yaw);
-  const fz = -Math.cos(yaw);
-  return new THREE.Vector3(
-    boatHouseAt.x + fx * 4.5,
-    0,
-    boatHouseAt.z + fz * 4.5,
-  );
+  return boatHouseWorld(HUT_OPEN_ALONG, HUT_DEEP / 2 + 1.85);
 }
 
 function pickCafeSpot(near?: THREE.Vector3) {
@@ -2500,7 +2674,7 @@ function pickCafeSpot(near?: THREE.Vector3) {
 export function cafeQueueSpot(near?: THREE.Vector3): THREE.Vector3 | null {
   const best = pickCafeSpot(near);
   if (!best) return null;
-  // Hatch faces local −Z — same convention as the boat-house counter.
+  // Hatch faces local −Z.
   const fx = -Math.sin(best.yaw);
   const fz = -Math.cos(best.yaw);
   return new THREE.Vector3(best.x + fx * 5.2, 0, best.z + fz * 5.2);
@@ -2518,19 +2692,9 @@ export function cafeEnterSpot(near?: THREE.Vector3): THREE.Vector3 | null {
   return cafeQueueSpot(near);
 }
 
-/** Where the boatman loiters beside the hatch. */
+/** Where the boatman loiters beside the open door. */
 export function boatmanStandSpot(): THREE.Vector3 | null {
-  if (!boatHouseAt) return null;
-  const yaw = boatHouseAt.yaw;
-  const fx = -Math.sin(yaw);
-  const fz = -Math.cos(yaw);
-  const sx = Math.cos(yaw);
-  const sz = -Math.sin(yaw);
-  return new THREE.Vector3(
-    boatHouseAt.x + fx * 3.2 + sx * 2.4,
-    0,
-    boatHouseAt.z + fz * 3.2 + sz * 2.4,
-  );
+  return boatHouseWorld(HUT_OPEN_ALONG + 1.4, HUT_DEEP / 2 + 0.7);
 }
 
 export function freePedaloCount(): number {

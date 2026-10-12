@@ -102,6 +102,7 @@ import {
   hiredPedaloHull,
   freePedaloCount,
   hatchQueueSpot,
+  setBoathouseOpen,
   setPedaloChop,
   consumePedaloWreck,
   getRoseGarden,
@@ -117,8 +118,10 @@ import { radio } from "../dialogue";
 import { Messages } from "./ui/Messages";
 import { ObjectiveArrow, type ArrowSpot } from "./ui/ObjectiveArrow";
 import { MissionBanner } from "./ui/MissionBanner";
+import { AchievementBanner } from "./ui/AchievementBanner";
 import { Compass } from "./ui/Compass";
 import { Callouts } from "./systems/Callouts";
+import { Achievements } from "./systems/Achievements";
 import { MISSION_LABELS, missionClockHour, type MissionId } from "../level/missions";
 
 const WASH_RADIUS = 1.28;
@@ -357,6 +360,7 @@ export class Game {
   private objectiveArrow: ObjectiveArrow;
   private missionArrow: ObjectiveArrow;
   private missionBanner: MissionBanner;
+  private achievements: Achievements;
   private compass: Compass;
   private messages: Messages;
   private callouts: Callouts;
@@ -369,6 +373,8 @@ export class Game {
   private cleaned = 0;
   private comboRun = 0;
   private comboLeft = 0;
+  private comboBest = 0;
+  private missionsCompleted = 0;
   private hurtLeft = 0;
   /** Bounce spray in the face — drips off over a few seconds. */
   private faceWetLeft = 0;
@@ -469,6 +475,8 @@ export class Game {
   private pressurePct: HTMLElement;
   private gameOverPanel: HTMLElement;
   private gameOverDetail: HTMLElement;
+  private gameOverStats: HTMLElement;
+  private gameOverUnlocks: HTMLElement;
   private instructionsElement: HTMLElement;
 
   constructor() {
@@ -530,6 +538,8 @@ export class Game {
     this.pressurePct = document.getElementById("pressure-pct")!;
     this.gameOverPanel = document.getElementById("game-over")!;
     this.gameOverDetail = document.getElementById("game-over-detail")!;
+    this.gameOverStats = document.getElementById("game-over-stats")!;
+    this.gameOverUnlocks = document.getElementById("game-over-unlocks")!;
     this.instructionsElement = document.getElementById("instructions")!;
     this.showTool(null);
     document
@@ -628,6 +638,9 @@ export class Game {
     );
     this.missionBanner = new MissionBanner(
       document.getElementById("mission-banner")!,
+    );
+    this.achievements = new Achievements(
+      new AchievementBanner(document.getElementById("achievement-banner")!),
     );
     this.compass = new Compass(document.getElementById("compass")!);
 
@@ -1230,11 +1243,15 @@ export class Game {
 
       const splash = person.claimSplash();
       if (splash) {
-        this.bigSplash(splash);
-        this.callouts.raise("dunk", this.dayCycle.clockFace(), {
-          x: splash.x,
-          z: splash.z,
-        });
+        if (splash.kind === "plunge") {
+          this.bigSplash(splash.at);
+          this.callouts.raise("dunk", this.dayCycle.clockFace(), {
+            x: splash.at.x,
+            z: splash.at.z,
+          });
+        } else {
+          this.wadeWake(splash.at);
+        }
       }
 
       if (dog) {
@@ -1435,8 +1452,8 @@ export class Game {
   }
 
   /**
-   * Mission 2: the cafés and the boat house have been tagged overnight. Every
-   * tag we've got goes up somewhere; the feeder rush follows once they're off.
+   * Mission 2: a few café kiosks and the boat house have been tagged overnight.
+   * Unique phrases only; the feeder rush follows once they're off.
    */
   private startGraffitiMission(): void {
     if (this.graffitiMissionStarted || this.secondEventDone) return;
@@ -1455,8 +1472,19 @@ export class Game {
       return;
     }
 
+    // One face per building, unique phrases — a handful is enough.
+    const shuffled = [...walls].sort(() => Math.random() - 0.5);
+    const chosen: Wall[] = [];
+    for (const wall of shuffled) {
+      if (chosen.some((p) => Math.hypot(p.x - wall.x, p.z - wall.z) < 10)) {
+        continue;
+      }
+      chosen.push(wall);
+      if (chosen.length >= 3) break;
+    }
+
     // A wall that's already got a tag on it keeps that one.
-    const fresh = walls.filter((wall) => {
+    const fresh = chosen.filter((wall) => {
       const have = this.graffiti.find((tag) => {
         if (tag.isClean()) return false;
         const at = tag.getPosition();
@@ -1465,21 +1493,13 @@ export class Game {
       if (have) this.graffitiMissionTags.push(have);
       return !have;
     });
-    const tagBag = [...TAGS].sort(() => Math.random() - 0.5);
-    const used = new Set<Tag>();
-    const pickTag = (): Tag => {
-      let pool = tagBag.filter((t) => !used.has(t));
-      if (pool.length === 0) {
-        used.clear();
-        pool = [...tagBag];
-      }
-      const word = pool[Math.floor(Math.random() * pool.length)]!;
-      used.add(word);
-      return word;
-    };
-    this.graffitiPending = fresh.map((wall) => ({
+    const live = new Set(this.graffitiMissionTags.map((tag) => tag.getWord()));
+    const tagBag = [...TAGS]
+      .filter((t) => !live.has(t))
+      .sort(() => Math.random() - 0.5);
+    this.graffitiPending = fresh.slice(0, tagBag.length).map((wall, i) => ({
       wall,
-      word: pickTag(),
+      word: tagBag[i]!,
     }));
     this.graffitiMissionLeft = GRAFFITI_MISSION_FOR;
     this.placeMissionTags();
@@ -2512,7 +2532,10 @@ export class Game {
     for (const tag of this.graffiti) {
       if (!tag.hitBy(point, this.camera.position, direction)) continue;
       tag.scrub(point, direction);
-      if (tag.claimCredit()) this.creditClean();
+      if (tag.claimCredit()) {
+        this.creditClean();
+        if (tag.getSite() === "boathouse") this.boatman?.noticeGraffitiGone();
+      }
       return true;
     }
 
@@ -2526,7 +2549,9 @@ export class Game {
     {
       const bedHit = sprayFlowerBed(point, this.camera.position);
       if (bedHit === "watered") {
-        this.gardener?.noticeWatered();
+        if (this.gardener?.noticeWatered()) {
+          this.achievements.unlock("gardener-happy");
+        }
         return true;
       }
       if (bedHit === "damaged") {
@@ -2555,6 +2580,11 @@ export class Game {
       if (!gull.hitBy(point, heavy)) continue;
       if (dirty) gull.splatter(point);
       else gull.rinse(point);
+      if (gull.isStunned()) return true;
+      if (gull.knockDown()) {
+        this.achievements.unlock("gull-down");
+        return true;
+      }
       if (this.picnicRaidActive) gull.hoseOff();
       else gull.flush();
       return true;
@@ -2580,7 +2610,10 @@ export class Game {
     }
 
     // Bodybuilders — they want the lance while they're on the kit.
-    if (this.gymCrew?.takeSpray(point, heavy)) return true;
+    if (this.gymCrew?.takeSpray(point, heavy)) {
+      this.achievements.unlock("gym-spray");
+      return true;
+    }
 
     // Play-park kids — hose them and mum/dad come steaming over.
     for (const visit of this.playVisits) {
@@ -2742,13 +2775,24 @@ export class Game {
     return false;
   }
 
+  private listenPan(at: THREE.Vector3): { pan: number; dist: number } {
+    const dx = at.x - this.camera.position.x;
+    const dz = at.z - this.camera.position.z;
+    return {
+      pan: Math.max(-1, Math.min(1, dx / 32)),
+      dist: Math.hypot(dx, dz),
+    };
+  }
+
   /**
    * Somebody has gone in. A wall of water goes up, and everything close by —
    * public and swans alike — gets the benefit of it.
    */
-  private bigSplash(at: THREE.Vector3): void {
+  private bigSplash(at: THREE.Vector3, audio: "person" | "wade" = "person"): void {
     this.splashRings(at);
-    parkAudio.waterSplash(1.15);
+    const { pan, dist } = this.listenPan(at);
+    if (audio === "person") parkAudio.personSplash(pan, dist);
+    else parkAudio.waterSplash(1.15, pan);
 
     for (const person of this.people) {
       const spot = person.getPosition();
@@ -2886,40 +2930,50 @@ export class Game {
 
   /** That's the shift over. Down they go, and the park carries on without them. */
   private die(): void {
-    this.dead = true;
-    document.exitPointerLock?.();
-    const title = this.gameOverPanel.querySelector("h1");
-    if (title) {
-      title.textContent = this.rebelMissionStarted
-        ? "PARK FALLEN"
-        : "PECKED TO DEATH";
-    }
-    this.gameOverDetail.innerHTML = this.rebelMissionStarted
-      ? [
-          `The Gosport lot took Canoe Lake at ${this.dayCycle.clockFace()}.`,
-          `Score <strong>${this.score}</strong> &middot; ${this.cleaned} cleaned &middot; ${this.complaints} complaints`,
-          `Anarchy on the esplanade. Southsea will not forget.`,
-        ].join("<br>")
-      : [
-          `A mute swan has seen you off at ${this.dayCycle.clockFace()}.`,
-          `Score <strong>${this.score}</strong> &middot; ${this.cleaned} cleaned &middot; ${this.complaints} complaints`,
-          `Park left at ${Math.round(this.cleanliness)}% clean.`,
-        ].join("<br>");
-    this.gameOverPanel.classList.add("on");
+    const fallen = this.rebelMissionStarted;
+    this.showEndScreen(
+      fallen ? "PARK FALLEN" : "PECKED TO DEATH",
+      fallen
+        ? `The Gosport lot took Canoe Lake at ${this.dayCycle.clockFace()}. Anarchy on the esplanade.`
+        : `A mute swan has seen you off at ${this.dayCycle.clockFace()}.`,
+    );
   }
 
   /** Held the lake — shift ends in glory rather than feathers. */
   private triumph(): void {
-    this.dead = true;
     this.rebelMissionWon = true;
+    this.showEndScreen(
+      "LAKE HELD",
+      `You held Canoe Lake against the Gosport separatists at ${this.dayCycle.clockFace()}. Armed response rolling in.`,
+    );
+  }
+
+  private showEndScreen(title: string, blurb: string): void {
+    this.dead = true;
     document.exitPointerLock?.();
-    const title = this.gameOverPanel.querySelector("h1");
-    if (title) title.textContent = "LAKE HELD";
-    this.gameOverDetail.innerHTML = [
-      `You held Canoe Lake against the Gosport separatists at ${this.dayCycle.clockFace()}.`,
-      `Score <strong>${this.score}</strong> &middot; ${this.cleaned} cleaned &middot; ${this.complaints} complaints`,
-      `Armed response rolling in. The park stays Pompey tonight.`,
-    ].join("<br>");
+    const heading = this.gameOverPanel.querySelector("h1");
+    if (heading) heading.textContent = title;
+    this.gameOverDetail.textContent = blurb;
+    const rows: [string, string][] = [
+      ["Score", String(this.score)],
+      ["Cleaned", String(this.cleaned)],
+      ["Complaints", String(this.complaints)],
+      ["Park", `${Math.round(this.cleanliness)}%`],
+      ["Missions", String(this.missionsCompleted)],
+      [
+        "Achievements",
+        `${this.achievements.shiftCount()} / ${this.achievements.total}`,
+      ],
+    ];
+    if (this.comboBest > 1) rows.push(["Best combo", `x${this.comboBest}`]);
+    this.gameOverStats.innerHTML = rows
+      .map(([label, value]) => `<dt>${label}</dt><dd>${value}</dd>`)
+      .join("");
+    const unlocked = this.achievements.shiftUnlocks();
+    this.gameOverUnlocks.textContent =
+      unlocked.length > 0
+        ? `This shift: ${unlocked.map((a) => a.title).join(" · ")}`
+        : "";
     this.gameOverPanel.classList.add("on");
   }
 
@@ -3277,19 +3331,36 @@ export class Game {
     }
 
     this.nextTag -= delta;
-    if (this.nextTag > 0 || this.graffiti.length >= 4) return;
+    if (this.nextTag > 0 || this.graffiti.length >= 2) return;
 
-    // Nobody tags a wall with the warden stood watching it.
-    const options = taggableWalls().filter(
-      (wall) => !this.inShot(wall.x, wall.z, wall.y),
+    const live = new Set(
+      this.graffiti
+        .filter((tag) => !tag.isClean())
+        .map((tag) => tag.getWord()),
     );
+    const unused = TAGS.filter((t) => !live.has(t));
+    if (unused.length === 0) {
+      this.nextTag = WAIT_AND_SEE;
+      return;
+    }
+
+    // Nobody tags a wall with the warden stood watching it, or one already inked.
+    const options = taggableWalls().filter((wall) => {
+      if (this.inShot(wall.x, wall.z, wall.y)) return false;
+      return !this.graffiti.some((tag) => {
+        if (tag.isClean()) return false;
+        const at = tag.getPosition();
+        return Math.hypot(at.x - wall.x, at.z - wall.z) < wall.width / 2 + 0.5;
+      });
+    });
     const wall = options[Math.floor(Math.random() * options.length)];
     if (!wall) {
       this.nextTag = WAIT_AND_SEE;
       return;
     }
     this.nextTag = 220 + Math.random() * 320;
-    const tag = new Graffiti(this.scene, wall);
+    const word = unused[Math.floor(Math.random() * unused.length)]!;
+    const tag = new Graffiti(this.scene, wall, word);
     this.graffiti.push(tag);
     const at = tag.getPosition();
     this.callouts.raise("graffiti", this.dayCycle.clockFace(), {
@@ -4193,6 +4264,7 @@ export class Game {
     for (let i = this.boats.length - 1; i >= 0; i--) {
       const boat = this.boats[i]!;
       boat.update(delta, chase);
+      if (boat.claimSunk()) this.achievements.unlock("rc-sink");
       if (boat.claimComplaint()) this.complain();
       if (chase && boat.claimHit()) {
         this.takeStrike(boat.getPosition());
@@ -4917,6 +4989,7 @@ export class Game {
   }
 
   private completeMission(id: MissionId): void {
+    this.missionsCompleted += 1;
     this.missionBanner.show(MISSION_LABELS[id], 5.2, "done");
     parkAudio.congrats();
   }
@@ -5147,6 +5220,8 @@ export class Game {
 
     const hour = this.dayCycle.hour;
     const hireHours = hour >= 9 && hour < 18.5;
+    // He opens up when he walks in; we only shut the bay after hours.
+    if (hour >= 18.5 || hour < 6) setBoathouseOpen(false);
 
     this.nextPedaloHire -= delta;
     if (
@@ -5450,13 +5525,14 @@ export class Game {
   private applyPlayerWadeSplash(): void {
     const splash = this.player.claimWadeSplash();
     if (!splash) return;
-    if (splash.big) this.bigSplash(splash.at);
+    if (splash.big) this.bigSplash(splash.at, "wade");
     else this.wadeWake(splash.at);
   }
 
   /** Small rings under the boots while trudging through. */
   private wadeWake(at: THREE.Vector3): void {
-    parkAudio.waterPlop(0.35);
+    const { pan } = this.listenPan(at);
+    parkAudio.waterPlop(0.35, pan);
     for (const [radius, life] of [
       [0.45, 0.7],
       [0.85, 1.0],
@@ -5514,6 +5590,7 @@ export class Game {
     this.comboLeft = COMBO_WINDOW;
     this.score += 10 * this.multiplier();
     this.updateHUD();
+    parkAudio.choreDone();
   }
 
   private multiplier(): number {
@@ -5559,6 +5636,7 @@ export class Game {
   }
 
   private updateHUD(): void {
+    if (this.comboRun > this.comboBest) this.comboBest = this.comboRun;
     this.cleanedElement.textContent = this.cleaned.toString();
     this.complaintsElement.textContent = this.complaints.toString();
     this.complaintsElement.parentElement!.classList.toggle(
@@ -5804,6 +5882,7 @@ export class Game {
     this.callouts.update(delta);
     this.messages.update(delta);
     this.missionBanner.update(delta);
+    this.achievements.update(delta);
     this.updateControlsHint(delta);
     this.updateCyclists(delta, mess);
     this.updateTraffic(delta);

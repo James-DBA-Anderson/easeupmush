@@ -282,6 +282,18 @@ export const catalog: DialogueCatalog = {
           'THAT\'S IT — SIT TIGHT',
         ]),
         ...pack('idle', ['NEXT!', 'SWAN BOATS THIS WAY', 'HIRE HERE']),
+        ...pack('open', [
+          'RIGHT THEN',
+          'OPEN FOR BUSINESS',
+          'ANOTHER DAY',
+          'LET\'S HAVE YOU',
+        ]),
+        ...pack('graffiti', [
+          'THAT\'S MORE LIKE IT',
+          'CHEERS MUSH — WAS A RIGHT STATE',
+          'ABOUT TIME SOMEONE GOT THAT OFF',
+          'LOOKS LIKE A BOATHOUSE AGAIN',
+        ]),
         ...pack('mad', [
           'YOU\'VE SUNK MY BLOODY SWAN!',
           'OI — THAT BOAT COSTS MONEY!',

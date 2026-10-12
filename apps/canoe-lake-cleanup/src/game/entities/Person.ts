@@ -242,6 +242,7 @@ export class Person {
   private wentIn = new THREE.Vector3();
   private cameOut = new THREE.Vector3();
   private splashAt: THREE.Vector3 | null = null;
+  private splashKind: "plunge" | "climb" = "plunge";
   private splashed = true;
   private climbSplashEarly = false;
   private climbSplashLate = false;
@@ -2578,10 +2579,11 @@ export class Person {
   }
 
   /** Where somebody just went in, once, for the game to make a splash of. */
-  public claimSplash(): THREE.Vector3 | null {
+  public claimSplash(): { at: THREE.Vector3; kind: "plunge" | "climb" } | null {
     const at = this.splashAt;
     this.splashAt = null;
-    return at;
+    if (!at) return null;
+    return { at, kind: this.splashKind };
   }
 
   /** Going in, thrashing about, and hauling themselves back out. */
@@ -2611,6 +2613,7 @@ export class Person {
     if (age < FALL_TIME + SWIM_TIME) {
       if (!this.splashed) {
         this.splashed = true;
+        this.splashKind = "plunge";
         this.splashAt = this.wentIn.clone().setY(WATER_Y);
       }
       // Chest-deep and floundering — furious about it already.
@@ -2680,11 +2683,13 @@ export class Person {
 
     if (!this.climbSplashEarly && u > 0.18) {
       this.climbSplashEarly = true;
+      this.splashKind = "climb";
       this.splashAt = this.group.position.clone().setY(WATER_Y);
       for (let i = 0; i < 5; i++) this.shedDrip(1.1);
     }
     if (!this.climbSplashLate && u > 0.58) {
       this.climbSplashLate = true;
+      this.splashKind = "climb";
       this.splashAt = this.group.position.clone().setY(WATER_Y * 0.4);
       for (let i = 0; i < 6; i++) this.shedDrip(1.2);
     }

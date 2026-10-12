@@ -17,10 +17,8 @@ import {
  * St Helens Parade wraps the west and north (+Z / −X): a long wall of tall
  * Victorian and Edwardian terraces and seafront hotels looking out over the
  * water. South (−Z) is Eastney Esplanade, the beach and the Solent, with
- * South Parade Pier well to the south-west along the front and the glass of
- * the Pyramids beside it. On a clear day the Spinnaker Tower stands up over
- * the rooftops away to the north-west, with the Isle of Wight a grey line
- * across the water.
+ * South Parade Pier well to the south-west along the front. The Isle of
+ * Wight is a grey line across the water.
  */
 
 const RENDER = new THREE.MeshStandardMaterial({
@@ -979,7 +977,8 @@ function buildCarPark(scene: THREE.Scene, yard: Yard, rand: () => number): void 
       );
       yard.add(ROAD_MARK, tick);
 
-      if (rand() < 0.4) continue;
+      // About a quarter of the bays taken — used to pack six in ten.
+      if (rand() < 0.76) continue;
       // Most nose-in; the odd one backed in.
       const face = yaw + (rand() < 0.15 ? Math.PI : 0);
       const car = parkedCar(rand);
@@ -1149,54 +1148,6 @@ function pier(yard: Yard): void {
   );
 }
 
-/** The Pyramids, next to the pier on the seafront: all glass, and unmistakable. */
-function pyramids(yard: Yard): void {
-  const x = -375;
-  const z = -118;
-  const gy = groundHeight(x, z);
-  yard.box(STONE, [64, 3, 44], [x, gy + 1.5, z]);
-  for (const [dx, size, height] of [
-    [-14, 30, 21],
-    [14, 26, 17],
-  ] as const) {
-    const pyramid = new THREE.ConeGeometry(size, height, 4);
-    pyramid.rotateY(Math.PI / 4);
-    pyramid.translate(x + dx, gy + 3 + height / 2, z);
-    yard.add(GLASS, pyramid);
-  }
-  surrounds.push({ x, z, halfWide: 32, halfDeep: 22, yaw: 0 });
-}
-
-/** The Spinnaker, standing up over the rooftops away to the north-west. */
-function spinnaker(yard: Yard): void {
-  const x = -300;
-  const z = 330;
-  const white = TRIM;
-
-  // Two legs sweeping up to the mast, near enough the real silhouette.
-  for (const lean of [-1, 1]) {
-    const leg = new THREE.CylinderGeometry(1.6, 4.5, 96, 6);
-    leg.translate(lean * 7, 48, 0);
-    leg.rotateZ(lean * -0.075);
-    leg.translate(x, 0, z);
-    yard.add(white, leg);
-  }
-  const mast = new THREE.CylinderGeometry(0.5, 2.4, 78, 6);
-  mast.translate(x, 122, z);
-  yard.add(white, mast);
-
-  // The viewing decks bulging out near the top.
-  for (const [y, r] of [
-    [88, 9],
-    [95, 7.5],
-    [101, 6],
-  ] as const) {
-    const deck = new THREE.CylinderGeometry(r, r, 4, 10);
-    deck.translate(x, y, z);
-    yard.add(GLASS, deck);
-  }
-}
-
 /** The Isle of Wight, a grey line on the water when the weather allows. */
 function island(yard: Yard): void {
   const rand = seeded(0x1ce);
@@ -1230,8 +1181,6 @@ export function buildSurrounds(scene: THREE.Scene): void {
   seafront(yard);
   island(yard);
   pier(yard);
-  pyramids(yard);
-  spinnaker(yard);
 
   // Parade roads + terrace façades from level data (editor Roads / Terraces).
   buildRoads(yard, rand);
@@ -1242,7 +1191,7 @@ export function buildSurrounds(scene: THREE.Scene): void {
   yard.build(scene);
 }
 
-/** Whether a point is inside a surround building (terraces, pier, pyramids). */
+/** Whether a point is inside a surround building (terraces, pier). */
 export function atSurroundBuilding(x: number, z: number): boolean {
   return hitsAny(x, z, surrounds);
 }

@@ -21,9 +21,9 @@ import {
 } from "./world/park";
 import { parkAudio } from "./audio/ParkAudio";
 
-const WALK_SPEED = 20.6;
+const WALK_SPEED = 22.7;
 /** Chest-deep slog across the bed — slower than the path, not a crawl. */
-const WADE_SPEED = 8.75;
+const WADE_SPEED = 9.6;
 const WORLD_LIMIT = 200;
 const EYE_HEIGHT = 1.7;
 

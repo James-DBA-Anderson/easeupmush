@@ -4,16 +4,26 @@ import { stepWalk } from "../world/blocking";
 import { isInLake, nearestShore, outwardAt } from "../world/lake";
 import {
   boatmanStandSpot,
+  boathouseSpot,
   hatchQueueSpot,
   pedaloWorldPos,
+  setBoathouseOpen,
 } from "../world/park";
 import { groundHeight } from "../world/terrain";
+import {
+  emptyRoute,
+  gateOutside,
+  nearestGate,
+  routeAim,
+  setRouteToward,
+  type LoopRoute,
+} from "../world/pathRoute";
 import type { Face } from "./Face";
 import { buildBoatman } from "./StaffModel";
 import { line } from "../../dialogue";
 
 
-type Job = "idle" | "toBoat" | "helping" | "back" | "hunt";
+type Job = "arriving" | "opening" | "idle" | "toBoat" | "helping" | "back" | "hunt";
 
 /**
  * The bloke who works the hire hatch — takes the money and helps people into
@@ -39,13 +49,22 @@ export class Boatman {
   private swingCool = 0;
   private swingsLanded = 0;
   private shoutIn = 0;
+  private opened = false;
+  private pleasedLeft = 0;
+  private arriveStuck = 0;
+  private route: LoopRoute = emptyRoute();
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
     const home =
       boatmanStandSpot() ?? hatchQueueSpot() ?? new THREE.Vector3(0, 0, 40);
     this.stand.copy(home);
-    this.group.position.copy(home);
+    const gate = nearestGate(home.x, home.z);
+    const outside = gateOutside(gate, 11);
+    this.group.position.set(outside.x, 0, outside.y);
+    this.group.rotation.y = Math.atan2(home.x - outside.x, home.z - outside.y);
+    setRouteToward(this.route, outside.x, outside.y, home.x, home.z);
+    this.job = "arriving";
     this.build();
     scene.add(this.group);
   }
@@ -66,8 +85,25 @@ export class Boatman {
    * Walk them to a reserved pedalo and help them aboard. Fires `onDone` once
    * they're in.
    */
+  /**
+   * Cleaner got the tags off the hut — he's pleased, so long as he's not
+   * already coming for you.
+   */
+  public noticeGraffitiGone(): boolean {
+    if (this.job === "hunt" || this.pleasedLeft > 0) return false;
+    this.pleasedLeft = 12;
+    this.say(line('boatman', 'graffiti'));
+    return true;
+  }
+
   public helpAboard(boatIndex: number, onDone: () => void): void {
-    if (this.job === "hunt") return;
+    if (
+      this.job === "hunt" ||
+      this.job === "arriving" ||
+      this.job === "opening"
+    ) {
+      return;
+    }
     // Drop a stuck help job so the queue doesn't jam.
     if (this.job === "toBoat" || this.job === "helping" || this.job === "back") {
       this.finishHelp();
@@ -122,7 +158,11 @@ export class Boatman {
         : this.grumble;
     this.face?.update(delta);
     this.face?.setMood(
-      this.job === "hunt" ? "angry" : this.job === "helping" ? "pleased" : "idle",
+      this.job === "hunt"
+        ? "angry"
+        : this.pleasedLeft > 0 || this.job === "helping" || this.job === "opening"
+          ? "pleased"
+          : "idle",
     );
 
     this.group.position.y = groundHeight(
@@ -132,9 +172,20 @@ export class Boatman {
 
     if (this.timer > 0) this.timer -= delta;
     if (this.swingCool > 0) this.swingCool -= delta;
+    if (this.pleasedLeft > 0) this.pleasedLeft = Math.max(0, this.pleasedLeft - delta);
 
     if (this.job === "hunt") {
       this.chase(delta, player);
+      return;
+    }
+
+    if (this.job === "arriving") {
+      this.walkIn(delta);
+      return;
+    }
+
+    if (this.job === "opening") {
+      this.openUp();
       return;
     }
 
@@ -202,8 +253,15 @@ export class Boatman {
     this.huntLeft -= delta;
     this.helpPose(false);
     if (!player || this.huntLeft <= 0) {
-      this.job = "back";
       this.swingReady = false;
+      if (this.opened) {
+        this.job = "back";
+      } else {
+        const here = this.group.position;
+        const hatch = hatchQueueSpot() ?? this.stand;
+        setRouteToward(this.route, here.x, here.z, hatch.x, hatch.z);
+        this.job = "arriving";
+      }
       return;
     }
 
@@ -259,6 +317,63 @@ export class Boatman {
       shore.x + out.x * 1.4,
       0,
       shore.y + out.y * 1.4,
+    );
+  }
+
+  /** Clock-on: in through the nearest gate, round the path, to the hut. */
+  private walkIn(delta: number): void {
+    this.helpPose(false);
+    this.arriveStuck += delta;
+    const hatch = hatchQueueSpot() ?? this.stand;
+    const here = this.group.position;
+    const aim = routeAim(
+      this.route,
+      here.x,
+      here.z,
+      hatch.x,
+      hatch.z,
+      9,
+    );
+    const to = aim ? new THREE.Vector3(aim.x, 0, aim.y) : hatch;
+    const close = Math.hypot(hatch.x - here.x, hatch.z - here.z) < 1.3;
+    if (
+      (this.walkToward(to, delta, 2.7) && !aim) ||
+      close ||
+      this.arriveStuck > 80
+    ) {
+      this.group.position.x = hatch.x;
+      this.group.position.z = hatch.z;
+      this.job = "opening";
+      this.timer = 1.7;
+      this.arriveStuck = 0;
+      this.faceHut();
+      this.say(line('boatman', 'open'));
+    }
+  }
+
+  /** Pull the working bay open, then take his spot by the door. */
+  private openUp(): void {
+    this.faceHut();
+    this.arms[0]!.rotation.set(-0.85, 0, 0.35);
+    this.arms[1]!.rotation.set(-1.15, 0, -0.25);
+    this.legs[0]!.rotation.x = 0.12;
+    this.legs[1]!.rotation.x = -0.08;
+    if (!this.opened && this.timer < 0.85) {
+      this.opened = true;
+      setBoathouseOpen(true);
+    }
+    if (this.timer > 0) return;
+    this.helpPose(false);
+    this.job = "back";
+    this.helpStuck = 0;
+  }
+
+  private faceHut(): void {
+    const hut = boathouseSpot();
+    if (!hut) return;
+    this.group.rotation.y = Math.atan2(
+      hut.x - this.group.position.x,
+      hut.z - this.group.position.z,
     );
   }
 
