@@ -10,10 +10,17 @@ export const ACCEL = 22;
 export const DECEL = 18;
 export const TURN_ACCEL = 32;
 
-/** One full backflip over this many seconds at a standing takeoff. */
+/** One full backflip over this many seconds at a standing takeoff (mid tuck). */
 export const FLIP_DURATION_SLOW = 1.28;
-/** One full backflip over this many seconds at max run-up. */
+/** One full backflip over this many seconds at max run-up (mid tuck). */
 export const FLIP_DURATION_FAST = 0.82;
+
+/** How quickly crouch eases toward the stick / keys. */
+export const TUCK_LERP = 7.5;
+/** Rotation rate at full layout (stick up). Mid tuck is 1. */
+export const TUCK_RATE_STRAIGHT = 0.55;
+/** Rotation rate at full crouch (stick down). */
+export const TUCK_RATE_CROUCH = 1.52;
 
 export const CLEAN_LAND_RAD = (22 * Math.PI) / 180;
 export const STUMBLE_LAND_RAD = (68 * Math.PI) / 180;
@@ -21,14 +28,6 @@ export const STUMBLE_LAND_RAD = (68 * Math.PI) / 180;
 export const STUMBLE_TIME = 0.7;
 export const FALLEN_TIME = 1.15;
 export const DEATH_TIME = 1.15;
-
-export const SPAWN_X = 4.2;
-export const GROUND_Y = 0;
-export const LEFT_END = 16.2;
-export const GAP_END = 21.5;
-export const LEVEL_END = 38;
-export const FLAG_X = 32.4;
-export const KILL_Y = -7;
 
 /** World width the camera tries to show. Tall portrait gets extra sky. */
 export const VIEW_WIDTH = 6.6;

@@ -3,22 +3,21 @@ import {
   CLEAN_LAND_RAD,
   DECEL,
   FALLEN_TIME,
-  FLAG_X,
   FLIP_DURATION_FAST,
   FLIP_DURATION_SLOW,
   GRAVITY,
-  GROUND_Y,
   HIP_HEIGHT,
   JUMP_VY,
-  KILL_Y,
   MAX_SPEED,
-  SPAWN_X,
   STUMBLE_LAND_RAD,
   STUMBLE_TIME,
   TAU,
+  TUCK_LERP,
+  TUCK_RATE_CROUCH,
+  TUCK_RATE_STRAIGHT,
   TURN_ACCEL,
 } from "./constants";
-import { groundAt } from "./world";
+import { groundAt, spawnGround, type Level } from "./world";
 
 export type BillState = "ground" | "air" | "stumble" | "fallen" | "dead" | "done";
 
@@ -31,8 +30,8 @@ export interface LandEvent {
 }
 
 export class Bill {
-  x = SPAWN_X;
-  y = GROUND_Y + HIP_HEIGHT;
+  x = 0;
+  y = HIP_HEIGHT;
   vx = 0;
   vy = 0;
   /** Local backflip rotation, 0 = feet down. Always spins backward. */
@@ -44,14 +43,17 @@ export class Bill {
   flipTravel = 0;
   flipDuration = FLIP_DURATION_SLOW;
   airTime = 0;
+  flipping = false;
+  /** 0 = layout / straight, 1 = full crouch. Default 0.5. */
+  tuck = 0.5;
   name = "Backflip Bill";
   landEvent: LandEvent | null = null;
   died = false;
   finished = false;
 
-  public spawn(): void {
-    this.x = SPAWN_X;
-    this.y = GROUND_Y + HIP_HEIGHT;
+  public spawn(level: Level): void {
+    this.x = level.spawnX;
+    this.y = spawnGround(level) + HIP_HEIGHT;
     this.vx = 0;
     this.vy = 0;
     this.rot = 0;
@@ -62,12 +64,14 @@ export class Bill {
     this.flipTravel = 0;
     this.flipDuration = FLIP_DURATION_SLOW;
     this.airTime = 0;
+    this.flipping = false;
+    this.tuck = 0.5;
     this.landEvent = null;
     this.died = false;
     this.finished = false;
   }
 
-  public step(dt: number, run: number, jump: boolean): void {
+  public step(dt: number, run: number, jump: boolean, tuckAxis: number, level: Level): void {
     this.landEvent = null;
     this.died = false;
     this.finished = false;
@@ -78,36 +82,38 @@ export class Bill {
     if (this.state === "stumble") {
       this.lockTimer -= dt;
       this.groundMove(dt, run * 0.25);
-      this.snapToGround();
+      this.snapToGround(level);
       this.runPhase += Math.abs(this.vx) * dt * 3.2;
       if (this.lockTimer <= 0) {
         this.state = "ground";
         this.rot = 0;
       }
-      this.checkGapDeath();
+      this.checkGapDeath(level);
       return;
     }
 
     if (this.state === "fallen") {
       this.lockTimer -= dt;
       this.vx *= Math.exp(-8 * dt);
-      this.snapToGround();
+      this.snapToGround(level);
       if (this.lockTimer <= 0) {
         this.state = "ground";
         this.rot = 0;
-        this.y = GROUND_Y + HIP_HEIGHT;
+        const g = groundAt(level, this.x);
+        if (g !== null) this.y = g + HIP_HEIGHT;
       }
-      this.checkGapDeath();
+      this.checkGapDeath(level);
       return;
     }
 
     if (this.state === "ground") {
+      this.tuck = 0.5;
       this.groundMove(dt, run);
-      this.snapToGround();
+      this.snapToGround(level);
       this.runPhase += Math.abs(this.vx) * dt * 2.6;
       if (jump) this.takeOff();
-      this.checkGapDeath();
-      if (this.state === "ground" && this.x >= FLAG_X) {
+      this.checkGapDeath(level);
+      if (this.state === "ground" && this.x >= level.flagX) {
         this.state = "done";
         this.finished = true;
         this.vx = 0;
@@ -115,29 +121,31 @@ export class Bill {
       return;
     }
 
-    // Air: trajectory locked at takeoff. No steering. One backflip.
+    // Air: horizontal trajectory locked. Vertical stick only tucks the flip.
     this.vy -= GRAVITY * dt;
     this.x += this.vx * dt;
     this.y += this.vy * dt;
     this.airTime += dt;
 
-    const omega = TAU / this.flipDuration;
-    if (this.flipTravel < TAU) {
-      const step = omega * dt;
-      const left = TAU - this.flipTravel;
-      const use = Math.min(step, left);
-      this.flipTravel += use;
+    if (this.flipping) {
+      const targetTuck = 0.5 + 0.5 * Math.max(-1, Math.min(1, tuckAxis));
+      const k = 1 - Math.exp(-TUCK_LERP * dt);
+      this.tuck += (targetTuck - this.tuck) * k;
+      const rate =
+        TUCK_RATE_STRAIGHT + (TUCK_RATE_CROUCH - TUCK_RATE_STRAIGHT) * this.tuck;
+      const omega = (TAU / this.flipDuration) * rate;
+      this.flipTravel += omega * dt;
       this.rot = this.flipTravel;
     } else {
-      this.rot = TAU;
+      this.rot = 0;
     }
 
-    const g = groundAt(this.x);
+    const g = groundAt(level, this.x);
     if (g !== null && this.vy <= 0 && this.y - HIP_HEIGHT <= g + 0.04) {
       this.land(g);
     }
 
-    this.checkGapDeath();
+    this.checkGapDeath(level);
   }
 
   private groundMove(dt: number, run: number): void {
@@ -158,14 +166,15 @@ export class Bill {
 
   private takeOff(): void {
     this.state = "air";
+    this.flipping = true;
     this.vy = JUMP_VY;
     this.flipTravel = 0;
     this.rot = 0;
     this.airTime = 0;
+    this.tuck = 0.5;
     const speed = Math.min(1, Math.abs(this.vx) / MAX_SPEED);
     this.flipDuration =
       FLIP_DURATION_SLOW + (FLIP_DURATION_FAST - FLIP_DURATION_SLOW) * speed;
-    // Facing at takeoff decides which way "back" is. vx is frozen after this.
   }
 
   private land(g: number): void {
@@ -175,38 +184,44 @@ export class Bill {
 
     if (off <= CLEAN_LAND_RAD) {
       this.state = "ground";
+      this.flipping = false;
       this.rot = 0;
+      this.tuck = 0.5;
       this.landEvent = { kind: "clean", x: this.x, y: g };
     } else if (off <= STUMBLE_LAND_RAD) {
       this.state = "stumble";
+      this.flipping = false;
       this.lockTimer = STUMBLE_TIME;
       this.vx *= 0.28;
       this.rot = Math.sign(ang || 1) * 0.35;
+      this.tuck = 0.5;
       this.landEvent = { kind: "stumble", x: this.x, y: g };
     } else {
       this.state = "fallen";
+      this.flipping = false;
       this.lockTimer = FALLEN_TIME;
       this.vx = 0;
       this.rot = Math.abs(ang) > Math.PI * 0.75 ? Math.PI : Math.sign(ang || 1) * (Math.PI / 2);
       this.y = g + HIP_HEIGHT * 0.38;
+      this.tuck = 0.5;
       this.landEvent = { kind: "fall", x: this.x, y: g };
     }
   }
 
-  private snapToGround(): void {
-    const g = groundAt(this.x);
+  private snapToGround(level: Level): void {
+    const g = groundAt(level, this.x);
     if (g === null) {
       this.state = "air";
+      this.flipping = false;
       this.vy = Math.min(this.vy, 0);
-      this.flipTravel = TAU;
       this.rot = 0;
       return;
     }
     if (this.state !== "fallen") this.y = g + HIP_HEIGHT;
   }
 
-  private checkGapDeath(): void {
-    if (this.y < KILL_Y) {
+  private checkGapDeath(level: Level): void {
+    if (this.y < level.killY) {
       this.state = "dead";
       this.died = true;
       this.vx = 0;
@@ -216,8 +231,7 @@ export class Bill {
 }
 
 function wrapPi(a: number): number {
-  let x = ((a + Math.PI) % TAU + TAU) % TAU - Math.PI;
-  return x;
+  return ((a + Math.PI) % TAU + TAU) % TAU - Math.PI;
 }
 
 export interface Dust {
@@ -349,18 +363,21 @@ function poseFor(bill: Bill, t: number): Pose {
   }
 
   if (bill.state === "air") {
-    const tuck = 0.08 * Math.sin(t * 14);
-    return {
-      lean: 0.12,
-      lThigh: 2.45 + tuck,
-      rThigh: 2.2 - tuck,
-      lShin: 0.65,
-      rShin: 0.5,
-      lArm: 3.35,
-      rArm: 3.05,
-      lFore: 2.15,
-      rFore: 1.95,
-    };
+    if (!bill.flipping) {
+      const hang = -Math.PI / 2;
+      return {
+        lean: 0.2,
+        lThigh: hang + 0.15,
+        rThigh: hang - 0.1,
+        lShin: hang,
+        rShin: hang - 0.05,
+        lArm: hang + 0.4,
+        rArm: hang - 0.3,
+        lFore: hang + 0.2,
+        rFore: hang - 0.15,
+      };
+    }
+    return lerpPose(LAYOUT, CROUCH, bill.tuck);
   }
 
   const moving = Math.abs(bill.vx) > 0.35;
@@ -382,6 +399,47 @@ function poseFor(bill: Bill, t: number): Pose {
     rArm: hang - 0.2 - lSwing * 0.85,
     lFore: hang - 0.1 - rSwing * 0.4,
     rFore: hang - 0.1 - lSwing * 0.4,
+  };
+}
+
+/** Straightened layout — limbs trail a little from the spin. */
+const LAYOUT: Pose = {
+  lean: 0.02,
+  lThigh: -1.82,
+  rThigh: -1.48,
+  lShin: -1.7,
+  rShin: -1.42,
+  lArm: -2.55,
+  rArm: -2.15,
+  lFore: -2.85,
+  rFore: -2.4,
+};
+
+/** Tight crouch. */
+const CROUCH: Pose = {
+  lean: 0.18,
+  lThigh: 2.55,
+  rThigh: 2.28,
+  lShin: 0.55,
+  rShin: 0.38,
+  lArm: 3.45,
+  rArm: 3.12,
+  lFore: 2.22,
+  rFore: 1.95,
+};
+
+function lerpPose(a: Pose, b: Pose, t: number): Pose {
+  const u = Math.max(0, Math.min(1, t));
+  return {
+    lean: a.lean + (b.lean - a.lean) * u,
+    lThigh: a.lThigh + (b.lThigh - a.lThigh) * u,
+    rThigh: a.rThigh + (b.rThigh - a.rThigh) * u,
+    lShin: a.lShin + (b.lShin - a.lShin) * u,
+    rShin: a.rShin + (b.rShin - a.rShin) * u,
+    lArm: a.lArm + (b.lArm - a.lArm) * u,
+    rArm: a.rArm + (b.rArm - a.rArm) * u,
+    lFore: a.lFore + (b.lFore - a.lFore) * u,
+    rFore: a.rFore + (b.rFore - a.rFore) * u,
   };
 }
 

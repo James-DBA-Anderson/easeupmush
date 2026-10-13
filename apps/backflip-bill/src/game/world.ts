@@ -1,11 +1,4 @@
-import {
-  FLAG_X,
-  GAP_END,
-  GROUND_Y,
-  LEFT_END,
-  LEVEL_END,
-  VIEW_WIDTH,
-} from "./constants";
+import { VIEW_WIDTH } from "./constants";
 
 export interface Platform {
   x0: number;
@@ -13,13 +6,55 @@ export interface Platform {
   y: number;
 }
 
-export const PLATFORMS: Platform[] = [
-  { x0: -4, x1: LEFT_END, y: GROUND_Y },
-  { x0: GAP_END, x1: LEVEL_END + 6, y: GROUND_Y },
+export interface Level {
+  id: number;
+  title: string;
+  spawnX: number;
+  platforms: Platform[];
+  gapX0: number;
+  gapX1: number;
+  flagX: number;
+  killY: number;
+  endX: number;
+}
+
+export const LEVELS: Level[] = [
+  {
+    id: 1,
+    title: "Level 1",
+    spawnX: 4.2,
+    platforms: [
+      { x0: -4, x1: 16.2, y: 0 },
+      { x0: 21.5, x1: 44, y: 0 },
+    ],
+    gapX0: 16.2,
+    gapX1: 21.5,
+    flagX: 32.4,
+    killY: -7,
+    endX: 38,
+  },
+  {
+    id: 2,
+    title: "Level 2",
+    spawnX: 4.2,
+    platforms: [
+      { x0: -4, x1: 16.2, y: 0 },
+      { x0: 21.8, x1: 44, y: -3.15 },
+    ],
+    gapX0: 16.2,
+    gapX1: 21.8,
+    flagX: 33.2,
+    killY: -10,
+    endX: 40,
+  },
 ];
 
-export function groundAt(x: number): number | null {
-  for (const p of PLATFORMS) {
+export function spawnGround(level: Level): number {
+  return groundAt(level, level.spawnX) ?? 0;
+}
+
+export function groundAt(level: Level, x: number): number | null {
+  for (const p of level.platforms) {
     if (x >= p.x0 && x <= p.x1) return p.y;
   }
   return null;
@@ -42,15 +77,23 @@ export function fitView(cssW: number, cssH: number): { w: number; h: number } {
   return { w, h };
 }
 
-export function followCam(cam: Cam, px: number, vx: number, dt: number): void {
+export function followCam(
+  cam: Cam,
+  px: number,
+  py: number,
+  vx: number,
+  dt: number,
+  level: Level,
+): void {
   const look = Math.max(-2.2, Math.min(2.2, vx * 0.28));
   const targetX = px + look;
   cam.x += (targetX - cam.x) * Math.min(1, dt * 6);
   const minX = cam.w * 0.45;
-  const maxX = LEVEL_END - cam.w * 0.4;
+  const maxX = level.endX - cam.w * 0.4;
   cam.x = Math.max(minX, Math.min(maxX, cam.x));
-  // Ground sits in the lower third so portrait has sky to breathe.
-  cam.y = GROUND_Y + cam.h * 0.28;
+  const under = groundAt(level, px) ?? spawnGround(level);
+  const targetY = under + (py - under) * 0.35 + cam.h * 0.26;
+  cam.y += (targetY - cam.y) * Math.min(1, dt * 5);
 }
 
 export function drawSky(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: number): void {
@@ -62,7 +105,6 @@ export function drawSky(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, c
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, cssW, cssH);
 
-  // Sodium glow.
   const sx = worldToScreenX(cam, cssW, 10);
   const sy = worldToScreenY(cam, cssH, 7);
   const glow = ctx.createRadialGradient(sx, sy, 4, sx, sy, cssW * 0.55);
@@ -72,12 +114,18 @@ export function drawSky(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, c
   ctx.fillRect(0, 0, cssW, cssH);
 }
 
-export function drawWorld(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: number): void {
+export function drawWorld(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
   drawSea(ctx, cam, cssW, cssH);
-  drawBackdrop(ctx, cam, cssW, cssH);
-  drawPit(ctx, cam, cssW, cssH);
-  drawGround(ctx, cam, cssW, cssH);
-  drawFlag(ctx, cam, cssW, cssH);
+  drawBackdrop(ctx, cam, cssW, cssH, level);
+  drawPit(ctx, cam, cssW, cssH, level);
+  drawGround(ctx, cam, cssW, cssH, level);
+  drawFlag(ctx, cam, cssW, cssH, level);
 }
 
 function drawSea(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: number): void {
@@ -102,36 +150,50 @@ function drawSea(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: nu
   }
 }
 
-function drawBackdrop(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: number): void {
-  // Distant lamps along the esplanade.
-  for (let x = 0; x <= LEVEL_END; x += 6.5) {
-    const sx = worldToScreenX(cam, cssW, x);
-    const gy = worldToScreenY(cam, cssH, GROUND_Y);
-    if (sx < -40 || sx > cssW + 40) continue;
-    ctx.strokeStyle = "#2a1c14";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(sx, gy);
-    ctx.lineTo(sx, gy - 86);
-    ctx.stroke();
-    ctx.fillStyle = "rgba(255,196,107,0.85)";
-    ctx.beginPath();
-    ctx.arc(sx, gy - 90, 6, 0, Math.PI * 2);
-    ctx.fill();
-    const lamp = ctx.createRadialGradient(sx, gy - 90, 2, sx, gy - 90, 48);
-    lamp.addColorStop(0, "rgba(255,196,107,0.28)");
-    lamp.addColorStop(1, "rgba(255,196,107,0)");
-    ctx.fillStyle = lamp;
-    ctx.beginPath();
-    ctx.arc(sx, gy - 90, 48, 0, Math.PI * 2);
-    ctx.fill();
+function drawBackdrop(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  for (const p of level.platforms) {
+    for (let x = p.x0 + 1.5; x < p.x1 - 0.8; x += 6.5) {
+      const sx = worldToScreenX(cam, cssW, x);
+      const gy = worldToScreenY(cam, cssH, p.y);
+      if (sx < -40 || sx > cssW + 40) continue;
+      ctx.strokeStyle = "#2a1c14";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(sx, gy);
+      ctx.lineTo(sx, gy - 86);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(255,196,107,0.85)";
+      ctx.beginPath();
+      ctx.arc(sx, gy - 90, 6, 0, Math.PI * 2);
+      ctx.fill();
+      const lamp = ctx.createRadialGradient(sx, gy - 90, 2, sx, gy - 90, 48);
+      lamp.addColorStop(0, "rgba(255,196,107,0.28)");
+      lamp.addColorStop(1, "rgba(255,196,107,0)");
+      ctx.fillStyle = lamp;
+      ctx.beginPath();
+      ctx.arc(sx, gy - 90, 48, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 
-function drawPit(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: number): void {
-  const x0 = worldToScreenX(cam, cssW, LEFT_END);
-  const x1 = worldToScreenX(cam, cssW, GAP_END);
-  const y0 = worldToScreenY(cam, cssH, GROUND_Y);
+function drawPit(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  const x0 = worldToScreenX(cam, cssW, level.gapX0);
+  const x1 = worldToScreenX(cam, cssW, level.gapX1);
+  const leftY = level.platforms[0]?.y ?? 0;
+  const y0 = worldToScreenY(cam, cssH, leftY);
   const y1 = cssH + 8;
   const g = ctx.createLinearGradient(0, y0, 0, y1);
   g.addColorStop(0, "#0a1218");
@@ -139,20 +201,26 @@ function drawPit(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: nu
   ctx.fillStyle = g;
   ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
 
-  ctx.fillStyle = "rgba(80, 30, 20, 0.35)";
+  ctx.fillStyle = "rgba(80, 30, 20, 0.45)";
   ctx.font = "700 13px 'Source Sans 3', sans-serif";
   ctx.textAlign = "center";
   ctx.fillText("the gap", (x0 + x1) / 2, y0 + 28);
 }
 
-function drawGround(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: number): void {
-  const gy = worldToScreenY(cam, cssH, GROUND_Y);
+function drawGround(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
   const ppm = cssW / cam.w;
-  const depth = 140;
+  const depth = 180;
 
-  for (const p of PLATFORMS) {
+  for (const p of level.platforms) {
     const x0 = worldToScreenX(cam, cssW, p.x0);
     const x1 = worldToScreenX(cam, cssW, p.x1);
+    const gy = worldToScreenY(cam, cssH, p.y);
     ctx.fillStyle = "#5c5348";
     ctx.fillRect(x0, gy, x1 - x0, depth);
     ctx.fillStyle = "#8a8378";
@@ -171,17 +239,32 @@ function drawGround(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH:
     }
   }
 
-  // Lip marks at the gap.
   ctx.fillStyle = "#2a2420";
-  const a = worldToScreenX(cam, cssW, LEFT_END);
-  const b = worldToScreenX(cam, cssW, GAP_END);
-  ctx.fillRect(a - 5, gy - 6, 8, 18);
-  ctx.fillRect(b - 3, gy - 6, 8, 18);
+  const left = level.platforms[0];
+  const right = level.platforms[1];
+  if (left) {
+    const a = worldToScreenX(cam, cssW, level.gapX0);
+    const gy = worldToScreenY(cam, cssH, left.y);
+    ctx.fillRect(a - 5, gy - 6, 8, 18);
+  }
+  if (right) {
+    const b = worldToScreenX(cam, cssW, level.gapX1);
+    const gy = worldToScreenY(cam, cssH, right.y);
+    ctx.fillRect(b - 3, gy - 6, 8, 18);
+  }
 }
 
-function drawFlag(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: number): void {
-  const sx = worldToScreenX(cam, cssW, FLAG_X);
-  const gy = worldToScreenY(cam, cssH, GROUND_Y);
+function drawFlag(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  const far = level.platforms[1];
+  const gyWorld = far?.y ?? 0;
+  const sx = worldToScreenX(cam, cssW, level.flagX);
+  const gy = worldToScreenY(cam, cssH, gyWorld);
   ctx.strokeStyle = "#1a1410";
   ctx.lineWidth = 3;
   ctx.beginPath();
