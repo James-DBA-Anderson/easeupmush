@@ -1,5 +1,5 @@
 {
-  "tuckScheme": "horizontal",
+  "tuckScheme": "holdJump",
   "gravity": 24,
   "jumpVy": 11.4,
   "maxSpeed": 8.4,
