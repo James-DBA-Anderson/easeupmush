@@ -3,9 +3,9 @@ export const TAU = Math.PI * 2;
 /** Hip height above the ground when standing (world metres). */
 export const HIP_HEIGHT = 0.92;
 
-export const GRAVITY = 24;
-export const JUMP_VY = 11.4;
-export const MAX_SPEED = 8.4;
+export const GRAVITY = 22;
+export const JUMP_VY = 12.2;
+export const MAX_SPEED = 9;
 export const ACCEL = 22;
 export const DECEL = 18;
 export const TURN_ACCEL = 32;
