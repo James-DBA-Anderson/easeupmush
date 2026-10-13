@@ -8,6 +8,7 @@ This is a **monorepo** — the marketing site plus games that ship under it.
 apps/
   site/                 # easeupmush.com homepage
   pompey-punch-up/      # Southsea brawler
+  backflip-bill/        # portrait backflip platformer PoC
 shared/
   phraseology.json      # Pompey slang — all games + /mush/phraseology/
 tools/
@@ -37,6 +38,7 @@ Production URLs after deploy:
 | `/mush/` | Back room — unlisted homepage with the in-progress games. Reached by clicking the logo on `/about/` |
 | `/mush/phraseology/` | Pompey phraseology reference (generated from `shared/phraseology.json`) |
 | `/games/pompeymon/` | Pompeymon (unlisted, linked from the back room only) |
+| `/games/backflip-bill/` | Backflip Bill (unlisted, linked from the back room only) |
 
 To try the full assembled site locally (homepage + Play link):
 
@@ -72,6 +74,10 @@ Manual deployment is also available: run `npm run deploy` locally (requires `CLO
 ### [Pompey Punch-Up](apps/pompey-punch-up/)
 
 Hungover on Southsea beach. Mean lads pile out of a car. Phaser 3 + TypeScript doodle brawler — see that app’s README for controls and design notes.
+
+### [Backflip Bill](apps/backflip-bill/)
+
+Portrait 2D platformer PoC. Bill can only backflip — run up, take off, land on your feet. Unlisted; play from the back room at `/games/backflip-bill/`.
 
 To add another game later: create `apps/<slug>/`, build it with `GAME_BASE=/games/<slug>/`, and copy into `dist/games/<slug>/` from `scripts/assemble-dist.mjs`.
 

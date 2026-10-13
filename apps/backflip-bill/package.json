@@ -1,0 +1,17 @@
+{
+  "name": "@easeupmush/backflip-bill",
+  "version": "0.1.0",
+  "private": true,
+  "description": "2D side-scroller — Backflip Bill can only backflip. Land on your feet.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "vite": "^6.2.2"
+  }
+}

@@ -52,6 +52,16 @@ const kids = [
     },
     shell: true,
   }),
+  spawn("npm run dev -w @easeupmush/backflip-bill", {
+    cwd: root,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      GAME_BASE: "/games/backflip-bill/",
+      BROWSER: "none",
+    },
+    shell: true,
+  }),
 ];
 
 function shutDown(code = 0) {
