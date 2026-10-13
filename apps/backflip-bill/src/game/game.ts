@@ -1,7 +1,7 @@
 import { Sfx } from "./audio";
 import { Bill, burst, drawBill, stepDust, type Dust } from "./bill";
-import { HIP_HEIGHT } from "./constants";
-import { isDebugTyping, Input } from "./input";
+import { HIP_HEIGHT, TAU } from "./constants";
+import { isDebugTyping, Input, wantsTouchUi } from "./input";
 import { hintForScheme, tuning } from "./tuning";
 import {
   drawSky,
@@ -17,6 +17,53 @@ import {
   type Cam,
   type Level,
 } from "./world";
+
+interface JumpResult {
+  title: string;
+  tries: number;
+  clean: boolean;
+  spins: number;
+  layoutHold: number;
+  points: number;
+}
+
+const EXTRA_SPIN_PTS = 400;
+const STAR_PTS = 500;
+const LAYOUT_TICK = 0.05;
+const LAYOUT_TICK_PTS = 25;
+
+function formatPts(n: number): string {
+  return `£${n.toLocaleString("en-GB")}`;
+}
+
+function extraSpins(spins: number): number {
+  return Math.max(0, spins - 1);
+}
+
+function layoutTicks(seconds: number): number {
+  return Math.floor(Math.max(0, seconds) / LAYOUT_TICK);
+}
+
+function jumpPoints(
+  levelIndex: number,
+  tries: number,
+  clean: boolean,
+  spins: number,
+  layoutHold: number,
+): number {
+  const clear = 1000 + levelIndex * 500;
+  const star = clean ? STAR_PTS : 0;
+  const attempt = Math.max(0, 400 - (tries - 1) * 100);
+  const layout = layoutTicks(layoutHold) * LAYOUT_TICK_PTS;
+  return clear + star + attempt + extraSpins(spins) * EXTRA_SPIN_PTS + layout;
+}
+
+function spinLabel(spins: number): string {
+  if (spins === 2) return "double";
+  if (spins === 3) return "triple";
+  if (spins === 4) return "quad";
+  return `${spins} spins`;
+}
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -36,7 +83,6 @@ export class Game {
   private deathT = 0;
   private hintT = 6.2;
   private levelIndex = 0;
-  private titleEl: HTMLElement;
   private calloutEl: HTMLElement;
   private hintEl: HTMLElement;
   private levelEl: HTMLElement;
@@ -44,6 +90,25 @@ export class Game {
   private altZero: HTMLElement;
   private altMarker: HTMLElement;
   private altRead: HTMLElement;
+  private scoreEl: HTMLElement;
+  private scoreValueEl: HTMLElement;
+  private resultsEl: HTMLElement;
+  private resultsListEl: HTMLElement;
+  private resultsScoreEl: HTMLElement;
+  private score = 0;
+  private tries = 1;
+  private jumpClean = false;
+  private jumpSpins = 0;
+  private jumpLayout = 0;
+  private liveBonus = 0;
+  private awardedLayoutTicks = 0;
+  private awardedExtra = 0;
+  private awardedStar = false;
+  private landedFar = false;
+  private wasFlipping = false;
+  private jumps: JumpResult[] = [];
+  private gameOver = false;
+  private resultsReadyT = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -51,7 +116,6 @@ export class Game {
     if (!ctx) throw new Error("No 2D context");
     this.ctx = ctx;
     this.cam = makeCam(1, 1);
-    this.titleEl = document.getElementById("title")!;
     this.calloutEl = document.getElementById("callout")!;
     this.hintEl = document.getElementById("hint")!;
     this.levelEl = document.getElementById("level")!;
@@ -59,12 +123,22 @@ export class Game {
     this.altZero = document.getElementById("alt-zero")!;
     this.altMarker = document.getElementById("alt-marker")!;
     this.altRead = document.getElementById("alt-read")!;
-    this.titleEl.textContent = "Backflip Bill";
+    this.scoreEl = document.getElementById("score")!;
+    this.scoreValueEl = document.getElementById("score-value")!;
+    this.resultsEl = document.getElementById("results")!;
+    this.resultsListEl = document.getElementById("results-list")!;
+    this.resultsScoreEl = document.getElementById("results-score")!;
+    document.getElementById("results-again")?.addEventListener("click", () => {
+      if (this.gameOver && this.resultsReadyT <= 0) this.playAgain();
+    });
     window.addEventListener("resize", this.resize);
     window.addEventListener("pointerdown", () => this.sfx.resume(), { once: true });
     window.addEventListener("keydown", (e) => {
       if (isDebugTyping(e.target)) return;
-      if (e.code === "KeyR") this.respawn();
+      if (e.code === "KeyR") {
+        if (this.gameOver || this.bill.cleared || this.bill.state === "done") return;
+        this.respawn();
+      }
     });
     this.bill.spawn(this.level());
     this.syncLevelHud();
@@ -89,18 +163,39 @@ export class Game {
   }
 
   private respawn(): void {
+    this.tries += 1;
+    this.jumpClean = false;
+    this.jumpSpins = 0;
+    this.jumpLayout = 0;
+    this.dropLiveBonus();
     this.bill.spawn(this.level());
     this.deathT = 0;
   }
 
   private loadLevel(index: number): void {
     this.levelIndex = Math.max(0, Math.min(LEVELS.length - 1, index));
+    this.tries = 1;
+    this.jumpClean = false;
+    this.jumpSpins = 0;
+    this.jumpLayout = 0;
+    this.clearLiveBonus();
     this.bill.spawn(this.level());
     this.dust.length = 0;
     this.cam.x = this.bill.x;
     this.cam.y = spawnGround(this.level()) + this.cam.h * 0.26;
     this.syncLevelHud();
     this.hintT = 5.5;
+  }
+
+  private playAgain(): void {
+    this.score = 0;
+    this.jumps = [];
+    this.gameOver = false;
+    this.resultsReadyT = 0;
+    this.hideResults();
+    this.syncScoreHud(false);
+    this.loadLevel(0);
+    this.flash("Back to the start");
   }
 
   private syncLevelHud(): void {
@@ -121,7 +216,7 @@ export class Game {
     this.canvas.style.width = `${this.cssW}px`;
     this.canvas.style.height = `${this.cssH}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const view = fitView(this.cssW, this.cssH);
+    const view = fitView(this.cssW, this.cssH, !wantsTouchUi());
     this.cam.w = view.w;
     this.cam.h = view.h;
   };
@@ -140,33 +235,59 @@ export class Game {
     const input = this.input.poll();
     const level = this.level();
 
-    if (this.bill.state === "done" && input.jump) {
+    if (this.gameOver) {
+      this.resultsReadyT -= dt;
+      if (input.jump && this.resultsReadyT <= 0) this.playAgain();
+      else this.bill.step(dt, 0, false, 0, level, false);
+    } else if ((this.bill.state === "done" || this.bill.cleared) && input.jump) {
       if (this.levelIndex < LEVELS.length - 1) {
         this.loadLevel(this.levelIndex + 1);
         this.flash(this.level().title);
-      } else {
-        this.loadLevel(0);
-        this.flash("Back to the start");
       }
     } else if (this.bill.state === "dead") {
       this.deathT -= dt;
       if (this.deathT <= 0) this.respawn();
     } else {
-      this.bill.step(dt, input.run, input.jump, input.tuck, level);
+      this.bill.step(dt, input.run, input.jump, input.tuck, level, input.touched);
+      if (this.bill.flipping && !this.wasFlipping) this.beginAttempt();
+      this.wasFlipping = this.bill.flipping;
+      if (this.bill.flipping) this.syncLiveBonuses();
       if (this.bill.landEvent) {
         const e = this.bill.landEvent;
+        if (e.kind !== "fall" && this.bill.x >= level.gapX1) {
+          this.landedFar = true;
+          this.jumpClean = e.kind === "clean";
+          this.jumpSpins = e.spins;
+          this.jumpLayout = e.layoutHold;
+          this.payLayout(e.layoutHold, false);
+          this.payExtra(e.spins, true);
+          if (e.kind === "clean") this.payStar();
+        } else {
+          this.jumpClean = false;
+          this.jumpSpins = 0;
+          this.jumpLayout = 0;
+          this.dropLiveBonus();
+        }
         if (e.kind === "clean") {
           this.sfx.cleanLand();
-          this.flash("Clean landing");
+          this.flash(e.spins >= 2 ? `Clean ${spinLabel(e.spins)}` : "Clean landing");
           burst(this.dust, e.x, e.y, 8, "rgba(232,240,244,0.7)", 3);
         } else if (e.kind === "stumble") {
           this.sfx.stumble();
-          this.flash("Hard landing");
+          this.flash(e.spins >= 2 ? `Hard ${spinLabel(e.spins)}` : "Hard landing");
           burst(this.dust, e.x, e.y, 12, "rgba(240,162,58,0.8)", 4);
         } else {
           this.sfx.fall();
           this.flash("You're having a laugh");
           burst(this.dust, e.x, e.y, 16, "rgba(196,60,42,0.75)", 5);
+        }
+      }
+      if (this.bill.snapEvents.length) {
+        this.sfx.snap();
+        if (this.bill.snapEvents.length > 1) this.sfx.snap();
+        for (const e of this.bill.snapEvents) {
+          burst(this.dust, e.x, e.y, 14, "rgba(255,248,230,0.95)", 6, true);
+          burst(this.dust, e.x, e.y, 8, "rgba(196,60,42,0.7)", 4, true);
         }
       }
       if (this.bill.restarted) {
@@ -177,13 +298,16 @@ export class Game {
         this.sfx.death();
         this.flash("Bill's gone in the gap");
         this.deathT = tuning.deathTime;
+        this.dropLiveBonus();
       }
       if (this.bill.finished) {
         this.sfx.finish();
+        this.recordJump();
         if (this.levelIndex < LEVELS.length - 1) {
           this.flash(`Get in — FLIP for level ${this.levelIndex + 2}`);
         } else {
           this.flash("Get in, Bill");
+          this.showResults();
         }
       }
       if (input.jump && this.bill.state === "air" && this.bill.airTime < 0.08) {
@@ -225,6 +349,155 @@ export class Game {
     this.altFill.style.bottom = `${Math.min(fill, zero)}%`;
     this.altFill.style.height = `${Math.abs(fill - zero)}%`;
     this.altRead.textContent = `${alt >= 0 ? "+" : ""}${alt.toFixed(1)}`;
+  }
+
+  private recordJump(): void {
+    const points = jumpPoints(
+      this.levelIndex,
+      this.tries,
+      this.jumpClean,
+      this.jumpSpins,
+      this.jumpLayout,
+    );
+    this.jumps.push({
+      title: this.level().title,
+      tries: this.tries,
+      clean: this.jumpClean,
+      spins: this.jumpSpins,
+      layoutHold: this.jumpLayout,
+      points,
+    });
+    this.score += points;
+    this.liveBonus = 0;
+    this.awardedLayoutTicks = 0;
+    this.awardedExtra = 0;
+    this.awardedStar = false;
+    this.landedFar = false;
+    this.syncScoreHud(true);
+  }
+
+  private beginAttempt(): void {
+    this.awardedLayoutTicks = 0;
+    this.awardedExtra = 0;
+    if (!this.landedFar) this.clearLiveBonus();
+  }
+
+  private dropLiveBonus(): void {
+    if (this.liveBonus > 0) this.spawnScoreFall(this.liveBonus);
+    this.clearLiveBonus();
+  }
+
+  private spawnScoreFall(amount: number): void {
+    const flake = document.createElement("span");
+    flake.className = "score-flake";
+    flake.textContent = `−${formatPts(amount)}`;
+    this.scoreEl.append(flake);
+    flake.addEventListener("animationend", () => flake.remove());
+  }
+
+  private clearLiveBonus(): void {
+    if (this.liveBonus === 0 && !this.awardedStar && !this.landedFar) {
+      this.awardedLayoutTicks = 0;
+      this.awardedExtra = 0;
+      return;
+    }
+    this.liveBonus = 0;
+    this.awardedLayoutTicks = 0;
+    this.awardedExtra = 0;
+    this.awardedStar = false;
+    this.landedFar = false;
+    this.syncScoreHud(false);
+  }
+
+  private addLive(points: number, pop: boolean): void {
+    if (points <= 0) return;
+    this.liveBonus += points;
+    this.syncScoreHud(pop);
+  }
+
+  private payLayout(hold: number, pop: boolean): void {
+    const ticks = layoutTicks(hold);
+    if (ticks <= this.awardedLayoutTicks) return;
+    this.addLive((ticks - this.awardedLayoutTicks) * LAYOUT_TICK_PTS, pop);
+    this.awardedLayoutTicks = ticks;
+  }
+
+  private payExtra(spins: number, pop: boolean): void {
+    const extra = extraSpins(spins);
+    if (extra <= this.awardedExtra) return;
+    this.addLive((extra - this.awardedExtra) * EXTRA_SPIN_PTS, pop);
+    this.awardedExtra = extra;
+  }
+
+  private payStar(): void {
+    if (this.awardedStar) return;
+    this.awardedStar = true;
+    this.addLive(STAR_PTS, true);
+  }
+
+  private syncLiveBonuses(): void {
+    this.payLayout(this.bill.layoutHold, false);
+    this.payExtra(Math.floor(this.bill.flipTravel / TAU), true);
+  }
+
+  private syncScoreHud(pop: boolean): void {
+    this.scoreValueEl.textContent = formatPts(this.score + this.liveBonus);
+    if (!pop) {
+      this.scoreEl.classList.remove("pop");
+      return;
+    }
+    this.scoreEl.classList.remove("pop");
+    void this.scoreEl.offsetWidth;
+    this.scoreEl.classList.add("pop");
+  }
+
+  private showResults(): void {
+    this.gameOver = true;
+    this.resultsReadyT = 0.7;
+    this.resultsListEl.replaceChildren(
+      ...this.jumps.map((jump) => {
+        const li = document.createElement("li");
+        const name = document.createElement("span");
+        name.className = "jump-name";
+        name.textContent = jump.title;
+        const tries = document.createElement("span");
+        tries.className = "jump-tries";
+        tries.textContent = jump.tries === 1 ? "1 try" : `${jump.tries} tries`;
+        const star = document.createElement("span");
+        star.className = jump.clean ? "jump-star" : "jump-star empty";
+        star.textContent = "★";
+        star.setAttribute("aria-label", jump.clean ? "Clean landing" : "");
+        star.setAttribute("aria-hidden", jump.clean ? "false" : "true");
+        const spins = document.createElement("span");
+        const extra = extraSpins(jump.spins);
+        spins.className = extra ? "jump-spins" : "jump-spins empty";
+        spins.textContent = extra ? `×${jump.spins}` : "×1";
+        spins.setAttribute("aria-label", extra ? `${jump.spins} rotations` : "");
+        spins.setAttribute("aria-hidden", extra ? "false" : "true");
+        const layout = document.createElement("span");
+        const ticks = layoutTicks(jump.layoutHold);
+        layout.className = ticks ? "jump-layout" : "jump-layout empty";
+        layout.textContent = `${(ticks * LAYOUT_TICK).toFixed(2)}s`;
+        layout.setAttribute("aria-label", ticks ? `Layout ${layout.textContent}` : "");
+        layout.setAttribute("aria-hidden", ticks ? "false" : "true");
+        const pts = document.createElement("span");
+        pts.className = "jump-pts";
+        pts.textContent = formatPts(jump.points);
+        li.append(name, tries, star, spins, layout, pts);
+        return li;
+      }),
+    );
+    this.resultsScoreEl.textContent = formatPts(this.score);
+    this.resultsEl.hidden = false;
+    this.resultsEl.classList.add("open");
+    document.body.classList.add("results-open");
+  }
+
+  private hideResults(): void {
+    this.resultsEl.hidden = true;
+    this.resultsEl.classList.remove("open");
+    document.body.classList.remove("results-open");
+    this.resultsListEl.replaceChildren();
   }
 
   private flash(msg: string): void {
@@ -273,10 +546,29 @@ export class Game {
     }
     drawBill(ctx, this.bill, s.x, s.y, s.ppm, this.t);
 
-    ctx.font = `700 ${Math.max(12, cssW * 0.032)}px "Source Sans 3", sans-serif`;
-    ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(232,240,244,0.9)";
-    ctx.fillText(this.bill.name, s.x, s.y - s.ppm * 1.35);
+    for (const f of this.bill.snapFlashes) {
+      const p = worldToScreen(cam, cssW, cssH, f.x, f.y);
+      const u = 1 - f.life / f.max;
+      const r = (10 + u * 34) * (p.ppm / 80);
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, f.life / f.max);
+      ctx.strokeStyle = "#fff6d8";
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = "#f0c14a";
+      ctx.lineWidth = 2;
+      ctx.lineCap = "round";
+      for (let i = 0; i < 4; i++) {
+        const a = (i * Math.PI) / 2 + 0.4 + u * 0.35;
+        ctx.beginPath();
+        ctx.moveTo(p.x + Math.cos(a) * r * 0.28, p.y + Math.sin(a) * r * 0.28);
+        ctx.lineTo(p.x + Math.cos(a) * r * 1.4, p.y + Math.sin(a) * r * 1.4);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
 
     if (this.bill.state === "dead") {
       ctx.fillStyle = "rgba(7,20,26,0.45)";

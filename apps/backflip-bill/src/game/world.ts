@@ -1,4 +1,4 @@
-import { VIEW_WIDTH } from "./constants";
+import { VIEW_WIDTH, VIEW_WIDTH_DESKTOP } from "./constants";
 
 /** World x of the start wall. Camera is locked here, so this sits on the left of the screen. */
 export const START_WALL_X = 0.55;
@@ -16,6 +16,8 @@ export interface Level {
   platforms: Platform[];
   gapX0: number;
   gapX1: number;
+  /** Solid floor at the bottom of the gap. */
+  pitY: number;
   flagX: number;
   killY: number;
   endX: number;
@@ -32,6 +34,7 @@ export const LEVELS: Level[] = [
     ],
     gapX0: 16.2,
     gapX1: 21.5,
+    pitY: -3.4,
     flagX: 32.4,
     killY: -7,
     endX: 38,
@@ -46,6 +49,7 @@ export const LEVELS: Level[] = [
     ],
     gapX0: 16.2,
     gapX1: 21.8,
+    pitY: -6.4,
     flagX: 33.2,
     killY: -10,
     endX: 40,
@@ -60,9 +64,25 @@ export const LEVELS: Level[] = [
     ],
     gapX0: 15.4,
     gapX1: 25.2,
+    pitY: -20.6,
     flagX: 40.5,
     killY: -28,
     endX: 52,
+  },
+  {
+    id: 4,
+    title: "Level 4",
+    spawnX: 4.2,
+    platforms: [
+      { x0: -4, x1: 16.2, y: 0 },
+      { x0: 22.15, x1: 23.95, y: 0 },
+    ],
+    gapX0: 16.2,
+    gapX1: 22.15,
+    pitY: -3.4,
+    flagX: 22.7,
+    killY: -7,
+    endX: 31,
   },
 ];
 
@@ -75,14 +95,108 @@ export function finishGround(level: Level): number {
   return groundAt(level, level.flagX) ?? 0;
 }
 
-export function groundAt(level: Level, x: number): number | null {
-  for (const p of level.platforms) {
-    if (x >= p.x0 && x <= p.x1) return p.y;
+export function pitFloor(level: Level): Platform {
+  return { x0: level.gapX0, x1: level.gapX1, y: level.pitY };
+}
+
+function pitSpans(level: Level): Platform[] {
+  const plats = [...level.platforms].sort((a, b) => a.x0 - b.x0);
+  const spans: Platform[] = [];
+  for (let i = 0; i < plats.length - 1; i++) {
+    const a = plats[i]!;
+    const b = plats[i + 1]!;
+    if (b.x0 - a.x1 > 0.2) spans.push({ x0: a.x1, x1: b.x0, y: level.pitY });
   }
-  return null;
+  const last = plats[plats.length - 1];
+  if (last) {
+    const end = Math.max(level.endX, last.x1) + 24;
+    if (end - last.x1 > 0.2) spans.push({ x0: last.x1, x1: end, y: level.pitY });
+  }
+  return spans;
+}
+
+function solids(level: Level): Platform[] {
+  return [...level.platforms, ...pitSpans(level)];
+}
+
+export function groundAt(level: Level, x: number): number | null {
+  let best: number | null = null;
+  for (const p of solids(level)) {
+    if (x < p.x0 || x > p.x1) continue;
+    if (best === null || p.y > best) best = p.y;
+  }
+  return best;
 }
 
 /** Push a circle out of platform solids (top slab + vertical sides, infinite down). */
+export interface NearSolid {
+  px: number;
+  py: number;
+  nx: number;
+  ny: number;
+  dist: number;
+}
+
+function closestOnPlatform(p: Platform, x: number, y: number): NearSolid {
+  if (x >= p.x0 && x <= p.x1 && y <= p.y) {
+    const penUp = p.y - y;
+    const penL = x - p.x0;
+    const penR = p.x1 - x;
+    let nx = 0;
+    let ny = 1;
+    let depth = penUp;
+    if (penL < depth) {
+      depth = penL;
+      nx = -1;
+      ny = 0;
+    }
+    if (penR < depth) {
+      depth = penR;
+      nx = 1;
+      ny = 0;
+    }
+    return { px: x, py: y, nx, ny, dist: 0 };
+  }
+  if (x >= p.x0 && x <= p.x1) {
+    return { px: x, py: p.y, nx: 0, ny: 1, dist: y - p.y };
+  }
+  if (y <= p.y) {
+    if (x < p.x0) return { px: p.x0, py: y, nx: -1, ny: 0, dist: p.x0 - x };
+    return { px: p.x1, py: y, nx: 1, ny: 0, dist: x - p.x1 };
+  }
+  const cx = x < p.x0 ? p.x0 : p.x1;
+  const dx = x - cx;
+  const dy = y - p.y;
+  const dist = Math.hypot(dx, dy);
+  const inv = dist > 1e-6 ? 1 / dist : 1;
+  return { px: cx, py: p.y, nx: dx * inv, ny: dy * inv, dist };
+}
+
+/** Closest solid he is heading toward — floor, pit, platform face, or start wall. */
+export function approachingSolid(
+  level: Level,
+  x: number,
+  y: number,
+  vx: number,
+  vy: number,
+  maxDist = 1.85,
+): NearSolid | null {
+  let best: NearSolid | null = null;
+  let bestEta = Infinity;
+  const consider = (hit: NearSolid) => {
+    if (hit.dist > maxDist) return;
+    const closing = Math.max(0, -vx * hit.nx - vy * hit.ny);
+    const eta = hit.dist / Math.max(0.35, closing);
+    if (eta < bestEta) {
+      bestEta = eta;
+      best = hit;
+    }
+  };
+  for (const p of solids(level)) consider(closestOnPlatform(p, x, y));
+  consider({ px: START_WALL_X, py: y, nx: 1, ny: 0, dist: x - START_WALL_X });
+  return best;
+}
+
 export function pushOutOfSolid(
   level: Level,
   x: number,
@@ -90,7 +204,7 @@ export function pushOutOfSolid(
   r: number,
 ): { nx: number; ny: number; depth: number } | null {
   let best: { nx: number; ny: number; depth: number } | null = null;
-  for (const p of level.platforms) {
+  for (const p of solids(level)) {
     const left = p.x0 - r;
     const right = p.x1 + r;
     const top = p.y + r;
@@ -131,8 +245,8 @@ export function makeCam(viewW: number, viewH: number): Cam {
   return { x: 0, y: 0, w: viewW, h: viewH };
 }
 
-export function fitView(cssW: number, cssH: number): { w: number; h: number } {
-  const w = VIEW_WIDTH;
+export function fitView(cssW: number, cssH: number, desktop = false): { w: number; h: number } {
+  const w = desktop ? VIEW_WIDTH_DESKTOP : VIEW_WIDTH;
   const h = w * (cssH / Math.max(1, cssW));
   return { w, h };
 }
@@ -254,31 +368,38 @@ function drawPit(
   cssH: number,
   level: Level,
 ): void {
-  const x0 = worldToScreenX(cam, cssW, level.gapX0);
-  const x1 = worldToScreenX(cam, cssW, level.gapX1);
   const leftY = level.platforms[0]?.y ?? 0;
+  const landY = level.platforms[1]?.y ?? leftY;
+  const drop = leftY - landY;
   const y0 = worldToScreenY(cam, cssH, leftY);
-  const y1 = cssH + 8;
-  const drop = leftY - (level.platforms[1]?.y ?? leftY);
-  if (drop > 8) {
-    ctx.fillStyle = "rgba(7, 16, 24, 0.2)";
-    ctx.fillRect(x0, y0, Math.max(0, x1 - x0), y1 - y0);
-    ctx.fillStyle = "rgba(80, 30, 20, 0.55)";
-    ctx.font = "700 13px 'Source Sans 3', sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("the drop", (x0 + x1) / 2, y0 + 28);
-    return;
-  }
-  const g = ctx.createLinearGradient(0, y0, 0, y1);
-  g.addColorStop(0, "#0a1218");
-  g.addColorStop(1, "#020406");
-  ctx.fillStyle = g;
-  ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
-
-  ctx.fillStyle = "rgba(80, 30, 20, 0.45)";
+  const yFloor = worldToScreenY(cam, cssH, level.pitY);
+  const h = Math.max(0, yFloor - y0);
   ctx.font = "700 13px 'Source Sans 3', sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText("the gap", (x0 + x1) / 2, y0 + 28);
+  for (const span of pitSpans(level)) {
+    const x0 = worldToScreenX(cam, cssW, span.x0);
+    const x1 = worldToScreenX(cam, cssW, span.x1);
+    const w = Math.max(0, x1 - x0);
+    if (w < 2) continue;
+    if (drop > 8 && span.x0 <= level.gapX0 + 0.05 && span.x1 >= level.gapX1 - 0.05) {
+      ctx.fillStyle = "rgba(7, 16, 24, 0.28)";
+      ctx.fillRect(x0, y0, w, h);
+      ctx.fillStyle = "rgba(80, 30, 20, 0.55)";
+      ctx.fillText("the drop", (x0 + x1) / 2, y0 + 28);
+      continue;
+    }
+    const g = ctx.createLinearGradient(0, y0, 0, yFloor);
+    g.addColorStop(0, "#0a1218");
+    g.addColorStop(1, "#1a1612");
+    ctx.fillStyle = g;
+    ctx.fillRect(x0, y0, w, h);
+    ctx.fillStyle = "rgba(80, 30, 20, 0.45)";
+    const labelX =
+      span.x0 >= level.gapX1 - 0.05
+        ? worldToScreenX(cam, cssW, span.x0 + 1.8)
+        : (x0 + x1) / 2;
+    ctx.fillText("the gap", labelX, y0 + 28);
+  }
 }
 
 function drawGround(
@@ -290,7 +411,7 @@ function drawGround(
 ): void {
   const ppm = cssW / cam.w;
 
-  for (const p of level.platforms) {
+  for (const p of solids(level)) {
     const x0 = worldToScreenX(cam, cssW, p.x0);
     const x1 = worldToScreenX(cam, cssW, p.x1);
     const gy = worldToScreenY(cam, cssH, p.y);
@@ -314,17 +435,12 @@ function drawGround(
   }
 
   ctx.fillStyle = "#2a2420";
-  const left = level.platforms[0];
-  const right = level.platforms[1];
-  if (left) {
-    const a = worldToScreenX(cam, cssW, level.gapX0);
-    const gy = worldToScreenY(cam, cssH, left.y);
-    ctx.fillRect(a - 5, gy - 6, 8, 18);
-  }
-  if (right) {
-    const b = worldToScreenX(cam, cssW, level.gapX1);
-    const gy = worldToScreenY(cam, cssH, right.y);
-    ctx.fillRect(b - 3, gy - 6, 8, 18);
+  for (const p of level.platforms) {
+    const gy = worldToScreenY(cam, cssH, p.y);
+    const a = worldToScreenX(cam, cssW, p.x0);
+    const b = worldToScreenX(cam, cssW, p.x1);
+    ctx.fillRect(a - 3, gy - 6, 8, 18);
+    ctx.fillRect(b - 5, gy - 6, 8, 18);
   }
 }
 
@@ -356,8 +472,7 @@ function drawFlag(
   cssH: number,
   level: Level,
 ): void {
-  const far = level.platforms[1];
-  const gyWorld = far?.y ?? 0;
+  const gyWorld = finishGround(level);
   const sx = worldToScreenX(cam, cssW, level.flagX);
   const gy = worldToScreenY(cam, cssH, gyWorld);
   ctx.strokeStyle = "#1a1410";

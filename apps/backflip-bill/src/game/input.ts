@@ -26,6 +26,8 @@ export interface PlayInput {
   tuck: number;
   /** Edge-triggered backflip / jump. */
   jump: boolean;
+  /** Any play control this frame — keyboard, stick, or FLIP. */
+  touched: boolean;
 }
 
 /**
@@ -108,7 +110,12 @@ export class Input {
 
     const jump = this.jumpQueued;
     this.jumpQueued = false;
-    return { run, tuck, jump };
+    const touched =
+      this.keys.size > 0 ||
+      this.flipHeld ||
+      this.stickId !== null ||
+      Math.abs(this.stickRun) > 0.04;
+    return { run, tuck, jump, touched };
   }
 
   public dispose(): void {

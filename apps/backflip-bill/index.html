@@ -62,23 +62,9 @@
         z-index: 10;
       }
 
-      #title {
-        position: absolute;
-        top: max(0.7rem, env(safe-area-inset-top));
-        left: 50%;
-        transform: translateX(-50%);
-        font-family: "Anton", Impact, sans-serif;
-        font-size: clamp(1.4rem, 7vw, 2.4rem);
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--chalk);
-        text-shadow: 0 2px 0 #07141a88;
-        white-space: nowrap;
-      }
-
       #callout {
         position: absolute;
-        top: 4.2rem;
+        top: max(2.8rem, calc(env(safe-area-inset-top) + 2.2rem));
         left: 50%;
         transform: translateX(-50%);
         font-weight: 700;
@@ -94,27 +80,83 @@
         opacity: 1;
       }
 
-      #level {
+      #level,
+      #score {
         position: absolute;
         top: max(0.75rem, env(safe-area-inset-top));
-        left: max(0.75rem, env(safe-area-inset-left));
         font-size: 0.8rem;
         font-weight: 700;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: var(--sodium);
         background: rgba(7, 20, 26, 0.4);
         border: 1px solid rgba(200, 221, 230, 0.18);
         border-radius: 999px;
         padding: 0.2rem 0.55rem;
       }
 
+      #level {
+        left: max(0.75rem, env(safe-area-inset-left));
+        color: var(--sodium);
+      }
+
+      #score {
+        right: max(0.75rem, env(safe-area-inset-right));
+        color: var(--chalk);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.04em;
+        overflow: visible;
+      }
+
+      #score b {
+        display: inline-block;
+        font-family: "Anton", Impact, sans-serif;
+        font-size: 1.15em;
+        font-weight: 400;
+        letter-spacing: 0.03em;
+        color: #ffd24a;
+      }
+
+      #score.pop b {
+        animation: score-pop 0.35s ease;
+      }
+
+      @keyframes score-pop {
+        0% { transform: scale(1); }
+        40% { transform: scale(1.18); }
+        100% { transform: scale(1); }
+      }
+
+      .score-flake {
+        position: absolute;
+        right: 0.45rem;
+        top: calc(100% + 0.15rem);
+        pointer-events: none;
+        font-family: "Anton", Impact, sans-serif;
+        font-size: 1.05em;
+        font-weight: 400;
+        letter-spacing: 0.03em;
+        color: #ffd24a;
+        text-shadow: 0 1px 0 #07141a88;
+        animation: score-fall 0.7s ease-in forwards;
+      }
+
+      @keyframes score-fall {
+        0% {
+          transform: translate(0, 0) rotate(0deg);
+          opacity: 1;
+        }
+        100% {
+          transform: translate(10px, 52px) rotate(14deg);
+          opacity: 0;
+        }
+      }
+
       #hint {
         position: absolute;
-        top: 7.2rem;
         left: 50%;
+        bottom: max(1.1rem, env(safe-area-inset-bottom));
         transform: translateX(-50%);
-        width: min(22rem, calc(100vw - 2rem));
+        width: min(22rem, calc(100vw - 8rem));
         text-align: center;
         font-size: 0.92rem;
         font-weight: 600;
@@ -132,7 +174,8 @@
       }
 
       body.touch-ui #hint {
-        top: 5.6rem;
+        bottom: calc(min(28vw, 118px) + 1.85rem + env(safe-area-inset-bottom, 0px));
+        width: min(22rem, calc(100vw - 2rem));
         font-size: 0.82rem;
       }
 
@@ -311,6 +354,173 @@
         letter-spacing: 0.02em;
         opacity: 0.8;
       }
+
+      #results {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        align-items: center;
+        justify-content: center;
+        padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+        background: rgba(7, 20, 26, 0.55);
+        pointer-events: auto;
+      }
+
+      #results.open {
+        display: flex;
+      }
+
+      body.results-open #hint,
+      body.results-open #altimeter {
+        opacity: 0;
+        visibility: hidden;
+      }
+
+      .results-card {
+        width: min(22rem, calc(100vw - 2rem));
+        max-height: calc(100dvh - 2rem);
+        overflow: auto;
+        background: rgba(7, 20, 26, 0.88);
+        border: 1px solid rgba(200, 221, 230, 0.22);
+        border-radius: 1rem;
+        padding: 1.15rem 1.2rem 1.05rem;
+        box-shadow: 0 12px 40px #0006;
+      }
+
+      .results-card h2 {
+        font-family: "Anton", Impact, sans-serif;
+        font-size: clamp(1.35rem, 6vw, 1.85rem);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        text-align: center;
+        margin-bottom: 0.85rem;
+      }
+
+      #results-list {
+        list-style: none;
+        display: grid;
+        gap: 0.45rem;
+      }
+
+      #results-list li {
+        display: grid;
+        grid-template-columns: 1fr auto auto auto auto auto;
+        align-items: center;
+        gap: 0.55rem;
+        padding: 0.42rem 0.55rem;
+        background: rgba(200, 221, 230, 0.06);
+        border-radius: 0.55rem;
+        font-size: 0.92rem;
+        font-weight: 600;
+      }
+
+      #results-list .jump-tries {
+        color: var(--foam);
+        font-variant-numeric: tabular-nums;
+        font-size: 0.82rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      #results-list .jump-star {
+        width: 1.15rem;
+        text-align: center;
+        color: #ffd24a;
+        font-size: 1.15rem;
+        line-height: 1;
+        text-shadow: 0 0 8px #f0c14a88;
+      }
+
+      #results-list .jump-star.empty {
+        color: transparent;
+        text-shadow: none;
+      }
+
+      #results-list .jump-spins {
+        min-width: 1.55rem;
+        text-align: right;
+        font-size: 0.82rem;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.04em;
+        color: #ffd24a;
+      }
+
+      #results-list .jump-spins.empty {
+        color: transparent;
+      }
+
+      #results-list .jump-layout {
+        min-width: 2.4rem;
+        text-align: right;
+        font-size: 0.78rem;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.02em;
+        color: var(--foam);
+      }
+
+      #results-list .jump-layout.empty {
+        color: transparent;
+      }
+
+      #results-list .jump-pts {
+        font-variant-numeric: tabular-nums;
+        color: #ffd24a;
+        min-width: 3.2rem;
+        text-align: right;
+      }
+
+      .results-total {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-top: 0.85rem;
+        padding-top: 0.7rem;
+        border-top: 1px solid rgba(200, 221, 230, 0.18);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 0.78rem;
+        color: var(--foam);
+      }
+
+      .results-total b {
+        font-family: "Anton", Impact, sans-serif;
+        font-size: 1.65rem;
+        font-weight: 400;
+        letter-spacing: 0.03em;
+        color: #ffd24a;
+      }
+
+      #results-again {
+        display: block;
+        width: 100%;
+        margin-top: 0.9rem;
+        border: 0;
+        border-radius: 999px;
+        padding: 0.55rem 0.8rem;
+        background: var(--sodium);
+        color: var(--ink);
+        font-family: "Anton", Impact, sans-serif;
+        font-size: 1.05rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        cursor: pointer;
+        box-shadow: 0 3px 0 #0003;
+      }
+
+      #results-again:active {
+        transform: scale(0.98);
+      }
+
+      .results-hint {
+        margin-top: 0.45rem;
+        text-align: center;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--foam);
+        opacity: 0.75;
+      }
     </style>
   </head>
   <body>
@@ -318,7 +528,7 @@
 
     <div id="hud">
       <div id="level">Level 1</div>
-      <div id="title">Backflip Bill</div>
+      <div id="score"><b id="score-value">£0</b></div>
       <div id="callout"></div>
       <p id="hint">Run up, FLIP. In the air, hold FLIP to tuck (speeds it), release to stretch (slows it). Open up to land — stretch out so the knees can cushion.</p>
       <div id="altimeter" aria-hidden="true">
@@ -331,6 +541,16 @@
           </div>
         </div>
         <div id="alt-read">+0.0</div>
+      </div>
+    </div>
+
+    <div id="results" hidden>
+      <div class="results-card">
+        <h2>Bill's jumps</h2>
+        <ol id="results-list"></ol>
+        <p class="results-total"><span>Total</span><b id="results-score">£0</b></p>
+        <button type="button" id="results-again">FLIP to play again</button>
+        <p class="results-hint">Star = clean · extras & layout time bonus</p>
       </div>
     </div>
 
