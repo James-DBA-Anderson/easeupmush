@@ -11,7 +11,7 @@ export function wantsTouchUi(): boolean {
 
 export function isDebugTyping(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
-  if (el.closest("#debug-menu")) return true;
+  if (el.closest("#debug-ui")) return true;
   const tag = el.tagName;
   return tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || el.isContentEditable;
 }

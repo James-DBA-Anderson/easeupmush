@@ -38,8 +38,10 @@ const FLIP: SliderSpec[] = [
 const LANDING: SliderSpec[] = [
   { key: "cleanLandDeg", label: "Clean land (°)", min: 4, max: 80, step: 1 },
   { key: "stumbleLandDeg", label: "Stumble land (°)", min: 10, max: 170, step: 1 },
+  { key: "cleanTuck", label: "Clean tuck (max)", min: 0.05, max: 0.7, step: 0.01 },
+  { key: "hardTuck", label: "Hard tuck (min)", min: 0.4, max: 1, step: 0.01 },
   { key: "stumbleTime", label: "Stumble time", min: 0.1, max: 3, step: 0.05 },
-  { key: "fallenTime", label: "Fall / downed time", min: 0.15, max: 4, step: 0.05 },
+  { key: "fallenTime", label: "Ragdoll / downed time", min: 0.15, max: 4, step: 0.05 },
   { key: "deathTime", label: "Death delay", min: 0.2, max: 4, step: 0.05 },
 ];
 
@@ -51,12 +53,41 @@ const SCHEMES: { id: TuckScheme; label: string; hint: string }[] = [
 
 export function mountDebugMenu(game: Game): void {
   let disk = snapshotTuning();
-  let collapsed = false;
+  let open = false;
 
-  const root = document.createElement("aside");
-  root.id = "debug-menu";
+  const root = document.createElement("div");
+  root.id = "debug-ui";
   root.innerHTML = `
     <style>
+      #debug-ui {
+        pointer-events: none;
+        font-family: "Source Sans 3", "Segoe UI", sans-serif;
+      }
+      #debug-launch,
+      #debug-menu {
+        pointer-events: auto;
+      }
+      #debug-launch {
+        position: fixed;
+        left: max(0.65rem, env(safe-area-inset-left));
+        bottom: max(0.75rem, env(safe-area-inset-bottom));
+        z-index: 50;
+        font-family: inherit;
+        font-weight: 700;
+        font-size: 0.78rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        border-radius: 999px;
+        border: 1px solid rgba(232, 240, 244, 0.35);
+        background: rgba(7, 20, 26, 0.82);
+        color: #f0a23a;
+        padding: 0.38rem 0.85rem;
+        cursor: pointer;
+        box-shadow: 0 4px 16px #0005;
+      }
+      body.touch-ui #debug-launch {
+        bottom: calc(min(34vw, 148px) + 1.8rem + env(safe-area-inset-bottom, 0px));
+      }
       #debug-menu {
         position: fixed;
         top: max(4.4rem, env(safe-area-inset-top));
@@ -65,8 +96,6 @@ export function mountDebugMenu(game: Game): void {
         width: min(21.5rem, calc(100vw - 1.2rem));
         max-height: calc(100dvh - 5.2rem);
         overflow: auto;
-        pointer-events: auto;
-        font-family: "Source Sans 3", "Segoe UI", sans-serif;
         color: #e8f0f4;
         background: rgba(7, 20, 26, 0.92);
         border: 1px solid rgba(200, 221, 230, 0.22);
@@ -74,15 +103,8 @@ export function mountDebugMenu(game: Game): void {
         box-shadow: 0 8px 28px #0006;
         padding: 0.7rem 0.8rem 0.85rem;
       }
-      #debug-menu.collapsed {
-        width: auto;
-        overflow: visible;
-        padding: 0.25rem;
-        background: transparent;
-        border: none;
-        box-shadow: none;
-      }
-      #debug-menu.collapsed .debug-body { display: none; }
+      #debug-ui:not(.open) #debug-menu { display: none; }
+      #debug-ui.open #debug-launch { display: none; }
       #debug-menu h2 {
         margin: 0;
         font-size: 0.72rem;
@@ -97,7 +119,6 @@ export function mountDebugMenu(game: Game): void {
         gap: 0.5rem;
         margin-bottom: 0.55rem;
       }
-      #debug-menu.collapsed .debug-head { margin: 0; }
       #debug-menu fieldset {
         border: 1px solid rgba(200, 221, 230, 0.14);
         border-radius: 8px;
@@ -170,9 +191,11 @@ export function mountDebugMenu(game: Game): void {
         opacity: 0.85;
       }
     </style>
+    <button type="button" id="debug-launch" aria-expanded="false" aria-controls="debug-menu">Debug</button>
+    <aside id="debug-menu" hidden>
     <div class="debug-head">
       <h2>Debug</h2>
-      <button type="button" class="toggle" aria-expanded="true">Hide</button>
+      <button type="button" class="toggle" aria-expanded="false">Hide</button>
     </div>
     <div class="debug-body">
       <fieldset>
@@ -204,25 +227,30 @@ export function mountDebugMenu(game: Game): void {
       </div>
       <p class="status">Tweaks apply live. Save writes them into the game for deploys.</p>
     </div>
+    </aside>
   `;
   document.body.appendChild(root);
 
   const status = root.querySelector(".status")!;
+  const panel = root.querySelector("#debug-menu") as HTMLElement;
+  const launch = root.querySelector("#debug-launch") as HTMLButtonElement;
   const toggle = root.querySelector(".toggle") as HTMLButtonElement;
 
-  const setCollapsed = (next: boolean): void => {
-    collapsed = next;
-    root.classList.toggle("collapsed", collapsed);
-    toggle.textContent = collapsed ? "Debug" : "Hide";
-    toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  const setOpen = (next: boolean): void => {
+    open = next;
+    root.classList.toggle("open", open);
+    panel.hidden = !open;
+    launch.setAttribute("aria-expanded", open ? "true" : "false");
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
   };
 
-  toggle.addEventListener("click", () => setCollapsed(!collapsed));
+  launch.addEventListener("click", () => setOpen(true));
+  toggle.addEventListener("click", () => setOpen(false));
   window.addEventListener("keydown", (e) => {
     if (e.code !== "Backquote" || e.repeat) return;
     if (e.target instanceof HTMLInputElement && e.target.type !== "radio") return;
     e.preventDefault();
-    setCollapsed(!collapsed);
+    setOpen(!open);
   });
 
   const refresh = (): void => {

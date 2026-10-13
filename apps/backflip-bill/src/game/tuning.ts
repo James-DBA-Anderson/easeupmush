@@ -17,10 +17,14 @@ export interface Tuning {
   tuckLerp: number;
   tuckRateStraight: number;
   tuckRateCrouch: number;
-  /** Feet-down window for a clean landing, degrees. */
+  /** Feet-down window for a clean landing, degrees. Wider when extended. */
   cleanLandDeg: number;
   /** Beyond this (degrees from feet-down) is a fall, not a stumble. */
   stumbleLandDeg: number;
+  /** Max crouch (0 layout … 1 tuck) that can still cushion a clean landing. */
+  cleanTuck: number;
+  /** At or above this crouch, landing is hard even on the feet. */
+  hardTuck: number;
   stumbleTime: number;
   fallenTime: number;
   deathTime: number;
@@ -41,6 +45,8 @@ export const TUNING_DEFAULTS: Tuning = {
   tuckRateCrouch: 1.52,
   cleanLandDeg: 22,
   stumbleLandDeg: 68,
+  cleanTuck: 0.4,
+  hardTuck: 0.75,
   stumbleTime: 0.7,
   fallenTime: 1.15,
   deathTime: 1.15,
@@ -62,6 +68,8 @@ export function sanitizeTuning(raw: unknown): Tuning {
     : TUNING_DEFAULTS.tuckScheme;
   const cleanLandDeg = n("cleanLandDeg", 4, 80);
   const stumbleLandDeg = Math.max(cleanLandDeg + 1, n("stumbleLandDeg", 10, 170));
+  const cleanTuck = n("cleanTuck", 0.05, 0.7);
+  const hardTuck = Math.max(cleanTuck + 0.05, n("hardTuck", 0.4, 1));
   return {
     tuckScheme,
     gravity: n("gravity", 6, 48),
@@ -77,6 +85,8 @@ export function sanitizeTuning(raw: unknown): Tuning {
     tuckRateCrouch: n("tuckRateCrouch", 0.4, 3),
     cleanLandDeg,
     stumbleLandDeg,
+    cleanTuck,
+    hardTuck,
     stumbleTime: n("stumbleTime", 0.1, 3),
     fallenTime: n("fallenTime", 0.15, 4),
     deathTime: n("deathTime", 0.2, 4),
@@ -98,5 +108,5 @@ export function hintForScheme(scheme: TuckScheme = tuning.tuckScheme): string {
       : scheme === "horizontal"
         ? "In the air, left straightens (slows the spin), right tucks (speeds it)."
         : "In the air, hold FLIP to tuck (speeds it), release to stretch (slows it).";
-  return `Run up, FLIP. ${air} Land on your feet.`;
+  return `Run up, FLIP. ${air} Open up to land — stretch out so the knees can cushion.`;
 }

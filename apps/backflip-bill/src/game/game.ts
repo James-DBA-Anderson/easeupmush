@@ -1,10 +1,12 @@
 import { Sfx } from "./audio";
 import { Bill, burst, drawBill, stepDust, type Dust } from "./bill";
+import { HIP_HEIGHT } from "./constants";
 import { isDebugTyping, Input } from "./input";
 import { hintForScheme, tuning } from "./tuning";
 import {
   drawSky,
   drawWorld,
+  finishGround,
   fitView,
   followCam,
   groundAt,
@@ -38,6 +40,10 @@ export class Game {
   private calloutEl: HTMLElement;
   private hintEl: HTMLElement;
   private levelEl: HTMLElement;
+  private altFill: HTMLElement;
+  private altZero: HTMLElement;
+  private altMarker: HTMLElement;
+  private altRead: HTMLElement;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -49,6 +55,10 @@ export class Game {
     this.calloutEl = document.getElementById("callout")!;
     this.hintEl = document.getElementById("hint")!;
     this.levelEl = document.getElementById("level")!;
+    this.altFill = document.getElementById("alt-fill")!;
+    this.altZero = document.getElementById("alt-zero")!;
+    this.altMarker = document.getElementById("alt-marker")!;
+    this.altRead = document.getElementById("alt-read")!;
     this.titleEl.textContent = "Backflip Bill";
     window.addEventListener("resize", this.resize);
     window.addEventListener("pointerdown", () => this.sfx.resume(), { once: true });
@@ -151,13 +161,17 @@ export class Game {
           burst(this.dust, e.x, e.y, 8, "rgba(232,240,244,0.7)", 3);
         } else if (e.kind === "stumble") {
           this.sfx.stumble();
-          this.flash("Ease up mush");
+          this.flash("Hard landing");
           burst(this.dust, e.x, e.y, 12, "rgba(240,162,58,0.8)", 4);
         } else {
           this.sfx.fall();
           this.flash("You're having a laugh");
           burst(this.dust, e.x, e.y, 16, "rgba(196,60,42,0.75)", 5);
         }
+      }
+      if (this.bill.restarted) {
+        this.flash("Back to the start");
+        this.respawn();
       }
       if (this.bill.died) {
         this.sfx.death();
@@ -191,6 +205,26 @@ export class Game {
     this.calloutEl.textContent = this.bannerT > 0 ? this.banner : "";
     this.calloutEl.classList.toggle("on", this.bannerT > 0);
     this.hintEl.classList.toggle("faded", this.hintT <= 0);
+    this.syncAltimeter();
+  }
+
+  private syncAltimeter(): void {
+    const level = this.level();
+    const finishY = finishGround(level);
+    const alt = this.bill.y - HIP_HEIGHT - finishY;
+    const spawnAlt = spawnGround(level) - finishY;
+    const jumpPeak = (tuning.jumpVy * tuning.jumpVy) / (2 * Math.max(1, tuning.gravity));
+    const maxAlt = Math.max(spawnAlt + jumpPeak + 0.8, jumpPeak + 1.6);
+    const minAlt = Math.min(-1.2, (level.killY - finishY) * 0.1);
+    const span = Math.max(0.8, maxAlt - minAlt);
+    const pct = (v: number): string => `${((Math.max(minAlt, Math.min(maxAlt, v)) - minAlt) / span) * 100}%`;
+    this.altZero.style.bottom = pct(0);
+    this.altMarker.style.bottom = pct(alt);
+    const fill = Math.max(0, Math.min(100, ((Math.max(0, Math.min(maxAlt, alt)) - minAlt) / span) * 100));
+    const zero = Math.max(0, Math.min(100, ((0 - minAlt) / span) * 100));
+    this.altFill.style.bottom = `${Math.min(fill, zero)}%`;
+    this.altFill.style.height = `${Math.abs(fill - zero)}%`;
+    this.altRead.textContent = `${alt >= 0 ? "+" : ""}${alt.toFixed(1)}`;
   }
 
   private flash(msg: string): void {

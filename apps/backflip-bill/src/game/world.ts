@@ -1,5 +1,8 @@
 import { VIEW_WIDTH } from "./constants";
 
+/** World x of the start wall. Camera is locked here, so this sits on the left of the screen. */
+export const START_WALL_X = 0.55;
+
 export interface Platform {
   x0: number;
   x1: number;
@@ -67,11 +70,54 @@ export function spawnGround(level: Level): number {
   return groundAt(level, level.spawnX) ?? 0;
 }
 
+/** Finish-line platform height. Altimeter 0. */
+export function finishGround(level: Level): number {
+  return groundAt(level, level.flagX) ?? 0;
+}
+
 export function groundAt(level: Level, x: number): number | null {
   for (const p of level.platforms) {
     if (x >= p.x0 && x <= p.x1) return p.y;
   }
   return null;
+}
+
+/** Push a circle out of platform solids (top slab + vertical sides, infinite down). */
+export function pushOutOfSolid(
+  level: Level,
+  x: number,
+  y: number,
+  r: number,
+): { nx: number; ny: number; depth: number } | null {
+  let best: { nx: number; ny: number; depth: number } | null = null;
+  for (const p of level.platforms) {
+    const left = p.x0 - r;
+    const right = p.x1 + r;
+    const top = p.y + r;
+    if (x < left || x > right || y > top) continue;
+    const penUp = top - y;
+    const penL = x - left;
+    const penR = right - x;
+    let nx = 0;
+    let ny = 1;
+    let depth = penUp;
+    if (penL < depth) {
+      depth = penL;
+      nx = -1;
+      ny = 0;
+    }
+    if (penR < depth) {
+      depth = penR;
+      nx = 1;
+      ny = 0;
+    }
+    if (depth > 0 && (!best || depth > best.depth)) best = { nx, ny, depth };
+  }
+  const wallDepth = START_WALL_X + r - x;
+  if (wallDepth > 0 && (!best || wallDepth > best.depth)) {
+    best = { nx: 1, ny: 0, depth: wallDepth };
+  }
+  return best;
 }
 
 export interface Cam {
@@ -142,6 +188,7 @@ export function drawWorld(
   drawBackdrop(ctx, cam, cssW, cssH, level);
   drawPit(ctx, cam, cssW, cssH, level);
   drawGround(ctx, cam, cssW, cssH, level);
+  drawStartWall(ctx, cam, cssW, cssH, level);
   drawFlag(ctx, cam, cssW, cssH, level);
 }
 
@@ -279,6 +326,27 @@ function drawGround(
     const gy = worldToScreenY(cam, cssH, right.y);
     ctx.fillRect(b - 3, gy - 6, 8, 18);
   }
+}
+
+function drawStartWall(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  const x = worldToScreenX(cam, cssW, START_WALL_X);
+  if (x < 2) return;
+  const roof = level.platforms[0]?.y ?? 0;
+  const gy = worldToScreenY(cam, cssH, roof);
+  ctx.fillStyle = "#3d3832";
+  ctx.fillRect(0, 0, x, cssH);
+  ctx.fillStyle = "#2a2622";
+  ctx.fillRect(0, gy, x, cssH - gy);
+  ctx.fillStyle = "#8a8378";
+  ctx.fillRect(x - 10, 0, 10, cssH);
+  ctx.fillStyle = "#d8cbb8";
+  ctx.fillRect(x - 4, 0, 4, cssH);
 }
 
 function drawFlag(

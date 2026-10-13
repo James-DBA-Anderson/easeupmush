@@ -13,6 +13,8 @@
   "tuckRateCrouch": 1.52,
   "cleanLandDeg": 22,
   "stumbleLandDeg": 68,
+  "cleanTuck": 0.4,
+  "hardTuck": 0.75,
   "stumbleTime": 0.7,
   "fallenTime": 1.15,
   "deathTime": 1.15

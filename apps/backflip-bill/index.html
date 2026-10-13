@@ -136,6 +136,95 @@
         font-size: 0.82rem;
       }
 
+      #altimeter {
+        position: absolute;
+        right: max(0.7rem, env(safe-area-inset-right));
+        bottom: max(0.75rem, env(safe-area-inset-bottom));
+        display: flex;
+        align-items: flex-end;
+        gap: 0.4rem;
+        color: var(--chalk);
+      }
+
+      body.touch-ui #altimeter {
+        bottom: calc(min(28vw, 118px) + 1.7rem + env(safe-area-inset-bottom, 0px));
+      }
+
+      #altimeter .alt-scale {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.28rem;
+      }
+
+      #altimeter .alt-caption {
+        font-size: 0.62rem;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--sodium);
+      }
+
+      #altimeter .alt-track {
+        position: relative;
+        width: 0.55rem;
+        height: clamp(7.5rem, 32vh, 14rem);
+        background: rgba(7, 20, 26, 0.5);
+        border: 1px solid rgba(200, 221, 230, 0.28);
+        border-radius: 999px;
+        overflow: visible;
+      }
+
+      #altimeter .alt-fill {
+        position: absolute;
+        left: 1px;
+        right: 1px;
+        bottom: 0;
+        border-radius: inherit;
+        background: linear-gradient(to top, #f0a23a, #c8dde6);
+        opacity: 0.85;
+        pointer-events: none;
+      }
+
+      #alt-zero {
+        position: absolute;
+        left: -0.22rem;
+        right: -0.22rem;
+        height: 2px;
+        background: var(--sodium);
+        transform: translateY(50%);
+      }
+
+      #alt-zero span {
+        position: absolute;
+        right: 100%;
+        top: 50%;
+        transform: translate(-0.28rem, -50%);
+        font-size: 0.68rem;
+        font-weight: 700;
+        color: var(--sodium);
+      }
+
+      #alt-marker {
+        position: absolute;
+        left: 50%;
+        width: 0;
+        height: 0;
+        border-top: 0.28rem solid transparent;
+        border-bottom: 0.28rem solid transparent;
+        border-right: 0.42rem solid var(--chalk);
+        transform: translate(-0.05rem, 50%);
+        filter: drop-shadow(0 1px 0 #07141a);
+      }
+
+      #alt-read {
+        font-size: 0.78rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        text-shadow: 0 1px 0 #07141a88;
+        min-width: 3.1rem;
+      }
+
       #mobile-controls {
         display: none;
         position: fixed;
@@ -231,7 +320,18 @@
       <div id="level">Level 1</div>
       <div id="title">Backflip Bill</div>
       <div id="callout"></div>
-      <p id="hint">Run up, FLIP. In the air, left straightens (slows the spin), right tucks (speeds it). Land on your feet.</p>
+      <p id="hint">Run up, FLIP. In the air, hold FLIP to tuck (speeds it), release to stretch (slows it). Open up to land — stretch out so the knees can cushion.</p>
+      <div id="altimeter" aria-hidden="true">
+        <div class="alt-scale">
+          <span class="alt-caption">Alt</span>
+          <div class="alt-track">
+            <div class="alt-fill" id="alt-fill"></div>
+            <div id="alt-zero"><span>0</span></div>
+            <div id="alt-marker"></div>
+          </div>
+        </div>
+        <div id="alt-read">+0.0</div>
+      </div>
     </div>
 
     <div id="mobile-controls" aria-hidden="true">
