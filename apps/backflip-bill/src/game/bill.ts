@@ -479,7 +479,7 @@ export class Bill {
     const floor = groundAt(level, this.x);
     const onGround = floor !== null;
     let limb = 0;
-    for (const key of Object.keys(rag.vel) as (keyof Pose)[]) limb += Math.abs(rag.vel[key]);
+    for (const key of Object.keys(rag.vel) as (keyof Pose)[]) limb += Math.abs(rag.vel[key] ?? 0);
     const moving =
       Math.abs(this.vx) > 0.35 ||
       Math.abs(rag.omega) > 0.5 ||
@@ -1264,14 +1264,18 @@ function jointOvershoot(
   const out: { key: keyof Pose; excess: number; speed: number }[] = [];
   const abs = (key: keyof Pose, min: number, max: number) => {
     const v = pose[key];
+    if (v === undefined) return;
+    const speed = vel[key] ?? 0;
     const excess = v < min ? min - v : v > max ? v - max : 0;
-    const drive = stopDrive(v, vel[key], min, max);
+    const drive = stopDrive(v, speed, min, max);
     const projected = excess + drive * 0.05;
-    if (projected > 0.02) out.push({ key, excess: projected, speed: Math.abs(vel[key]) });
+    if (projected > 0.02) out.push({ key, excess: projected, speed: Math.abs(speed) });
   };
   const rel = (child: keyof Pose, parent: keyof Pose, min: number, max: number) => {
-    const childAng = pose[child] ?? pose[parent];
-    const r = wrapPi(childAng - pose[parent]);
+    const parentAng = pose[parent];
+    if (parentAng === undefined) return;
+    const childAng = pose[child] ?? parentAng;
+    const r = wrapPi(childAng - parentAng);
     const rVel = (vel[child] ?? 0) - (vel[parent] ?? 0);
     const excess = r < min ? min - r : r > max ? r - max : 0;
     const drive = stopDrive(r, rVel, min, max);
@@ -1387,9 +1391,10 @@ function clampLimbPose(pose: Pose): Pose {
 }
 
 function integrateJoint(pose: Pose, vel: Pose, key: keyof Pose, pull: number, dt: number, damp: number): void {
-  vel[key] += (pull - vel[key] * damp) * dt;
-  vel[key] = clamp(vel[key], -18, 18);
-  pose[key] += vel[key] * dt;
+  const v = vel[key] ?? 0;
+  const next = clamp(v + (pull - v * damp) * dt, -18, 18);
+  vel[key] = next;
+  pose[key] = (pose[key] ?? 0) + next * dt;
 }
 
 function flopToward(rag: Ragdoll, hang: number, dt: number, _grounded: boolean, heap = false): void {
@@ -1656,6 +1661,7 @@ function foldLimb(
   for (const joint of joints) {
     if (left < 0.002) return;
     const orig = pose[joint];
+    if (orig === undefined) continue;
     const p0 = makeRig(pose, airFeet)[rigKey];
     const w0 = worldOf(bill, p0.x, p0.y);
     let bestGain = 0;
@@ -1684,7 +1690,7 @@ function foldLimb(
     left -= (w.x - w0.x) * nx + (w.y - w0.y) * ny;
   }
   if (left > 0.08 && joints[0]) {
-    noteSnap(bill, joints[0], 0, Math.abs(vel[joints[0]]), left);
+    noteSnap(bill, joints[0], 0, Math.abs(vel[joints[0]] ?? 0), left);
   }
 }
 
