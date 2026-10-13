@@ -7,3 +7,9 @@ if (!(canvas instanceof HTMLCanvasElement)) {
 
 const game = new Game(canvas);
 game.start();
+
+if (import.meta.env.DEV) {
+  void import("./game/debugMenu").then(({ mountDebugMenu }) => {
+    mountDebugMenu(game);
+  });
+}

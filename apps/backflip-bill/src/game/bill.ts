@@ -1,22 +1,5 @@
-import {
-  ACCEL,
-  CLEAN_LAND_RAD,
-  DECEL,
-  FALLEN_TIME,
-  FLIP_DURATION_FAST,
-  FLIP_DURATION_SLOW,
-  GRAVITY,
-  HIP_HEIGHT,
-  JUMP_VY,
-  MAX_SPEED,
-  STUMBLE_LAND_RAD,
-  STUMBLE_TIME,
-  TAU,
-  TUCK_LERP,
-  TUCK_RATE_CROUCH,
-  TUCK_RATE_STRAIGHT,
-  TURN_ACCEL,
-} from "./constants";
+import { degToRad, HIP_HEIGHT, TAU } from "./constants";
+import { tuning } from "./tuning";
 import { groundAt, spawnGround, type Level } from "./world";
 
 export type BillState = "ground" | "air" | "stumble" | "fallen" | "dead" | "done";
@@ -41,7 +24,7 @@ export class Bill {
   runPhase = 0;
   lockTimer = 0;
   flipTravel = 0;
-  flipDuration = FLIP_DURATION_SLOW;
+  flipDuration = tuning.flipDurationSlow;
   airTime = 0;
   flipping = false;
   /** 0 = layout / straight, 1 = full crouch. Default 0.5. */
@@ -62,7 +45,7 @@ export class Bill {
     this.runPhase = 0;
     this.lockTimer = 0;
     this.flipTravel = 0;
-    this.flipDuration = FLIP_DURATION_SLOW;
+    this.flipDuration = tuning.flipDurationSlow;
     this.airTime = 0;
     this.flipping = false;
     this.tuck = 0.5;
@@ -121,18 +104,19 @@ export class Bill {
       return;
     }
 
-    // Air: horizontal trajectory locked. Vertical stick only tucks the flip.
-    this.vy -= GRAVITY * dt;
+    // Air: horizontal trajectory locked. Stick / hold-jump only tucks the flip.
+    this.vy -= tuning.gravity * dt;
     this.x += this.vx * dt;
     this.y += this.vy * dt;
     this.airTime += dt;
 
     if (this.flipping) {
       const targetTuck = 0.5 + 0.5 * Math.max(-1, Math.min(1, tuckAxis));
-      const k = 1 - Math.exp(-TUCK_LERP * dt);
+      const k = 1 - Math.exp(-tuning.tuckLerp * dt);
       this.tuck += (targetTuck - this.tuck) * k;
       const rate =
-        TUCK_RATE_STRAIGHT + (TUCK_RATE_CROUCH - TUCK_RATE_STRAIGHT) * this.tuck;
+        tuning.tuckRateStraight +
+        (tuning.tuckRateCrouch - tuning.tuckRateStraight) * this.tuck;
       const omega = (TAU / this.flipDuration) * rate;
       this.flipTravel += omega * dt;
       this.rot = this.flipTravel;
@@ -149,15 +133,18 @@ export class Bill {
   }
 
   private groundMove(dt: number, run: number): void {
-    const target = run * MAX_SPEED;
+    const target = run * tuning.maxSpeed;
     if (Math.abs(run) > 0.05) {
-      const accel = Math.sign(run) === Math.sign(this.vx) || Math.abs(this.vx) < 0.3 ? ACCEL : TURN_ACCEL;
+      const accel =
+        Math.sign(run) === Math.sign(this.vx) || Math.abs(this.vx) < 0.3
+          ? tuning.accel
+          : tuning.turnAccel;
       if (this.vx < target) this.vx = Math.min(target, this.vx + accel * dt);
       else this.vx = Math.max(target, this.vx - accel * dt);
       this.facing = run >= 0 ? 1 : -1;
     } else {
       const mag = Math.abs(this.vx);
-      const next = Math.max(0, mag - DECEL * dt);
+      const next = Math.max(0, mag - tuning.decel * dt);
       this.vx = mag < 0.05 ? 0 : Math.sign(this.vx) * next;
     }
     this.x += this.vx * dt;
@@ -167,14 +154,15 @@ export class Bill {
   private takeOff(): void {
     this.state = "air";
     this.flipping = true;
-    this.vy = JUMP_VY;
+    this.vy = tuning.jumpVy;
     this.flipTravel = 0;
     this.rot = 0;
     this.airTime = 0;
     this.tuck = 0.5;
-    const speed = Math.min(1, Math.abs(this.vx) / MAX_SPEED);
+    const speed = Math.min(1, Math.abs(this.vx) / tuning.maxSpeed);
     this.flipDuration =
-      FLIP_DURATION_SLOW + (FLIP_DURATION_FAST - FLIP_DURATION_SLOW) * speed;
+      tuning.flipDurationSlow +
+      (tuning.flipDurationFast - tuning.flipDurationSlow) * speed;
   }
 
   private land(g: number): void {
@@ -182,16 +170,16 @@ export class Bill {
     const ang = wrapPi(this.rot);
     const off = Math.abs(ang);
 
-    if (off <= CLEAN_LAND_RAD) {
+    if (off <= degToRad(tuning.cleanLandDeg)) {
       this.state = "ground";
       this.flipping = false;
       this.rot = 0;
       this.tuck = 0.5;
       this.landEvent = { kind: "clean", x: this.x, y: g };
-    } else if (off <= STUMBLE_LAND_RAD) {
+    } else if (off <= degToRad(tuning.stumbleLandDeg)) {
       this.state = "stumble";
       this.flipping = false;
-      this.lockTimer = STUMBLE_TIME;
+      this.lockTimer = tuning.stumbleTime;
       this.vx *= 0.28;
       this.rot = Math.sign(ang || 1) * 0.35;
       this.tuck = 0.5;
@@ -199,7 +187,7 @@ export class Bill {
     } else {
       this.state = "fallen";
       this.flipping = false;
-      this.lockTimer = FALLEN_TIME;
+      this.lockTimer = tuning.fallenTime;
       this.vx = 0;
       this.rot = Math.abs(ang) > Math.PI * 0.75 ? Math.PI : Math.sign(ang || 1) * (Math.PI / 2);
       this.y = g + HIP_HEIGHT * 0.38;
@@ -288,6 +276,7 @@ export function drawBill(
   ctx.rotate(bill.rot);
 
   const pose = poseFor(bill, t);
+  const arch = pose.arch;
 
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -295,8 +284,15 @@ export function drawBill(
   ctx.fillStyle = "#11110e";
 
   const hip: Pt = { x: 0, y: 0 };
-  const neck: Pt = { x: pose.lean * 0.08, y: 0.62 };
-  const head: Pt = { x: neck.x + pose.lean * 0.05, y: neck.y + 0.24 };
+  const chest: Pt = { x: arch * 0.16, y: 0.32 };
+  const neck: Pt = {
+    x: pose.lean * 0.08 - arch * 0.12,
+    y: 0.62 - arch * 0.03,
+  };
+  const head: Pt = {
+    x: neck.x + pose.lean * 0.05 - arch * 0.1,
+    y: neck.y + 0.23 - arch * 0.02,
+  };
 
   const lHip: Pt = { x: -0.07, y: -0.02 };
   const rHip: Pt = { x: 0.07, y: -0.02 };
@@ -314,18 +310,22 @@ export function drawBill(
 
   strokeSeg(ctx, lHip, lKnee, lFoot, 0.09);
   strokeSeg(ctx, rHip, rKnee, rFoot, 0.09);
-  strokeSeg(ctx, hip, neck, 0.1);
+  strokeCurve(ctx, hip, chest, neck, 0.1);
   strokeSeg(ctx, lSh, lElb, lHand, 0.08);
   strokeSeg(ctx, rSh, rElb, rHand, 0.08);
 
   ctx.beginPath();
   ctx.arc(head.x, head.y, 0.19, 0, TAU);
   ctx.fill();
+  ctx.save();
+  ctx.translate(head.x, head.y);
+  ctx.rotate(-arch * 0.7);
   ctx.fillStyle = "#c43c2a";
   ctx.beginPath();
-  ctx.ellipse(head.x, head.y + 0.12, 0.2, 0.08, 0, 0, TAU);
+  ctx.ellipse(0, 0.12, 0.2, 0.08, 0, 0, TAU);
   ctx.fill();
-  ctx.fillRect(head.x - 0.02, head.y + 0.1, 0.24, 0.045);
+  ctx.fillRect(-0.02, 0.1, 0.24, 0.045);
+  ctx.restore();
 
   ctx.restore();
 }
@@ -337,6 +337,8 @@ interface Pt {
 
 interface Pose {
   lean: number;
+  /** 0 = straight spine, 1 = hyperextended layout arch. */
+  arch: number;
   lThigh: number;
   rThigh: number;
   lShin: number;
@@ -351,6 +353,7 @@ function poseFor(bill: Bill, t: number): Pose {
   if (bill.state === "fallen") {
     return {
       lean: 0.2,
+      arch: 0,
       lThigh: -2.4,
       rThigh: -2.1,
       lShin: -2.9,
@@ -367,6 +370,7 @@ function poseFor(bill: Bill, t: number): Pose {
       const hang = -Math.PI / 2;
       return {
         lean: 0.2,
+        arch: 0,
         lThigh: hang + 0.15,
         rThigh: hang - 0.1,
         lShin: hang,
@@ -381,7 +385,7 @@ function poseFor(bill: Bill, t: number): Pose {
   }
 
   const moving = Math.abs(bill.vx) > 0.35;
-  const amp = moving ? Math.min(1, Math.abs(bill.vx) / MAX_SPEED) : 0;
+  const amp = moving ? Math.min(1, Math.abs(bill.vx) / tuning.maxSpeed) : 0;
   const p = bill.runPhase;
   const limp = bill.state === "stumble" ? 0.55 : 1;
   const lSwing = Math.sin(p) * 0.85 * amp * limp;
@@ -391,6 +395,7 @@ function poseFor(bill: Bill, t: number): Pose {
   const hang = -Math.PI / 2;
   return {
     lean: (moving ? 0.35 * amp : 0) + (bill.state === "stumble" ? 0.5 : 0),
+    arch: 0,
     lThigh: hang + lSwing + idle,
     rThigh: hang + rSwing - idle,
     lShin: hang + lSwing * 0.35 - 0.15 * amp,
@@ -402,22 +407,24 @@ function poseFor(bill: Bill, t: number): Pose {
   };
 }
 
-/** Straightened layout — limbs trail a little from the spin. */
+/** Layout: arched back, full extension, arms and legs trailing the spin. */
 const LAYOUT: Pose = {
-  lean: 0.02,
-  lThigh: -1.82,
-  rThigh: -1.48,
-  lShin: -1.7,
-  rShin: -1.42,
-  lArm: -2.55,
-  rArm: -2.15,
-  lFore: -2.85,
-  rFore: -2.4,
+  lean: -0.28,
+  arch: 1,
+  lThigh: -1.98,
+  rThigh: -1.82,
+  lShin: -2.12,
+  rShin: -1.94,
+  lArm: 2.08,
+  rArm: 1.88,
+  lFore: 2.28,
+  rFore: 2.06,
 };
 
 /** Tight crouch. */
 const CROUCH: Pose = {
   lean: 0.18,
+  arch: -0.12,
   lThigh: 2.55,
   rThigh: 2.28,
   lShin: 0.55,
@@ -432,6 +439,7 @@ function lerpPose(a: Pose, b: Pose, t: number): Pose {
   const u = Math.max(0, Math.min(1, t));
   return {
     lean: a.lean + (b.lean - a.lean) * u,
+    arch: a.arch + (b.arch - a.arch) * u,
     lThigh: a.lThigh + (b.lThigh - a.lThigh) * u,
     rThigh: a.rThigh + (b.rThigh - a.rThigh) * u,
     lShin: a.lShin + (b.lShin - a.lShin) * u,
@@ -456,5 +464,13 @@ function strokeSeg(ctx: CanvasRenderingContext2D, ...ptsAndWidth: [...Pt[], numb
   for (let i = 1; i < pts.length; i++) {
     ctx.lineTo(pts[i]!.x, pts[i]!.y);
   }
+  ctx.stroke();
+}
+
+function strokeCurve(ctx: CanvasRenderingContext2D, a: Pt, ctrl: Pt, b: Pt, w: number): void {
+  ctx.lineWidth = w;
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.quadraticCurveTo(ctrl.x, ctrl.y, b.x, b.y);
   ctx.stroke();
 }

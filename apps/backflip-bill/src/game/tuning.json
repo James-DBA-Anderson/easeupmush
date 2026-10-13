@@ -1,0 +1,19 @@
+{
+  "tuckScheme": "horizontal",
+  "gravity": 24,
+  "jumpVy": 11.4,
+  "maxSpeed": 8.4,
+  "accel": 22,
+  "decel": 18,
+  "turnAccel": 32,
+  "flipDurationSlow": 1.28,
+  "flipDurationFast": 0.82,
+  "tuckLerp": 7.5,
+  "tuckRateStraight": 0.55,
+  "tuckRateCrouch": 1.52,
+  "cleanLandDeg": 22,
+  "stumbleLandDeg": 68,
+  "stumbleTime": 0.7,
+  "fallenTime": 1.15,
+  "deathTime": 1.15
+}

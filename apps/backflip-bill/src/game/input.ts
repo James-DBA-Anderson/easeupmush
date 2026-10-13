@@ -1,4 +1,5 @@
 import { JOYSTICK_DEADZONE } from "./constants";
+import { tuning } from "./tuning";
 
 /** Portrait, phone-sized, or a coarse pointer — show the on-screen controls. */
 export const MOBILE_QUERY =
@@ -8,12 +9,19 @@ export function wantsTouchUi(): boolean {
   return window.matchMedia(MOBILE_QUERY).matches;
 }
 
+export function isDebugTyping(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.closest("#debug-menu")) return true;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || el.isContentEditable;
+}
+
 export interface PlayInput {
   /** −1 … +1 run. Horizontal air steering is ignored by the player. */
   run: number;
   /**
-   * −1 straighten (up) … +1 crouch (down). Only used in the air.
-   * 0 is the midpoint tuck.
+   * −1 straighten … +1 crouch. Only used in the air.
+   * 0 is the midpoint tuck (unused for hold-jump, which is always ±1).
    */
   tuck: number;
   /** Edge-triggered backflip / jump. */
@@ -27,8 +35,10 @@ export interface PlayInput {
 export class Input {
   private keys = new Set<string>();
   private jumpQueued = false;
+  private flipHeld = false;
   private stickRun = 0;
-  private stickTuck = 0;
+  private stickNx = 0;
+  private stickNy = 0;
   private enabled = false;
   private root: HTMLElement;
   private stick: HTMLElement;
@@ -75,9 +85,25 @@ export class Input {
     if (this.keys.has("ArrowRight") || this.keys.has("KeyD")) run += 1;
     run = Math.max(-1, Math.min(1, run));
 
-    let tuck = this.stickTuck;
-    if (this.keys.has("ArrowUp") || this.keys.has("KeyW")) tuck -= 1;
-    if (this.keys.has("ArrowDown") || this.keys.has("KeyS")) tuck += 1;
+    const jumpHeld =
+      this.flipHeld ||
+      this.keys.has("Space") ||
+      this.keys.has("KeyW") ||
+      this.keys.has("ArrowUp");
+
+    let tuck = 0;
+    const scheme = tuning.tuckScheme;
+    if (scheme === "vertical") {
+      tuck = this.stickNy;
+      if (this.keys.has("ArrowUp") || this.keys.has("KeyW")) tuck -= 1;
+      if (this.keys.has("ArrowDown") || this.keys.has("KeyS")) tuck += 1;
+    } else if (scheme === "horizontal") {
+      tuck = this.stickNx;
+      if (this.keys.has("ArrowLeft") || this.keys.has("KeyA")) tuck -= 1;
+      if (this.keys.has("ArrowRight") || this.keys.has("KeyD")) tuck += 1;
+    } else {
+      tuck = jumpHeld ? 1 : -1;
+    }
     tuck = Math.max(-1, Math.min(1, tuck));
 
     const jump = this.jumpQueued;
@@ -106,6 +132,7 @@ export class Input {
 
   private onKeyDown = (e: KeyboardEvent): void => {
     if (e.repeat) return;
+    if (isDebugTyping(e.target)) return;
     this.keys.add(e.code);
     if (e.code === "Space") {
       e.preventDefault();
@@ -122,6 +149,7 @@ export class Input {
 
   private onBlur = (): void => {
     this.keys.clear();
+    this.flipHeld = false;
     this.resetStick();
   };
 
@@ -131,10 +159,12 @@ export class Input {
       e.preventDefault();
       this.flip.setPointerCapture(e.pointerId);
       this.jumpQueued = true;
+      this.flipHeld = true;
       this.flip.classList.add("active");
     };
     const off = (e: PointerEvent) => {
       e.preventDefault();
+      this.flipHeld = false;
       this.flip.classList.remove("active");
     };
     this.flip.addEventListener("pointerdown", on);
@@ -219,14 +249,16 @@ export class Input {
     let ny = dy / max;
     if (Math.abs(nx) < JOYSTICK_DEADZONE) nx = 0;
     if (Math.abs(ny) < JOYSTICK_DEADZONE) ny = 0;
-    this.stickRun = Math.max(-1, Math.min(1, nx));
-    this.stickTuck = Math.max(-1, Math.min(1, ny));
+    this.stickNx = Math.max(-1, Math.min(1, nx));
+    this.stickNy = Math.max(-1, Math.min(1, ny));
+    this.stickRun = this.stickNx;
   }
 
   private resetStick(): void {
     this.stickId = null;
     this.stickRun = 0;
-    this.stickTuck = 0;
+    this.stickNx = 0;
+    this.stickNy = 0;
     this.stick.classList.remove("active");
     this.knob.style.transform = "translate(-50%, -50%)";
     if (this.floating) {

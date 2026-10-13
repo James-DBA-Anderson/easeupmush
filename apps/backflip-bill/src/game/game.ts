@@ -1,7 +1,7 @@
 import { Sfx } from "./audio";
 import { Bill, burst, drawBill, stepDust, type Dust } from "./bill";
-import { DEATH_TIME } from "./constants";
-import { Input } from "./input";
+import { isDebugTyping, Input } from "./input";
+import { hintForScheme, tuning } from "./tuning";
 import {
   drawSky,
   drawWorld,
@@ -53,17 +53,25 @@ export class Game {
     window.addEventListener("resize", this.resize);
     window.addEventListener("pointerdown", () => this.sfx.resume(), { once: true });
     window.addEventListener("keydown", (e) => {
+      if (isDebugTyping(e.target)) return;
       if (e.code === "KeyR") this.respawn();
     });
     this.bill.spawn(this.level());
     this.syncLevelHud();
+    this.syncHint();
     this.resize();
+    const wanted = Number(new URLSearchParams(window.location.search).get("level"));
+    if (wanted >= 1 && wanted <= LEVELS.length) this.loadLevel(wanted - 1);
   }
 
   public start(): void {
     this.running = true;
     this.last = performance.now();
     requestAnimationFrame(this.frame);
+  }
+
+  public onTuningChanged(): void {
+    this.syncHint();
   }
 
   private level(): Level {
@@ -88,6 +96,10 @@ export class Game {
   private syncLevelHud(): void {
     const lv = this.level();
     this.levelEl.textContent = lv.title;
+  }
+
+  private syncHint(): void {
+    this.hintEl.textContent = hintForScheme();
   }
 
   private resize = (): void => {
@@ -150,12 +162,12 @@ export class Game {
       if (this.bill.died) {
         this.sfx.death();
         this.flash("Bill's gone in the gap");
-        this.deathT = DEATH_TIME;
+        this.deathT = tuning.deathTime;
       }
       if (this.bill.finished) {
         this.sfx.finish();
         if (this.levelIndex < LEVELS.length - 1) {
-          this.flash("Get in — FLIP for level 2");
+          this.flash(`Get in — FLIP for level ${this.levelIndex + 2}`);
         } else {
           this.flash("Get in, Bill");
         }
