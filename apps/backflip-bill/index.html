@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#1b3348" />
+    <meta
+      name="description"
+      content="Backflip Bill — a 2D platformer where the only jump is a backflip. Land on your feet."
+    />
+    <title>Backflip Bill</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Source+Sans+3:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --ink: #07141a;
+        --foam: #c8dde6;
+        --sodium: #f0a23a;
+        --chalk: #e8f0f4;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
+        overflow: hidden;
+        background: #1b3348;
+        font-family: "Source Sans 3", "Segoe UI", sans-serif;
+        color: var(--chalk);
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: none;
+      }
+
+      #game {
+        display: block;
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
+        touch-action: none;
+      }
+
+      #hud {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 10;
+      }
+
+      #title {
+        position: absolute;
+        top: max(0.7rem, env(safe-area-inset-top));
+        left: 50%;
+        transform: translateX(-50%);
+        font-family: "Anton", Impact, sans-serif;
+        font-size: clamp(1.4rem, 7vw, 2.4rem);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--chalk);
+        text-shadow: 0 2px 0 #07141a88;
+        white-space: nowrap;
+      }
+
+      #callout {
+        position: absolute;
+        top: 4.2rem;
+        left: 50%;
+        transform: translateX(-50%);
+        font-weight: 700;
+        font-size: clamp(0.95rem, 4vw, 1.2rem);
+        color: var(--sodium);
+        text-shadow: 0 1px 0 #07141a;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+        white-space: nowrap;
+      }
+
+      #callout.on {
+        opacity: 1;
+      }
+
+      #hint {
+        position: absolute;
+        top: 7.2rem;
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(22rem, calc(100vw - 2rem));
+        text-align: center;
+        font-size: 0.92rem;
+        font-weight: 600;
+        color: var(--foam);
+        background: rgba(7, 20, 26, 0.45);
+        border: 1px solid rgba(200, 221, 230, 0.18);
+        border-radius: 999px;
+        padding: 0.4rem 0.9rem;
+        transition: opacity 0.6s ease, visibility 0.6s ease;
+      }
+
+      #hint.faded {
+        opacity: 0;
+        visibility: hidden;
+      }
+
+      body.touch-ui #hint {
+        top: 5.6rem;
+        font-size: 0.82rem;
+      }
+
+      #mobile-controls {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 30;
+        pointer-events: none;
+      }
+
+      #mobile-controls.visible,
+      body.touch-ui #mobile-controls {
+        display: block;
+      }
+
+      #stick-zone {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 48%;
+        height: 100%;
+        pointer-events: auto;
+        touch-action: none;
+      }
+
+      .mobile-stick {
+        position: absolute;
+        left: max(1rem, env(safe-area-inset-left));
+        bottom: max(1.2rem, env(safe-area-inset-bottom));
+        width: min(34vw, 148px);
+        height: min(34vw, 148px);
+        border-radius: 50%;
+        background: rgba(7, 20, 26, 0.32);
+        border: 3px solid rgba(232, 240, 244, 0.55);
+        pointer-events: auto;
+        touch-action: none;
+        z-index: 2;
+      }
+
+      .mobile-stick.active {
+        background: rgba(7, 20, 26, 0.48);
+        border-color: rgba(240, 162, 58, 0.9);
+      }
+
+      .mobile-stick-knob {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 42%;
+        height: 42%;
+        border-radius: 50%;
+        background: rgba(232, 240, 244, 0.9);
+        border: 3px solid #fff;
+        transform: translate(-50%, -50%);
+        box-shadow: 0 2px 8px #0004;
+      }
+
+      #mobile-flip {
+        position: absolute;
+        right: max(1rem, env(safe-area-inset-right));
+        bottom: max(1.2rem, env(safe-area-inset-bottom));
+        width: min(28vw, 118px);
+        height: min(28vw, 118px);
+        border-radius: 50%;
+        border: 3px solid rgba(255, 255, 255, 0.75);
+        background: rgba(240, 162, 58, 0.72);
+        color: var(--ink);
+        font-family: "Anton", Impact, sans-serif;
+        font-size: clamp(0.95rem, 4.2vw, 1.35rem);
+        letter-spacing: 0.06em;
+        pointer-events: auto;
+        touch-action: none;
+        box-shadow: 0 4px 0 #0003;
+      }
+
+      #mobile-flip.active {
+        transform: scale(0.94);
+        background: rgba(255, 196, 107, 0.92);
+      }
+
+      #mobile-flip span {
+        display: block;
+        font-family: "Source Sans 3", sans-serif;
+        font-size: 0.62em;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        opacity: 0.8;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <div id="hud">
+      <div id="title">Backflip Bill</div>
+      <div id="callout"></div>
+      <p id="hint">Run up so the flip finishes on your feet. Miss the gap and Bill's gone.</p>
+    </div>
+
+    <div id="mobile-controls" aria-hidden="true">
+      <div id="stick-zone"></div>
+      <div class="mobile-stick" id="mobile-stick">
+        <div class="mobile-stick-knob" id="mobile-stick-knob"></div>
+      </div>
+      <button type="button" id="mobile-flip">FLIP<span>backflip</span></button>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

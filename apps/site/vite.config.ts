@@ -33,6 +33,11 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
+      "/games/backflip-bill": {
+        target: "http://127.0.0.1:5306",
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   preview: {
