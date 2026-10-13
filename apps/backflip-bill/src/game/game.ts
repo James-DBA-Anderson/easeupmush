@@ -1,6 +1,6 @@
 import { Sfx } from "./audio";
 import { Bill, burst, drawBill, stepDust, type Dust } from "./bill";
-import { DEATH_TIME, GROUND_Y } from "./constants";
+import { DEATH_TIME, GROUND_Y, TAU } from "./constants";
 import { Input } from "./input";
 import {
   drawSky,
@@ -166,6 +166,17 @@ export class Game {
       ctx.ellipse(shadowY.x, shadowY.y, s.ppm * 0.32, s.ppm * 0.08, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
+    }
+    if (this.bill.state === "air" && this.bill.flipTravel > 0.15 && this.bill.flipTravel < TAU) {
+      const saved = this.bill.rot;
+      for (const trail of [0.55, 1.05]) {
+        this.bill.rot = Math.max(0, saved - trail);
+        ctx.save();
+        ctx.globalAlpha = 0.2;
+        drawBill(ctx, this.bill, s.x, s.y, s.ppm, this.t);
+        ctx.restore();
+      }
+      this.bill.rot = saved;
     }
     drawBill(ctx, this.bill, s.x, s.y, s.ppm, this.t);
 

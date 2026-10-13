@@ -298,20 +298,20 @@ export function drawBill(
   const lHand = polar(lElb, pose.lFore, 0.3);
   const rHand = polar(rElb, pose.rFore, 0.3);
 
-  strokeSeg(ctx, lHip, lKnee, lFoot, 0.075);
-  strokeSeg(ctx, rHip, rKnee, rFoot, 0.075);
-  strokeSeg(ctx, hip, neck, 0.08);
-  strokeSeg(ctx, lSh, lElb, lHand, 0.065);
-  strokeSeg(ctx, rSh, rElb, rHand, 0.065);
+  strokeSeg(ctx, lHip, lKnee, lFoot, 0.09);
+  strokeSeg(ctx, rHip, rKnee, rFoot, 0.09);
+  strokeSeg(ctx, hip, neck, 0.1);
+  strokeSeg(ctx, lSh, lElb, lHand, 0.08);
+  strokeSeg(ctx, rSh, rElb, rHand, 0.08);
 
   ctx.beginPath();
-  ctx.arc(head.x, head.y, 0.17, 0, TAU);
+  ctx.arc(head.x, head.y, 0.19, 0, TAU);
   ctx.fill();
   ctx.fillStyle = "#c43c2a";
   ctx.beginPath();
-  ctx.ellipse(head.x, head.y + 0.11, 0.18, 0.075, 0, 0, TAU);
+  ctx.ellipse(head.x, head.y + 0.12, 0.2, 0.08, 0, 0, TAU);
   ctx.fill();
-  ctx.fillRect(head.x - 0.02, head.y + 0.09, 0.22, 0.04);
+  ctx.fillRect(head.x - 0.02, head.y + 0.1, 0.24, 0.045);
 
   ctx.restore();
 }
@@ -371,16 +371,17 @@ function poseFor(bill: Bill, t: number): Pose {
   const rSwing = Math.sin(p + Math.PI) * 0.85 * amp * limp;
   const idle = moving ? 0 : Math.sin(t * 3) * 0.04;
 
+  const hang = -Math.PI / 2;
   return {
     lean: (moving ? 0.35 * amp : 0) + (bill.state === "stumble" ? 0.5 : 0),
-    lThigh: -Math.PI / 2 + lSwing + idle,
-    rThigh: -Math.PI / 2 + rSwing - idle,
-    lShin: -Math.PI / 2 + lSwing * 0.35 - 0.15 * amp,
-    rShin: -Math.PI / 2 + rSwing * 0.35 - 0.15 * amp,
-    lArm: Math.PI * 0.15 - rSwing * 0.7,
-    rArm: Math.PI * 0.15 - lSwing * 0.7,
-    lFore: Math.PI * 0.05 - rSwing * 0.35,
-    rFore: Math.PI * 0.05 - lSwing * 0.35,
+    lThigh: hang + lSwing + idle,
+    rThigh: hang + rSwing - idle,
+    lShin: hang + lSwing * 0.35 - 0.15 * amp,
+    rShin: hang + rSwing * 0.35 - 0.15 * amp,
+    lArm: hang - 0.2 - rSwing * 0.85,
+    rArm: hang - 0.2 - lSwing * 0.85,
+    lFore: hang - 0.1 - rSwing * 0.4,
+    rFore: hang - 0.1 - lSwing * 0.4,
   };
 }
 
