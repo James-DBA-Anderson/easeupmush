@@ -220,7 +220,9 @@ export class Bill {
 
   private beginRagdoll(kind: "hard" | "crash", g: number): void {
     const crash = kind === "crash";
-    const speed = Math.abs(this.vx);
+    const impact = Math.max(0, -this.vy);
+    const slide = this.vx;
+    const speed = Math.abs(slide);
     const rolling = speed >= 2.2;
     const spin = this.spinRate;
     const dir = Math.sign(spin || wrapPi(this.rot) || 1);
@@ -245,7 +247,7 @@ export class Bill {
     const omega = rolling
       ? clamp(spin * 0.8 + dir * speed * 0.22, -12, 12)
       : dir * 1.05;
-    this.rag = {
+    const rag: Ragdoll = {
       pose,
       vel: {
         lean: kick * 0.08,
@@ -265,6 +267,9 @@ export class Bill {
       stillTime: 0,
       maxAge: 8,
     };
+    this.rag = rag;
+    // Fall speed and slide are cleared above; the dump still needs that hit on the limbs.
+    joltPose(rag, impact, slide);
   }
 
   private stepRagdoll(dt: number, level: Level): void {
@@ -346,6 +351,17 @@ export class Bill {
         hits++;
       }
       if (!hits) return;
+      if (rag && pass === 0) {
+        const floorSpeed = up > 0 ? Math.max(0, -this.vy) : 0;
+        const wallSpeed =
+          left > right ? Math.max(0, this.vx) : right > left ? Math.max(0, -this.vx) : 0;
+        const impact = Math.max(floorSpeed, wallSpeed);
+        // Resting contact is only about gravity*dt (~0.8). A real hit is faster.
+        if (impact > 2) {
+          const slide = floorSpeed >= wallSpeed ? this.vx : this.vy;
+          joltPose(rag, impact, slide);
+        }
+      }
       this.y += up;
       if (right > left) this.x += right;
       else if (left > 0) this.x -= left;
