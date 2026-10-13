@@ -1,6 +1,6 @@
 import { Sfx } from "./audio";
 import { Bill, burst, drawBill, stepDust, type Dust } from "./bill";
-import { DEATH_TIME, GROUND_Y, TAU } from "./constants";
+import { DEATH_TIME } from "./constants";
 import { Input } from "./input";
 import {
   drawSky,
@@ -8,9 +8,12 @@ import {
   fitView,
   followCam,
   groundAt,
+  LEVELS,
   makeCam,
+  spawnGround,
   worldToScreen,
   type Cam,
+  type Level,
 } from "./world";
 
 export class Game {
@@ -29,10 +32,12 @@ export class Game {
   private banner = "";
   private bannerT = 0;
   private deathT = 0;
-  private hintT = 5.5;
+  private hintT = 6.2;
+  private levelIndex = 0;
   private titleEl: HTMLElement;
   private calloutEl: HTMLElement;
   private hintEl: HTMLElement;
+  private levelEl: HTMLElement;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -43,12 +48,15 @@ export class Game {
     this.titleEl = document.getElementById("title")!;
     this.calloutEl = document.getElementById("callout")!;
     this.hintEl = document.getElementById("hint")!;
+    this.levelEl = document.getElementById("level")!;
     this.titleEl.textContent = "Backflip Bill";
     window.addEventListener("resize", this.resize);
     window.addEventListener("pointerdown", () => this.sfx.resume(), { once: true });
     window.addEventListener("keydown", (e) => {
-      if (e.code === "KeyR") this.bill.spawn();
+      if (e.code === "KeyR") this.respawn();
     });
+    this.bill.spawn(this.level());
+    this.syncLevelHud();
     this.resize();
   }
 
@@ -56,6 +64,30 @@ export class Game {
     this.running = true;
     this.last = performance.now();
     requestAnimationFrame(this.frame);
+  }
+
+  private level(): Level {
+    return LEVELS[this.levelIndex] ?? LEVELS[0]!;
+  }
+
+  private respawn(): void {
+    this.bill.spawn(this.level());
+    this.deathT = 0;
+  }
+
+  private loadLevel(index: number): void {
+    this.levelIndex = Math.max(0, Math.min(LEVELS.length - 1, index));
+    this.bill.spawn(this.level());
+    this.dust.length = 0;
+    this.cam.x = this.bill.x;
+    this.cam.y = spawnGround(this.level()) + this.cam.h * 0.26;
+    this.syncLevelHud();
+    this.hintT = 5.5;
+  }
+
+  private syncLevelHud(): void {
+    const lv = this.level();
+    this.levelEl.textContent = lv.title;
   }
 
   private resize = (): void => {
@@ -84,13 +116,21 @@ export class Game {
 
   private step(dt: number): void {
     const input = this.input.poll();
+    const level = this.level();
+
     if (this.bill.state === "done" && input.jump) {
-      this.bill.spawn();
+      if (this.levelIndex < LEVELS.length - 1) {
+        this.loadLevel(this.levelIndex + 1);
+        this.flash(this.level().title);
+      } else {
+        this.loadLevel(0);
+        this.flash("Back to the start");
+      }
     } else if (this.bill.state === "dead") {
       this.deathT -= dt;
-      if (this.deathT <= 0) this.bill.spawn();
+      if (this.deathT <= 0) this.respawn();
     } else {
-      this.bill.step(dt, input.run, input.jump);
+      this.bill.step(dt, input.run, input.jump, input.tuck, level);
       if (this.bill.landEvent) {
         const e = this.bill.landEvent;
         if (e.kind === "clean") {
@@ -114,19 +154,25 @@ export class Game {
       }
       if (this.bill.finished) {
         this.sfx.finish();
-        this.flash("Get in, Bill");
+        if (this.levelIndex < LEVELS.length - 1) {
+          this.flash("Get in — FLIP for level 2");
+        } else {
+          this.flash("Get in, Bill");
+        }
       }
       if (input.jump && this.bill.state === "air" && this.bill.airTime < 0.08) {
         this.sfx.jump();
-        burst(this.dust, this.bill.x, GROUND_Y, 6, "rgba(200,221,230,0.55)", 2.4);
+        const g = groundAt(level, this.bill.x) ?? spawnGround(level);
+        burst(this.dust, this.bill.x, g, 6, "rgba(200,221,230,0.55)", 2.4);
       }
     }
 
     if (this.bill.state === "ground" && Math.abs(this.bill.vx) > 3.5 && Math.random() < dt * 8) {
-      burst(this.dust, this.bill.x, GROUND_Y, 1, "rgba(180,170,155,0.55)", 1.4);
+      const g = groundAt(level, this.bill.x) ?? spawnGround(level);
+      burst(this.dust, this.bill.x, g, 1, "rgba(180,170,155,0.55)", 1.4);
     }
 
-    followCam(this.cam, this.bill.x, this.bill.vx, dt);
+    followCam(this.cam, this.bill.x, this.bill.y, this.bill.vx, dt, level);
     stepDust(this.dust, dt);
     this.bannerT -= dt;
     this.hintT -= dt;
@@ -137,13 +183,14 @@ export class Game {
 
   private flash(msg: string): void {
     this.banner = msg;
-    this.bannerT = 1.6;
+    this.bannerT = 1.8;
   }
 
   private draw(): void {
     const { ctx, cssW, cssH, cam } = this;
+    const level = this.level();
     drawSky(ctx, cam, cssW, cssH);
-    drawWorld(ctx, cam, cssW, cssH);
+    drawWorld(ctx, cam, cssW, cssH, level);
 
     for (const p of this.dust) {
       const s = worldToScreen(cam, cssW, cssH, p.x, p.y);
@@ -156,18 +203,18 @@ export class Game {
     }
 
     const s = worldToScreen(cam, cssW, cssH, this.bill.x, this.bill.y);
-    const g = groundAt(this.bill.x);
-    const shadowY = worldToScreen(cam, cssW, cssH, this.bill.x, g ?? GROUND_Y);
+    const g = groundAt(level, this.bill.x);
     if (g !== null) {
+      const shadowY = worldToScreen(cam, cssW, cssH, this.bill.x, g);
       ctx.save();
-      ctx.globalAlpha = Math.max(0.08, 0.28 - Math.max(0, this.bill.y - GROUND_Y - 0.9) * 0.04);
+      ctx.globalAlpha = Math.max(0.08, 0.28 - Math.max(0, this.bill.y - g - 0.9) * 0.04);
       ctx.fillStyle = "#000";
       ctx.beginPath();
       ctx.ellipse(shadowY.x, shadowY.y, s.ppm * 0.32, s.ppm * 0.08, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
-    if (this.bill.state === "air" && this.bill.flipTravel > 0.15 && this.bill.flipTravel < TAU) {
+    if (this.bill.state === "air" && this.bill.flipTravel > 0.15) {
       const saved = this.bill.rot;
       for (const trail of [0.55, 1.05]) {
         this.bill.rot = Math.max(0, saved - trail);
@@ -183,7 +230,7 @@ export class Game {
     ctx.font = `700 ${Math.max(12, cssW * 0.032)}px "Source Sans 3", sans-serif`;
     ctx.textAlign = "center";
     ctx.fillStyle = "rgba(232,240,244,0.9)";
-    ctx.fillText("Backflip Bill", s.x, s.y - s.ppm * 1.35);
+    ctx.fillText(this.bill.name, s.x, s.y - s.ppm * 1.35);
 
     if (this.bill.state === "dead") {
       ctx.fillStyle = "rgba(7,20,26,0.45)";

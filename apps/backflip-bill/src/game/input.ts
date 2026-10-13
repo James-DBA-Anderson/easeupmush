@@ -9,8 +9,13 @@ export function wantsTouchUi(): boolean {
 }
 
 export interface PlayInput {
-  /** −1 … +1 run. Air steering is ignored by the player. */
+  /** −1 … +1 run. Horizontal air steering is ignored by the player. */
   run: number;
+  /**
+   * −1 straighten (up) … +1 crouch (down). Only used in the air.
+   * 0 is the midpoint tuck.
+   */
+  tuck: number;
   /** Edge-triggered backflip / jump. */
   jump: boolean;
 }
@@ -23,6 +28,7 @@ export class Input {
   private keys = new Set<string>();
   private jumpQueued = false;
   private stickRun = 0;
+  private stickTuck = 0;
   private enabled = false;
   private root: HTMLElement;
   private stick: HTMLElement;
@@ -69,9 +75,14 @@ export class Input {
     if (this.keys.has("ArrowRight") || this.keys.has("KeyD")) run += 1;
     run = Math.max(-1, Math.min(1, run));
 
+    let tuck = this.stickTuck;
+    if (this.keys.has("ArrowUp") || this.keys.has("KeyW")) tuck -= 1;
+    if (this.keys.has("ArrowDown") || this.keys.has("KeyS")) tuck += 1;
+    tuck = Math.max(-1, Math.min(1, tuck));
+
     const jump = this.jumpQueued;
     this.jumpQueued = false;
-    return { run, jump };
+    return { run, tuck, jump };
   }
 
   public dispose(): void {
@@ -96,8 +107,11 @@ export class Input {
   private onKeyDown = (e: KeyboardEvent): void => {
     if (e.repeat) return;
     this.keys.add(e.code);
-    if (e.code === "Space" || e.code === "KeyW" || e.code === "ArrowUp") {
+    if (e.code === "Space") {
       e.preventDefault();
+      this.jumpQueued = true;
+    }
+    if (e.code === "KeyW" || e.code === "ArrowUp") {
       this.jumpQueued = true;
     }
   };
@@ -202,13 +216,17 @@ export class Input {
     }
     this.knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
     let nx = dx / max;
+    let ny = dy / max;
     if (Math.abs(nx) < JOYSTICK_DEADZONE) nx = 0;
+    if (Math.abs(ny) < JOYSTICK_DEADZONE) ny = 0;
     this.stickRun = Math.max(-1, Math.min(1, nx));
+    this.stickTuck = Math.max(-1, Math.min(1, ny));
   }
 
   private resetStick(): void {
     this.stickId = null;
     this.stickRun = 0;
+    this.stickTuck = 0;
     this.stick.classList.remove("active");
     this.knob.style.transform = "translate(-50%, -50%)";
     if (this.floating) {

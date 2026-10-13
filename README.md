@@ -77,7 +77,7 @@ Hungover on Southsea beach. Mean lads pile out of a car. Phaser 3 + TypeScript d
 
 ### [Backflip Bill](apps/backflip-bill/)
 
-Portrait 2D platformer PoC. Bill can only backflip — run up, take off, land on your feet. Unlisted; play from the back room at `/games/backflip-bill/`.
+Portrait 2D platformer PoC. Bill can only backflip — run up, take off, tuck in the air, land on your feet. Unlisted; play from the back room at `/games/backflip-bill/`.
 
 To add another game later: create `apps/<slug>/`, build it with `GAME_BASE=/games/<slug>/`, and copy into `dist/games/<slug>/` from `scripts/assemble-dist.mjs`.
 

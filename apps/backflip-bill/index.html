@@ -94,6 +94,21 @@
         opacity: 1;
       }
 
+      #level {
+        position: absolute;
+        top: max(0.75rem, env(safe-area-inset-top));
+        left: max(0.75rem, env(safe-area-inset-left));
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--sodium);
+        background: rgba(7, 20, 26, 0.4);
+        border: 1px solid rgba(200, 221, 230, 0.18);
+        border-radius: 999px;
+        padding: 0.2rem 0.55rem;
+      }
+
       #hint {
         position: absolute;
         top: 7.2rem;
@@ -213,9 +228,10 @@
     <canvas id="game"></canvas>
 
     <div id="hud">
+      <div id="level">Level 1</div>
       <div id="title">Backflip Bill</div>
       <div id="callout"></div>
-      <p id="hint">Run up so the flip finishes on your feet. Miss the gap and Bill's gone.</p>
+      <p id="hint">Run up, FLIP. In the air, stick up straightens (slows the spin), down tucks (speeds it). Land on your feet.</p>
     </div>
 
     <div id="mobile-controls" aria-hidden="true">
