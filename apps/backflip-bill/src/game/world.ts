@@ -14,6 +14,8 @@ export interface Level {
   title: string;
   spawnX: number;
   platforms: Platform[];
+  /** Crates: `y` is the top. Collision is a solid block down to the floor. */
+  boxes?: Platform[];
   gapX0: number;
   gapX1: number;
   /** Solid floor at the bottom of the gap. */
@@ -21,6 +23,9 @@ export interface Level {
   flagX: number;
   killY: number;
   endX: number;
+  /** Debug sandbox: no finish, ragdoll does not reset the level. */
+  sandbox?: boolean;
+  noFlag?: boolean;
 }
 
 export const LEVELS: Level[] = [
@@ -86,6 +91,37 @@ export const LEVELS: Level[] = [
   },
 ];
 
+/** Debug sandbox: flat run, optional gap and crates, no finish line. */
+export function makeSimLevel(gap: boolean, boxes: boolean): Level {
+  const platforms: Platform[] = gap
+    ? [
+        { x0: -4, x1: 14.2, y: 0 },
+        { x0: 18.6, x1: 44, y: 0 },
+      ]
+    : [{ x0: -4, x1: 44, y: 0 }];
+  const crate: Platform[] = [];
+  if (boxes) {
+    crate.push({ x0: 7.5, x1: 9.05, y: 0.7 });
+    crate.push({ x0: 9.35, x1: 10.9, y: 1.22 });
+    crate.push(gap ? { x0: 20.4, x1: 22.1, y: 0.92 } : { x0: 16.6, x1: 18.3, y: 0.52 });
+  }
+  return {
+    id: 0,
+    title: "Sim",
+    spawnX: 4.2,
+    platforms,
+    boxes: crate,
+    gapX0: gap ? 14.2 : 0,
+    gapX1: gap ? 18.6 : 0,
+    pitY: -3.6,
+    flagX: 99,
+    killY: -10,
+    endX: 36,
+    sandbox: true,
+    noFlag: true,
+  };
+}
+
 export function spawnGround(level: Level): number {
   return groundAt(level, level.spawnX) ?? 0;
 }
@@ -125,6 +161,10 @@ function pitSpans(level: Level): Platform[] {
 }
 
 function solids(level: Level): Platform[] {
+  return [...level.platforms, ...(level.boxes ?? []), ...pitSpans(level)];
+}
+
+function groundSlabs(level: Level): Platform[] {
   return [...level.platforms, ...pitSpans(level)];
 }
 
@@ -315,8 +355,9 @@ export function drawWorld(
   drawBackdrop(ctx, cam, cssW, cssH, level);
   drawPit(ctx, cam, cssW, cssH, level);
   drawGround(ctx, cam, cssW, cssH, level);
+  drawBoxes(ctx, cam, cssW, cssH, level);
   drawStartWall(ctx, cam, cssW, cssH, level);
-  drawFlag(ctx, cam, cssW, cssH, level);
+  if (!level.noFlag) drawFlag(ctx, cam, cssW, cssH, level);
 }
 
 function drawSea(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: number): void {
@@ -424,7 +465,7 @@ function drawGround(
 ): void {
   const ppm = cssW / cam.w;
 
-  for (const p of solids(level)) {
+  for (const p of groundSlabs(level)) {
     const x0 = worldToScreenX(cam, cssW, p.x0);
     const x1 = worldToScreenX(cam, cssW, p.x1);
     const gy = worldToScreenY(cam, cssH, p.y);
@@ -454,6 +495,43 @@ function drawGround(
     const b = worldToScreenX(cam, cssW, p.x1);
     ctx.fillRect(a - 3, gy - 6, 8, 18);
     ctx.fillRect(b - 5, gy - 6, 8, 18);
+  }
+}
+
+function drawBoxes(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  const ppm = cssW / cam.w;
+  for (const b of level.boxes ?? []) {
+    const x0 = worldToScreenX(cam, cssW, b.x0);
+    const x1 = worldToScreenX(cam, cssW, b.x1);
+    const top = worldToScreenY(cam, cssH, b.y);
+    const bot = worldToScreenY(cam, cssH, 0);
+    const h = Math.max(8, bot - top);
+    const w = x1 - x0;
+    ctx.fillStyle = "#8b5a2b";
+    ctx.fillRect(x0, top, w, h);
+    ctx.fillStyle = "#c4894a";
+    ctx.fillRect(x0, top, w, 7);
+    ctx.strokeStyle = "#5c3a18";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x0 + 1, top + 1, w - 2, h - 2);
+    ctx.strokeStyle = "rgba(45, 28, 12, 0.45)";
+    ctx.lineWidth = 1;
+    const plank = Math.max(10, 0.28 * ppm);
+    for (let y = top + 10; y < top + h; y += plank) {
+      ctx.beginPath();
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x1, y);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#3d2814";
+    ctx.fillRect(x0 + w * 0.18, top + 4, 3, h - 8);
+    ctx.fillRect(x0 + w * 0.78, top + 4, 3, h - 8);
   }
 }
 
@@ -526,5 +604,18 @@ export function worldToScreen(
     x: worldToScreenX(cam, cssW, x),
     y: worldToScreenY(cam, cssH, y),
     ppm: cssW / cam.w,
+  };
+}
+
+export function screenToWorld(
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  sx: number,
+  sy: number,
+): { x: number; y: number } {
+  return {
+    x: (sx / cssW) * cam.w + (cam.x - cam.w * 0.5),
+    y: cam.y + cam.h * 0.5 - (sy / cssH) * cam.h,
   };
 }

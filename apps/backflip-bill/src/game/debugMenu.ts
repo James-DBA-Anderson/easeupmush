@@ -113,7 +113,8 @@ export function mountDebugMenu(game: Game): void {
         flex-wrap: wrap;
         gap: 0.4rem;
       }
-      #debug-menu .level-picks button[aria-pressed="true"] {
+      #debug-menu .level-picks button[aria-pressed="true"],
+      #debug-menu .sim-enter[aria-pressed="true"] {
         background: #f0a23a;
         color: #07141a;
         border-color: #f0a23a;
@@ -199,7 +200,8 @@ export function mountDebugMenu(game: Game): void {
         color: #07141a;
         border-color: #f0a23a;
       }
-      #debug-menu .status {
+      #debug-menu .status,
+      #debug-menu .sim-note {
         font-size: 0.72rem;
         min-height: 1.1em;
         margin-top: 0.4rem;
@@ -221,6 +223,22 @@ export function mountDebugMenu(game: Game): void {
               `<button type="button" data-level="${i}" aria-pressed="false">${lv.title}</button>`,
           ).join("")}
         </div>
+      </fieldset>
+      <fieldset>
+        <legend>Simulation</legend>
+        <label class="scheme">
+          <input type="checkbox" data-sim="gap">
+          <span>Gap<small>A hole in the floor to fall through</small></span>
+        </label>
+        <label class="scheme">
+          <input type="checkbox" data-sim="boxes">
+          <span>Boxes<small>Crates to dump him into</small></span>
+        </label>
+        <div class="actions" style="margin-top:0.4rem">
+          <button type="button" class="primary sim-enter" aria-pressed="false">Enter sim</button>
+          <button type="button" class="sim-exit">Exit sim</button>
+        </div>
+        <p class="sim-note">No finish. Hide this panel, then drag Bill — he goes limp. Release to drop.</p>
       </fieldset>
       <div class="debug-grid">
       <fieldset>
@@ -296,6 +314,12 @@ export function mountDebugMenu(game: Game): void {
     for (const btn of root.querySelectorAll<HTMLButtonElement>("[data-level]")) {
       btn.setAttribute("aria-pressed", Number(btn.dataset.level) === current ? "true" : "false");
     }
+    const gap = root.querySelector<HTMLInputElement>('[data-sim="gap"]');
+    const boxes = root.querySelector<HTMLInputElement>('[data-sim="boxes"]');
+    if (gap) gap.checked = game.debugSimGap();
+    if (boxes) boxes.checked = game.debugSimBoxes();
+    const enter = root.querySelector<HTMLButtonElement>(".sim-enter");
+    if (enter) enter.setAttribute("aria-pressed", game.debugInSim() ? "true" : "false");
   };
 
   root.querySelector(".level-picks")?.addEventListener("click", (e) => {
@@ -306,6 +330,28 @@ export function mountDebugMenu(game: Game): void {
     game.debugGotoLevel(index);
     refresh();
     status.textContent = `Jumped to ${LEVELS[index]?.title ?? "level"}.`;
+  });
+
+  root.querySelector('[data-sim="gap"]')?.addEventListener("change", (e) => {
+    const el = e.target;
+    if (!(el instanceof HTMLInputElement)) return;
+    game.debugSetSimProps(el.checked, game.debugSimBoxes());
+  });
+  root.querySelector('[data-sim="boxes"]')?.addEventListener("change", (e) => {
+    const el = e.target;
+    if (!(el instanceof HTMLInputElement)) return;
+    game.debugSetSimProps(game.debugSimGap(), el.checked);
+  });
+  root.querySelector(".sim-enter")?.addEventListener("click", () => {
+    game.debugEnterSim();
+    refresh();
+    setOpen(false);
+    status.textContent = "Sim running. Drag Bill to pick him up.";
+  });
+  root.querySelector(".sim-exit")?.addEventListener("click", () => {
+    game.debugExitSim();
+    refresh();
+    status.textContent = "Left sim.";
   });
 
   root.addEventListener("input", (e) => {

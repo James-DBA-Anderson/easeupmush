@@ -12,6 +12,8 @@ import {
   groundAt,
   LEVELS,
   makeCam,
+  makeSimLevel,
+  screenToWorld,
   spawnGround,
   worldToScreen,
   type Cam,
@@ -113,6 +115,19 @@ export class Game {
   private jumps: JumpResult[] = [];
   private gameOver = false;
   private resultsReadyT = 0;
+  private sim = false;
+  private simGap = false;
+  private simBoxes = false;
+  private grabbing = false;
+  private grabX = 0;
+  private grabY = 0;
+  private grabLastX = 0;
+  private grabLastY = 0;
+  private grabLastT = 0;
+  private grabVx = 0;
+  private grabVy = 0;
+  private grabOffX = 0;
+  private grabOffY = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -138,6 +153,10 @@ export class Game {
     });
     window.addEventListener("resize", this.resize);
     window.addEventListener("pointerdown", () => this.sfx.resume(), { once: true });
+    this.canvas.addEventListener("pointerdown", this.onSimPointerDown);
+    window.addEventListener("pointermove", this.onSimPointerMove);
+    window.addEventListener("pointerup", this.onSimPointerUp);
+    window.addEventListener("pointercancel", this.onSimPointerUp);
     window.addEventListener("keydown", (e) => {
       if (isDebugTyping(e.target)) return;
       if (e.code === "KeyR") {
@@ -164,14 +183,131 @@ export class Game {
   }
 
   public debugLevelIndex(): number {
-    return this.levelIndex;
+    return this.sim ? -1 : this.levelIndex;
+  }
+
+  public debugInSim(): boolean {
+    return this.sim;
+  }
+
+  public debugSimGap(): boolean {
+    return this.simGap;
+  }
+
+  public debugSimBoxes(): boolean {
+    return this.simBoxes;
   }
 
   public debugGotoLevel(index: number): void {
+    this.sim = false;
+    this.grabbing = false;
+    this.bill.held = false;
     this.loadLevel(index);
   }
 
+  public debugEnterSim(): void {
+    this.sim = true;
+    this.gameOver = false;
+    this.resultsReadyT = 0;
+    this.hideResults();
+    this.clearLiveBonus();
+    this.tries = 1;
+    this.rebuildSim(true);
+    this.hintEl.textContent = "Drag Bill — he goes limp. Release to drop.";
+    this.hintT = 6.2;
+    this.flash("Sim — drag Bill, release to drop");
+  }
+
+  public debugExitSim(): void {
+    if (!this.sim) return;
+    this.sim = false;
+    this.grabbing = false;
+    this.bill.held = false;
+    this.canvas.style.cursor = "";
+    this.loadLevel(this.levelIndex);
+    this.syncHint();
+  }
+
+  public debugSetSimProps(gap: boolean, boxes: boolean): void {
+    this.simGap = gap;
+    this.simBoxes = boxes;
+    if (this.sim) this.rebuildSim(false);
+  }
+
+  private rebuildSim(spawn: boolean): void {
+    const keepX = this.bill.x;
+    const keepY = this.bill.y;
+    const held = this.bill.held;
+    if (spawn) {
+      this.bill.spawn(this.level());
+      this.cam.x = this.bill.x;
+      this.cam.y = spawnGround(this.level()) + this.cam.h * 0.26;
+    } else if (held) {
+      this.bill.x = keepX;
+      this.bill.y = keepY;
+    }
+    this.dust.length = 0;
+    this.timeScale = 1;
+    this.syncLevelHud();
+    this.canvas.style.cursor = "grab";
+  }
+
+  private pointerToWorld(e: PointerEvent): { x: number; y: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    const sx = ((e.clientX - rect.left) / Math.max(1, rect.width)) * this.cssW;
+    const sy = ((e.clientY - rect.top) / Math.max(1, rect.height)) * this.cssH;
+    return screenToWorld(this.cam, this.cssW, this.cssH, sx, sy);
+  }
+
+  private onSimPointerDown = (e: PointerEvent): void => {
+    if (!this.sim || this.gameOver) return;
+    if (e.button !== 0) return;
+    if (document.getElementById("debug-ui")?.classList.contains("open")) return;
+    const w = this.pointerToWorld(e);
+    const dx = w.x - this.bill.x;
+    const dy = w.y - this.bill.y;
+    if (dx * dx + dy * dy > 1.55 * 1.55) return;
+    e.preventDefault();
+    this.canvas.setPointerCapture(e.pointerId);
+    this.grabbing = true;
+    this.grabOffX = this.bill.x - w.x;
+    this.grabOffY = this.bill.y - w.y;
+    this.grabX = this.bill.x;
+    this.grabY = this.bill.y;
+    this.grabLastX = w.x;
+    this.grabLastY = w.y;
+    this.grabLastT = performance.now();
+    this.grabVx = 0;
+    this.grabVy = 0;
+    this.bill.goLimp();
+    this.bill.carry(this.grabX, this.grabY);
+    this.canvas.style.cursor = "grabbing";
+  };
+
+  private onSimPointerMove = (e: PointerEvent): void => {
+    if (!this.grabbing) return;
+    const w = this.pointerToWorld(e);
+    const now = performance.now();
+    const dt = Math.max(0.008, (now - this.grabLastT) / 1000);
+    const k = 0.55;
+    this.grabVx = this.grabVx * (1 - k) + ((w.x - this.grabLastX) / dt) * k;
+    this.grabVy = this.grabVy * (1 - k) + ((w.y - this.grabLastY) / dt) * k;
+    this.grabLastX = w.x;
+    this.grabLastY = w.y;
+    this.grabLastT = now;
+    this.grabX = w.x + this.grabOffX;
+    this.grabY = w.y + this.grabOffY;
+  };
+
+  private onSimPointerUp = (): void => {
+    if (!this.grabbing) return;
+    this.grabbing = false;
+    this.bill.drop(this.grabVx, this.grabVy);
+    this.canvas.style.cursor = this.sim ? "grab" : "";
+  };
+
   private level(): Level {
+    if (this.sim) return makeSimLevel(this.simGap, this.simBoxes);
     return LEVELS[this.levelIndex] ?? LEVELS[0]!;
   }
 
@@ -255,8 +391,10 @@ export class Game {
   private step(wall: number): void {
     const input = this.input.poll();
     const level = this.level();
-    const inJump = this.bill.flipping && this.bill.state === "air";
-    const want = this.gameOver || this.bill.state === "dead" ? 1 : inJump ? JUMP_TIME_SCALE : 1;
+    if (this.grabbing) this.bill.carry(this.grabX, this.grabY);
+    const inJump = this.bill.flipping && this.bill.state === "air" && !this.grabbing;
+    const want =
+      this.gameOver || this.bill.state === "dead" || this.grabbing ? 1 : inJump ? JUMP_TIME_SCALE : 1;
     this.timeScale += (want - this.timeScale) * Math.min(1, wall * 10);
     if (Math.abs(this.timeScale - want) < 0.004) this.timeScale = want;
     const dt = wall * this.timeScale;
@@ -275,12 +413,16 @@ export class Game {
       if (this.deathT <= 0) this.respawn();
     } else {
       this.bill.step(dt, input.run, input.jump, input.tuck, level, input.touched);
-      if (this.bill.flipping && !this.wasFlipping) this.beginAttempt();
+      if (!this.sim) {
+        if (this.bill.flipping && !this.wasFlipping) this.beginAttempt();
+        if (this.bill.flipping) this.syncLiveBonuses();
+      }
       this.wasFlipping = this.bill.flipping;
-      if (this.bill.flipping) this.syncLiveBonuses();
       if (this.bill.landEvent) {
         const e = this.bill.landEvent;
-        if (e.kind !== "fall" && this.bill.x >= level.gapX1) {
+        if (this.sim) {
+          /* sandbox: sfx only, no score */
+        } else if (e.kind !== "fall" && this.bill.x >= level.gapX1) {
           this.landedFar = true;
           this.jumpClean = e.kind === "clean";
           this.jumpSpins = e.spins;
@@ -317,16 +459,20 @@ export class Game {
         }
       }
       if (this.bill.restarted) {
-        this.flash("Back to the start");
+        if (!this.sim) this.flash("Back to the start");
         this.respawn();
       }
       if (this.bill.died) {
-        this.sfx.death();
-        this.flash("Bill's gone in the gap");
-        this.deathT = tuning.deathTime;
-        this.dropLiveBonus();
+        if (this.sim) {
+          this.respawn();
+        } else {
+          this.sfx.death();
+          this.flash("Bill's gone in the gap");
+          this.deathT = tuning.deathTime;
+          this.dropLiveBonus();
+        }
       }
-      if (this.bill.finished) {
+      if (this.bill.finished && !this.sim) {
         this.sfx.finish();
         this.recordJump();
         if (this.levelIndex < LEVELS.length - 1) {
@@ -360,7 +506,7 @@ export class Game {
 
   private syncAltimeter(): void {
     const level = this.level();
-    const finishY = finishGround(level);
+    const finishY = level.noFlag ? spawnGround(level) : finishGround(level);
     const alt = this.bill.y - HIP_HEIGHT - finishY;
     const spawnAlt = spawnGround(level) - finishY;
     const jumpPeak = (tuning.jumpVy * tuning.jumpVy) / (2 * Math.max(1, tuning.gravity));

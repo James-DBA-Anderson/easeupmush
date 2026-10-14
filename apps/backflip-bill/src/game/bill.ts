@@ -106,6 +106,8 @@ export class Bill {
   braceRLeg = 0;
   /** 0–1: square legs and feet for a landing. Pose only — never changes spin. */
   landPrep = 0;
+  /** Debug sim: mouse is carrying him. */
+  held = false;
 
   public spawn(level: Level): void {
     this.x = level.spawnX;
@@ -154,6 +156,72 @@ export class Bill {
     this.braceLLeg = 0;
     this.braceRLeg = 0;
     this.landPrep = 0;
+    this.held = false;
+  }
+
+  public goLimp(): void {
+    this.flipping = false;
+    this.landPrep = 0;
+    this.brace = 0;
+    this.spinRate = 0;
+    this.held = true;
+    this.restarted = false;
+    this.state = "fallen";
+    if (this.rag) {
+      this.rag.maxAge = 1e9;
+      this.rag.age = 0;
+      this.rag.stillTime = 0;
+      this.rag.rolling = false;
+      this.rag.pose = clampLimbPose(lerpPose(this.rag.pose, HEAP, 0.55));
+      return;
+    }
+    const now = poseFor(this, 0);
+    const pose = clampLimbPose(lerpPose(now, HEAP, 0.78));
+    this.rag = {
+      pose,
+      vel: {
+        lean: 0.4,
+        arch: -0.2,
+        spineLumbar: -0.15,
+        spineThoracic: 0.1,
+        spineCervical: 0.2,
+        lThigh: -1.4,
+        rThigh: 1.1,
+        lShin: -0.8,
+        rShin: 0.6,
+        lArm: 1.6,
+        rArm: -1.2,
+        lFore: 0.9,
+        rFore: -0.7,
+        lFoot: 0.4,
+        rFoot: -0.3,
+      },
+      omega: 1.35,
+      rolling: false,
+      age: 0,
+      stillTime: 0,
+      maxAge: 1e9,
+    };
+  }
+
+  public carry(x: number, y: number): void {
+    this.x = x;
+    this.y = y;
+    this.vx = 0;
+    this.vy = 0;
+  }
+
+  public drop(vx: number, vy: number): void {
+    this.held = false;
+    this.vx = clamp(vx, -18, 18);
+    this.vy = clamp(vy, -18, 18);
+    const rag = this.rag;
+    if (!rag) return;
+    rag.rolling = Math.hypot(this.vx, this.vy) >= 2.2;
+    rag.omega = clamp(-this.vx * 0.55, -10, 10);
+    rag.age = 0;
+    rag.stillTime = 0;
+    rag.maxAge = 1e9;
   }
 
   public step(
@@ -185,7 +253,7 @@ export class Bill {
 
     if (this.rag) {
       this.stepRagdoll(dt, level);
-      this.checkGapDeath(level);
+      if (!this.held) this.checkGapDeath(level);
       this.tryFinish(level);
       return;
     }
@@ -268,6 +336,7 @@ export class Bill {
   }
 
   private tryFinish(level: Level): void {
+    if (level.noFlag || this.held) return;
     if (this.cleared) {
       if (this.onFeet() && Math.abs(this.vx) < 0.32 && onFlagPlatform(level, this.x)) {
         this.vx = 0;
@@ -359,6 +428,7 @@ export class Bill {
     const extend = Math.max(0, 1 - this.tuck);
     const cleanAng = degToRad(tuning.cleanLandDeg);
     const stumbleAng = degToRad(tuning.stumbleLandDeg);
+    const planted = this.feetLinedUp();
 
     this.flipping = false;
     this.landPrep = 0;
@@ -369,6 +439,11 @@ export class Bill {
     // Landing in a ball from a standing backflip is always a dump.
     const crashAng = still ? degToRad(Math.max(30, tuning.cleanLandDeg + 8)) : stumbleAng;
     if (off > crashAng || (still && tucked) || (tucked && off > cleanAng)) {
+      if (planted) {
+        this.beginRagdoll("hard", g);
+        this.landEvent = this.makeLand("stumble", this.x, g);
+        return;
+      }
       this.beginRagdoll("crash", g);
       this.landEvent = this.makeLand("fall", this.x, g);
       return;
@@ -474,6 +549,15 @@ export class Bill {
     if (!rag) return;
 
     rag.age += dt;
+    if (this.held) {
+      const sag = wrapPi(1.22 - wrapPi(this.rot));
+      rag.omega += sag * 5.5 * dt;
+      rag.omega *= Math.exp(-2.4 * dt);
+      this.rot += rag.omega * dt;
+      flopToward(rag, wrapPi(-Math.PI / 2 - this.rot), dt, false, true);
+      enforceRagdollJoints(this);
+      return;
+    }
     if (Math.abs(this.vx) < 1.5) rag.rolling = false;
 
     this.vy -= tuning.gravity * dt;
@@ -518,6 +602,17 @@ export class Bill {
     // After a standing finish he may tumble off a ledge — let that play out until
     // he actually stops (or hits killY). Fail ragdolls still cap at maxAge, then
     // always go back to the level start — never stand up mid-run.
+    if (level.sandbox) {
+      if (!stopped) return;
+      this.spinRate = 0;
+      this.vx = 0;
+      this.vy = 0;
+      this.rag = null;
+      this.state = "ground";
+      this.rot = 0;
+      if (onGround && floor !== null) this.y = floor + HIP_HEIGHT;
+      return;
+    }
     if (this.cleared) {
       if (!stopped) return;
     } else if (!stopped && !timedOut) {
@@ -601,26 +696,65 @@ export class Bill {
   }
 
   /**
-   * Square legs and feet toward the floor as it comes up. Gated on being at least
-   * 75% extended — a tuck has no plant. Never writes `rot` / spin.
+   * Square legs and feet toward the floor as it comes up. Only when he can
+   * actually see it — feet coming under him, not inverted mid-flip. Never
+   * writes `rot` / spin.
    */
   private updateLandPrep(dt: number, level: Level): void {
     const extend = Math.max(0, 1 - this.tuck);
-    const g = groundAt(level, this.x);
+    const g = this.seenLanding(level);
     const height = g === null ? 99 : this.y - HIP_HEIGHT - g;
     const closing = Math.max(0, -this.vy);
-    const near = g !== null && height < 1.85 && height > -0.2;
-    const falling = this.vy < 0.85;
-    const gate = clamp((extend - 0.75) / 0.15, 0, 1);
-    const reach = clamp((1.65 - height) / 1.15, 0, 1);
-    const rush = clamp(closing / 7, 0, 1);
+    const spin = Math.abs(wrapPi(this.rot));
+    // Full spot when roughly upright; dead once he is on his back / inverted.
+    const spot = 1 - clamp((spin - 0.7) / 0.52, 0, 1);
+    const near = g !== null && height < 3.45 && height > -0.2;
+    const falling = this.vy < 0.45;
+    const gate = clamp((extend - 0.7) / 0.18, 0, 1);
+    const reach = clamp((3.2 - height) / 2.5, 0, 1);
+    const rush = clamp(closing / 8, 0, 1);
     const want =
-      this.flipping && near && falling && gate > 0
-        ? gate * Math.max(reach * 0.38, reach * (0.4 + 0.6 * rush))
+      this.flipping && near && falling && spot > 0.04 && gate > 0
+        ? gate * spot * Math.min(1, 0.58 + 0.42 * reach + 0.2 * rush)
         : 0;
-    const k = 1 - Math.exp(-(want > this.landPrep ? 14 : 9) * dt);
+    const k = 1 - Math.exp(-(want > this.landPrep ? 28 : 13) * dt);
     this.landPrep += (want - this.landPrep) * k;
     if (this.landPrep < 0.02 && want <= 0) this.landPrep = 0;
+  }
+
+  /** Closest floor in front of him — the pad he can see, not a pit behind it. */
+  private seenLanding(level: Level): number | null {
+    const lookT = clamp(2.4 / Math.max(0.45, -this.vy), 0.08, 0.38);
+    const xs = [this.x, this.x + this.vx * lookT * 0.45, this.x + this.vx * lookT];
+    let best: number | null = null;
+    let bestH = Infinity;
+    for (const sx of xs) {
+      const g = groundAt(level, sx);
+      if (g === null) continue;
+      const h = this.y - HIP_HEIGHT - g;
+      if (h < -0.22) continue;
+      if (h < bestH) {
+        bestH = h;
+        best = g;
+      }
+    }
+    return best;
+  }
+
+  /** Extended plant: shins toward world-down and ankles under the hips. */
+  private feetLinedUp(): boolean {
+    if (this.tuck > 0.25 || this.landPrep < 0.22) return false;
+    const pose = poseFor(this, 0);
+    const down = worldDirToLocal(this, 0, -1);
+    const err =
+      0.5 *
+      (Math.abs(wrapPi(pose.lShin - down)) + Math.abs(wrapPi(pose.rShin - down)));
+    if (err > 0.62) return false;
+    const rig = makeRig(pose, true);
+    const hip = worldOf(this, (rig.lHip.x + rig.rHip.x) * 0.5, (rig.lHip.y + rig.rHip.y) * 0.5);
+    const lAnk = worldOf(this, rig.lAnkle.x, rig.lAnkle.y);
+    const rAnk = worldOf(this, rig.rAnkle.x, rig.rAnkle.y);
+    return lAnk.y < hip.y - 0.16 && rAnk.y < hip.y - 0.16;
   }
 
   private touchingSolid(level: Level, floorToo: boolean, coreOnly = false): boolean {
@@ -720,6 +854,7 @@ export class Bill {
   }
 
   private checkGapDeath(level: Level): void {
+    if (this.held) return;
     if (this.y < level.killY) {
       if (this.cleared) {
         this.state = "done";
