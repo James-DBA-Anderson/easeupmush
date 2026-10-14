@@ -44,6 +44,10 @@ export class Sfx {
     window.setTimeout(() => this.blip(440, 660, 0.14, 0.07, "square"), 90);
   }
 
+  public bonus(from: number, to: number): void {
+    this.blip(from, to, 0.11, 0.07, "square");
+  }
+
   /** Bone/joint going well past its stop — sharp crack. */
   public snap(): void {
     this.noise(0.045, 0.15);

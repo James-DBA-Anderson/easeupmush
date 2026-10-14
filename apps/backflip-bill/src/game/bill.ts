@@ -104,6 +104,8 @@ export class Bill {
   braceRArm = 0;
   braceLLeg = 0;
   braceRLeg = 0;
+  /** 0–1: square legs and feet for a landing. Pose only — never changes spin. */
+  landPrep = 0;
 
   public spawn(level: Level): void {
     this.x = level.spawnX;
@@ -151,6 +153,7 @@ export class Bill {
     this.braceRArm = 0;
     this.braceLLeg = 0;
     this.braceRLeg = 0;
+    this.landPrep = 0;
   }
 
   public step(
@@ -229,6 +232,7 @@ export class Bill {
     }
 
     this.updateBrace(dt, level);
+    this.updateLandPrep(dt, level);
 
     const g = groundAt(level, this.x);
     const floorLand = g !== null && this.vy <= 0 && this.y - HIP_HEIGHT <= g + 0.08;
@@ -341,6 +345,7 @@ export class Bill {
     this.cushion = 0;
     this.spinRate = 0;
     this.rag = null;
+    this.landPrep = 0;
     const speed = Math.min(1, Math.abs(this.vx) / tuning.maxSpeed);
     this.flipDuration =
       tuning.flipDurationSlow +
@@ -356,6 +361,7 @@ export class Bill {
     const stumbleAng = degToRad(tuning.stumbleLandDeg);
 
     this.flipping = false;
+    this.landPrep = 0;
 
     const still = Math.abs(this.vx) < 1.7;
     const tucked = this.tuck >= tuning.hardTuck;
@@ -429,6 +435,7 @@ export class Bill {
       if (Math.abs(this.rot) < 1.7) this.rot = dir * 1.62;
     }
     this.brace = 0;
+    this.landPrep = 0;
     const omega = rolling
       ? clamp(spin * 0.8 + dir * speed * 0.22, -12, 12)
       : dir * 1.05;
@@ -509,14 +516,14 @@ export class Bill {
     const stopped = rag.stillTime >= 0.12;
     const timedOut = rag.age >= rag.maxAge;
     // After a standing finish he may tumble off a ledge — let that play out until
-    // he actually stops (or hits killY). Fail ragdolls still cap at maxAge.
+    // he actually stops (or hits killY). Fail ragdolls still cap at maxAge, then
+    // always go back to the level start — never stand up mid-run.
     if (this.cleared) {
       if (!stopped) return;
     } else if (!stopped && !timedOut) {
       return;
     }
 
-    const crash = this.state === "fallen";
     this.spinRate = 0;
     this.vx = 0;
     this.vy = 0;
@@ -531,13 +538,7 @@ export class Bill {
       return;
     }
     this.rag = null;
-    if (crash || timedOut) {
-      this.restarted = true;
-      return;
-    }
-    this.state = "ground";
-    this.rot = 0;
-    if (onGround) this.y = floor + HIP_HEIGHT;
+    this.restarted = true;
   }
 
   /** Reach the nearest hands/feet at an incoming wall or floor. */
@@ -597,6 +598,29 @@ export class Bill {
     setW(tips[0]!.id, 1);
     setW(tips[1]!.id, 0.82);
     if (tips[2] && tips[2].d < tips[0]!.d + 0.28) setW(tips[2].id, 0.4);
+  }
+
+  /**
+   * Square legs and feet toward the floor as it comes up. Gated on being at least
+   * 75% extended — a tuck has no plant. Never writes `rot` / spin.
+   */
+  private updateLandPrep(dt: number, level: Level): void {
+    const extend = Math.max(0, 1 - this.tuck);
+    const g = groundAt(level, this.x);
+    const height = g === null ? 99 : this.y - HIP_HEIGHT - g;
+    const closing = Math.max(0, -this.vy);
+    const near = g !== null && height < 1.85 && height > -0.2;
+    const falling = this.vy < 0.85;
+    const gate = clamp((extend - 0.75) / 0.15, 0, 1);
+    const reach = clamp((1.65 - height) / 1.15, 0, 1);
+    const rush = clamp(closing / 7, 0, 1);
+    const want =
+      this.flipping && near && falling && gate > 0
+        ? gate * Math.max(reach * 0.38, reach * (0.4 + 0.6 * rush))
+        : 0;
+    const k = 1 - Math.exp(-(want > this.landPrep ? 14 : 9) * dt);
+    this.landPrep += (want - this.landPrep) * k;
+    if (this.landPrep < 0.02 && want <= 0) this.landPrep = 0;
   }
 
   private touchingSolid(level: Level, floorToo: boolean, coreOnly = false): boolean {
@@ -1141,7 +1165,10 @@ function poseFor(bill: Bill, t: number): Pose {
         bill,
       );
     }
-    return applyBrace(clampLimbPose(lerpPose(LAYOUT, CROUCH, bill.tuck)), bill);
+    return applyLandPrep(
+      applyBrace(clampLimbPose(lerpPose(LAYOUT, CROUCH, bill.tuck)), bill),
+      bill,
+    );
   }
 
   const hang = -Math.PI / 2;
@@ -1603,6 +1630,30 @@ function applyBrace(pose: Pose, bill: Bill): Pose {
   return clampLimbPose(p);
 }
 
+/** Point thighs at world-down and flatten the feet. Joint clamps only — no spin. */
+function applyLandPrep(pose: Pose, bill: Bill): Pose {
+  const u = bill.landPrep;
+  if (u < 0.03) return pose;
+  const down = worldDirToLocal(bill, 0, -1);
+  const flat = worldDirToLocal(bill, 1, 0);
+  const p = { ...pose };
+  const plant = (
+    thighK: "lThigh" | "rThigh",
+    shinK: "lShin" | "rShin",
+    footK: "lFoot" | "rFoot",
+    split: number,
+  ) => {
+    const thighT = down + split;
+    const shinT = thighT - 0.42;
+    p[thighK] = mixAng(p[thighK], thighT, u);
+    p[shinK] = mixAng(p[shinK], shinT, u);
+    p[footK] = mixAng(p[footK] ?? p[shinK], flat, u);
+  };
+  plant("lThigh", "lShin", "lFoot", 0.07);
+  plant("rThigh", "rShin", "rFoot", -0.05);
+  return clampLimbPose(p);
+}
+
 type JointName = keyof Pose;
 
 interface Rig {
@@ -2033,7 +2084,14 @@ function drawFace(ctx: CanvasRenderingContext2D, hx: number, hy: number, mood: F
 }
 
 function footAngle(bill: Bill, shin: number, thigh: number): number {
-  if (bill.state === "air" || bill.rag) return shin;
+  if (bill.rag) return shin;
+  if (bill.state === "air") {
+    if (bill.landPrep > 0.04) {
+      const flat = worldDirToLocal(bill, 1, 0);
+      return mixAng(shin, flat, bill.landPrep);
+    }
+    return shin;
+  }
   const hang = -Math.PI / 2;
   const idle = bill.state === "ground" && Math.abs(bill.vx) < 0.28 && !bill.celebrating;
   const lifted =

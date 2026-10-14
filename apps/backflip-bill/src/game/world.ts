@@ -280,6 +280,10 @@ export function followCam(
     ? py + cam.h * 0.22
     : floor + cam.h * 0.22;
   cam.y += (targetY - cam.y) * Math.min(1, dt * (falling ? 14 : 5.5));
+  // Keep a band of view under him so the ground can enter the frame before impact.
+  const minBelow = cam.h * 0.34;
+  const maxCamY = py + cam.h * 0.5 - minBelow;
+  if (cam.y > maxCamY) cam.y = maxCamY;
 }
 
 export function drawSky(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: number): void {

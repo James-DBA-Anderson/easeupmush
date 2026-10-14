@@ -1,7 +1,7 @@
 {
   "tuckScheme": "holdJump",
-  "gravity": 24,
-  "jumpVy": 11.4,
+  "gravity": 22.5,
+  "jumpVy": 11.7,
   "maxSpeed": 8.4,
   "accel": 22,
   "decel": 18,
@@ -10,7 +10,7 @@
   "flipDurationFast": 0.82,
   "tuckLerp": 7.5,
   "tuckRateStraight": 0.31,
-  "tuckRateCrouch": 1.04,
+  "tuckRateCrouch": 1.31,
   "cleanLandDeg": 22,
   "stumbleLandDeg": 68,
   "cleanTuck": 0.4,

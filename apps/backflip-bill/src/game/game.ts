@@ -31,6 +31,8 @@ const EXTRA_SPIN_PTS = 400;
 const STAR_PTS = 500;
 const LAYOUT_TICK = 0.05;
 const LAYOUT_TICK_PTS = 25;
+/** Wall-clock scale while flipping. Run and ragdoll stay at 1. */
+const JUMP_TIME_SCALE = 0.76;
 
 function formatPts(n: number): string {
   return `£${n.toLocaleString("en-GB")}`;
@@ -92,6 +94,7 @@ export class Game {
   private altRead: HTMLElement;
   private scoreEl: HTMLElement;
   private scoreValueEl: HTMLElement;
+  private scoreLiveEl: HTMLElement;
   private resultsEl: HTMLElement;
   private resultsListEl: HTMLElement;
   private resultsScoreEl: HTMLElement;
@@ -106,6 +109,7 @@ export class Game {
   private awardedStar = false;
   private landedFar = false;
   private wasFlipping = false;
+  private timeScale = 1;
   private jumps: JumpResult[] = [];
   private gameOver = false;
   private resultsReadyT = 0;
@@ -125,6 +129,7 @@ export class Game {
     this.altRead = document.getElementById("alt-read")!;
     this.scoreEl = document.getElementById("score")!;
     this.scoreValueEl = document.getElementById("score-value")!;
+    this.scoreLiveEl = document.getElementById("score-live")!;
     this.resultsEl = document.getElementById("results")!;
     this.resultsListEl = document.getElementById("results-list")!;
     this.resultsScoreEl = document.getElementById("results-score")!;
@@ -176,8 +181,12 @@ export class Game {
     this.jumpSpins = 0;
     this.jumpLayout = 0;
     this.dropLiveBonus();
-    this.bill.spawn(this.level());
+    const level = this.level();
+    this.bill.spawn(level);
+    this.cam.x = this.bill.x;
+    this.cam.y = spawnGround(level) + this.cam.h * 0.26;
     this.deathT = 0;
+    this.timeScale = 1;
   }
 
   private loadLevel(index: number): void {
@@ -191,6 +200,7 @@ export class Game {
     this.jumpLayout = 0;
     this.clearLiveBonus();
     this.bill.spawn(this.level());
+    this.timeScale = 1;
     this.dust.length = 0;
     this.cam.x = this.bill.x;
     this.cam.y = spawnGround(this.level()) + this.cam.h * 0.26;
@@ -242,9 +252,14 @@ export class Game {
     requestAnimationFrame(this.frame);
   };
 
-  private step(dt: number): void {
+  private step(wall: number): void {
     const input = this.input.poll();
     const level = this.level();
+    const inJump = this.bill.flipping && this.bill.state === "air";
+    const want = this.gameOver || this.bill.state === "dead" ? 1 : inJump ? JUMP_TIME_SCALE : 1;
+    this.timeScale += (want - this.timeScale) * Math.min(1, wall * 10);
+    if (Math.abs(this.timeScale - want) < 0.004) this.timeScale = want;
+    const dt = wall * this.timeScale;
 
     if (this.gameOver) {
       this.resultsReadyT -= dt;
@@ -270,8 +285,8 @@ export class Game {
           this.jumpClean = e.kind === "clean";
           this.jumpSpins = e.spins;
           this.jumpLayout = e.layoutHold;
-          this.payLayout(e.layoutHold, false);
-          this.payExtra(e.spins, true);
+          this.payLayout(e.layoutHold);
+          this.payExtra(e.spins);
           if (e.kind === "clean") this.payStar();
         } else {
           this.jumpClean = false;
@@ -406,6 +421,15 @@ export class Game {
     flake.addEventListener("animationend", () => flake.remove());
   }
 
+  private spawnScoreRise(amount: number, kind: "layout" | "extra" | "star"): void {
+    const chip = document.createElement("span");
+    chip.className = `score-chip ${kind}`;
+    chip.textContent = kind === "star" ? `★ +${formatPts(amount)}` : `+${formatPts(amount)}`;
+    chip.style.right = `${0.2 + Math.random() * 0.55}rem`;
+    this.scoreEl.append(chip);
+    chip.addEventListener("animationend", () => chip.remove());
+  }
+
   private clearLiveBonus(): void {
     if (this.liveBonus === 0 && !this.awardedStar && !this.landedFar) {
       this.awardedLayoutTicks = 0;
@@ -420,39 +444,44 @@ export class Game {
     this.syncScoreHud(false);
   }
 
-  private addLive(points: number, pop: boolean): void {
+  private addLive(points: number, kind: "layout" | "extra" | "star"): void {
     if (points <= 0) return;
     this.liveBonus += points;
-    this.syncScoreHud(pop);
+    this.spawnScoreRise(points, kind);
+    this.syncScoreHud(true);
+    if (kind === "extra") this.sfx.bonus(520, 760);
+    else if (kind === "star") this.sfx.bonus(660, 990);
   }
 
-  private payLayout(hold: number, pop: boolean): void {
+  private payLayout(hold: number): void {
     const ticks = layoutTicks(hold);
     if (ticks <= this.awardedLayoutTicks) return;
-    this.addLive((ticks - this.awardedLayoutTicks) * LAYOUT_TICK_PTS, pop);
+    this.addLive((ticks - this.awardedLayoutTicks) * LAYOUT_TICK_PTS, "layout");
     this.awardedLayoutTicks = ticks;
   }
 
-  private payExtra(spins: number, pop: boolean): void {
+  private payExtra(spins: number): void {
     const extra = extraSpins(spins);
     if (extra <= this.awardedExtra) return;
-    this.addLive((extra - this.awardedExtra) * EXTRA_SPIN_PTS, pop);
+    this.addLive((extra - this.awardedExtra) * EXTRA_SPIN_PTS, "extra");
     this.awardedExtra = extra;
   }
 
   private payStar(): void {
     if (this.awardedStar) return;
     this.awardedStar = true;
-    this.addLive(STAR_PTS, true);
+    this.addLive(STAR_PTS, "star");
   }
 
   private syncLiveBonuses(): void {
-    this.payLayout(this.bill.layoutHold, false);
-    this.payExtra(Math.floor(this.bill.flipTravel / TAU), true);
+    this.payLayout(this.bill.layoutHold);
+    this.payExtra(Math.floor(this.bill.flipTravel / TAU));
   }
 
   private syncScoreHud(pop: boolean): void {
     this.scoreValueEl.textContent = formatPts(this.score + this.liveBonus);
+    this.scoreLiveEl.textContent = `+${formatPts(this.liveBonus)}`;
+    this.scoreEl.classList.toggle("hot", this.liveBonus > 0);
     if (!pop) {
       this.scoreEl.classList.remove("pop");
       return;

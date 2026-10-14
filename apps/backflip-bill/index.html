@@ -101,10 +101,21 @@
 
       #score {
         right: max(0.75rem, env(safe-area-inset-right));
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.06rem;
         color: var(--chalk);
         font-variant-numeric: tabular-nums;
         letter-spacing: 0.04em;
         overflow: visible;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+      }
+
+      #score.hot {
+        border-color: rgba(255, 210, 74, 0.85);
+        background: rgba(7, 20, 26, 0.62);
+        box-shadow: 0 0 18px #f0a23a99;
       }
 
       #score b {
@@ -116,28 +127,72 @@
         color: #ffd24a;
       }
 
+      #score-live {
+        display: none;
+        font-family: "Anton", Impact, sans-serif;
+        font-size: 1.05em;
+        font-weight: 400;
+        letter-spacing: 0.04em;
+        color: #ffe27a;
+        text-shadow: 0 0 10px #f0a23acc;
+        line-height: 1;
+      }
+
+      #score.hot #score-live {
+        display: block;
+        animation: live-pulse 0.45s ease-in-out infinite alternate;
+      }
+
+      @keyframes live-pulse {
+        from { transform: scale(1); filter: brightness(1); }
+        to { transform: scale(1.08); filter: brightness(1.25); }
+      }
+
       #score.pop b {
-        animation: score-pop 0.35s ease;
+        animation: score-pop 0.42s ease;
       }
 
       @keyframes score-pop {
         0% { transform: scale(1); }
-        40% { transform: scale(1.18); }
+        35% { transform: scale(1.38); color: #fff4b8; }
         100% { transform: scale(1); }
       }
 
-      .score-flake {
+      .score-flake,
+      .score-chip {
         position: absolute;
-        right: 0.45rem;
-        top: calc(100% + 0.15rem);
+        right: 0.35rem;
         pointer-events: none;
         font-family: "Anton", Impact, sans-serif;
-        font-size: 1.05em;
         font-weight: 400;
         letter-spacing: 0.03em;
+        text-shadow: 0 1px 0 #07141a88, 0 0 10px #f0a23a88;
+        white-space: nowrap;
+      }
+
+      .score-flake {
+        top: calc(100% + 0.15rem);
+        font-size: 1.05em;
         color: #ffd24a;
-        text-shadow: 0 1px 0 #07141a88;
         animation: score-fall 0.7s ease-in forwards;
+      }
+
+      .score-chip {
+        top: 0.05rem;
+        font-size: 1.35em;
+        color: #fff4b8;
+        animation: score-rise 0.9s ease-out forwards;
+      }
+
+      .score-chip.layout {
+        font-size: 1.05em;
+        color: #ffe27a;
+        animation-duration: 0.7s;
+      }
+
+      .score-chip.star {
+        font-size: 1.55em;
+        color: #ffd24a;
       }
 
       @keyframes score-fall {
@@ -147,6 +202,17 @@
         }
         100% {
           transform: translate(10px, 52px) rotate(14deg);
+          opacity: 0;
+        }
+      }
+
+      @keyframes score-rise {
+        0% {
+          transform: translate(0, 0) scale(1.2);
+          opacity: 1;
+        }
+        100% {
+          transform: translate(-18px, -56px) scale(1);
           opacity: 0;
         }
       }
@@ -528,7 +594,10 @@
 
     <div id="hud">
       <div id="level">Level 1</div>
-      <div id="score"><b id="score-value">£0</b></div>
+      <div id="score">
+        <b id="score-value">£0</b>
+        <span id="score-live">+£0</span>
+      </div>
       <div id="callout"></div>
       <p id="hint">Run up, FLIP. In the air, hold FLIP to tuck (speeds it), release to stretch (slows it). Open up to land — stretch out so the knees can cushion.</p>
       <div id="altimeter" aria-hidden="true">
