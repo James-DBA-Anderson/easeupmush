@@ -1466,9 +1466,10 @@ function clampLimbPose(pose: Pose): Pose {
 }
 
 function integrateJoint(pose: Pose, vel: Pose, key: keyof Pose, pull: number, dt: number, damp: number): void {
-  const v = (vel[key] ?? 0) + (pull - (vel[key] ?? 0) * damp) * dt;
-  vel[key] = clamp(v, -18, 18);
-  pose[key] = (pose[key] ?? 0) + vel[key] * dt;
+  const v = vel[key] ?? 0;
+  const next = clamp(v + (pull - v * damp) * dt, -18, 18);
+  vel[key] = next;
+  pose[key] = (pose[key] ?? 0) + next * dt;
 }
 
 function flopToward(rag: Ragdoll, hang: number, dt: number, _grounded: boolean, heap = false): void {
