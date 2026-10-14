@@ -7,6 +7,7 @@ import {
   type Tuning,
   type TuckScheme,
 } from "./tuning";
+import { LEVELS } from "./world";
 
 type NumericTuning = Exclude<keyof Tuning, "tuckScheme">;
 
@@ -90,18 +91,32 @@ export function mountDebugMenu(game: Game): void {
       }
       #debug-menu {
         position: fixed;
-        top: max(4.4rem, env(safe-area-inset-top));
-        right: max(0.65rem, env(safe-area-inset-right));
+        inset: 0;
         z-index: 50;
-        width: min(21.5rem, calc(100vw - 1.2rem));
-        max-height: calc(100dvh - 5.2rem);
+        width: 100%;
+        height: 100dvh;
         overflow: auto;
         color: #e8f0f4;
-        background: rgba(7, 20, 26, 0.92);
-        border: 1px solid rgba(200, 221, 230, 0.22);
-        border-radius: 12px;
-        box-shadow: 0 8px 28px #0006;
-        padding: 0.7rem 0.8rem 0.85rem;
+        background: rgba(7, 20, 26, 0.96);
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        padding: max(0.85rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+      }
+      #debug-menu .debug-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+        gap: 0.55rem;
+      }
+      #debug-menu .level-picks {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+      }
+      #debug-menu .level-picks button[aria-pressed="true"] {
+        background: #f0a23a;
+        color: #07141a;
+        border-color: #f0a23a;
       }
       #debug-ui:not(.open) #debug-menu { display: none; }
       #debug-ui.open #debug-launch { display: none; }
@@ -199,6 +214,16 @@ export function mountDebugMenu(game: Game): void {
     </div>
     <div class="debug-body">
       <fieldset>
+        <legend>Level</legend>
+        <div class="level-picks">
+          ${LEVELS.map(
+            (lv, i) =>
+              `<button type="button" data-level="${i}" aria-pressed="false">${lv.title}</button>`,
+          ).join("")}
+        </div>
+      </fieldset>
+      <div class="debug-grid">
+      <fieldset>
         <legend>Controls</legend>
         ${SCHEMES.map(
           (s) => `
@@ -220,6 +245,7 @@ export function mountDebugMenu(game: Game): void {
         <legend>Landing</legend>
         ${LANDING.map(sliderHtml).join("")}
       </fieldset>
+      </div>
       <div class="actions">
         <button type="button" class="primary save">Save</button>
         <button type="button" class="revert">Revert</button>
@@ -266,7 +292,21 @@ export function mountDebugMenu(game: Game): void {
       `input[name="tuck-scheme"][value="${tuning.tuckScheme}"]`,
     );
     if (radio) radio.checked = true;
+    const current = game.debugLevelIndex();
+    for (const btn of root.querySelectorAll<HTMLButtonElement>("[data-level]")) {
+      btn.setAttribute("aria-pressed", Number(btn.dataset.level) === current ? "true" : "false");
+    }
   };
+
+  root.querySelector(".level-picks")?.addEventListener("click", (e) => {
+    const btn = e.target instanceof Element ? e.target.closest("button[data-level]") : null;
+    if (!(btn instanceof HTMLButtonElement)) return;
+    const index = Number(btn.dataset.level);
+    if (!Number.isFinite(index)) return;
+    game.debugGotoLevel(index);
+    refresh();
+    status.textContent = `Jumped to ${LEVELS[index]?.title ?? "level"}.`;
+  });
 
   root.addEventListener("input", (e) => {
     const el = e.target;

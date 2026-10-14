@@ -158,6 +158,14 @@ export class Game {
     this.syncHint();
   }
 
+  public debugLevelIndex(): number {
+    return this.levelIndex;
+  }
+
+  public debugGotoLevel(index: number): void {
+    this.loadLevel(index);
+  }
+
   private level(): Level {
     return LEVELS[this.levelIndex] ?? LEVELS[0]!;
   }
@@ -174,6 +182,9 @@ export class Game {
 
   private loadLevel(index: number): void {
     this.levelIndex = Math.max(0, Math.min(LEVELS.length - 1, index));
+    this.gameOver = false;
+    this.resultsReadyT = 0;
+    this.hideResults();
     this.tries = 1;
     this.jumpClean = false;
     this.jumpSpins = 0;

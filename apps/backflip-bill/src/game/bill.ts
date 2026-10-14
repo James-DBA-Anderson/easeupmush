@@ -3,6 +3,7 @@ import { tuning } from "./tuning";
 import {
   approachingSolid,
   groundAt,
+  onFlagPlatform,
   pushOutOfSolid,
   spawnGround,
   START_WALL_X,
@@ -36,7 +37,7 @@ export interface SnapFlash {
 }
 
 type BandageSpot = "lKnee" | "rKnee" | "lElb" | "rElb";
-type SoreSpot = "lHip" | "rHip" | "coccyx";
+type SoreSpot = "lHip" | "rHip" | "coccyx" | "back";
 type SnapKind = BandageSpot | SoreSpot;
 
 export class Bill {
@@ -78,13 +79,15 @@ export class Bill {
   bandages = new Set<BandageSpot>();
   /** Snaps this attempt — applied on the next spawn if the run fails. */
   pendingBandages = new Set<BandageSpot>();
-  /** Hip / coccyx snaps — no bandage, just a sore rub at idle. */
+  /** Hip / coccyx / spine snaps — no bandage, just a sore rub at idle. */
   sore = new Set<SoreSpot>();
   pendingSore = new Set<SoreSpot>();
   died = false;
   finished = false;
   /** Crossed the flag this attempt — trying to come to a halt. */
   cleared = false;
+  /** Tumbled through the flag — standing up past it does not count. */
+  private botchedFinish = false;
   celebrating = false;
   celebrateT = 0;
   /** Player has touched a control this spawn — no more idle stretches. */
@@ -134,6 +137,7 @@ export class Bill {
     this.died = false;
     this.finished = false;
     this.cleared = false;
+    this.botchedFinish = false;
     this.celebrating = false;
     this.celebrateT = 0;
     this.engaged = false;
@@ -186,7 +190,7 @@ export class Bill {
     if (this.state === "ground") {
       this.tuck = 0.5;
       this.cushion = Math.max(0, this.cushion - dt * 1.45);
-      if (!this.cleared && this.x >= level.flagX) this.succeed();
+      if (!this.cleared) this.tryFinish(level);
       this.groundMove(dt, run);
       this.snapToGround(level);
       this.applyCushionDrop(level);
@@ -255,9 +259,13 @@ export class Bill {
     this.tryFinish(level);
   }
 
+  private onFeet(): boolean {
+    return this.state === "ground" && !this.rag && Math.abs(wrapPi(this.rot)) < 0.5;
+  }
+
   private tryFinish(level: Level): void {
     if (this.cleared) {
-      if (this.state === "ground" && Math.abs(this.vx) < 0.32 && !this.rag) {
+      if (this.onFeet() && Math.abs(this.vx) < 0.32 && onFlagPlatform(level, this.x)) {
         this.vx = 0;
         this.rot = 0;
         this.state = "done";
@@ -265,7 +273,17 @@ export class Bill {
       }
       return;
     }
-    if (this.x >= level.flagX && !this.rag && this.state === "ground") {
+    const tumbling = !!(this.rag || this.state === "fallen" || this.state === "stumble");
+    if (tumbling && this.x >= level.flagX) {
+      this.botchedFinish = true;
+      return;
+    }
+    if (
+      !this.botchedFinish &&
+      this.x >= level.flagX &&
+      this.onFeet() &&
+      onFlagPlatform(level, this.x)
+    ) {
       this.succeed();
     }
   }
@@ -419,6 +437,9 @@ export class Bill {
       vel: {
         lean: kick * 0.06,
         arch: crash ? -0.28 : -0.12,
+        spineLumbar: crash ? -0.45 : -0.18,
+        spineThoracic: crash ? 0.28 : 0.1,
+        spineCervical: crash ? 0.4 : 0.14,
         lThigh: -spin * 0.85 + kick * 0.22,
         rThigh: -spin * 0.62 - kick * 0.18,
         lShin: -spin * 1.15 + kick * 0.14,
@@ -434,7 +455,7 @@ export class Bill {
       rolling,
       age: 0,
       stillTime: 0,
-      maxAge: 8,
+      maxAge: 3,
     };
     this.rag = rag;
     // Fall speed and slide are cleared above; the dump still needs that hit on the limbs.
@@ -478,33 +499,39 @@ export class Bill {
 
     const floor = groundAt(level, this.x);
     const onGround = floor !== null;
-    let limb = 0;
-    for (const key of Object.keys(rag.vel) as (keyof Pose)[]) limb += Math.abs(rag.vel[key]);
     const moving =
-      Math.abs(this.vx) > 0.35 ||
-      Math.abs(rag.omega) > 0.5 ||
-      Math.abs(this.vy) > 0.55 ||
-      limb > 1.4;
-    if (onGround && !moving && rag.age > 0.55) rag.stillTime += dt;
+      Math.abs(this.vx) > 0.4 ||
+      Math.abs(rag.omega) > 0.55 ||
+      Math.abs(this.vy) > 0.6;
+    if (!moving) rag.stillTime += dt;
     else rag.stillTime = 0;
 
-    if (rag.stillTime <= 0.32) return;
+    const stopped = rag.stillTime >= 0.12;
+    const timedOut = rag.age >= rag.maxAge;
+    // After a standing finish he may tumble off a ledge — let that play out until
+    // he actually stops (or hits killY). Fail ragdolls still cap at maxAge.
+    if (this.cleared) {
+      if (!stopped) return;
+    } else if (!stopped && !timedOut) {
+      return;
+    }
 
     const crash = this.state === "fallen";
-    this.rag = null;
     this.spinRate = 0;
     this.vx = 0;
     this.vy = 0;
     if (this.cleared) {
-      this.rot = 0;
       this.state = "done";
-      if (onGround && floor !== null) {
+      if (onGround && onFlagPlatform(level, this.x)) {
+        this.rag = null;
+        this.rot = 0;
         this.y = floor + HIP_HEIGHT;
         this.beginCelebrate();
       }
       return;
     }
-    if (crash) {
+    this.rag = null;
+    if (crash || timedOut) {
       this.restarted = true;
       return;
     }
@@ -674,7 +701,6 @@ export class Bill {
         this.state = "done";
         this.vx = 0;
         this.vy = 0;
-        this.rag = null;
         return;
       }
       this.state = "dead";
@@ -762,6 +788,7 @@ export function drawBill(
   ctx.rotate(bill.rot);
 
   const pose = poseFor(bill, t);
+  const chain = torsoChain(pose);
   const arch = pose.arch;
   const grounded = bill.state === "ground" && !bill.rag;
   if (grounded) {
@@ -780,14 +807,8 @@ export function drawBill(
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  const neck: Pt = {
-    x: pose.lean * 0.2 - arch * 0.14,
-    y: 0.64 - arch * 0.02,
-  };
-  const head: Pt = {
-    x: neck.x + 0.05 + pose.lean * 0.06 - arch * 0.1,
-    y: neck.y + 0.21,
-  };
+  const neck = chain.neck;
+  const head = chain.head;
 
   const lHip: Pt = { x: -0.03 - pose.lean * 0.1, y: -0.01 };
   const rHip: Pt = { x: 0.03 - pose.lean * 0.1, y: -0.01 };
@@ -796,8 +817,9 @@ export function drawBill(
   const lAnkle = polar(lKnee, pose.lShin, 0.36);
   const rAnkle = polar(rKnee, pose.rShin, 0.36);
 
-  const lSh: Pt = { x: neck.x - 0.05 - arch * 0.03, y: neck.y - 0.05 };
-  const rSh: Pt = { x: neck.x - 0.04 - arch * 0.03, y: neck.y - 0.05 };
+  const cervical = pose.spineCervical ?? arch * 0.24;
+  const lSh: Pt = { x: neck.x - 0.05 - cervical * 0.08, y: neck.y - 0.05 };
+  const rSh: Pt = { x: neck.x - 0.04 - cervical * 0.08, y: neck.y - 0.05 };
   const lSleeve = polar(lSh, pose.lArm, 0.15);
   const rSleeve = polar(rSh, pose.rArm, 0.15);
   const lElb = polar(lSh, pose.lArm, 0.32);
@@ -857,8 +879,11 @@ interface Pt {
 
 interface Pose {
   lean: number;
-  /** 0 = straight spine, 1 = hyperextended layout arch. */
+  /** 0 = straight spine, 1 = hyperextended layout arch. Split into joints when ragdolling. */
   arch: number;
+  spineLumbar?: number;
+  spineThoracic?: number;
+  spineCervical?: number;
   lThigh: number;
   rThigh: number;
   lShin: number;
@@ -889,8 +914,31 @@ const THIGH_RANGE = { min: -2.12, max: 1.15 };
 const ARM_RANGE = { min: -2.0, max: 2.45 };
 const LEAN_RANGE = { min: -0.62, max: 0.88 };
 const ARCH_RANGE = { min: -0.18, max: 0.95 };
+const LUMBAR_RANGE = { min: -0.16, max: 0.5 };
+const THORACIC_RANGE = { min: -0.14, max: 0.4 };
+const CERVICAL_RANGE = { min: -0.18, max: 0.32 };
 /** 0 = pointed (in line with shin). Positive = toes toward shin. */
 const ANKLE_BEND = { min: -0.55, max: 1.45 };
+
+function fillSpine(pose: Pose): void {
+  pose.spineLumbar = pose.spineLumbar ?? pose.arch * 0.42;
+  pose.spineThoracic = pose.spineThoracic ?? pose.arch * 0.36;
+  pose.spineCervical = pose.spineCervical ?? pose.arch * 0.24;
+}
+
+function torsoChain(pose: Pose): { lumbar: Pt; thoracic: Pt; neck: Pt; head: Pt } {
+  fillSpine(pose);
+  const pelvis: Pt = { x: -pose.lean * 0.04, y: 0.02 };
+  let ang = Math.PI / 2 + pose.lean * 0.18;
+  ang += pose.spineLumbar!;
+  const lumbar = polar(pelvis, ang, 0.21);
+  ang += pose.spineThoracic!;
+  const thoracic = polar(lumbar, ang, 0.23);
+  ang += pose.spineCervical!;
+  const neck = polar(thoracic, ang, 0.2);
+  const head = polar(neck, ang + 0.12 + pose.lean * 0.08, 0.21);
+  return { lumbar, thoracic, neck, head };
+}
 
 function idleRest(t: number): Pose {
   const hang = -Math.PI / 2;
@@ -990,16 +1038,31 @@ function idleStretch(t: number): Pose {
   return lerpPose(a.p, b.p, e);
 }
 
-/** Sore hip or tailbone: plant the feet and rub instead of stretching. */
+/** Sore hip, tailbone, or back: plant the feet and rub instead of stretching. */
 function idleRub(t: number, sore: Set<SoreSpot>): Pose {
   const hang = -Math.PI / 2;
   const rest = idleRest(t);
   const spots: SoreSpot[] = [];
   if (sore.has("coccyx")) spots.push("coccyx");
+  if (sore.has("back")) spots.push("back");
   if (sore.has("rHip")) spots.push("rHip");
   if (sore.has("lHip")) spots.push("lHip");
   const pick = spots[Math.floor(t / 3.6) % Math.max(1, spots.length)] ?? "coccyx";
   const rub = Math.sin(t * 8.2);
+  if (pick === "back") {
+    return {
+      ...rest,
+      lean: 0.22 + 0.05 * rub,
+      arch: 0.42,
+      spineLumbar: 0.4,
+      spineThoracic: 0.22,
+      spineCervical: 0.06,
+      rArm: hang - 0.28 + 0.14 * rub,
+      rFore: hang + 1.28 + 0.24 * rub,
+      lArm: hang - 0.2 + 0.1 * rub,
+      lFore: hang + 1.12 + 0.18 * rub,
+    };
+  }
   if (pick === "coccyx") {
     return {
       ...rest,
@@ -1263,15 +1326,17 @@ function jointOvershoot(
 ): { key: keyof Pose; excess: number; speed: number }[] {
   const out: { key: keyof Pose; excess: number; speed: number }[] = [];
   const abs = (key: keyof Pose, min: number, max: number) => {
-    const v = pose[key];
+    const v = pose[key] ?? 0;
+    const speed = vel[key] ?? 0;
     const excess = v < min ? min - v : v > max ? v - max : 0;
-    const drive = stopDrive(v, vel[key], min, max);
+    const drive = stopDrive(v, speed, min, max);
     const projected = excess + drive * 0.05;
-    if (projected > 0.02) out.push({ key, excess: projected, speed: Math.abs(vel[key]) });
+    if (projected > 0.02) out.push({ key, excess: projected, speed: Math.abs(speed) });
   };
   const rel = (child: keyof Pose, parent: keyof Pose, min: number, max: number) => {
-    const childAng = pose[child] ?? pose[parent];
-    const r = wrapPi(childAng - pose[parent]);
+    const parentAng = pose[parent] ?? 0;
+    const childAng = pose[child] ?? parentAng;
+    const r = wrapPi(childAng - parentAng);
     const rVel = (vel[child] ?? 0) - (vel[parent] ?? 0);
     const excess = r < min ? min - r : r > max ? r - max : 0;
     const drive = stopDrive(r, rVel, min, max);
@@ -1282,6 +1347,9 @@ function jointOvershoot(
   };
   abs("lean", LEAN_RANGE.min, LEAN_RANGE.max);
   abs("arch", ARCH_RANGE.min, ARCH_RANGE.max);
+  abs("spineLumbar", LUMBAR_RANGE.min, LUMBAR_RANGE.max);
+  abs("spineThoracic", THORACIC_RANGE.min, THORACIC_RANGE.max);
+  abs("spineCervical", CERVICAL_RANGE.min, CERVICAL_RANGE.max);
   abs("lThigh", THIGH_RANGE.min, THIGH_RANGE.max);
   abs("rThigh", THIGH_RANGE.min, THIGH_RANGE.max);
   abs("lArm", ARM_RANGE.min, ARM_RANGE.max);
@@ -1302,6 +1370,9 @@ function jointWorld(bill: Bill, key: keyof Pose): { x: number; y: number } {
   const map: Record<keyof Pose, keyof Rig> = {
     lean: "back",
     arch: "back",
+    spineLumbar: "lumbar",
+    spineThoracic: "thoracic",
+    spineCervical: "neck",
     lThigh: "lHip",
     rThigh: "rHip",
     lShin: "lKnee",
@@ -1316,6 +1387,9 @@ function jointWorld(bill: Bill, key: keyof Pose): { x: number; y: number } {
   if (key === "lean" || key === "arch") {
     return worldOf(bill, (rig.lHip.x + rig.rHip.x) * 0.5 - 0.08, 0.04);
   }
+  if (key === "spineLumbar") return worldOf(bill, rig.lumbar.x, rig.lumbar.y);
+  if (key === "spineThoracic") return worldOf(bill, rig.thoracic.x, rig.thoracic.y);
+  if (key === "spineCervical") return worldOf(bill, rig.neck.x, rig.neck.y);
   const p = rig[map[key]];
   return worldOf(bill, p.x, p.y);
 }
@@ -1359,6 +1433,7 @@ function snapKind(key: keyof Pose): SnapKind | null {
   if (key === "lArm" || key === "lFore") return "lElb";
   if (key === "rArm" || key === "rFore") return "rElb";
   if (key === "lFoot" || key === "rFoot") return null;
+  if (key === "spineLumbar" || key === "spineThoracic" || key === "spineCervical") return "back";
   return "coccyx";
 }
 
@@ -1371,8 +1446,12 @@ function enforceRagdollJoints(bill: Bill): void {
 }
 
 function clampLimbPose(pose: Pose): Pose {
+  fillSpine(pose);
   pose.lean = clamp(pose.lean, LEAN_RANGE.min, LEAN_RANGE.max);
   pose.arch = clamp(pose.arch, ARCH_RANGE.min, ARCH_RANGE.max);
+  pose.spineLumbar = clamp(pose.spineLumbar!, LUMBAR_RANGE.min, LUMBAR_RANGE.max);
+  pose.spineThoracic = clamp(pose.spineThoracic!, THORACIC_RANGE.min, THORACIC_RANGE.max);
+  pose.spineCervical = clamp(pose.spineCervical!, CERVICAL_RANGE.min, CERVICAL_RANGE.max);
   pose.lThigh = clamp(pose.lThigh, THIGH_RANGE.min, THIGH_RANGE.max);
   pose.rThigh = clamp(pose.rThigh, THIGH_RANGE.min, THIGH_RANGE.max);
   pose.lShin = hinge(pose.lShin, pose.lThigh, KNEE_BEND.min, KNEE_BEND.max);
@@ -1387,9 +1466,9 @@ function clampLimbPose(pose: Pose): Pose {
 }
 
 function integrateJoint(pose: Pose, vel: Pose, key: keyof Pose, pull: number, dt: number, damp: number): void {
-  vel[key] += (pull - vel[key] * damp) * dt;
-  vel[key] = clamp(vel[key], -18, 18);
-  pose[key] += vel[key] * dt;
+  const v = (vel[key] ?? 0) + (pull - (vel[key] ?? 0) * damp) * dt;
+  vel[key] = clamp(v, -18, 18);
+  pose[key] = (pose[key] ?? 0) + vel[key] * dt;
 }
 
 function flopToward(rag: Ragdoll, hang: number, dt: number, _grounded: boolean, heap = false): void {
@@ -1403,8 +1482,18 @@ function flopToward(rag: Ragdoll, hang: number, dt: number, _grounded: boolean, 
   const torsoStiff = heap ? 6.2 : 3.4;
   const limbStiff = heap ? 1.15 : 0.7;
   const tipStiff = heap ? 0.7 : 0.38;
+  fillSpine(pose);
+  vel.spineLumbar = vel.spineLumbar ?? 0;
+  vel.spineThoracic = vel.spineThoracic ?? 0;
+  vel.spineCervical = vel.spineCervical ?? 0;
   integrateJoint(pose, vel, "lean", wrapPi((heap ? HEAP.lean : 0) - pose.lean) * torsoStiff, dt, heap ? 5.4 : 3.6);
   integrateJoint(pose, vel, "arch", wrapPi((heap ? HEAP.arch : 0) - pose.arch) * (torsoStiff * 0.8), dt, heap ? 4.8 : 3.2);
+  const heapLumbar = HEAP.arch * 0.42;
+  const heapThoracic = HEAP.arch * 0.36;
+  const heapCervical = HEAP.arch * 0.24;
+  integrateJoint(pose, vel, "spineLumbar", wrapPi((heap ? heapLumbar : 0) - pose.spineLumbar!) * (torsoStiff * 0.9), dt, heap ? 4.2 : 2.4);
+  integrateJoint(pose, vel, "spineThoracic", wrapPi((heap ? heapThoracic : 0) - pose.spineThoracic!) * (torsoStiff * 0.7), dt, heap ? 3.6 : 1.8);
+  integrateJoint(pose, vel, "spineCervical", wrapPi((heap ? heapCervical : 0) - pose.spineCervical!) * (torsoStiff * 0.55), dt, heap ? 3.0 : 1.35);
   integrateJoint(pose, vel, "lThigh", pull(pose.lThigh, HEAP.lThigh, limbStiff) - rag.omega * 1.8, dt, 0.42);
   integrateJoint(pose, vel, "rThigh", pull(pose.rThigh, HEAP.rThigh, limbStiff * 0.9) - rag.omega * 1.35, dt, 0.4);
   integrateJoint(pose, vel, "lShin", pull(pose.lShin, HEAP.lShin, tipStiff) - rag.omega * 1.1, dt, 0.22);
@@ -1437,6 +1526,9 @@ function joltPose(rag: Ragdoll, impact: number, slide: number): void {
   rag.vel.lFoot = (rag.vel.lFoot ?? 0) - j * 0.22;
   rag.vel.rFoot = (rag.vel.rFoot ?? 0) - j * 0.18;
   rag.vel.lean += s * 0.08;
+  rag.vel.spineLumbar = (rag.vel.spineLumbar ?? 0) - j * 0.38;
+  rag.vel.spineThoracic = (rag.vel.spineThoracic ?? 0) + j * 0.22 + s * 0.12;
+  rag.vel.spineCervical = (rag.vel.spineCervical ?? 0) + j * 0.4;
   rag.omega += s * 0.85;
 }
 
@@ -1445,6 +1537,9 @@ function lerpPose(a: Pose, b: Pose, t: number): Pose {
   return {
     lean: a.lean + (b.lean - a.lean) * u,
     arch: a.arch + (b.arch - a.arch) * u,
+    spineLumbar: (a.spineLumbar ?? a.arch * 0.42) + ((b.spineLumbar ?? b.arch * 0.42) - (a.spineLumbar ?? a.arch * 0.42)) * u,
+    spineThoracic: (a.spineThoracic ?? a.arch * 0.36) + ((b.spineThoracic ?? b.arch * 0.36) - (a.spineThoracic ?? a.arch * 0.36)) * u,
+    spineCervical: (a.spineCervical ?? a.arch * 0.24) + ((b.spineCervical ?? b.arch * 0.24) - (a.spineCervical ?? a.arch * 0.24)) * u,
     lThigh: a.lThigh + (b.lThigh - a.lThigh) * u,
     rThigh: a.rThigh + (b.rThigh - a.rThigh) * u,
     lShin: a.lShin + (b.lShin - a.lShin) * u,
@@ -1514,6 +1609,8 @@ interface Rig {
   back: Pt;
   belly: Pt;
   chest: Pt;
+  lumbar: Pt;
+  thoracic: Pt;
   lHip: Pt;
   rHip: Pt;
   lKnee: Pt;
@@ -1540,23 +1637,18 @@ interface Rig {
 type RigName = keyof Rig;
 
 function makeRig(pose: Pose, airFeet: boolean): Rig {
-  const arch = pose.arch;
-  const neck: Pt = {
-    x: pose.lean * 0.2 - arch * 0.14,
-    y: 0.64 - arch * 0.02,
-  };
-  const head: Pt = {
-    x: neck.x + 0.05 + pose.lean * 0.06 - arch * 0.1,
-    y: neck.y + 0.21,
-  };
+  const chain = torsoChain(pose);
+  const neck = chain.neck;
+  const head = chain.head;
   const lHip: Pt = { x: -0.03 - pose.lean * 0.1, y: -0.01 };
   const rHip: Pt = { x: 0.03 - pose.lean * 0.1, y: -0.01 };
   const lKnee = polar(lHip, pose.lThigh, 0.46);
   const rKnee = polar(rHip, pose.rThigh, 0.46);
   const lAnkle = polar(lKnee, pose.lShin, 0.36);
   const rAnkle = polar(rKnee, pose.rShin, 0.36);
-  const lSh: Pt = { x: neck.x - 0.05 - arch * 0.03, y: neck.y - 0.05 };
-  const rSh: Pt = { x: neck.x - 0.04 - arch * 0.03, y: neck.y - 0.05 };
+  const cervical = pose.spineCervical ?? pose.arch * 0.24;
+  const lSh: Pt = { x: neck.x - 0.05 - cervical * 0.08, y: neck.y - 0.05 };
+  const rSh: Pt = { x: neck.x - 0.04 - cervical * 0.08, y: neck.y - 0.05 };
   const lElb = polar(lSh, pose.lArm, 0.32);
   const rElb = polar(rSh, pose.rArm, 0.32);
   const lHand = polar(lElb, pose.lFore, 0.3);
@@ -1565,9 +1657,11 @@ function makeRig(pose: Pose, airFeet: boolean): Rig {
   const rFoot = polar(rAnkle, airFeet ? (pose.rFoot ?? pose.rShin) : 0, 0.18);
   return {
     com: { x: 0, y: 0.04 },
-    back: { x: -0.09, y: 0.22 },
-    belly: { x: 0.08, y: 0.2 },
+    back: { x: chain.lumbar.x - 0.09, y: chain.lumbar.y },
+    belly: { x: chain.lumbar.x + 0.08, y: chain.lumbar.y },
     chest: { x: (lSh.x + rSh.x) * 0.5, y: (lSh.y + rSh.y) * 0.5 },
+    lumbar: chain.lumbar,
+    thoracic: chain.thoracic,
     lHip,
     rHip,
     lKnee,
@@ -1611,6 +1705,8 @@ function bodyWorldPoints(bill: Bill): BodySample[] {
     { rig: "back", r: 0.13, kind: "core" },
     { rig: "belly", r: 0.13, kind: "core" },
     { rig: "chest", r: 0.13, kind: "core" },
+    { rig: "lumbar", r: 0.1, kind: "limb", joints: ["spineLumbar"] },
+    { rig: "thoracic", r: 0.1, kind: "limb", joints: ["spineThoracic", "spineLumbar"] },
     { rig: "lHip", r: 0.11, kind: "core" },
     { rig: "rHip", r: 0.11, kind: "core" },
     { rig: "neck", r: 0.11, kind: "core" },
@@ -1652,10 +1748,11 @@ function foldLimb(
   depth: number,
   joints: JointName[],
 ): void {
+  fillSpine(pose);
   let left = depth;
   for (const joint of joints) {
     if (left < 0.002) return;
-    const orig = pose[joint];
+    const orig = pose[joint] ?? 0;
     const p0 = makeRig(pose, airFeet)[rigKey];
     const w0 = worldOf(bill, p0.x, p0.y);
     let bestGain = 0;
@@ -1677,14 +1774,14 @@ function foldLimb(
     if (bestGain < 1e-4) continue;
     const scale = Math.min(1.2, left / bestGain);
     pose[joint] = orig + bestStep * scale;
-    vel[joint] *= 0.18;
+    vel[joint] = (vel[joint] ?? 0) * 0.18;
     enforceRagdollJoints(bill);
     const now = makeRig(pose, airFeet)[rigKey];
     const w = worldOf(bill, now.x, now.y);
     left -= (w.x - w0.x) * nx + (w.y - w0.y) * ny;
   }
   if (left > 0.08 && joints[0]) {
-    noteSnap(bill, joints[0], 0, Math.abs(vel[joints[0]]), left);
+    noteSnap(bill, joints[0], 0, Math.abs(vel[joints[0]] ?? 0), left);
   }
 }
 

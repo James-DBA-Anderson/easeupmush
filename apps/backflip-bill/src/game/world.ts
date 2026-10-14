@@ -95,6 +95,15 @@ export function finishGround(level: Level): number {
   return groundAt(level, level.flagX) ?? 0;
 }
 
+/** Standing on the same platform the flag is planted on. */
+export function onFlagPlatform(level: Level, x: number): boolean {
+  for (const p of level.platforms) {
+    if (level.flagX < p.x0 || level.flagX > p.x1) continue;
+    return x >= p.x0 && x <= p.x1;
+  }
+  return false;
+}
+
 export function pitFloor(level: Level): Platform {
   return { x0: level.gapX0, x1: level.gapX1, y: level.pitY };
 }
