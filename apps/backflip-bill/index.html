@@ -240,9 +240,11 @@
       }
 
       body.touch-ui #hint {
-        bottom: calc(min(28vw, 118px) + 1.85rem + env(safe-area-inset-bottom, 0px));
-        width: min(22rem, calc(100vw - 2rem));
+        top: max(2.85rem, calc(env(safe-area-inset-top) + 2.35rem));
+        bottom: auto;
+        width: min(22rem, calc(100vw - 1.5rem));
         font-size: 0.82rem;
+        border-radius: 1rem;
       }
 
       #altimeter {

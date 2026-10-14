@@ -4,6 +4,7 @@ import {
   approachingSolid,
   groundAt,
   onFlagPlatform,
+  pushOutOfHoop,
   pushOutOfSolid,
   spawnGround,
   START_WALL_X,
@@ -258,16 +259,20 @@ export class Bill {
       return;
     }
 
-    if (this.state === "ground") {
+    if (this.state === "ground" || this.state === "stumble") {
       this.tuck = 0.5;
       this.cushion = Math.max(0, this.cushion - dt * 1.45);
+      if (this.state === "stumble") {
+        this.lockTimer -= dt;
+        if (this.lockTimer <= 0) this.state = "ground";
+      }
       if (!this.cleared) this.tryFinish(level);
       this.groundMove(dt, run);
       this.snapToGround(level);
       this.applyCushionDrop(level);
       const spd = Math.min(1, Math.abs(this.vx) / tuning.maxSpeed);
       this.runPhase += Math.abs(this.vx) * dt * (2.05 + 0.85 * spd);
-      if (jump && !this.cleared) this.takeOff();
+      if (jump && !this.cleared && this.state !== "stumble") this.takeOff();
       this.checkGapDeath(level);
       this.tryFinish(level);
       return;
@@ -332,7 +337,8 @@ export class Bill {
   }
 
   private onFeet(): boolean {
-    return this.state === "ground" && !this.rag && Math.abs(wrapPi(this.rot)) < 0.5;
+    const standing = this.state === "ground" || this.state === "stumble";
+    return standing && !this.rag && Math.abs(wrapPi(this.rot)) < 0.5;
   }
 
   private tryFinish(level: Level): void {
@@ -346,7 +352,7 @@ export class Bill {
       }
       return;
     }
-    const tumbling = !!(this.rag || this.state === "fallen" || this.state === "stumble");
+    const tumbling = !!(this.rag || this.state === "fallen");
     if (tumbling && this.x >= level.flagX) {
       this.botchedFinish = true;
       return;
@@ -429,28 +435,22 @@ export class Bill {
     const cleanAng = degToRad(tuning.cleanLandDeg);
     const stumbleAng = degToRad(tuning.stumbleLandDeg);
     const planted = this.feetLinedUp();
+    const tucked = this.tuck >= tuning.hardTuck;
+    const opened = this.tuck <= tuning.cleanTuck;
 
     this.flipping = false;
     this.landPrep = 0;
 
-    const still = Math.abs(this.vx) < 1.7;
-    const tucked = this.tuck >= tuning.hardTuck;
-    // In-place tucked flips often complete near 360°, so leftover angle is tiny.
-    // Landing in a ball from a standing backflip is always a dump.
-    const crashAng = still ? degToRad(Math.max(30, tuning.cleanLandDeg + 8)) : stumbleAng;
-    if (off > crashAng || (still && tucked) || (tucked && off > cleanAng)) {
-      if (planted) {
-        this.beginRagdoll("hard", g);
-        this.landEvent = this.makeLand("stumble", this.x, g);
-        return;
-      }
+    // On your feet: leftover angle in the stumble window, or land-prep lined the shins up.
+    const onFeet = planted || off <= stumbleAng;
+    if (!onFeet) {
       this.beginRagdoll("crash", g);
       this.landEvent = this.makeLand("fall", this.x, g);
       return;
     }
 
-    // Feet down and not in a ball: stick it. More extension = more knee cushion.
-    if (off <= cleanAng && !tucked) {
+    // Stick it only when opened out and close to feet-down.
+    if (opened && off <= cleanAng && !tucked) {
       this.state = "ground";
       this.rot = 0;
       this.tuck = 0.5;
@@ -460,8 +460,26 @@ export class Bill {
       return;
     }
 
-    this.beginRagdoll("hard", g);
+    this.beginStumble(g);
     this.landEvent = this.makeLand("stumble", this.x, g);
+  }
+
+  /** Hard landing: stay up, dump the knees, keep the run. */
+  private beginStumble(g: number): void {
+    const crouch = this.tuck;
+    this.state = "stumble";
+    this.flipping = false;
+    this.rag = null;
+    this.tuck = 0.5;
+    this.cushion = 0.58 + 0.38 * clamp(crouch, 0, 1);
+    this.lockTimer = tuning.stumbleTime;
+    this.rot = 0;
+    this.spinRate = 0;
+    this.landPrep = 0;
+    this.brace = 0;
+    this.vx *= 0.52;
+    this.vy = 0;
+    this.y = g + HIP_HEIGHT * (1 - 0.42 * this.cushion);
   }
 
   private makeLand(kind: LandKind, x: number, y: number): LandEvent {
@@ -743,13 +761,13 @@ export class Bill {
 
   /** Extended plant: shins toward world-down and ankles under the hips. */
   private feetLinedUp(): boolean {
-    if (this.tuck > 0.25 || this.landPrep < 0.22) return false;
+    if (this.tuck > 0.38 || this.landPrep < 0.12) return false;
     const pose = poseFor(this, 0);
     const down = worldDirToLocal(this, 0, -1);
     const err =
       0.5 *
       (Math.abs(wrapPi(pose.lShin - down)) + Math.abs(wrapPi(pose.rShin - down)));
-    if (err > 0.62) return false;
+    if (err > 0.78) return false;
     const rig = makeRig(pose, true);
     const hip = worldOf(this, (rig.lHip.x + rig.rHip.x) * 0.5, (rig.lHip.y + rig.rHip.y) * 0.5);
     const lAnk = worldOf(this, rig.lAnkle.x, rig.lAnkle.y);
@@ -757,8 +775,20 @@ export class Bill {
     return lAnk.y < hip.y - 0.16 && rAnk.y < hip.y - 0.16;
   }
 
+  private hoopHit(
+    level: Level,
+    x: number,
+    y: number,
+    r: number,
+  ): { nx: number; ny: number; depth: number } | null {
+    if (!level.hoop) return null;
+    return pushOutOfHoop(level.hoop, x, y, r, this.tuck);
+  }
+
   private touchingSolid(level: Level, floorToo: boolean, coreOnly = false): boolean {
     for (const pt of bodyWorldPoints(this)) {
+      const hoop = this.hoopHit(level, pt.x, pt.y, pt.r);
+      if (hoop && hoop.depth > 0.03) return true;
       if (coreOnly && pt.kind !== "core") continue;
       const hit = pushOutOfSolid(level, pt.x, pt.y, pt.r);
       if (!hit) continue;
@@ -781,9 +811,11 @@ export class Bill {
       let hits = 0;
       let coreHit = false;
       for (const pt of pts) {
-        const hit = pushOutOfSolid(level, pt.x, pt.y, pt.r);
+        let hit = pushOutOfSolid(level, pt.x, pt.y, pt.r);
+        if (hit && !floorToo && hit.ny > 0.5) hit = null;
+        const hoop = this.hoopHit(level, pt.x, pt.y, pt.r);
+        if (hoop && (!hit || hoop.depth > hit.depth)) hit = hoop;
         if (!hit) continue;
-        if (!floorToo && hit.ny > 0.5) continue;
         if (rag && pt.kind === "limb" && pt.joints) {
           foldLimb(this, rag.pose, rag.vel, pt.rig, airFeet, hit.nx, hit.ny, hit.depth, pt.joints);
           hits++;

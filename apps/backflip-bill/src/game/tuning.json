@@ -11,11 +11,11 @@
   "tuckLerp": 7.5,
   "tuckRateStraight": 0.31,
   "tuckRateCrouch": 1.31,
-  "cleanLandDeg": 22,
-  "stumbleLandDeg": 68,
+  "cleanLandDeg": 25,
+  "stumbleLandDeg": 85,
   "cleanTuck": 0.4,
   "hardTuck": 0.75,
   "stumbleTime": 0.7,
   "fallenTime": 1.15,
-  "deathTime": 1.15
+  "deathTime": 1
 }

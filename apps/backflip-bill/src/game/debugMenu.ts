@@ -130,10 +130,49 @@ export function mountDebugMenu(game: Game): void {
       }
       #debug-menu .debug-head {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         justify-content: space-between;
-        gap: 0.5rem;
+        gap: 0.75rem;
         margin-bottom: 0.55rem;
+      }
+      #debug-menu .debug-head-right {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.4rem;
+        min-width: min(22rem, 100%);
+      }
+      #debug-menu .debug-head-right .actions {
+        justify-content: flex-end;
+      }
+      #debug-menu .debug-head-right .status {
+        margin: 0;
+        text-align: right;
+        max-width: 22rem;
+      }
+      #debug-menu .debug-top {
+        display: grid;
+        grid-template-columns: minmax(16rem, 1.15fr) minmax(16rem, 1fr);
+        gap: 0.55rem;
+        align-items: start;
+        margin-bottom: 0.55rem;
+      }
+      #debug-menu .debug-top-left {
+        display: flex;
+        flex-direction: column;
+        gap: 0.55rem;
+      }
+      #debug-menu .debug-top fieldset,
+      #debug-menu .debug-top-left fieldset {
+        margin-bottom: 0;
+      }
+      @media (max-width: 720px) {
+        #debug-menu .debug-top {
+          grid-template-columns: 1fr;
+        }
+        #debug-menu .debug-head-right {
+          min-width: 0;
+        }
       }
       #debug-menu fieldset {
         border: 1px solid rgba(200, 221, 230, 0.14);
@@ -212,45 +251,57 @@ export function mountDebugMenu(game: Game): void {
     <aside id="debug-menu" hidden>
     <div class="debug-head">
       <h2>Debug</h2>
-      <button type="button" class="toggle" aria-expanded="false">Hide</button>
+      <div class="debug-head-right">
+        <button type="button" class="toggle" aria-expanded="false">Hide</button>
+        <div class="actions">
+          <button type="button" class="primary save">Save</button>
+          <button type="button" class="revert">Revert</button>
+          <button type="button" class="factory">Factory</button>
+        </div>
+        <p class="status">Tweaks apply live. Save writes them into the game for deploys.</p>
+      </div>
     </div>
     <div class="debug-body">
-      <fieldset>
-        <legend>Level</legend>
-        <div class="level-picks">
-          ${LEVELS.map(
-            (lv, i) =>
-              `<button type="button" data-level="${i}" aria-pressed="false">${lv.title}</button>`,
+      <div class="debug-top">
+        <div class="debug-top-left">
+          <fieldset>
+            <legend>Level</legend>
+            <div class="level-picks">
+              ${LEVELS.map(
+                (lv, i) =>
+                  `<button type="button" data-level="${i}" aria-pressed="false">${lv.title}</button>`,
+              ).join("")}
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Simulation</legend>
+            <label class="scheme">
+              <input type="checkbox" data-sim="gap">
+              <span>Gap<small>A hole in the floor to fall through</small></span>
+            </label>
+            <label class="scheme">
+              <input type="checkbox" data-sim="boxes">
+              <span>Boxes<small>Crates to dump him into</small></span>
+            </label>
+            <div class="actions" style="margin-top:0.4rem">
+              <button type="button" class="primary sim-enter" aria-pressed="false">Enter sim</button>
+              <button type="button" class="sim-exit">Exit sim</button>
+            </div>
+            <p class="sim-note">No finish. Hide this panel, then drag Bill — he goes limp. Release to drop.</p>
+          </fieldset>
+        </div>
+        <fieldset>
+          <legend>Controls</legend>
+          ${SCHEMES.map(
+            (s) => `
+            <label class="scheme">
+              <input type="radio" name="tuck-scheme" value="${s.id}">
+              <span>${s.label}<small>${s.hint}</small></span>
+            </label>`,
           ).join("")}
-        </div>
-      </fieldset>
-      <fieldset>
-        <legend>Simulation</legend>
-        <label class="scheme">
-          <input type="checkbox" data-sim="gap">
-          <span>Gap<small>A hole in the floor to fall through</small></span>
-        </label>
-        <label class="scheme">
-          <input type="checkbox" data-sim="boxes">
-          <span>Boxes<small>Crates to dump him into</small></span>
-        </label>
-        <div class="actions" style="margin-top:0.4rem">
-          <button type="button" class="primary sim-enter" aria-pressed="false">Enter sim</button>
-          <button type="button" class="sim-exit">Exit sim</button>
-        </div>
-        <p class="sim-note">No finish. Hide this panel, then drag Bill — he goes limp. Release to drop.</p>
-      </fieldset>
+        </fieldset>
+      </div>
       <div class="debug-grid">
-      <fieldset>
-        <legend>Controls</legend>
-        ${SCHEMES.map(
-          (s) => `
-          <label class="scheme">
-            <input type="radio" name="tuck-scheme" value="${s.id}">
-            <span>${s.label}<small>${s.hint}</small></span>
-          </label>`,
-        ).join("")}
-      </fieldset>
       <fieldset>
         <legend>Movement</legend>
         ${MOVEMENT.map(sliderHtml).join("")}
@@ -264,12 +315,6 @@ export function mountDebugMenu(game: Game): void {
         ${LANDING.map(sliderHtml).join("")}
       </fieldset>
       </div>
-      <div class="actions">
-        <button type="button" class="primary save">Save</button>
-        <button type="button" class="revert">Revert</button>
-        <button type="button" class="factory">Factory</button>
-      </div>
-      <p class="status">Tweaks apply live. Save writes them into the game for deploys.</p>
     </div>
     </aside>
   `;

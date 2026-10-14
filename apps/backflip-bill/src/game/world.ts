@@ -26,6 +26,17 @@ export interface Level {
   /** Debug sandbox: no finish, ragdoll does not reset the level. */
   sandbox?: boolean;
   noFlag?: boolean;
+  /** Circus hoop: only a tucked pose fits the hole. */
+  hoop?: Hoop;
+}
+
+export interface Hoop {
+  x: number;
+  y: number;
+  inner: number;
+  outer: number;
+  /** 0 layout … 1 crouch. Must be at least this tucked to pass. */
+  tuck: number;
 }
 
 export const LEVELS: Level[] = [
@@ -55,9 +66,9 @@ export const LEVELS: Level[] = [
     gapX0: 16.2,
     gapX1: 21.8,
     pitY: -6.4,
-    flagX: 33.2,
+    flagX: 24.6,
     killY: -10,
-    endX: 40,
+    endX: 32,
   },
   {
     id: 3,
@@ -88,6 +99,22 @@ export const LEVELS: Level[] = [
     flagX: 22.7,
     killY: -7,
     endX: 31,
+  },
+  {
+    id: 5,
+    title: "Level 5",
+    spawnX: 4.2,
+    platforms: [
+      { x0: -4, x1: 15.4, y: 0 },
+      { x0: 26.8, x1: 50, y: -6.4 },
+    ],
+    gapX0: 15.4,
+    gapX1: 26.8,
+    pitY: -9.8,
+    flagX: 35.2,
+    killY: -15,
+    endX: 44,
+    hoop: { x: 17.2, y: 3.08, inner: 0.64, outer: 0.94, tuck: 0.7 },
   },
 ];
 
@@ -243,7 +270,51 @@ export function approachingSolid(
   };
   for (const p of solids(level)) consider(closestOnPlatform(p, x, y));
   consider({ px: START_WALL_X, py: y, nx: 1, ny: 0, dist: x - START_WALL_X });
+  if (level.hoop) consider(closestOnHoop(level.hoop, x, y));
   return best;
+}
+
+function closestOnHoop(h: Hoop, x: number, y: number): NearSolid {
+  const dx = x - h.x;
+  const dy = y - h.y;
+  const d = Math.hypot(dx, dy) || 1e-6;
+  const nx = dx / d;
+  const ny = dy / d;
+  const mid = (h.inner + h.outer) * 0.5;
+  return {
+    px: h.x + nx * mid,
+    py: h.y + ny * mid,
+    nx,
+    ny,
+    dist: Math.abs(d - mid) - (h.outer - h.inner) * 0.5,
+  };
+}
+
+/** Annulus is solid. Too open and the whole disk blocks — only a tuck fits the hole. */
+export function pushOutOfHoop(
+  hoop: Hoop,
+  x: number,
+  y: number,
+  r: number,
+  tuck: number,
+): { nx: number; ny: number; depth: number } | null {
+  const dx = x - hoop.x;
+  const dy = y - hoop.y;
+  const d = Math.hypot(dx, dy);
+  const nx = d > 1e-6 ? dx / d : 1;
+  const ny = d > 1e-6 ? dy / d : 0;
+  if (tuck < hoop.tuck) {
+    const depth = hoop.outer + r - d;
+    if (depth <= 0) return null;
+    return { nx, ny, depth };
+  }
+  if (d + r < hoop.inner || d - r > hoop.outer) return null;
+  const innerPen = d + r - hoop.inner;
+  const outerPen = hoop.outer + r - d;
+  if (d <= hoop.inner || innerPen < outerPen) {
+    return { nx: -nx, ny: -ny, depth: Math.max(0.001, innerPen) };
+  }
+  return { nx, ny, depth: Math.max(0.001, outerPen) };
 }
 
 export function pushOutOfSolid(
@@ -356,6 +427,7 @@ export function drawWorld(
   drawPit(ctx, cam, cssW, cssH, level);
   drawGround(ctx, cam, cssW, cssH, level);
   drawBoxes(ctx, cam, cssW, cssH, level);
+  drawHoop(ctx, cam, cssW, cssH, level);
   drawStartWall(ctx, cam, cssW, cssH, level);
   if (!level.noFlag) drawFlag(ctx, cam, cssW, cssH, level);
 }
@@ -533,6 +605,51 @@ function drawBoxes(
     ctx.fillRect(x0 + w * 0.18, top + 4, 3, h - 8);
     ctx.fillRect(x0 + w * 0.78, top + 4, 3, h - 8);
   }
+}
+
+function drawHoop(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  const hoop = level.hoop;
+  if (!hoop) return;
+  const ppm = cssW / cam.w;
+  const sx = worldToScreenX(cam, cssW, hoop.x);
+  const sy = worldToScreenY(cam, cssH, hoop.y);
+  const midR = ((hoop.inner + hoop.outer) * 0.5) * ppm;
+  const thick = Math.max(5, (hoop.outer - hoop.inner) * ppm);
+  const takeoff = level.platforms[0];
+  if (takeoff) {
+    const px = worldToScreenX(cam, cssW, takeoff.x1 - 0.32);
+    const py = worldToScreenY(cam, cssH, takeoff.y);
+    ctx.strokeStyle = "#2a2420";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px, sy);
+    ctx.lineTo(sx - midR, sy);
+    ctx.stroke();
+    ctx.fillStyle = "#3d3832";
+    ctx.fillRect(px - 8, py - 6, 16, 10);
+  }
+  ctx.strokeStyle = "#8a4e14";
+  ctx.lineWidth = thick + 4;
+  ctx.beginPath();
+  ctx.arc(sx, sy, midR, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = "#f0a23a";
+  ctx.lineWidth = thick;
+  ctx.beginPath();
+  ctx.arc(sx, sy, midR, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(255, 248, 230, 0.55)";
+  ctx.lineWidth = Math.max(2, thick * 0.22);
+  ctx.beginPath();
+  ctx.arc(sx, sy, midR - thick * 0.2, -0.95, 0.45);
+  ctx.stroke();
 }
 
 function drawStartWall(
