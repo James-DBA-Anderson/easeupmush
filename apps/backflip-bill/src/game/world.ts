@@ -39,6 +39,10 @@ export interface Hoop {
   tuck: number;
 }
 
+/** Face the runner, 10° off edge-on so the hole still reads as a hoop. */
+const HOOP_YAW = (80 * Math.PI) / 180;
+const HOOP_FORESHORTEN = Math.cos(HOOP_YAW);
+
 export const LEVELS: Level[] = [
   {
     id: 1,
@@ -106,15 +110,15 @@ export const LEVELS: Level[] = [
     spawnX: 4.2,
     platforms: [
       { x0: -4, x1: 15.4, y: 0 },
-      { x0: 26.8, x1: 50, y: -6.4 },
+      { x0: 25.0, x1: 50, y: -6.4 },
     ],
     gapX0: 15.4,
-    gapX1: 26.8,
+    gapX1: 25.0,
     pitY: -9.8,
-    flagX: 35.2,
+    flagX: 33.2,
     killY: -15,
     endX: 44,
-    hoop: { x: 17.2, y: 3.08, inner: 0.64, outer: 0.94, tuck: 0.7 },
+    hoop: { x: 18.5, y: 3.35, inner: 0.86, outer: 1.26, tuck: 0.7 },
   },
 ];
 
@@ -274,23 +278,26 @@ export function approachingSolid(
   return best;
 }
 
+function hoopSlab(h: Hoop): number {
+  return Math.max(0.2, h.outer * HOOP_FORESHORTEN + 0.1);
+}
+
 function closestOnHoop(h: Hoop, x: number, y: number): NearSolid {
-  const dx = x - h.x;
-  const dy = y - h.y;
-  const d = Math.hypot(dx, dy) || 1e-6;
-  const nx = dx / d;
-  const ny = dy / d;
-  const mid = (h.inner + h.outer) * 0.5;
+  const py = Math.max(h.y - h.outer, Math.min(h.y + h.outer, y));
+  const nx = x >= h.x ? 1 : -1;
   return {
-    px: h.x + nx * mid,
-    py: h.y + ny * mid,
+    px: h.x,
+    py,
     nx,
-    ny,
-    dist: Math.abs(d - mid) - (h.outer - h.inner) * 0.5,
+    ny: 0,
+    dist: Math.abs(x - h.x) - hoopSlab(h),
   };
 }
 
-/** Annulus is solid. Too open and the whole disk blocks — only a tuck fits the hole. */
+/**
+ * Hoop faces along the run. The hole is open in X; only the top/bottom rim
+ * (and the whole aperture if he is not tucked) is solid.
+ */
 export function pushOutOfHoop(
   hoop: Hoop,
   x: number,
@@ -300,21 +307,20 @@ export function pushOutOfHoop(
 ): { nx: number; ny: number; depth: number } | null {
   const dx = x - hoop.x;
   const dy = y - hoop.y;
-  const d = Math.hypot(dx, dy);
-  const nx = d > 1e-6 ? dx / d : 1;
-  const ny = d > 1e-6 ? dy / d : 0;
+  const hw = hoopSlab(hoop) + r;
+  if (Math.abs(dx) > hw) return null;
+  const ady = Math.abs(dy);
+  if (ady - r > hoop.outer) return null;
+  const sx = dx >= 0 ? 1 : -1;
   if (tuck < hoop.tuck) {
-    const depth = hoop.outer + r - d;
-    if (depth <= 0) return null;
-    return { nx, ny, depth };
+    return { nx: sx, ny: 0, depth: hw - Math.abs(dx) };
   }
-  if (d + r < hoop.inner || d - r > hoop.outer) return null;
-  const innerPen = d + r - hoop.inner;
-  const outerPen = hoop.outer + r - d;
-  if (d <= hoop.inner || innerPen < outerPen) {
-    return { nx: -nx, ny: -ny, depth: Math.max(0.001, innerPen) };
+  if (ady + r < hoop.inner) return null;
+  const ny = dy >= 0 ? 1 : -1;
+  if (ady < (hoop.inner + hoop.outer) * 0.5) {
+    return { nx: 0, ny: -ny, depth: Math.max(0.001, ady + r - hoop.inner) };
   }
-  return { nx, ny, depth: Math.max(0.001, outerPen) };
+  return { nx: 0, ny, depth: Math.max(0.001, hoop.outer + r - ady) };
 }
 
 export function pushOutOfSolid(
@@ -371,6 +377,14 @@ export function fitView(cssW: number, cssH: number, desktop = false): { w: numbe
   return { w, h };
 }
 
+/** Fraction of view width to keep ahead of Bill so more of the run is on screen. */
+const CAM_AHEAD = 0.18;
+
+export function camLookX(px: number, cam: Cam, vx = 0): number {
+  const look = Math.max(-2.2, Math.min(2.2, vx * 0.28));
+  return px + cam.w * CAM_AHEAD + look;
+}
+
 export function followCam(
   cam: Cam,
   px: number,
@@ -379,10 +393,9 @@ export function followCam(
   dt: number,
   level: Level,
 ): void {
-  const look = Math.max(-2.2, Math.min(2.2, vx * 0.28));
-  const targetX = px + look;
+  const targetX = camLookX(px, cam, vx);
   cam.x += (targetX - cam.x) * Math.min(1, dt * 6);
-  const minX = cam.w * 0.45;
+  const minX = cam.w * 0.38;
   const maxX = level.endX - cam.w * 0.4;
   cam.x = Math.max(minX, Math.min(maxX, cam.x));
   const floor = groundAt(level, px);
@@ -607,6 +620,23 @@ function drawBoxes(
   }
 }
 
+function hoopEllipse(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  rxO: number,
+  ryO: number,
+  rxI: number,
+  ryI: number,
+  fill: string,
+): void {
+  ctx.beginPath();
+  ctx.ellipse(sx, sy, rxO, ryO, 0, 0, Math.PI * 2);
+  ctx.ellipse(sx, sy, rxI, ryI, 0, 0, Math.PI * 2);
+  ctx.fillStyle = fill;
+  ctx.fill("evenodd");
+}
+
 function drawHoop(
   ctx: CanvasRenderingContext2D,
   cam: Cam,
@@ -619,8 +649,10 @@ function drawHoop(
   const ppm = cssW / cam.w;
   const sx = worldToScreenX(cam, cssW, hoop.x);
   const sy = worldToScreenY(cam, cssH, hoop.y);
-  const midR = ((hoop.inner + hoop.outer) * 0.5) * ppm;
-  const thick = Math.max(5, (hoop.outer - hoop.inner) * ppm);
+  const rxO = Math.max(4, hoop.outer * HOOP_FORESHORTEN * ppm);
+  const ryO = hoop.outer * ppm;
+  const rxI = Math.max(2, hoop.inner * HOOP_FORESHORTEN * ppm);
+  const ryI = hoop.inner * ppm;
   const takeoff = level.platforms[0];
   if (takeoff) {
     const px = worldToScreenX(cam, cssW, takeoff.x1 - 0.32);
@@ -630,25 +662,18 @@ function drawHoop(
     ctx.beginPath();
     ctx.moveTo(px, py);
     ctx.lineTo(px, sy);
-    ctx.lineTo(sx - midR, sy);
+    ctx.lineTo(sx - rxO, sy);
     ctx.stroke();
     ctx.fillStyle = "#3d3832";
     ctx.fillRect(px - 8, py - 6, 16, 10);
   }
-  ctx.strokeStyle = "#8a4e14";
-  ctx.lineWidth = thick + 4;
+  const skew = Math.max(3, 0.08 * ppm);
+  hoopEllipse(ctx, sx - skew, sy, rxO * 1.05, ryO, rxI, ryI, "#8a4e14");
+  hoopEllipse(ctx, sx, sy, rxO, ryO, rxI, ryI, "#f0a23a");
   ctx.beginPath();
-  ctx.arc(sx, sy, midR, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.strokeStyle = "#f0a23a";
-  ctx.lineWidth = thick;
-  ctx.beginPath();
-  ctx.arc(sx, sy, midR, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.strokeStyle = "rgba(255, 248, 230, 0.55)";
-  ctx.lineWidth = Math.max(2, thick * 0.22);
-  ctx.beginPath();
-  ctx.arc(sx, sy, midR - thick * 0.2, -0.95, 0.45);
+  ctx.ellipse(sx + rxO * 0.12, sy - ryO * 0.18, rxO * 0.4, ryO * 0.38, 0, -0.9, 0.45);
+  ctx.strokeStyle = "rgba(255, 248, 230, 0.5)";
+  ctx.lineWidth = Math.max(2, 0.035 * ppm);
   ctx.stroke();
 }
 

@@ -4,6 +4,7 @@ import { HIP_HEIGHT, TAU } from "./constants";
 import { isDebugTyping, Input, wantsTouchUi } from "./input";
 import { hintForScheme, tuning } from "./tuning";
 import {
+  camLookX,
   drawSky,
   drawWorld,
   finishGround,
@@ -168,6 +169,7 @@ export class Game {
     this.syncLevelHud();
     this.syncHint();
     this.resize();
+    this.cam.x = camLookX(this.bill.x, this.cam);
     const wanted = Number(new URLSearchParams(window.location.search).get("level"));
     if (wanted >= 1 && wanted <= LEVELS.length) this.loadLevel(wanted - 1);
   }
@@ -240,7 +242,7 @@ export class Game {
     const held = this.bill.held;
     if (spawn) {
       this.bill.spawn(this.level());
-      this.cam.x = this.bill.x;
+      this.cam.x = camLookX(this.bill.x, this.cam);
       this.cam.y = spawnGround(this.level()) + this.cam.h * 0.26;
     } else if (held) {
       this.bill.x = keepX;
@@ -319,7 +321,7 @@ export class Game {
     this.dropLiveBonus();
     const level = this.level();
     this.bill.spawn(level);
-    this.cam.x = this.bill.x;
+    this.cam.x = camLookX(this.bill.x, this.cam);
     this.cam.y = spawnGround(level) + this.cam.h * 0.26;
     this.deathT = 0;
     this.timeScale = 1;
@@ -338,7 +340,7 @@ export class Game {
     this.bill.spawn(this.level());
     this.timeScale = 1;
     this.dust.length = 0;
-    this.cam.x = this.bill.x;
+    this.cam.x = camLookX(this.bill.x, this.cam);
     this.cam.y = spawnGround(this.level()) + this.cam.h * 0.26;
     this.syncLevelHud();
     this.hintT = 5.5;
