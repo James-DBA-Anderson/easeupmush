@@ -23,6 +23,13 @@ export interface LandEvent {
   spins: number;
   /** Seconds held at full layout during this flip. */
   layoutHold: number;
+  /** Downward speed at contact, m/s. */
+  impact: number;
+}
+
+export interface HitEvent {
+  mag: number;
+  hoop: boolean;
 }
 
 export interface SnapEvent {
@@ -68,6 +75,10 @@ export class Bill {
   spinRate = 0;
   rag: Ragdoll | null = null;
   landEvent: LandEvent | null = null;
+  /** Ragdoll / hoop contact this frame — consumed for sfx. */
+  hitEvent: HitEvent | null = null;
+  /** Just started the post-finish pose. */
+  celebrateEvent = false;
   /** Joints that snapped this frame — consumed by the game for sfx + dust. */
   snapEvents: SnapEvent[] = [];
   /** Lingering crack flashes at snapped joints. */
@@ -131,6 +142,8 @@ export class Bill {
     this.spinRate = 0;
     this.rag = null;
     this.landEvent = null;
+    this.hitEvent = null;
+    this.celebrateEvent = false;
     this.snapEvents = [];
     this.snapFlashes = [];
     this.time = 0;
@@ -234,6 +247,8 @@ export class Bill {
     touched = false,
   ): void {
     this.landEvent = null;
+    this.hitEvent = null;
+    this.celebrateEvent = false;
     this.snapEvents.length = 0;
     this.time += dt;
     this.died = false;
@@ -429,6 +444,7 @@ export class Bill {
 
   private land(g: number): void {
     this.y = g + HIP_HEIGHT;
+    const impact = Math.max(0.4, -this.vy);
     const ang = wrapPi(this.rot);
     const off = Math.abs(ang);
     const extend = Math.max(0, 1 - this.tuck);
@@ -445,7 +461,7 @@ export class Bill {
     const onFeet = planted || off <= stumbleAng;
     if (!onFeet) {
       this.beginRagdoll("crash", g);
-      this.landEvent = this.makeLand("fall", this.x, g);
+      this.landEvent = this.makeLand("fall", this.x, g, impact);
       return;
     }
 
@@ -456,12 +472,12 @@ export class Bill {
       this.tuck = 0.5;
       this.cushion = 0.22 + 0.78 * extend;
       this.y = g + HIP_HEIGHT * (1 - 0.42 * this.cushion);
-      this.landEvent = this.makeLand("clean", this.x, g);
+      this.landEvent = this.makeLand("clean", this.x, g, impact);
       return;
     }
 
     this.beginStumble(g);
-    this.landEvent = this.makeLand("stumble", this.x, g);
+    this.landEvent = this.makeLand("stumble", this.x, g, impact);
   }
 
   /** Hard landing: stay up, dump the knees, keep the run. */
@@ -482,13 +498,14 @@ export class Bill {
     this.y = g + HIP_HEIGHT * (1 - 0.42 * this.cushion);
   }
 
-  private makeLand(kind: LandKind, x: number, y: number): LandEvent {
+  private makeLand(kind: LandKind, x: number, y: number, impact?: number): LandEvent {
     return {
       kind,
       x,
       y,
       spins: Math.max(0, Math.round(this.flipTravel / TAU)),
       layoutHold: this.layoutHold,
+      impact: impact ?? Math.max(0.4, -this.vy),
     };
   }
 
@@ -810,11 +827,15 @@ export class Bill {
       let accT = 0;
       let hits = 0;
       let coreHit = false;
+      let hoopContact = false;
       for (const pt of pts) {
         let hit = pushOutOfSolid(level, pt.x, pt.y, pt.r);
         if (hit && !floorToo && hit.ny > 0.5) hit = null;
         const hoop = this.hoopHit(level, pt.x, pt.y, pt.r);
-        if (hoop && (!hit || hoop.depth > hit.depth)) hit = hoop;
+        if (hoop && (!hit || hoop.depth > hit.depth)) {
+          hit = hoop;
+          hoopContact = true;
+        }
         if (!hit) continue;
         if (rag && pt.kind === "limb" && pt.joints) {
           foldLimb(this, rag.pose, rag.vel, pt.rig, airFeet, hit.nx, hit.ny, hit.depth, pt.joints);
@@ -833,15 +854,20 @@ export class Bill {
         if (pt.kind === "core") coreHit = true;
       }
       if (!hits) return;
-      if (rag && pass === 0) {
+      if (pass === 0) {
         const floorSpeed = up > 0 ? Math.max(0, -this.vy) : 0;
         const wallSpeed =
           left > right ? Math.max(0, this.vx) : right > left ? Math.max(0, -this.vx) : 0;
-        const impact = Math.max(floorSpeed, wallSpeed);
-        // Resting contact is only about gravity*dt (~0.8). A real hit is faster.
-        if (impact > 2) {
+        const impact = Math.max(floorSpeed, wallSpeed, hoopContact ? Math.hypot(this.vx, this.vy) : 0);
+        if (rag && impact > 2) {
           const slide = floorSpeed >= wallSpeed ? this.vx : this.vy;
           joltPose(rag, impact, slide);
+        }
+        if (impact > 2 || (hoopContact && impact > 1.2)) {
+          const mag = Math.max(impact, hoopContact ? 3 : 0);
+          if (!this.hitEvent || mag > this.hitEvent.mag) {
+            this.hitEvent = { mag, hoop: hoopContact };
+          }
         }
       }
       this.y += up;
@@ -883,6 +909,7 @@ export class Bill {
   private beginCelebrate(): void {
     this.celebrating = true;
     this.celebrateT = 0;
+    this.celebrateEvent = true;
   }
 
   private checkGapDeath(level: Level): void {

@@ -45,6 +45,15 @@ function extraSpins(spins: number): number {
   return Math.max(0, spins - 1);
 }
 
+function stretchBeat(t: number): number {
+  const u = (((t % 26) + 26) % 26) / 26;
+  if (u >= 0.84) return 3;
+  if (u >= 0.6) return 2;
+  if (u >= 0.38) return 1;
+  if (u >= 0.16) return 0;
+  return -1;
+}
+
 function layoutTicks(seconds: number): number {
   return Math.floor(Math.max(0, seconds) / LAYOUT_TICK);
 }
@@ -129,6 +138,12 @@ export class Game {
   private grabVy = 0;
   private grabOffX = 0;
   private grabOffY = 0;
+  private lastFoot = 0;
+  private lastTuck = 0.5;
+  private prevX = 0;
+  private hoopPassed = false;
+  private lastStretch = -1;
+  private wasCleared = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -153,7 +168,9 @@ export class Game {
       if (this.gameOver && this.resultsReadyT <= 0) this.playAgain();
     });
     window.addEventListener("resize", this.resize);
-    window.addEventListener("pointerdown", () => this.sfx.resume(), { once: true });
+    const unlock = (): void => this.sfx.resume();
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
     this.canvas.addEventListener("pointerdown", this.onSimPointerDown);
     window.addEventListener("pointermove", this.onSimPointerMove);
     window.addEventListener("pointerup", this.onSimPointerUp);
@@ -170,8 +187,10 @@ export class Game {
     this.syncHint();
     this.resize();
     this.cam.x = camLookX(this.bill.x, this.cam);
+    this.resetMotionSfx();
     const wanted = Number(new URLSearchParams(window.location.search).get("level"));
     if (wanted >= 1 && wanted <= LEVELS.length) this.loadLevel(wanted - 1);
+    else this.sfx.levelStart();
   }
 
   public start(): void {
@@ -244,6 +263,7 @@ export class Game {
       this.bill.spawn(this.level());
       this.cam.x = camLookX(this.bill.x, this.cam);
       this.cam.y = spawnGround(this.level()) + this.cam.h * 0.26;
+      this.resetMotionSfx();
     } else if (held) {
       this.bill.x = keepX;
       this.bill.y = keepY;
@@ -284,6 +304,7 @@ export class Game {
     this.bill.goLimp();
     this.bill.carry(this.grabX, this.grabY);
     this.canvas.style.cursor = "grabbing";
+    this.sfx.grab();
   };
 
   private onSimPointerMove = (e: PointerEvent): void => {
@@ -306,6 +327,7 @@ export class Game {
     this.grabbing = false;
     this.bill.drop(this.grabVx, this.grabVy);
     this.canvas.style.cursor = this.sim ? "grab" : "";
+    this.sfx.drop();
   };
 
   private level(): Level {
@@ -325,6 +347,7 @@ export class Game {
     this.cam.y = spawnGround(level) + this.cam.h * 0.26;
     this.deathT = 0;
     this.timeScale = 1;
+    this.resetMotionSfx();
   }
 
   private loadLevel(index: number): void {
@@ -344,6 +367,8 @@ export class Game {
     this.cam.y = spawnGround(this.level()) + this.cam.h * 0.26;
     this.syncLevelHud();
     this.hintT = 5.5;
+    this.resetMotionSfx();
+    this.sfx.levelStart();
   }
 
   private playAgain(): void {
@@ -439,18 +464,22 @@ export class Game {
           this.dropLiveBonus();
         }
         if (e.kind === "clean") {
-          this.sfx.cleanLand();
+          this.sfx.cleanLand(e.impact);
           this.flash(e.spins >= 2 ? `Clean ${spinLabel(e.spins)}` : "Clean landing");
           burst(this.dust, e.x, e.y, 8, "rgba(232,240,244,0.7)", 3);
         } else if (e.kind === "stumble") {
-          this.sfx.stumble();
+          this.sfx.stumble(e.impact);
           this.flash(e.spins >= 2 ? `Hard ${spinLabel(e.spins)}` : "Hard landing");
           burst(this.dust, e.x, e.y, 12, "rgba(240,162,58,0.8)", 4);
         } else {
-          this.sfx.fall();
+          this.sfx.fall(e.impact);
           this.flash("You're having a laugh");
           burst(this.dust, e.x, e.y, 16, "rgba(196,60,42,0.75)", 5);
         }
+      }
+      if (this.bill.hitEvent && (!this.bill.landEvent || this.bill.hitEvent.hoop)) {
+        if (this.bill.hitEvent.hoop) this.sfx.hoopClang();
+        else this.sfx.bodyHit(this.bill.hitEvent.mag);
       }
       if (this.bill.snapEvents.length) {
         this.sfx.snap();
@@ -460,6 +489,7 @@ export class Game {
           burst(this.dust, e.x, e.y, 8, "rgba(196,60,42,0.7)", 4, true);
         }
       }
+      if (this.bill.celebrateEvent) this.sfx.celebrate();
       if (this.bill.restarted) {
         if (!this.sim) this.flash("Back to the start");
         this.respawn();
@@ -495,6 +525,8 @@ export class Game {
       const g = groundAt(level, this.bill.x) ?? spawnGround(level);
       burst(this.dust, this.bill.x, g, 1, "rgba(180,170,155,0.55)", 1.4);
     }
+
+    this.playMotionSfx(level);
 
     followCam(this.cam, this.bill.x, this.bill.y, this.bill.vx, dt, level);
     stepDust(this.dust, dt);
@@ -557,7 +589,10 @@ export class Game {
   }
 
   private dropLiveBonus(): void {
-    if (this.liveBonus > 0) this.spawnScoreFall(this.liveBonus);
+    if (this.liveBonus > 0) {
+      this.spawnScoreFall(this.liveBonus);
+      this.sfx.miss();
+    }
     this.clearLiveBonus();
   }
 
@@ -597,8 +632,7 @@ export class Game {
     this.liveBonus += points;
     this.spawnScoreRise(points, kind);
     this.syncScoreHud(true);
-    if (kind === "extra") this.sfx.bonus(520, 760);
-    else if (kind === "star") this.sfx.bonus(660, 990);
+    this.sfx.bonus(kind);
   }
 
   private payLayout(hold: number): void {
@@ -679,6 +713,7 @@ export class Game {
     this.resultsEl.hidden = false;
     this.resultsEl.classList.add("open");
     document.body.classList.add("results-open");
+    this.sfx.results();
   }
 
   private hideResults(): void {
@@ -691,6 +726,68 @@ export class Game {
   private flash(msg: string): void {
     this.banner = msg;
     this.bannerT = 1.8;
+  }
+
+  private resetMotionSfx(): void {
+    this.lastFoot = this.bill.runPhase;
+    this.lastTuck = this.bill.tuck;
+    this.prevX = this.bill.x;
+    this.hoopPassed = false;
+    this.lastStretch = -1;
+    this.wasCleared = this.bill.cleared;
+  }
+
+  private playMotionSfx(level: Level): void {
+    const bill = this.bill;
+    const air = bill.state === "air" || !!bill.rag || bill.held;
+    this.sfx.tick({
+      flipping: bill.flipping && !bill.held,
+      omega: bill.spinRate,
+      air,
+      fall: Math.max(0, -bill.vy),
+      speed: Math.hypot(bill.vx, bill.vy),
+    });
+
+    const standing =
+      (bill.state === "ground" || bill.state === "stumble") && !bill.rag && !bill.held;
+    if (standing && Math.abs(bill.vx) > 1.15) {
+      const crossed = Math.floor(bill.runPhase / Math.PI) !== Math.floor(this.lastFoot / Math.PI);
+      if (crossed) this.sfx.foot(Math.abs(bill.vx) / tuning.maxSpeed);
+    }
+    this.lastFoot = bill.runPhase;
+
+    if (bill.flipping) {
+      const d = bill.tuck - this.lastTuck;
+      if (d > 0.16) this.sfx.tuck();
+      else if (d < -0.16) this.sfx.extend();
+    }
+    this.lastTuck = bill.tuck;
+
+    const hoop = level.hoop;
+    if (
+      hoop &&
+      !this.hoopPassed &&
+      bill.flipping &&
+      bill.tuck >= hoop.tuck &&
+      this.prevX < hoop.x &&
+      bill.x >= hoop.x &&
+      Math.abs(bill.y - hoop.y) < hoop.inner + 0.2
+    ) {
+      this.sfx.hoopPass();
+      this.hoopPassed = true;
+    }
+    this.prevX = bill.x;
+
+    if (standing && !bill.engaged && Math.abs(bill.vx) < 0.28 && bill.sore.size === 0) {
+      const beat = stretchBeat(bill.time);
+      if (beat >= 0 && beat !== this.lastStretch) this.sfx.stretch();
+      this.lastStretch = beat;
+    } else {
+      this.lastStretch = -1;
+    }
+
+    if (bill.cleared && !this.wasCleared && Math.abs(bill.vx) > 2) this.sfx.skid();
+    this.wasCleared = bill.cleared;
   }
 
   private draw(): void {
