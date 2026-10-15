@@ -25,6 +25,16 @@
         --foam: #c8dde6;
         --sodium: #f0a23a;
         --chalk: #e8f0f4;
+        --font-ui: "Source Sans 3", "Segoe UI", sans-serif;
+        --font-display: "Anton", Impact, sans-serif;
+        --type-micro: 0.68rem;
+        --type-label: 0.78rem;
+        --type-body: 0.92rem;
+        --type-callout: 1.15rem;
+        --type-display: 1.15rem;
+        --type-title: 1.65rem;
+        --tracking-label: 0.1em;
+        --tracking-display: 0.04em;
       }
 
       * {
@@ -40,7 +50,7 @@
         height: 100dvh;
         overflow: hidden;
         background: #1b3348;
-        font-family: "Source Sans 3", "Segoe UI", sans-serif;
+        font-family: var(--font-ui);
         color: var(--chalk);
         user-select: none;
         -webkit-user-select: none;
@@ -67,8 +77,9 @@
         top: max(2.8rem, calc(env(safe-area-inset-top) + 2.2rem));
         left: 50%;
         transform: translateX(-50%);
+        font-family: var(--font-ui);
         font-weight: 700;
-        font-size: clamp(0.95rem, 4vw, 1.2rem);
+        font-size: var(--type-callout);
         color: var(--sodium);
         text-shadow: 0 1px 0 #07141a;
         opacity: 0;
@@ -84,14 +95,13 @@
       #score {
         position: absolute;
         top: max(0.75rem, env(safe-area-inset-top));
-        font-size: 0.8rem;
+        font-family: var(--font-ui);
+        font-size: var(--type-callout);
         font-weight: 700;
-        letter-spacing: 0.08em;
+        letter-spacing: var(--tracking-label);
         text-transform: uppercase;
-        background: rgba(7, 20, 26, 0.4);
-        border: 1px solid rgba(200, 221, 230, 0.18);
-        border-radius: 999px;
-        padding: 0.2rem 0.55rem;
+        padding: 0.2rem 0.15rem;
+        text-shadow: 0 1px 0 #07141a, 0 0 8px #07141acc;
       }
 
       #level {
@@ -105,35 +115,32 @@
         flex-direction: column;
         align-items: flex-end;
         gap: 0.06rem;
-        color: var(--chalk);
+        color: var(--sodium);
         font-variant-numeric: tabular-nums;
-        letter-spacing: 0.04em;
         overflow: visible;
-        transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+        transition: text-shadow 0.15s ease;
       }
 
       #score.hot {
-        border-color: rgba(255, 210, 74, 0.85);
-        background: rgba(7, 20, 26, 0.62);
-        box-shadow: 0 0 18px #f0a23a99;
+        text-shadow: 0 1px 0 #07141a, 0 0 12px #f0a23acc;
       }
 
       #score b {
         display: inline-block;
-        font-family: "Anton", Impact, sans-serif;
-        font-size: 1.15em;
-        font-weight: 400;
-        letter-spacing: 0.03em;
-        color: #ffd24a;
+        font-family: inherit;
+        font-size: inherit;
+        font-weight: inherit;
+        letter-spacing: inherit;
+        color: inherit;
       }
 
       #score-live {
         display: none;
-        font-family: "Anton", Impact, sans-serif;
-        font-size: 1.05em;
-        font-weight: 400;
-        letter-spacing: 0.04em;
-        color: #ffe27a;
+        font-family: inherit;
+        font-size: inherit;
+        font-weight: inherit;
+        letter-spacing: inherit;
+        color: inherit;
         text-shadow: 0 0 10px #f0a23acc;
         line-height: 1;
       }
@@ -163,35 +170,35 @@
         position: absolute;
         right: 0.35rem;
         pointer-events: none;
-        font-family: "Anton", Impact, sans-serif;
+        font-family: var(--font-display);
         font-weight: 400;
-        letter-spacing: 0.03em;
+        letter-spacing: var(--tracking-display);
         text-shadow: 0 1px 0 #07141a88, 0 0 10px #f0a23a88;
         white-space: nowrap;
       }
 
       .score-flake {
         top: calc(100% + 0.15rem);
-        font-size: 1.05em;
+        font-size: var(--type-display);
         color: #ffd24a;
         animation: score-fall 0.7s ease-in forwards;
       }
 
       .score-chip {
         top: 0.05rem;
-        font-size: 1.35em;
+        font-size: var(--type-display);
         color: #fff4b8;
         animation: score-rise 0.9s ease-out forwards;
       }
 
       .score-chip.layout {
-        font-size: 1.05em;
+        font-size: var(--type-display);
         color: #ffe27a;
         animation-duration: 0.7s;
       }
 
       .score-chip.star {
-        font-size: 1.55em;
+        font-size: var(--type-callout);
         color: #ffd24a;
       }
 
@@ -224,7 +231,8 @@
         transform: translateX(-50%);
         width: min(22rem, calc(100vw - 8rem));
         text-align: center;
-        font-size: 0.92rem;
+        font-family: var(--font-ui);
+        font-size: var(--type-body);
         font-weight: 600;
         color: var(--foam);
         background: rgba(7, 20, 26, 0.45);
@@ -243,17 +251,17 @@
         top: max(2.85rem, calc(env(safe-area-inset-top) + 2.35rem));
         bottom: auto;
         width: min(22rem, calc(100vw - 1.5rem));
-        font-size: 0.82rem;
+        font-size: var(--type-body);
         border-radius: 1rem;
       }
 
       #altimeter {
         position: absolute;
-        right: max(0.7rem, env(safe-area-inset-right));
+        right: max(0.28rem, env(safe-area-inset-right));
         bottom: max(0.75rem, env(safe-area-inset-bottom));
         display: flex;
         align-items: flex-end;
-        gap: 0.4rem;
+        gap: 0.38rem;
         color: var(--chalk);
       }
 
@@ -269,16 +277,17 @@
       }
 
       #altimeter .alt-caption {
-        font-size: 0.62rem;
+        font-family: var(--font-ui);
+        font-size: var(--type-micro);
         font-weight: 700;
-        letter-spacing: 0.14em;
+        letter-spacing: var(--tracking-label);
         text-transform: uppercase;
         color: var(--sodium);
       }
 
       #altimeter .alt-track {
         position: relative;
-        width: 0.55rem;
+        width: 0.95rem;
         height: clamp(7.5rem, 32vh, 14rem);
         background: rgba(7, 20, 26, 0.5);
         border: 1px solid rgba(200, 221, 230, 0.28);
@@ -311,8 +320,10 @@
         right: 100%;
         top: 50%;
         transform: translate(-0.28rem, -50%);
-        font-size: 0.68rem;
+        font-family: var(--font-ui);
+        font-size: var(--type-micro);
         font-weight: 700;
+        letter-spacing: var(--tracking-label);
         color: var(--sodium);
       }
 
@@ -329,11 +340,38 @@
       }
 
       #alt-read {
-        font-size: 0.78rem;
+        font-family: var(--font-ui);
+        font-size: var(--type-label);
         font-weight: 700;
         font-variant-numeric: tabular-nums;
         text-shadow: 0 1px 0 #07141a88;
         min-width: 3.1rem;
+        text-align: right;
+      }
+
+      #altimeter.low .alt-track {
+        border-color: var(--sodium);
+        animation: alt-glow 0.5s ease-in-out infinite alternate;
+      }
+
+      #altimeter.low .alt-fill {
+        background: linear-gradient(to top, #c44a28, #f0a23a);
+        opacity: 1;
+      }
+
+      #altimeter.low .alt-caption,
+      #altimeter.low #alt-read {
+        color: #ffd24a;
+      }
+
+      #altimeter.low-close .alt-track {
+        animation-duration: 0.2s;
+        border-color: #ffd24a;
+      }
+
+      @keyframes alt-glow {
+        from { box-shadow: 0 0 5px #f0a23a66; }
+        to { box-shadow: 0 0 16px #f0a23acc; }
       }
 
       #hazard-warn {
@@ -373,17 +411,19 @@
 
       #hazard-warn .hazard-diamond span {
         transform: rotate(-45deg);
-        font-family: "Anton", Impact, sans-serif;
-        font-size: 1.45rem;
+        font-family: var(--font-display);
+        font-size: var(--type-callout);
+        font-weight: 400;
         line-height: 1;
         color: #07141a;
       }
 
       #hazard-warn em {
+        font-family: var(--font-ui);
         font-style: normal;
-        font-size: 0.68rem;
-        font-weight: 800;
-        letter-spacing: 0.16em;
+        font-size: var(--type-micro);
+        font-weight: 700;
+        letter-spacing: var(--tracking-label);
         text-transform: uppercase;
         color: #ffd24a;
         text-shadow: 0 1px 0 #07141a;
@@ -464,9 +504,10 @@
         border: 3px solid rgba(255, 255, 255, 0.75);
         background: rgba(240, 162, 58, 0.72);
         color: var(--ink);
-        font-family: "Anton", Impact, sans-serif;
-        font-size: clamp(0.95rem, 4.2vw, 1.35rem);
-        letter-spacing: 0.06em;
+        font-family: var(--font-display);
+        font-size: var(--type-callout);
+        font-weight: 400;
+        letter-spacing: var(--tracking-display);
         pointer-events: auto;
         touch-action: none;
         box-shadow: 0 4px 0 #0003;
@@ -479,10 +520,10 @@
 
       #mobile-flip span {
         display: block;
-        font-family: "Source Sans 3", sans-serif;
-        font-size: 0.62em;
+        font-family: var(--font-ui);
+        font-size: var(--type-micro);
         font-weight: 700;
-        letter-spacing: 0.02em;
+        letter-spacing: var(--tracking-label);
         opacity: 0.8;
       }
 
@@ -508,6 +549,10 @@
         visibility: hidden;
       }
 
+      body.results-open #mobile-controls {
+        display: none;
+      }
+
       .results-card {
         width: min(22rem, calc(100vw - 2rem));
         max-height: calc(100dvh - 2rem);
@@ -520,9 +565,10 @@
       }
 
       .results-card h2 {
-        font-family: "Anton", Impact, sans-serif;
-        font-size: clamp(1.35rem, 6vw, 1.85rem);
-        letter-spacing: 0.04em;
+        font-family: var(--font-display);
+        font-size: var(--type-title);
+        font-weight: 400;
+        letter-spacing: var(--tracking-display);
         text-transform: uppercase;
         text-align: center;
         margin-bottom: 0.85rem;
@@ -542,15 +588,16 @@
         padding: 0.42rem 0.55rem;
         background: rgba(200, 221, 230, 0.06);
         border-radius: 0.55rem;
-        font-size: 0.92rem;
+        font-family: var(--font-ui);
+        font-size: var(--type-body);
         font-weight: 600;
       }
 
       #results-list .jump-tries {
         color: var(--foam);
         font-variant-numeric: tabular-nums;
-        font-size: 0.82rem;
-        letter-spacing: 0.04em;
+        font-size: var(--type-label);
+        letter-spacing: var(--tracking-label);
         text-transform: uppercase;
       }
 
@@ -558,7 +605,7 @@
         width: 1.15rem;
         text-align: center;
         color: #ffd24a;
-        font-size: 1.15rem;
+        font-size: var(--type-callout);
         line-height: 1;
         text-shadow: 0 0 8px #f0c14a88;
       }
@@ -571,9 +618,9 @@
       #results-list .jump-spins {
         min-width: 1.55rem;
         text-align: right;
-        font-size: 0.82rem;
+        font-size: var(--type-label);
         font-variant-numeric: tabular-nums;
-        letter-spacing: 0.04em;
+        letter-spacing: var(--tracking-label);
         color: #ffd24a;
       }
 
@@ -584,9 +631,9 @@
       #results-list .jump-layout {
         min-width: 2.4rem;
         text-align: right;
-        font-size: 0.78rem;
+        font-size: var(--type-label);
         font-variant-numeric: tabular-nums;
-        letter-spacing: 0.02em;
+        letter-spacing: var(--tracking-label);
         color: var(--foam);
       }
 
@@ -595,6 +642,10 @@
       }
 
       #results-list .jump-pts {
+        font-family: var(--font-display);
+        font-size: var(--type-display);
+        font-weight: 400;
+        letter-spacing: var(--tracking-display);
         font-variant-numeric: tabular-nums;
         color: #ffd24a;
         min-width: 3.2rem;
@@ -608,18 +659,19 @@
         margin-top: 0.85rem;
         padding-top: 0.7rem;
         border-top: 1px solid rgba(200, 221, 230, 0.18);
+        font-family: var(--font-ui);
         font-weight: 700;
-        letter-spacing: 0.08em;
+        letter-spacing: var(--tracking-label);
         text-transform: uppercase;
-        font-size: 0.78rem;
+        font-size: var(--type-label);
         color: var(--foam);
       }
 
       .results-total b {
-        font-family: "Anton", Impact, sans-serif;
-        font-size: 1.65rem;
+        font-family: var(--font-display);
+        font-size: var(--type-title);
         font-weight: 400;
-        letter-spacing: 0.03em;
+        letter-spacing: var(--tracking-display);
         color: #ffd24a;
       }
 
@@ -632,9 +684,10 @@
         padding: 0.55rem 0.8rem;
         background: var(--sodium);
         color: var(--ink);
-        font-family: "Anton", Impact, sans-serif;
-        font-size: 1.05rem;
-        letter-spacing: 0.06em;
+        font-family: var(--font-display);
+        font-size: var(--type-callout);
+        font-weight: 400;
+        letter-spacing: var(--tracking-display);
         text-transform: uppercase;
         cursor: pointer;
         box-shadow: 0 3px 0 #0003;
@@ -647,7 +700,8 @@
       .results-hint {
         margin-top: 0.45rem;
         text-align: center;
-        font-size: 0.75rem;
+        font-family: var(--font-ui);
+        font-size: var(--type-micro);
         font-weight: 600;
         color: var(--foam);
         opacity: 0.75;
@@ -670,6 +724,7 @@
       </div>
       <p id="hint">Run up, FLIP. In the air, hold FLIP to tuck (speeds it), release to stretch (slows it). Open up to land — stretch out so the knees can cushion.</p>
       <div id="altimeter" aria-hidden="true">
+        <div id="alt-read">+0.0</div>
         <div class="alt-scale">
           <span class="alt-caption">Alt</span>
           <div class="alt-track">
@@ -678,7 +733,6 @@
             <div id="alt-marker"></div>
           </div>
         </div>
-        <div id="alt-read">+0.0</div>
       </div>
     </div>
 

@@ -74,7 +74,7 @@ export const LEVELS: Level[] = [
     gapX0: 16.2,
     gapX1: 21.5,
     pitY: -3.4,
-    flagX: 24.8,
+    flagX: 23.4,
     killY: -7,
     endX: 32,
   },
@@ -344,10 +344,6 @@ function solids(level: Level): Platform[] {
   return [...level.platforms, ...(level.boxes ?? []), ...pitSpans(level)];
 }
 
-function groundSlabs(level: Level): Platform[] {
-  return [...level.platforms, ...pitSpans(level)];
-}
-
 export function groundAt(level: Level, x: number): number | null {
   let best: number | null = null;
   for (const p of solids(level)) {
@@ -589,13 +585,11 @@ export function followCam(
 }
 
 export function drawSky(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: number): void {
-  const topY = cam.y + cam.h * 0.5;
-  const botY = cam.y - cam.h * 0.5;
   const g = ctx.createLinearGradient(0, 0, 0, cssH);
-  for (let i = 0; i <= 10; i++) {
-    const t = i / 10;
-    g.addColorStop(t, skyAt(topY - t * (topY - botY)));
-  }
+  g.addColorStop(0, "#1b3348");
+  g.addColorStop(0.45, "#3a5570");
+  g.addColorStop(0.72, "#c47a4a");
+  g.addColorStop(1, "#f0a23a");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, cssW, cssH);
 
@@ -624,10 +618,7 @@ export function drawWorld(
     if (!level.noFlag) drawFlag(ctx, cam, cssW, cssH, level);
     return;
   }
-  drawHarbour(ctx, cam, cssW, cssH);
-  drawPortsdown(ctx, cam, cssW, cssH);
-  drawSpinnaker(ctx, cam, cssW, cssH);
-  drawTerraces(ctx, cam, cssW, cssH, level);
+  drawDistantHarbour(ctx, cam, cssW, cssH);
   drawBackdrop(ctx, cam, cssW, cssH, level);
   drawPit(ctx, cam, cssW, cssH, level);
   drawGround(ctx, cam, cssW, cssH, level);
@@ -645,28 +636,50 @@ function drawTrainCountry(
   level: Level,
 ): void {
   const scroll = level.train?.scroll ?? 0;
-  const topY = cam.y + cam.h * 0.5;
-  const botY = cam.y - cam.h * 0.5;
+  const horizon = worldToScreenY(cam, cssH, 3.1);
   const g = ctx.createLinearGradient(0, 0, 0, cssH);
-  for (let i = 0; i <= 8; i++) {
-    const t = i / 8;
-    g.addColorStop(t, skyAt(topY - t * (topY - botY)));
-  }
+  g.addColorStop(0, "#152030");
+  g.addColorStop(0.38, "#3a4a58");
+  g.addColorStop(0.62, "#6a7a62");
+  g.addColorStop(1, "#3d4a32");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, cssW, cssH);
-  drawHarbour(ctx, cam, cssW, cssH);
-  drawPortsdown(ctx, cam, cssW, cssH);
-  drawSpinnaker(ctx, cam, cssW, cssH);
+  ctx.fillStyle = "#4a5a38";
+  ctx.fillRect(0, horizon, cssW, cssH);
+  ctx.strokeStyle = "rgba(200,221,230,0.18)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, horizon);
+  ctx.lineTo(cssW, horizon);
+  ctx.stroke();
 
-  const horizon = worldToScreenY(cam, cssH, 1.6);
   const left = cam.x - cam.w * 0.5;
   const right = cam.x + cam.w * 0.5;
-  const ppm = cssW / cam.w;
-  const start = Math.floor((left + scroll * 0.45) / 3.1) * 3.1;
-  for (let wx = start; wx < right + scroll * 0.45 + 4; wx += 3.1) {
-    const sx = worldToScreenX(cam, cssW, wx - scroll * 0.45);
-    if (sx < -50 || sx > cssW + 50) continue;
-    drawHouseFront(ctx, sx, horizon, Math.max(18, 1.4 * ppm), 2, Math.abs(Math.floor(wx * 3)) % 5, ppm * 0.42);
+  const start = Math.floor((left + scroll * 0.55) / 5.2) * 5.2;
+  for (let wx = start; wx < right + scroll * 0.55 + 6; wx += 5.2) {
+    const groundX = wx - scroll * 0.55;
+    const sx = worldToScreenX(cam, cssW, groundX);
+    if (sx < -40 || sx > cssW + 40) continue;
+    const gy = horizon;
+    ctx.fillStyle = "#1c2818";
+    ctx.fillRect(sx - 5, gy - 52, 10, 52);
+    ctx.fillStyle = "#3d5a32";
+    ctx.beginPath();
+    ctx.ellipse(sx, gy - 58, 22, 16, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const postStart = Math.floor((left + scroll) / 7.4) * 7.4;
+  for (let wx = postStart; wx < right + scroll + 8; wx += 7.4) {
+    const sx = worldToScreenX(cam, cssW, wx - scroll);
+    if (sx < -20 || sx > cssW + 20) continue;
+    ctx.fillStyle = "#2a2420";
+    ctx.fillRect(sx - 2, horizon - 78, 4, 78);
+    ctx.strokeStyle = "rgba(20,16,12,0.45)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(sx, horizon - 72);
+    ctx.lineTo(sx + 48, horizon - 68);
+    ctx.stroke();
   }
 }
 
@@ -797,187 +810,79 @@ function drawObstacles(
   }
 }
 
-function skyAt(y: number): string {
-  const keys: { y: number; r: number; g: number; b: number }[] = [
-    { y: 14, r: 112, g: 132, b: 148 },
-    { y: 6.5, r: 88, g: 112, b: 132 },
-    { y: 2.4, r: 108, g: 132, b: 152 },
-    { y: 0.2, r: 186, g: 138, b: 108 },
-    { y: -3, r: 98, g: 78, b: 76 },
-    { y: -8, r: 68, g: 56, b: 56 },
-    { y: -17, r: 48, g: 40, b: 42 },
-  ];
-  const top = keys[0]!;
-  const bot = keys[keys.length - 1]!;
-  if (y >= top.y) return `rgb(${top.r},${top.g},${top.b})`;
-  if (y <= bot.y) return `rgb(${bot.r},${bot.g},${bot.b})`;
-  for (let i = 0; i < keys.length - 1; i++) {
-    const a = keys[i]!;
-    const b = keys[i + 1]!;
-    if (y <= a.y && y >= b.y) {
-      const t = (a.y - y) / Math.max(0.01, a.y - b.y);
-      return `rgb(${Math.round(a.r + (b.r - a.r) * t)},${Math.round(a.g + (b.g - a.g) * t)},${Math.round(a.b + (b.b - a.b) * t)})`;
-    }
-  }
-  return `rgb(${bot.r},${bot.g},${bot.b})`;
-}
-
 function dropDepth(level: Level): number {
   return (level.platforms[0]?.y ?? 0) - finishGround(level);
 }
 
-function streetAt(level: Level, x: number, y: number): boolean {
-  for (const p of level.platforms) {
-    if (Math.abs(p.y - y) > 0.35) continue;
-    if (x >= p.x0 - 0.8 && x <= p.x1 + 0.8) return true;
-  }
-  return false;
-}
-
-const BRICK = ["#8a4a3a", "#9b5544", "#7a4034", "#cbb79a", "#a0604c"] as const;
-const STOREY = 2.75;
-
-function drawHarbour(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: number): void {
-  const horizon = worldToScreenY(cam, cssH, 1.85);
-  const shore = worldToScreenY(cam, cssH, -0.2);
-  const y0 = Math.max(-2, horizon);
-  const y1 = Math.min(cssH + 2, Math.max(horizon, shore));
-  if (y1 <= y0) return;
-  const g = ctx.createLinearGradient(0, y0, 0, y1);
-  g.addColorStop(0, "#4a6574");
-  g.addColorStop(1, "#2a4452");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, y0, cssW, y1 - y0);
-  ctx.strokeStyle = "rgba(220,230,236,0.28)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, horizon);
-  ctx.lineTo(cssW, horizon);
-  ctx.stroke();
-  ctx.strokeStyle = "rgba(200,221,230,0.08)";
-  ctx.lineWidth = 1;
-  for (let i = 0; i < 5; i++) {
-    const y = horizon + 16 + i * 20;
-    if (y > y1) break;
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(cssW, y);
-    ctx.stroke();
-  }
-}
-
-function drawPortsdown(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: number): void {
-  const shift = cam.x * 0.06;
-  const base = worldToScreenY(cam, cssH, 2.05);
-  const peak = worldToScreenY(cam, cssH, 5.4);
-  if (peak > cssH + 40 || base < -40) return;
-  ctx.fillStyle = "#6a7a62";
-  ctx.beginPath();
-  ctx.moveTo(-40, base + 40);
-  ctx.lineTo(-40, base);
-  ctx.lineTo(cssW * 0.08 - shift, peak + 18);
-  ctx.lineTo(cssW * 0.22 - shift, peak);
-  ctx.lineTo(cssW * 0.4 - shift, peak + 22);
-  ctx.lineTo(cssW * 0.62 - shift, peak + 8);
-  ctx.lineTo(cssW * 0.86 - shift, peak + 28);
-  ctx.lineTo(cssW + 40, base);
-  ctx.lineTo(cssW + 40, base + 40);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = "rgba(214, 206, 186, 0.35)";
-  ctx.beginPath();
-  ctx.moveTo(cssW * 0.16 - shift, peak + 10);
-  ctx.lineTo(cssW * 0.22 - shift, peak);
-  ctx.lineTo(cssW * 0.3 - shift, peak + 14);
-  ctx.closePath();
-  ctx.fill();
-}
-
-function drawSpinnaker(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: number): void {
-  const x = 26.5 - cam.x * 0.12;
-  const sx = worldToScreenX(cam, cssW, x);
-  const base = worldToScreenY(cam, cssH, 1.85);
-  const tip = worldToScreenY(cam, cssH, 7.1);
-  if (sx < -40 || sx > cssW + 40) return;
-  if (tip > cssH + 20 || base < -20) return;
-  const ppm = cssW / cam.w;
-  const w = Math.max(10, 0.55 * ppm);
-  ctx.fillStyle = "rgba(232,238,244,0.88)";
-  ctx.beginPath();
-  ctx.moveTo(sx, tip);
-  ctx.lineTo(sx + w, base);
-  ctx.lineTo(sx + w * 0.22, base);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = "rgba(200,210,220,0.9)";
-  ctx.fillRect(sx - 2, tip, 3, base - tip);
-}
-
-function drawHouseFront(
-  ctx: CanvasRenderingContext2D,
-  sx: number,
-  gy: number,
-  w: number,
-  storeys: number,
-  seed: number,
-  ppm: number,
-): void {
-  const brick = BRICK[seed % BRICK.length]!;
-  const roofH = Math.max(8, 0.7 * ppm);
-  const wallH = Math.max(16, storeys * STOREY * ppm);
-  ctx.fillStyle = "#3c444c";
-  ctx.beginPath();
-  ctx.moveTo(sx - 2, gy - wallH);
-  ctx.lineTo(sx + w * 0.5, gy - wallH - roofH);
-  ctx.lineTo(sx + w + 2, gy - wallH);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = brick;
-  ctx.fillRect(sx, gy - wallH, w, wallH);
-  ctx.fillStyle = "#5a322c";
-  ctx.fillRect(sx + w * 0.72, gy - wallH - roofH - 6, Math.max(3, 0.12 * ppm), roofH + 8);
-  const winW = Math.max(4, 0.22 * ppm);
-  const winH = Math.max(5, 0.32 * ppm);
-  for (let s = 0; s < storeys; s++) {
-    const wy = gy - 10 - s * (wallH / storeys);
-    const lit = s === 0 || seed % 4 === s;
-    ctx.fillStyle = lit ? "rgba(232, 176, 92, 0.78)" : "rgba(32, 42, 52, 0.7)";
-    ctx.fillRect(sx + w * 0.14, wy - winH, winW, winH);
-    ctx.fillRect(sx + w * 0.58, wy - winH, winW, winH);
-  }
-  ctx.fillStyle = "#2a2420";
-  ctx.fillRect(sx + w * 0.38, gy - Math.max(8, 0.42 * ppm), Math.max(5, 0.2 * ppm), Math.max(8, 0.42 * ppm));
-}
-
-function drawTerraces(
+/** Screen-space Buckland / harbour — a thin dusk ridge, never at Bill's scale. */
+function drawDistantHarbour(
   ctx: CanvasRenderingContext2D,
   cam: Cam,
   cssW: number,
   cssH: number,
-  level: Level,
 ): void {
+  const hillY = cssH * 0.33;
+  const shoreY = cssH * 0.4;
   const ppm = cssW / cam.w;
-  const drop = dropDepth(level);
-  const takeY = level.platforms[0]?.y ?? 0;
-  const landY = finishGround(level);
-  const shift = cam.x * 0.28;
-  const left = cam.x - cam.w * 0.7 - shift;
-  const right = cam.x + cam.w * 0.7 - shift;
-  const rows: { y: number; storeys: number }[] = [{ y: takeY, storeys: 2 }];
-  if (drop > 2.05) rows.push({ y: landY, storeys: 2 });
-  for (let r = rows.length - 1; r >= 0; r--) {
-    const row = rows[r]!;
-    const gy = worldToScreenY(cam, cssH, row.y);
-    if (gy < -80 || gy > cssH + 120) continue;
-    const houseW = Math.max(22, 1.48 * ppm);
-    const start = Math.floor(left / 1.55) * 1.55;
-    for (let wx = start; wx < right + 2; wx += 1.55) {
-      if (!streetAt(level, wx + shift, row.y)) continue;
-      const sx = worldToScreenX(cam, cssW, wx + shift);
-      if (sx < -60 || sx > cssW + 60) continue;
-      const seed = Math.abs(Math.floor(wx * 4 + row.y * 3)) % 5;
-      drawHouseFront(ctx, sx, gy, houseW, row.storeys, seed, ppm);
-    }
+  const shift = cam.x * ppm * 0.055;
+
+  const water = ctx.createLinearGradient(0, shoreY - 6, 0, shoreY + 26);
+  water.addColorStop(0, "rgba(22, 52, 69, 0)");
+  water.addColorStop(0.28, "rgba(22, 52, 69, 0.38)");
+  water.addColorStop(1, "rgba(22, 52, 69, 0)");
+  ctx.fillStyle = water;
+  ctx.fillRect(0, shoreY - 6, cssW, 32);
+
+  const hillShift = cam.x * ppm * 0.018;
+  ctx.fillStyle = "rgba(40, 52, 54, 0.38)";
+  ctx.beginPath();
+  ctx.moveTo(-40 - hillShift, shoreY + 6);
+  ctx.lineTo(cssW * 0.1 - hillShift, hillY + 22);
+  ctx.lineTo(cssW * 0.24 - hillShift, hillY);
+  ctx.lineTo(cssW * 0.42 - hillShift, hillY + 18);
+  ctx.lineTo(cssW * 0.63 - hillShift, hillY + 4);
+  ctx.lineTo(cssW * 0.86 - hillShift, hillY + 24);
+  ctx.lineTo(cssW + 40 - hillShift, shoreY + 8);
+  ctx.lineTo(cssW + 40 - hillShift, shoreY + 18);
+  ctx.lineTo(-40 - hillShift, shoreY + 18);
+  ctx.closePath();
+  ctx.fill();
+
+  const step = 20;
+  const phase = ((shift % step) + step) % step;
+  const first = Math.floor(shift / step) - 2;
+  const n = Math.ceil(cssW / step) + 6;
+  ctx.fillStyle = "rgba(16, 22, 28, 0.36)";
+  ctx.beginPath();
+  ctx.moveTo(-30, shoreY + 2);
+  for (let i = 0; i < n; i++) {
+    const id = first + i;
+    const sx = i * step - phase;
+    const h = 4 + Math.abs((id * 17 + 11) % 9);
+    const bw = 9 + Math.abs((id * 5) % 6);
+    ctx.lineTo(sx, shoreY - h);
+    ctx.lineTo(sx + bw, shoreY - h);
+  }
+  ctx.lineTo(cssW + 30, shoreY + 2);
+  ctx.closePath();
+  ctx.fill();
+
+  const spinX = cssW * 0.72 - (cam.x - 8) * ppm * 0.012;
+  ctx.fillStyle = "rgba(232, 238, 244, 0.42)";
+  ctx.beginPath();
+  ctx.moveTo(spinX, hillY - 18);
+  ctx.lineTo(spinX + 4, shoreY);
+  ctx.lineTo(spinX + 1.2, shoreY);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(240, 162, 58, 0.5)";
+  for (let i = 0; i < n; i++) {
+    const id = first + i;
+    if (Math.abs(id * 7) % 3 !== 0) continue;
+    const sx = Math.round(i * step - phase + 5);
+    const sy = Math.round(shoreY - 3 - Math.abs(id % 5));
+    ctx.fillRect(sx, sy, 2, 2);
   }
 }
 
@@ -987,22 +892,18 @@ function drawLamp(
   gy: number,
   hot: boolean,
 ): void {
-  ctx.strokeStyle = "#2a2420";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(sx, gy);
-  ctx.lineTo(sx, gy - 86);
-  ctx.stroke();
+  ctx.fillStyle = "#2a2420";
+  ctx.fillRect(sx - 2.5, gy - 16, 5, 16);
   ctx.fillStyle = hot ? "#ffd24a" : "rgba(255,196,107,0.85)";
   ctx.beginPath();
-  ctx.arc(sx, gy - 90, hot ? 7 : 6, 0, Math.PI * 2);
+  ctx.arc(sx, gy - 18, hot ? 5 : 4, 0, Math.PI * 2);
   ctx.fill();
-  const lamp = ctx.createRadialGradient(sx, gy - 90, 2, sx, gy - 90, hot ? 58 : 48);
-  lamp.addColorStop(0, hot ? "rgba(240,162,58,0.42)" : "rgba(255,196,107,0.28)");
+  const lamp = ctx.createRadialGradient(sx, gy - 18, 1, sx, gy - 18, hot ? 36 : 28);
+  lamp.addColorStop(0, hot ? "rgba(240,162,58,0.4)" : "rgba(255,196,107,0.24)");
   lamp.addColorStop(1, "rgba(255,196,107,0)");
   ctx.fillStyle = lamp;
   ctx.beginPath();
-  ctx.arc(sx, gy - 90, hot ? 58 : 48, 0, Math.PI * 2);
+  ctx.arc(sx, gy - 18, hot ? 36 : 28, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -1013,14 +914,12 @@ function drawBackdrop(
   cssH: number,
   level: Level,
 ): void {
-  const landY = finishGround(level);
   for (const p of level.platforms) {
     for (let x = p.x0 + 1.5; x < p.x1 - 0.8; x += 6.5) {
       const sx = worldToScreenX(cam, cssW, x);
       const gy = worldToScreenY(cam, cssH, p.y);
       if (sx < -40 || sx > cssW + 40) continue;
-      const hot = dropDepth(level) > 2.05 && Math.abs(p.y - landY) < 0.2;
-      drawLamp(ctx, sx, gy, hot);
+      drawLamp(ctx, sx, gy, dropDepth(level) > 2.05 && Math.abs(p.y - finishGround(level)) < 0.2);
     }
   }
 }
@@ -1033,49 +932,20 @@ function drawPit(
   level: Level,
 ): void {
   const leftY = level.platforms[0]?.y ?? 0;
-  const landY = level.platforms[1]?.y ?? leftY;
-  const drop = leftY - landY;
   const y0 = worldToScreenY(cam, cssH, leftY);
   const yFloor = worldToScreenY(cam, cssH, level.pitY);
   const h = Math.max(0, yFloor - y0);
-  const ppm = cssW / cam.w;
-  ctx.font = "700 13px 'Source Sans 3', sans-serif";
-  ctx.textAlign = "center";
   for (const span of pitSpans(level)) {
     const x0 = worldToScreenX(cam, cssW, span.x0);
     const x1 = worldToScreenX(cam, cssW, span.x1);
     const w = Math.max(0, x1 - x0);
-    if (w < 2) continue;
-    const mainDrop = drop > 2.05 && span.x0 <= level.gapX0 + 0.05 && span.x1 >= level.gapX1 - 0.05;
-    ctx.fillStyle = mainDrop ? "#5a3832" : "#2a2420";
+    if (w < 2 || h < 2) continue;
+    const g = ctx.createLinearGradient(0, y0, 0, yFloor);
+    g.addColorStop(0, "rgba(8, 14, 22, 0.08)");
+    g.addColorStop(0.22, "rgba(8, 14, 22, 0.22)");
+    g.addColorStop(1, "rgba(6, 10, 16, 0.42)");
+    ctx.fillStyle = g;
     ctx.fillRect(x0, y0, w, h);
-    if (mainDrop) {
-      ctx.fillStyle = "#7a4a40";
-      ctx.fillRect(x0, y0, Math.max(6, 0.18 * ppm), h);
-      ctx.fillRect(x1 - Math.max(6, 0.18 * ppm), y0, Math.max(6, 0.18 * ppm), h);
-      ctx.strokeStyle = "rgba(40, 24, 20, 0.35)";
-      ctx.lineWidth = 1;
-      for (let y = leftY; y > level.pitY; y -= STOREY) {
-        const sy = worldToScreenY(cam, cssH, y);
-        ctx.beginPath();
-        ctx.moveTo(x0, sy);
-        ctx.lineTo(x1, sy);
-        ctx.stroke();
-      }
-      const yLand = worldToScreenY(cam, cssH, landY);
-      drawLamp(ctx, x0 + 16, yLand, true);
-      drawLamp(ctx, x1 - 16, yLand, true);
-      const openGy = worldToScreenY(cam, cssH, landY + STOREY);
-      if (openGy < yLand - 8) {
-        drawLamp(ctx, (x0 + x1) * 0.5, openGy, true);
-      }
-    }
-    ctx.fillStyle = "rgba(232, 220, 200, 0.45)";
-    const labelX =
-      span.x0 >= level.gapX1 - 0.05
-        ? worldToScreenX(cam, cssW, span.x0 + 1.8)
-        : (x0 + x1) / 2;
-    ctx.fillText(mainDrop && drop > 8 ? "the drop" : "the gap", labelX, y0 + 28);
   }
 }
 
@@ -1086,37 +956,94 @@ function drawGround(
   cssH: number,
   level: Level,
 ): void {
-  const ppm = cssW / cam.w;
+  for (const p of level.platforms) {
+    drawRooftop(ctx, cam, cssW, cssH, p);
+  }
+}
 
-  for (const p of groundSlabs(level)) {
-    const x0 = worldToScreenX(cam, cssW, p.x0);
-    const x1 = worldToScreenX(cam, cssW, p.x1);
-    const gy = worldToScreenY(cam, cssH, p.y);
-    const depth = Math.max(180, cssH - gy + 48);
-    ctx.fillStyle = "#3a3a3e";
-    ctx.fillRect(x0, gy, x1 - x0, depth);
-    ctx.fillStyle = "#8a8680";
-    ctx.fillRect(x0, gy, x1 - x0, Math.max(8, 0.28 * ppm));
-    ctx.fillStyle = "#c8c4bc";
-    ctx.fillRect(x0, gy - 4, x1 - x0, 5);
-    ctx.strokeStyle = "rgba(24,24,28,0.28)";
+function drawRooftop(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  p: Platform,
+): void {
+  const ppm = cssW / cam.w;
+  const x0 = worldToScreenX(cam, cssW, p.x0);
+  const x1 = worldToScreenX(cam, cssW, p.x1);
+  const gy = worldToScreenY(cam, cssH, p.y);
+  const w = x1 - x0;
+  if (w < 2 || x1 < -30 || x0 > cssW + 30) return;
+  const depth = Math.max(cssH - gy + 36, 2.8 * ppm);
+  const brick = Math.abs(Math.floor(p.x0 * 3)) % 2 === 0 ? "#7a4538" : "#6e3f34";
+
+  ctx.fillStyle = brick;
+  ctx.fillRect(x0, gy, w, depth);
+  const down = ctx.createLinearGradient(0, gy, 0, gy + depth);
+  down.addColorStop(0, "rgba(30, 10, 8, 0)");
+  down.addColorStop(1, "rgba(12, 6, 8, 0.38)");
+  ctx.fillStyle = down;
+  ctx.fillRect(x0, gy, w, depth);
+
+  const winW = Math.max(9, 0.4 * ppm);
+  const winH = Math.max(13, 0.58 * ppm);
+  const pitch = 1.12;
+  const first = Math.ceil((p.x0 + 0.38) / pitch) * pitch;
+  for (let storey = 0; storey < 7; storey++) {
+    const wy = p.y - 0.52 - storey * 2.72;
+    const y = worldToScreenY(cam, cssH, wy);
+    if (y > cssH + 8) break;
+    ctx.strokeStyle = "rgba(40, 18, 16, 0.3)";
     ctx.lineWidth = 1;
-    const slab = 1.4 * ppm;
-    for (let x = x0; x < x1; x += slab) {
+    ctx.beginPath();
+    ctx.moveTo(x0, y - 6);
+    ctx.lineTo(x1, y - 6);
+    ctx.stroke();
+    for (let wx = first; wx + 0.45 < p.x1; wx += pitch) {
+      const sx = worldToScreenX(cam, cssW, wx);
+      if (sx + winW < x0 || sx > x1) continue;
+      const lit = Math.abs(Math.floor(wx * 11 + storey * 5)) % 5 === 0;
+      ctx.fillStyle = lit ? "rgba(240, 162, 58, 0.58)" : "#1c2830";
+      ctx.fillRect(sx, y, winW, winH);
+      ctx.strokeStyle = "rgba(210, 204, 196, 0.45)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(sx, y, winW, winH);
       ctx.beginPath();
-      ctx.moveTo(x, gy - 4);
-      ctx.lineTo(x, gy + depth);
+      ctx.moveTo(sx, y + winH * 0.5);
+      ctx.lineTo(sx + winW, y + winH * 0.5);
       ctx.stroke();
     }
   }
 
-  ctx.fillStyle = "#4a2c28";
-  for (const p of level.platforms) {
-    const gy = worldToScreenY(cam, cssH, p.y);
-    const a = worldToScreenX(cam, cssW, p.x0);
-    const b = worldToScreenX(cam, cssW, p.x1);
-    ctx.fillRect(a - 3, gy - 6, 8, 18);
-    ctx.fillRect(b - 5, gy - 6, 8, 18);
+  ctx.fillStyle = "#3c3c42";
+  ctx.fillRect(x0, gy, w, Math.max(7, 0.2 * ppm));
+  ctx.fillStyle = "#8a8680";
+  ctx.fillRect(x0, gy, w, 3);
+  ctx.fillStyle = "#d4cdc2";
+  ctx.fillRect(x0, gy - 5, w, 6);
+
+  const party = Math.max(6, 0.14 * ppm);
+  ctx.fillStyle = "#5a322c";
+  ctx.fillRect(x0 - 2, gy - 10, party, Math.max(18, 0.55 * ppm));
+  ctx.fillRect(x1 - party + 2, gy - 10, party, Math.max(18, 0.55 * ppm));
+  ctx.fillStyle = "#d4cdc2";
+  ctx.fillRect(x0 - 3, gy - 13, party + 2, 5);
+  ctx.fillRect(x1 - party + 1, gy - 13, party + 2, 5);
+
+  if (p.x1 - p.x0 < 3.2) return;
+  const chimStep = 4.8;
+  const chim0 = Math.ceil((p.x0 + 1.4) / chimStep) * chimStep;
+  for (let wx = chim0; wx < p.x1 - 1; wx += chimStep) {
+    const sx = worldToScreenX(cam, cssW, wx);
+    const cw = Math.max(8, 0.26 * ppm);
+    const ch = Math.max(14, 0.55 * ppm);
+    ctx.fillStyle = "#6a3830";
+    ctx.fillRect(sx, gy - ch, cw, ch);
+    ctx.fillStyle = "#d4cdc2";
+    ctx.fillRect(sx - 2, gy - ch - 4, cw + 4, 6);
+    ctx.fillStyle = "#4a2c28";
+    ctx.fillRect(sx + 2, gy - ch - 11, 3, 8);
+    ctx.fillRect(sx + cw - 5, gy - ch - 10, 3, 7);
   }
 }
 
@@ -1236,22 +1163,16 @@ function drawStartWall(
     ctx.fillRect(x - 5, 0, 5, gy);
     return;
   }
-  ctx.fillStyle = "#8a4a3a";
-  ctx.fillRect(0, 0, x, cssH);
-  ctx.fillStyle = "#3a3a3e";
+  ctx.fillStyle = "#7a4538";
   ctx.fillRect(0, gy, x, cssH - gy);
-  ctx.fillStyle = "#6a3830";
-  ctx.fillRect(x - 10, 0, 10, cssH);
-  ctx.fillStyle = "#c8c4bc";
-  ctx.fillRect(x - 4, gy - 4, 4, 5);
-  ctx.strokeStyle = "rgba(40, 20, 18, 0.35)";
-  ctx.lineWidth = 1;
-  for (let y = 8; y < gy; y += 14) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(x - 10, y);
-    ctx.stroke();
-  }
+  ctx.fillStyle = "#3c3c42";
+  ctx.fillRect(0, gy, x, Math.max(7, (cssW / cam.w) * 0.2));
+  ctx.fillStyle = "#d4cdc2";
+  ctx.fillRect(0, gy - 5, x, 6);
+  ctx.fillStyle = "#5a322c";
+  ctx.fillRect(x - 10, gy - 12, 10, cssH - gy + 12);
+  ctx.fillStyle = "#d4cdc2";
+  ctx.fillRect(x - 11, gy - 14, 12, 5);
 }
 
 function drawFlag(
@@ -1278,7 +1199,7 @@ function drawFlag(
   ctx.closePath();
   ctx.fill();
   ctx.fillStyle = "#e8f0f4";
-  ctx.font = "700 12px 'Source Sans 3', sans-serif";
+  ctx.font = "700 12px 'Source Sans 3', 'Segoe UI', sans-serif";
   ctx.textAlign = "left";
   ctx.fillText("Bill", sx + 6, gy - 60);
 }

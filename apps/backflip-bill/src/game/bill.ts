@@ -126,6 +126,8 @@ export class Bill {
   gapArmTuck = 0;
   /** 0–1: head-first panic — arms out at the floor. Pose only, does not save the landing. */
   panic = 0;
+  /** Missed the pad and hit the pit — angry fail, then restart. */
+  gapFail = false;
   /** Debug sim: mouse is carrying him. */
   held = false;
 
@@ -181,6 +183,7 @@ export class Bill {
     this.landPrep = 0;
     this.gapArmTuck = 0;
     this.panic = 0;
+    this.gapFail = false;
     this.held = false;
   }
 
@@ -268,7 +271,10 @@ export class Bill {
     this.finished = false;
     this.restarted = false;
     if (touched) this.engaged = true;
-    if (jump) this.jumpBuf = 0.16;
+    // FLIP in the air is tuck / layout, not a queued bounce. Only buffer a
+    // takeoff from a press that already happened on the pad.
+    const onPad = this.state === "ground" || this.state === "stumble";
+    if (jump && onPad && !this.cleared) this.jumpBuf = 0.16;
     this.jumpBuf = Math.max(0, this.jumpBuf - dt);
     for (let i = this.snapFlashes.length - 1; i >= 0; i--) {
       const f = this.snapFlashes[i]!;
@@ -351,12 +357,9 @@ export class Bill {
     const floorLand = g !== null && this.vy <= 0 && this.y - HIP_HEIGHT <= g + 0.08;
 
     if (this.flipping && floorLand) {
-      this.land(g);
+      this.land(g, level);
       if (this.rag) this.resolveBody(level, true);
-      else {
-        this.shoveFromHazards(level);
-        if (this.jumpBuf > 0 && !this.cleared && !this.rag) this.takeOff();
-      }
+      else this.shoveFromHazards(level);
     } else if (this.hitsObstacle(level)) {
       this.beginRagdoll("crash", floorLand ? g : null);
       this.landEvent = this.makeLand("fall", this.x, floorLand && g !== null ? g : this.y);
@@ -367,6 +370,7 @@ export class Bill {
     } else if (!this.flipping) {
       const wall = this.airTime > 0.08 && this.touchingSolid(level, false);
       if (floorLand || wall) {
+        if (floorLand && padAt(level, this.x) === null) this.gapFail = true;
         this.beginRagdoll("crash", floorLand ? g : null);
         this.landEvent = this.makeLand("fall", this.x, floorLand && g !== null ? g : this.y);
         this.resolveBody(level, true);
@@ -456,7 +460,7 @@ export class Bill {
     const n = Math.max(-0.55, Math.min(1, along));
     const amp = Math.min(1, Math.abs(this.vx) / tuning.maxSpeed);
     if (this.cleared && amp > 0.04) this.rot = 0.22 * amp;
-    else this.rot = -0.26 * n * (0.4 + 0.6 * amp);
+    else this.rot = -0.36 * n * (0.5 + 0.5 * amp);
   }
 
   private takeOff(): void {
@@ -482,7 +486,8 @@ export class Bill {
       (tuning.flipDurationFast - tuning.flipDurationSlow) * speed;
   }
 
-  private land(g: number): void {
+  private land(g: number, level: Level): void {
+    this.jumpBuf = 0;
     this.y = g + HIP_HEIGHT;
     const impact = Math.max(0.4, -this.vy);
     const ang = wrapPi(this.rot);
@@ -498,6 +503,13 @@ export class Bill {
     this.landPrep = 0;
     this.gapArmTuck = 0;
     // Keep panic until the ragdoll snapshot, then clear.
+
+    if (padAt(level, this.x) === null) {
+      this.gapFail = true;
+      this.beginRagdoll("crash", g);
+      this.landEvent = this.makeLand("fall", this.x, g, impact);
+      return;
+    }
 
     // On your feet: leftover angle in the stumble window, or land-prep lined the shins up.
     const onFeet = planted || off <= stumbleAng;
@@ -1036,18 +1048,21 @@ export class Bill {
 
   private checkGapDeath(level: Level): void {
     if (this.held) return;
-    if (this.y < level.killY) {
-      if (this.cleared) {
-        this.state = "done";
-        this.vx = 0;
-        this.vy = 0;
-        return;
-      }
-      this.state = "dead";
-      this.died = true;
+    if (this.y >= level.killY) return;
+    if (this.cleared) {
+      this.state = "done";
       this.vx = 0;
       this.vy = 0;
+      return;
     }
+    this.gapFail = true;
+    if (!this.rag) {
+      this.y = level.pitY + HIP_HEIGHT;
+      this.beginRagdoll("crash", level.pitY);
+      this.landEvent = this.makeLand("fall", this.x, level.pitY, Math.max(0.4, -this.vy));
+    }
+    this.y = Math.max(this.y, level.killY + 0.2);
+    this.vy = Math.max(this.vy, -3);
   }
 }
 
@@ -1533,15 +1548,19 @@ function poseFor(bill: Bill, t: number): Pose {
   // comes forward, so the opposite arm leads (normal run).
   const lA = gaitArm(p, a, backpedal);
   const rA = gaitArm(p + Math.PI, a, backpedal);
+  const into = !bill.cleared && !backpedal ? a : 0;
   const lean = bill.cleared
     ? -0.16 - 0.3 * a
     : backpedal
       ? 0.06 + along * 0.95
-      : 0.28 + 0.52 * a;
+      : 0.16 + 0.28 * into;
 
   return clampLimbPose({
     lean: lean + (bill.state === "stumble" ? 0.5 : 0) + squat * 0.28,
-    arch: backpedal ? 0.04 : 0.06 * a,
+    arch: backpedal ? 0.04 : -0.1 * into,
+    spineLumbar: -0.14 * into,
+    spineThoracic: -0.1 * into,
+    spineCervical: -0.07 * into,
     lThigh: L.thigh + squat * 1.15,
     rThigh: R.thigh + squat * 1.02,
     lShin: L.shin - squat * 0.85,
@@ -2353,9 +2372,10 @@ const TEETH = "#f6f1ea";
 const BROW = "#6a5040";
 const BLUSH = "rgba(214, 118, 108, 0.38)";
 
-type FaceMood = "idle" | "run" | "back" | "focus" | "tuck" | "grin" | "wince" | "shock" | "dazed" | "win";
+type FaceMood = "idle" | "run" | "back" | "focus" | "tuck" | "grin" | "wince" | "shock" | "dazed" | "win" | "angry";
 
 function faceMood(bill: Bill): FaceMood {
+  if (bill.gapFail) return "angry";
   if (bill.state === "dead") return "dazed";
   if (bill.state === "done" || bill.cleared) return "win";
   if (!bill.engaged && bill.sore.size && bill.state === "ground" && !bill.rag) return "wince";
@@ -2408,8 +2428,8 @@ function drawFace(ctx: CanvasRenderingContext2D, hx: number, hy: number, mood: F
   const eye: Pt = { x: hx + 0.082, y: hy + 0.038 };
   const mouth: Pt = { x: hx + 0.112, y: hy - 0.052 };
 
-  if (mood === "tuck" || mood === "run" || mood === "wince") {
-    ctx.fillStyle = BLUSH;
+  if (mood === "tuck" || mood === "run" || mood === "wince" || mood === "angry") {
+    ctx.fillStyle = mood === "angry" ? "rgba(196, 60, 42, 0.42)" : BLUSH;
     ctx.beginPath();
     ctx.ellipse(hx + 0.07, hy - 0.01, 0.032, 0.018, 0.2, 0, TAU);
     ctx.fill();
@@ -2419,7 +2439,10 @@ function drawFace(ctx: CanvasRenderingContext2D, hx: number, hy: number, mood: F
   ctx.lineCap = "round";
   ctx.lineWidth = 0.018;
   ctx.beginPath();
-  if (mood === "shock" || mood === "focus") {
+  if (mood === "angry") {
+    ctx.moveTo(hx + 0.026, hy + 0.102);
+    ctx.lineTo(hx + 0.122, hy + 0.062);
+  } else if (mood === "shock" || mood === "focus") {
     ctx.moveTo(hx + 0.03, hy + 0.092);
     ctx.lineTo(hx + 0.125, hy + 0.1);
   } else if (mood === "wince" || mood === "tuck") {
@@ -2459,9 +2482,17 @@ function drawFace(ctx: CanvasRenderingContext2D, hx: number, hy: number, mood: F
     }
     ctx.stroke();
   } else {
-    const wide = mood === "shock" ? 0.034 : mood === "focus" ? 0.03 : 0.026;
+    const wide = mood === "shock" ? 0.034 : mood === "focus" ? 0.03 : mood === "angry" ? 0.028 : 0.026;
     const tall =
-      mood === "shock" ? 0.034 : mood === "run" || mood === "tuck" ? 0.018 : mood === "grin" || mood === "win" ? 0.02 : 0.024;
+      mood === "shock"
+        ? 0.034
+        : mood === "angry"
+          ? 0.014
+          : mood === "run" || mood === "tuck"
+            ? 0.018
+            : mood === "grin" || mood === "win"
+              ? 0.02
+              : 0.024;
     ctx.fillStyle = EYE;
     ctx.beginPath();
     ctx.ellipse(eye.x, eye.y, wide, tall, 0.12, 0, TAU);
@@ -2482,6 +2513,13 @@ function drawFace(ctx: CanvasRenderingContext2D, hx: number, hy: number, mood: F
     ctx.ellipse(mouth.x + 0.008, mouth.y - 0.004, 0.022, 0.028, 0.1, 0, TAU);
     ctx.fill();
     ctx.stroke();
+  } else if (mood === "angry") {
+    ctx.moveTo(mouth.x - 0.03, mouth.y - 0.004);
+    ctx.quadraticCurveTo(mouth.x + 0.002, mouth.y + 0.022, mouth.x + 0.034, mouth.y - 0.002);
+    ctx.stroke();
+    ctx.fillStyle = TEETH;
+    ctx.fillRect(mouth.x - 0.016, mouth.y - 0.006, 0.032, 0.01);
+    ctx.strokeRect(mouth.x - 0.016, mouth.y - 0.006, 0.032, 0.01);
   } else if (mood === "tuck") {
     ctx.moveTo(mouth.x - 0.028, mouth.y + 0.006);
     ctx.lineTo(mouth.x + 0.03, mouth.y + 0.004);

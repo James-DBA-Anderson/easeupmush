@@ -62,7 +62,7 @@ export function mountDebugMenu(game: Game): void {
     <style>
       #debug-ui {
         pointer-events: none;
-        font-family: "Source Sans 3", "Segoe UI", sans-serif;
+        font-family: var(--font-ui);
       }
       #debug-launch,
       #debug-menu {
@@ -75,8 +75,8 @@ export function mountDebugMenu(game: Game): void {
         z-index: 50;
         font-family: inherit;
         font-weight: 700;
-        font-size: 0.78rem;
-        letter-spacing: 0.06em;
+        font-size: var(--type-label);
+        letter-spacing: var(--tracking-label);
         text-transform: uppercase;
         border-radius: 999px;
         border: 1px solid rgba(232, 240, 244, 0.35);
@@ -123,8 +123,10 @@ export function mountDebugMenu(game: Game): void {
       #debug-ui.open #debug-launch { display: none; }
       #debug-menu h2 {
         margin: 0;
-        font-size: 0.72rem;
-        letter-spacing: 0.12em;
+        font-family: var(--font-ui);
+        font-size: var(--type-micro);
+        font-weight: 700;
+        letter-spacing: var(--tracking-label);
         text-transform: uppercase;
         color: #f0a23a;
       }
@@ -181,8 +183,9 @@ export function mountDebugMenu(game: Game): void {
         padding: 0.45rem 0.55rem 0.55rem;
       }
       #debug-menu legend {
-        font-size: 0.68rem;
-        letter-spacing: 0.08em;
+        font-size: var(--type-micro);
+        font-weight: 700;
+        letter-spacing: var(--tracking-label);
         text-transform: uppercase;
         color: #c8dde6;
         padding: 0 0.25rem;
@@ -191,7 +194,7 @@ export function mountDebugMenu(game: Game): void {
         display: flex;
         gap: 0.4rem;
         align-items: flex-start;
-        font-size: 0.82rem;
+        font-size: var(--type-label);
         font-weight: 600;
         margin: 0.22rem 0;
         cursor: pointer;
@@ -207,12 +210,12 @@ export function mountDebugMenu(game: Game): void {
         gap: 0.25rem 0.4rem;
         align-items: center;
         margin: 0.28rem 0;
-        font-size: 0.78rem;
+        font-size: var(--type-label);
       }
       #debug-menu .row span { opacity: 0.9; }
       #debug-menu .row b {
         font-variant-numeric: tabular-nums;
-        font-size: 0.75rem;
+        font-size: var(--type-label);
         color: #f0a23a;
         min-width: 2.6rem;
         text-align: right;
@@ -226,7 +229,7 @@ export function mountDebugMenu(game: Game): void {
       #debug-menu button {
         font-family: inherit;
         font-weight: 700;
-        font-size: 0.78rem;
+        font-size: var(--type-label);
         border-radius: 999px;
         border: 1px solid rgba(232, 240, 244, 0.28);
         background: rgba(232, 240, 244, 0.08);
@@ -241,7 +244,7 @@ export function mountDebugMenu(game: Game): void {
       }
       #debug-menu .status,
       #debug-menu .sim-note {
-        font-size: 0.72rem;
+        font-size: var(--type-micro);
         min-height: 1.1em;
         margin-top: 0.4rem;
         opacity: 0.85;

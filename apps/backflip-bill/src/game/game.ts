@@ -109,10 +109,12 @@ export class Game {
   private calloutEl: HTMLElement;
   private hintEl: HTMLElement;
   private levelEl: HTMLElement;
+  private altEl: HTMLElement;
   private altFill: HTMLElement;
   private altZero: HTMLElement;
   private altMarker: HTMLElement;
   private altRead: HTMLElement;
+  private altCaption: HTMLElement;
   private scoreEl: HTMLElement;
   private scoreValueEl: HTMLElement;
   private scoreLiveEl: HTMLElement;
@@ -156,6 +158,7 @@ export class Game {
   private liveLevel: Level = cloneLevel(LEVELS[0]!);
   private warnEl: HTMLElement;
   private wasWarn = false;
+  private wasAltLow = false;
   /** Elapsed preview time. Negative = not playing. */
   private previewT = -1;
   private previewHold = 0.34;
@@ -172,10 +175,12 @@ export class Game {
     this.calloutEl = document.getElementById("callout")!;
     this.hintEl = document.getElementById("hint")!;
     this.levelEl = document.getElementById("level")!;
+    this.altEl = document.getElementById("altimeter")!;
     this.altFill = document.getElementById("alt-fill")!;
     this.altZero = document.getElementById("alt-zero")!;
     this.altMarker = document.getElementById("alt-marker")!;
     this.altRead = document.getElementById("alt-read")!;
+    this.altCaption = this.altEl.querySelector(".alt-caption")!;
     this.scoreEl = document.getElementById("score")!;
     this.scoreValueEl = document.getElementById("score-value")!;
     this.scoreLiveEl = document.getElementById("score-live")!;
@@ -654,6 +659,23 @@ export class Game {
     this.altFill.style.bottom = `${Math.min(fill, zero)}%`;
     this.altFill.style.height = `${Math.abs(fill - zero)}%`;
     this.altRead.textContent = `${alt >= 0 ? "+" : ""}${alt.toFixed(1)}`;
+
+    const air =
+      this.bill.state === "air" && this.bill.flipping && !this.bill.rag && !this.inPreview();
+    const big = spawnAlt > 2.05;
+    const g = Math.max(1, tuning.gravity);
+    const vy = this.bill.vy;
+    const h = Math.max(0, alt);
+    const disc = vy * vy + 2 * g * h;
+    const tti = air && disc > 0 ? (vy + Math.sqrt(disc)) / g : 99;
+    const falling = vy < -0.9;
+    const low = air && big && falling && tti > 0.02 && tti < 0.7;
+    const close = low && tti < 0.34;
+    this.altEl.classList.toggle("low", low);
+    this.altEl.classList.toggle("low-close", close);
+    this.altCaption.textContent = low ? "Low" : "Alt";
+    if (low && !this.wasAltLow) this.sfx.altLow();
+    this.wasAltLow = low;
   }
 
   private recordJump(): void {
@@ -835,6 +857,8 @@ export class Game {
     this.lastStretch = -1;
     this.wasCleared = this.bill.cleared;
     this.wasWarn = false;
+    this.wasAltLow = false;
+    this.altEl.classList.remove("low", "low-close");
     this.warnEl.classList.remove("on", "close");
     this.warnEl.hidden = true;
   }

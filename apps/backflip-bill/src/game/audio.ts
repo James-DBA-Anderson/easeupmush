@@ -195,6 +195,12 @@ export class Sfx {
     this.noiseBurst(0.07, 0.04, 1400, 2.2);
   }
 
+  public altLow(): void {
+    if (!this.gate("altLow", 0.7)) return;
+    this.arpeggio([523, 392, 330], 0.07, 0.055, "square");
+    this.sweep(640, 220, 0.16, 0.05, "triangle");
+  }
+
   public grab(): void {
     this.noiseBurst(0.08, 0.05, 380, 0.8);
     this.thud(70, 0.08, 0.06);
