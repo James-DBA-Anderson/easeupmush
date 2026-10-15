@@ -4,7 +4,9 @@ import { HIP_HEIGHT, TAU } from "./constants";
 import { isDebugTyping, Input, wantsTouchUi } from "./input";
 import { hintForScheme, tuning } from "./tuning";
 import {
+  approachingObstacle,
   camLookX,
+  cloneLevel,
   drawSky,
   drawWorld,
   finishGround,
@@ -16,6 +18,7 @@ import {
   makeSimLevel,
   screenToWorld,
   spawnGround,
+  stepTrain,
   worldToScreen,
   type Cam,
   type Level,
@@ -144,6 +147,9 @@ export class Game {
   private hoopPassed = false;
   private lastStretch = -1;
   private wasCleared = false;
+  private liveLevel: Level = cloneLevel(LEVELS[0]!);
+  private warnEl: HTMLElement;
+  private wasWarn = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -164,6 +170,7 @@ export class Game {
     this.resultsEl = document.getElementById("results")!;
     this.resultsListEl = document.getElementById("results-list")!;
     this.resultsScoreEl = document.getElementById("results-score")!;
+    this.warnEl = document.getElementById("hazard-warn")!;
     document.getElementById("results-again")?.addEventListener("click", () => {
       if (this.gameOver && this.resultsReadyT <= 0) this.playAgain();
     });
@@ -332,7 +339,7 @@ export class Game {
 
   private level(): Level {
     if (this.sim) return makeSimLevel(this.simGap, this.simBoxes);
-    return LEVELS[this.levelIndex] ?? LEVELS[0]!;
+    return this.liveLevel;
   }
 
   private respawn(): void {
@@ -341,6 +348,7 @@ export class Game {
     this.jumpSpins = 0;
     this.jumpLayout = 0;
     this.dropLiveBonus();
+    if (!this.sim) this.liveLevel = cloneLevel(LEVELS[this.levelIndex] ?? LEVELS[0]!);
     const level = this.level();
     this.bill.spawn(level);
     this.cam.x = camLookX(this.bill.x, this.cam);
@@ -352,6 +360,7 @@ export class Game {
 
   private loadLevel(index: number): void {
     this.levelIndex = Math.max(0, Math.min(LEVELS.length - 1, index));
+    this.liveLevel = cloneLevel(LEVELS[this.levelIndex] ?? LEVELS[0]!);
     this.gameOver = false;
     this.resultsReadyT = 0;
     this.hideResults();
@@ -366,6 +375,7 @@ export class Game {
     this.cam.x = camLookX(this.bill.x, this.cam);
     this.cam.y = spawnGround(this.level()) + this.cam.h * 0.26;
     this.syncLevelHud();
+    this.syncHint();
     this.hintT = 5.5;
     this.resetMotionSfx();
     this.sfx.levelStart();
@@ -388,7 +398,7 @@ export class Game {
   }
 
   private syncHint(): void {
-    this.hintEl.textContent = hintForScheme();
+    this.hintEl.textContent = this.level().hint ?? hintForScheme();
   }
 
   private resize = (): void => {
@@ -425,6 +435,9 @@ export class Game {
     this.timeScale += (want - this.timeScale) * Math.min(1, wall * 10);
     if (Math.abs(this.timeScale - want) < 0.004) this.timeScale = want;
     const dt = wall * this.timeScale;
+    if (!this.sim && !this.gameOver && this.bill.state !== "dead" && !this.bill.cleared) {
+      stepTrain(level, dt);
+    }
 
     if (this.gameOver) {
       this.resultsReadyT -= dt;
@@ -499,7 +512,7 @@ export class Game {
           this.respawn();
         } else {
           this.sfx.death();
-          this.flash("Bill's gone in the gap");
+          this.flash(level.train ? "Bill's gone off the train" : "Bill's gone in the gap");
           this.deathT = tuning.deathTime;
           this.dropLiveBonus();
         }
@@ -536,6 +549,17 @@ export class Game {
     this.calloutEl.classList.toggle("on", this.bannerT > 0);
     this.hintEl.classList.toggle("faded", this.hintT <= 0);
     this.syncAltimeter();
+    this.syncHazardWarn(level);
+  }
+
+  private syncHazardWarn(level: Level): void {
+    const next = !this.sim && level.train ? approachingObstacle(level, this.bill.x) : null;
+    const show = !!next && next.dist > 0.55 && this.bill.state !== "dead" && !this.bill.cleared;
+    this.warnEl.classList.toggle("on", show);
+    this.warnEl.classList.toggle("close", show && next !== null && next.dist < 5.6);
+    this.warnEl.hidden = !show;
+    if (show && !this.wasWarn) this.sfx.warn();
+    this.wasWarn = show;
   }
 
   private syncAltimeter(): void {
@@ -735,6 +759,9 @@ export class Game {
     this.hoopPassed = false;
     this.lastStretch = -1;
     this.wasCleared = this.bill.cleared;
+    this.wasWarn = false;
+    this.warnEl.classList.remove("on", "close");
+    this.warnEl.hidden = true;
   }
 
   private playMotionSfx(level: Level): void {

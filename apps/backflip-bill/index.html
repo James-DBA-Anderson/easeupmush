@@ -336,6 +336,69 @@
         min-width: 3.1rem;
       }
 
+      #hazard-warn {
+        position: absolute;
+        right: max(0.85rem, env(safe-area-inset-right));
+        top: 38%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.28rem;
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(-50%);
+        transition: opacity 0.12s ease, visibility 0.12s ease;
+      }
+
+      #hazard-warn.on {
+        opacity: 1;
+        visibility: visible;
+        animation: hazard-pulse 0.5s ease-in-out infinite alternate;
+      }
+
+      #hazard-warn.close {
+        animation-duration: 0.22s;
+      }
+
+      #hazard-warn .hazard-diamond {
+        width: 2.55rem;
+        height: 2.55rem;
+        background: #f0a23a;
+        border: 3px solid #07141a;
+        transform: rotate(45deg);
+        box-shadow: 0 0 16px #f0a23a88;
+        display: grid;
+        place-items: center;
+      }
+
+      #hazard-warn .hazard-diamond span {
+        transform: rotate(-45deg);
+        font-family: "Anton", Impact, sans-serif;
+        font-size: 1.45rem;
+        line-height: 1;
+        color: #07141a;
+      }
+
+      #hazard-warn em {
+        font-style: normal;
+        font-size: 0.68rem;
+        font-weight: 800;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: #ffd24a;
+        text-shadow: 0 1px 0 #07141a;
+      }
+
+      @keyframes hazard-pulse {
+        from { filter: brightness(1); transform: translateY(-50%) scale(1); }
+        to { filter: brightness(1.25); transform: translateY(-50%) scale(1.08); }
+      }
+
+      body.touch-ui #hazard-warn {
+        top: 32%;
+        right: max(0.55rem, env(safe-area-inset-right));
+      }
+
       #mobile-controls {
         display: none;
         position: fixed;
@@ -601,6 +664,10 @@
         <span id="score-live">+£0</span>
       </div>
       <div id="callout"></div>
+      <div id="hazard-warn" hidden>
+        <div class="hazard-diamond"><span>!</span></div>
+        <em>Look out</em>
+      </div>
       <p id="hint">Run up, FLIP. In the air, hold FLIP to tuck (speeds it), release to stretch (slows it). Open up to land — stretch out so the knees can cushion.</p>
       <div id="altimeter" aria-hidden="true">
         <div class="alt-scale">

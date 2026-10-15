@@ -189,6 +189,12 @@ export class Sfx {
     this.sweep(180, 260, 0.14, 0.03, "sine");
   }
 
+  public warn(): void {
+    if (!this.gate("warn", 0.55)) return;
+    this.arpeggio([392, 330], 0.08, 0.06, "square");
+    this.noiseBurst(0.07, 0.04, 1400, 2.2);
+  }
+
   public grab(): void {
     this.noiseBurst(0.08, 0.05, 380, 0.8);
     this.thud(70, 0.08, 0.06);

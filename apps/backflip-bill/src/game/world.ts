@@ -9,6 +9,21 @@ export interface Platform {
   y: number;
 }
 
+export interface Obstacle {
+  x: number;
+  w: number;
+  h: number;
+  /** Extra chimney / vent on top of the crate. */
+  stack?: number;
+}
+
+export interface Train {
+  /** World-units per second the countryside and oncoming blocks slide left. */
+  speed: number;
+  /** Visual rail / tree offset, in metres. */
+  scroll: number;
+}
+
 export interface Level {
   id: number;
   title: string;
@@ -28,6 +43,10 @@ export interface Level {
   noFlag?: boolean;
   /** Circus hoop: only a tucked pose fits the hole. */
   hoop?: Hoop;
+  /** Roof-height blocks that slide toward the player. */
+  obstacles?: Obstacle[];
+  train?: Train;
+  hint?: string;
 }
 
 export interface Hoop {
@@ -55,9 +74,9 @@ export const LEVELS: Level[] = [
     gapX0: 16.2,
     gapX1: 21.5,
     pitY: -3.4,
-    flagX: 32.4,
+    flagX: 24.8,
     killY: -7,
-    endX: 38,
+    endX: 32,
   },
   {
     id: 2,
@@ -120,7 +139,112 @@ export const LEVELS: Level[] = [
     endX: 44,
     hoop: { x: 18.5, y: 3.35, inner: 0.86, outer: 1.26, tuck: 0.7 },
   },
+  {
+    id: 6,
+    title: "Level 6",
+    spawnX: 4.2,
+    platforms: [{ x0: -4, x1: 42, y: 0 }],
+    gapX0: 42,
+    gapX1: 8.5,
+    pitY: -9.2,
+    flagX: 33.6,
+    killY: -14,
+    endX: 44,
+    train: { speed: 4.7, scroll: 0 },
+    obstacles: [
+      { x: 16.8, w: 1.08, h: 1.18 },
+      { x: 24.6, w: 1.14, h: 1.26 },
+      { x: 31.2, w: 1.22, h: 1.28, stack: 0.64 },
+    ],
+    hint: "You're on the 6:42. Flip over three oncoming blocks — look right for the warning.",
+  },
 ];
+
+export function cloneLevel(src: Level): Level {
+  return {
+    ...src,
+    platforms: src.platforms.map((p) => ({ ...p })),
+    boxes: src.boxes?.map((p) => ({ ...p })),
+    hoop: src.hoop ? { ...src.hoop } : undefined,
+    obstacles: src.obstacles?.map((o) => ({ ...o })),
+    train: src.train ? { ...src.train, scroll: 0 } : undefined,
+  };
+}
+
+export function stepTrain(level: Level, dt: number): void {
+  if (!level.train) return;
+  const v = level.train.speed;
+  level.train.scroll += v * dt;
+  for (const o of level.obstacles ?? []) o.x -= v * dt;
+}
+
+function roofY(level: Level): number {
+  return level.platforms[0]?.y ?? 0;
+}
+
+export function obstacleBox(level: Level, o: Obstacle): { x0: number; x1: number; y0: number; y1: number } {
+  const roof = roofY(level);
+  return { x0: o.x, x1: o.x + o.w, y0: roof, y1: roof + o.h + (o.stack ?? 0) };
+}
+
+function aabbHit(
+  b: { x0: number; x1: number; y0: number; y1: number },
+  x: number,
+  y: number,
+  r: number,
+): { nx: number; ny: number; depth: number } | null {
+  const left = b.x0 - r;
+  const right = b.x1 + r;
+  const bot = b.y0 - r;
+  const top = b.y1 + r;
+  if (x < left || x > right || y < bot || y > top) return null;
+  const penL = x - left;
+  const penR = right - x;
+  const penD = y - bot;
+  const penU = top - y;
+  let nx = -1;
+  let ny = 0;
+  let depth = penL;
+  if (penR < depth) {
+    depth = penR;
+    nx = 1;
+    ny = 0;
+  }
+  if (penD < depth) {
+    depth = penD;
+    nx = 0;
+    ny = -1;
+  }
+  if (penU < depth) {
+    depth = penU;
+    nx = 0;
+    ny = 1;
+  }
+  return depth > 0 ? { nx, ny, depth } : null;
+}
+
+export function obstacleHits(level: Level, x: number, y: number, r: number): boolean {
+  for (const o of level.obstacles ?? []) {
+    if (aabbHit(obstacleBox(level, o), x, y, r)) return true;
+  }
+  return false;
+}
+
+/** Next block still ahead of the player, if it's close enough to warn. */
+export function approachingObstacle(
+  level: Level,
+  px: number,
+  maxDist = 13.5,
+): { dist: number } | null {
+  let best: { dist: number } | null = null;
+  for (const o of level.obstacles ?? []) {
+    const dist = o.x - px;
+    if (dist + o.w < 0.35) continue;
+    if (dist > maxDist) continue;
+    if (!best || dist < best.dist) best = { dist };
+  }
+  return best;
+}
 
 /** Debug sandbox: flat run, optional gap and crates, no finish line. */
 export function makeSimLevel(gap: boolean, boxes: boolean): Level {
@@ -208,6 +332,17 @@ export function groundAt(level: Level, x: number): number | null {
   return best;
 }
 
+/** Highest solid the feet can actually stand on — never a cliff above them. */
+export function supportAt(level: Level, x: number, feetY: number, climb = 0.16): number | null {
+  let best: number | null = null;
+  for (const p of solids(level)) {
+    if (x < p.x0 || x > p.x1) continue;
+    if (p.y > feetY + climb) continue;
+    if (best === null || p.y > best) best = p.y;
+  }
+  return best;
+}
+
 /** Push a circle out of platform solids (top slab + vertical sides, infinite down). */
 export interface NearSolid {
   px: number;
@@ -275,6 +410,20 @@ export function approachingSolid(
   for (const p of solids(level)) consider(closestOnPlatform(p, x, y));
   consider({ px: START_WALL_X, py: y, nx: 1, ny: 0, dist: x - START_WALL_X });
   if (level.hoop) consider(closestOnHoop(level.hoop, x, y));
+  for (const o of level.obstacles ?? []) {
+    const b = obstacleBox(level, o);
+    const hit = aabbHit(b, x, y, 0);
+    if (hit) consider({ px: x, py: y, nx: hit.nx, ny: hit.ny, dist: 0 });
+    else {
+      const cx = Math.max(b.x0, Math.min(b.x1, x));
+      const cy = Math.max(b.y0, Math.min(b.y1, y));
+      const dx = x - cx;
+      const dy = y - cy;
+      const dist = Math.hypot(dx, dy);
+      const inv = dist > 1e-6 ? 1 / dist : 1;
+      consider({ px: cx, py: cy, nx: dx * inv, ny: dy * inv, dist });
+    }
+  }
   return best;
 }
 
@@ -357,6 +506,10 @@ export function pushOutOfSolid(
   if (wallDepth > 0 && (!best || wallDepth > best.depth)) {
     best = { nx: 1, ny: 0, depth: wallDepth };
   }
+  for (const o of level.obstacles ?? []) {
+    const hit = aabbHit(obstacleBox(level, o), x, y, r);
+    if (hit && (!best || hit.depth > best.depth)) best = hit;
+  }
   return best;
 }
 
@@ -435,6 +588,15 @@ export function drawWorld(
   cssH: number,
   level: Level,
 ): void {
+  if (level.train) {
+    drawTrainCountry(ctx, cam, cssW, cssH, level);
+    drawPit(ctx, cam, cssW, cssH, level);
+    drawTrain(ctx, cam, cssW, cssH, level);
+    drawObstacles(ctx, cam, cssW, cssH, level);
+    drawStartWall(ctx, cam, cssW, cssH, level);
+    if (!level.noFlag) drawFlag(ctx, cam, cssW, cssH, level);
+    return;
+  }
   drawSea(ctx, cam, cssW, cssH);
   drawBackdrop(ctx, cam, cssW, cssH, level);
   drawPit(ctx, cam, cssW, cssH, level);
@@ -443,6 +605,188 @@ export function drawWorld(
   drawHoop(ctx, cam, cssW, cssH, level);
   drawStartWall(ctx, cam, cssW, cssH, level);
   if (!level.noFlag) drawFlag(ctx, cam, cssW, cssH, level);
+}
+
+function drawTrainCountry(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  const scroll = level.train?.scroll ?? 0;
+  const horizon = worldToScreenY(cam, cssH, 3.1);
+  const g = ctx.createLinearGradient(0, 0, 0, cssH);
+  g.addColorStop(0, "#152030");
+  g.addColorStop(0.38, "#3a4a58");
+  g.addColorStop(0.62, "#6a7a62");
+  g.addColorStop(1, "#3d4a32");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, cssW, cssH);
+  ctx.fillStyle = "#4a5a38";
+  ctx.fillRect(0, horizon, cssW, cssH);
+  ctx.strokeStyle = "rgba(200,221,230,0.18)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, horizon);
+  ctx.lineTo(cssW, horizon);
+  ctx.stroke();
+
+  const left = cam.x - cam.w * 0.5;
+  const right = cam.x + cam.w * 0.5;
+  const start = Math.floor((left + scroll * 0.55) / 5.2) * 5.2;
+  for (let wx = start; wx < right + scroll * 0.55 + 6; wx += 5.2) {
+    const groundX = wx - scroll * 0.55;
+    const sx = worldToScreenX(cam, cssW, groundX);
+    if (sx < -40 || sx > cssW + 40) continue;
+    const gy = horizon;
+    ctx.fillStyle = "#1c2818";
+    ctx.fillRect(sx - 5, gy - 52, 10, 52);
+    ctx.fillStyle = "#3d5a32";
+    ctx.beginPath();
+    ctx.ellipse(sx, gy - 58, 22, 16, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const postStart = Math.floor((left + scroll) / 7.4) * 7.4;
+  for (let wx = postStart; wx < right + scroll + 8; wx += 7.4) {
+    const sx = worldToScreenX(cam, cssW, wx - scroll);
+    if (sx < -20 || sx > cssW + 20) continue;
+    ctx.fillStyle = "#2a2420";
+    ctx.fillRect(sx - 2, horizon - 78, 4, 78);
+    ctx.strokeStyle = "rgba(20,16,12,0.45)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(sx, horizon - 72);
+    ctx.lineTo(sx + 48, horizon - 68);
+    ctx.stroke();
+  }
+}
+
+function drawTrain(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  const roof = roofY(level);
+  const p = level.platforms[0];
+  if (!p) return;
+  const scroll = level.train?.scroll ?? 0;
+  const ppm = cssW / cam.w;
+  const x0 = worldToScreenX(cam, cssW, p.x0);
+  const x1 = worldToScreenX(cam, cssW, p.x1);
+  const gy = worldToScreenY(cam, cssH, roof);
+  const rail = worldToScreenY(cam, cssH, roof - 2.05);
+  const w = x1 - x0;
+  const bodyH = Math.max(8, rail - gy);
+
+  ctx.fillStyle = "#1a1612";
+  ctx.fillRect(x0, rail, w, cssH - rail);
+  ctx.fillStyle = "#6a6358";
+  ctx.fillRect(x0, rail - 4, w, 8);
+  ctx.fillStyle = "#9a9388";
+  ctx.fillRect(x0, rail + 10, w, 4);
+
+  const sleeper = 0.72 * ppm;
+  const shift = ((scroll * ppm) % Math.max(4, sleeper) + Math.max(4, sleeper)) % Math.max(4, sleeper);
+  ctx.fillStyle = "#4a4036";
+  for (let x = x0 - shift; x < x1; x += Math.max(8, sleeper)) {
+    ctx.fillRect(x, rail + 2, Math.max(4, 0.16 * ppm), 18);
+  }
+
+  ctx.fillStyle = "#5c6e7a";
+  ctx.fillRect(x0, gy, w, bodyH);
+  ctx.fillStyle = "#4a5a66";
+  ctx.fillRect(x0, gy + bodyH * 0.55, w, bodyH * 0.45);
+  ctx.fillStyle = "#d8e0e6";
+  ctx.fillRect(x0, gy - 6, w, 7);
+  ctx.fillStyle = "#f0a23a";
+  ctx.fillRect(x0, gy - 9, w, 4);
+
+  const carW = 8.6;
+  for (let wx = p.x0; wx < p.x1 - 0.4; wx += carW) {
+    const xEnd = worldToScreenX(cam, cssW, Math.min(p.x1, wx + carW));
+    ctx.fillStyle = "#2a343c";
+    ctx.fillRect(xEnd - 4, gy + 6, 8, bodyH - 10);
+    ctx.fillStyle = "#b8e4f4";
+    ctx.strokeStyle = "#2a343c";
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      const win = worldToScreenX(cam, cssW, wx + 1.15 + i * 1.55);
+      const ww = Math.max(12, 0.48 * ppm);
+      const wh = Math.max(16, 0.42 * ppm);
+      if (win < x0 || win > x1 - ww) continue;
+      ctx.fillRect(win, gy + 20, ww, wh);
+      ctx.strokeRect(win, gy + 20, ww, wh);
+    }
+    const wheelY = rail - 4;
+    const wr = Math.max(8, 0.26 * ppm);
+    const w1 = worldToScreenX(cam, cssW, wx + 1.8);
+    const w2 = worldToScreenX(cam, cssW, wx + 6.6);
+    ctx.fillStyle = "#1a1410";
+    ctx.beginPath();
+    ctx.arc(w1, wheelY, wr, 0, Math.PI * 2);
+    ctx.arc(w2, wheelY, wr, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#8a8378";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(w1, wheelY, wr * 0.45, 0, Math.PI * 2);
+    ctx.arc(w2, wheelY, wr * 0.45, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawObstacles(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  const ppm = cssW / cam.w;
+  for (const o of level.obstacles ?? []) {
+    const b = obstacleBox(level, o);
+    const x0 = worldToScreenX(cam, cssW, b.x0);
+    const x1 = worldToScreenX(cam, cssW, b.x1);
+    const top = worldToScreenY(cam, cssH, b.y1);
+    const bot = worldToScreenY(cam, cssH, b.y0);
+    const w = Math.max(6, x1 - x0);
+    const stripe = Math.max(6, 0.16 * ppm);
+    const crateTop = o.stack
+      ? worldToScreenY(cam, cssH, b.y0 + o.h)
+      : top;
+    ctx.fillStyle = "#3d3832";
+    ctx.fillRect(x0 - 7, crateTop, 8, bot - crateTop + 6);
+    ctx.fillRect(x1 - 1, crateTop, 8, bot - crateTop + 6);
+    ctx.fillStyle = "#8a8378";
+    ctx.fillRect(x0 - 8, crateTop - 8, w + 16, 12);
+    ctx.fillStyle = "#f0a23a";
+    ctx.fillRect(x0 - 8, crateTop - 10, w + 16, 3);
+    ctx.fillStyle = "#2a2622";
+    ctx.fillRect(x0 + 2, crateTop + 6, w - 4, bot - crateTop - 8);
+    ctx.strokeStyle = "rgba(232,240,244,0.18)";
+    ctx.lineWidth = 1;
+    for (let y = crateTop + 10; y < bot - 6; y += stripe) {
+      ctx.beginPath();
+      ctx.moveTo(x0 + 4, y);
+      ctx.lineTo(x1 - 4, y);
+      ctx.stroke();
+    }
+    if (o.stack) {
+      const mid = (x0 + x1) * 0.5;
+      const pipeW = Math.max(8, 0.22 * ppm);
+      ctx.fillStyle = "#5a5348";
+      ctx.fillRect(mid - pipeW * 0.5, top, pipeW, crateTop - top);
+      ctx.fillStyle = "#8a8378";
+      ctx.fillRect(mid - pipeW * 0.72, top - 6, pipeW * 1.44, 10);
+      ctx.fillStyle = "#c8dde6";
+      ctx.globalAlpha = 0.35;
+      ctx.fillRect(mid - pipeW * 0.35, top - 22, pipeW * 0.7, 16);
+      ctx.globalAlpha = 1;
+    }
+  }
 }
 
 function drawSea(ctx: CanvasRenderingContext2D, cam: Cam, cssW: number, cssH: number): void {
@@ -688,6 +1032,17 @@ function drawStartWall(
   if (x < 2) return;
   const roof = level.platforms[0]?.y ?? 0;
   const gy = worldToScreenY(cam, cssH, roof);
+  if (level.train) {
+    ctx.fillStyle = "#1a2228";
+    ctx.fillRect(0, 0, x, cssH);
+    ctx.fillStyle = "#2c3640";
+    ctx.fillRect(0, gy, x, cssH - gy);
+    ctx.fillStyle = "#c8d0d6";
+    ctx.fillRect(x - 8, gy - 6, 8, 8);
+    ctx.fillStyle = "#f0a23a";
+    ctx.fillRect(x - 5, 0, 5, gy);
+    return;
+  }
   ctx.fillStyle = "#3d3832";
   ctx.fillRect(0, 0, x, cssH);
   ctx.fillStyle = "#2a2622";

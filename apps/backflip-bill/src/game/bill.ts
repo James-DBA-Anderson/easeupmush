@@ -3,9 +3,11 @@ import { tuning } from "./tuning";
 import {
   approachingSolid,
   groundAt,
+  obstacleHits,
   onFlagPlatform,
   pushOutOfHoop,
   pushOutOfSolid,
+  supportAt,
   spawnGround,
   START_WALL_X,
   type Level,
@@ -285,6 +287,14 @@ export class Bill {
       this.groundMove(dt, run);
       this.snapToGround(level);
       this.applyCushionDrop(level);
+      if (this.hitsObstacle(level)) {
+        const g = groundAt(level, this.x);
+        this.beginRagdoll("crash", g);
+        this.landEvent = this.makeLand("fall", this.x, g ?? this.y);
+        this.resolveBody(level, true);
+        this.checkGapDeath(level);
+        return;
+      }
       const spd = Math.min(1, Math.abs(this.vx) / tuning.maxSpeed);
       this.runPhase += Math.abs(this.vx) * dt * (2.05 + 0.85 * spd);
       if (jump && !this.cleared && this.state !== "stumble") this.takeOff();
@@ -325,7 +335,18 @@ export class Bill {
     const g = groundAt(level, this.x);
     const floorLand = g !== null && this.vy <= 0 && this.y - HIP_HEIGHT <= g + 0.08;
 
-    if (!this.flipping) {
+    if (this.flipping && floorLand) {
+      this.land(g);
+      if (this.rag) this.resolveBody(level, true);
+      else this.shoveFromHazards(level);
+    } else if (this.hitsObstacle(level)) {
+      this.beginRagdoll("crash", floorLand ? g : null);
+      this.landEvent = this.makeLand("fall", this.x, floorLand && g !== null ? g : this.y);
+      this.resolveBody(level, true);
+      this.checkGapDeath(level);
+      this.tryFinish(level);
+      return;
+    } else if (!this.flipping) {
       const wall = this.airTime > 0.08 && this.touchingSolid(level, false);
       if (floorLand || wall) {
         this.beginRagdoll("crash", floorLand ? g : null);
@@ -334,9 +355,6 @@ export class Bill {
       } else {
         this.resolveBody(level, false);
       }
-    } else if (floorLand) {
-      this.land(g);
-      if (this.rag) this.resolveBody(level, true);
     } else if (this.touchingSolid(level, false, this.brace < 0.28)) {
       this.beginRagdoll("crash", null);
       this.landEvent = this.makeLand("fall", this.x, this.y);
@@ -792,6 +810,24 @@ export class Bill {
     return lAnk.y < hip.y - 0.16 && rAnk.y < hip.y - 0.16;
   }
 
+  /** Slide off a roof crate after a stuck landing instead of eating it as a fall. */
+  private shoveFromHazards(level: Level): void {
+    if (!level.obstacles?.length) return;
+    const hit = pushOutOfSolid(level, this.x, this.y, 0.32);
+    if (hit && Math.abs(hit.nx) > 0.5) {
+      this.x += hit.nx * hit.depth;
+      this.vx = hit.nx > 0 ? Math.max(0, this.vx) : Math.min(0, this.vx);
+    }
+  }
+
+  private hitsObstacle(level: Level): boolean {
+    if (!level.obstacles?.length) return false;
+    for (const pt of bodyWorldPoints(this)) {
+      if (obstacleHits(level, pt.x, pt.y, pt.r)) return true;
+    }
+    return false;
+  }
+
   private hoopHit(
     level: Level,
     x: number,
@@ -890,20 +926,41 @@ export class Bill {
 
   private applyCushionDrop(level: Level): void {
     if (this.cushion <= 0.02) return;
-    const floor = groundAt(level, this.x);
-    if (floor !== null) this.y = floor + HIP_HEIGHT * (1 - 0.42 * this.cushion);
+    const feet = this.y - HIP_HEIGHT;
+    const floor = supportAt(level, this.x, feet);
+    if (floor !== null && feet - floor <= 0.2) {
+      this.y = floor + HIP_HEIGHT * (1 - 0.42 * this.cushion);
+    }
   }
 
   private snapToGround(level: Level): void {
-    const g = groundAt(level, this.x);
-    if (g === null || this.y - HIP_HEIGHT - g > 0.2) {
-      this.state = "air";
-      this.flipping = false;
-      this.vy = Math.min(this.vy, 0);
-      this.airTime = 0;
+    const feet = this.y - HIP_HEIGHT;
+    // Cushioned landings sit the feet ~0.4m below standing hip height.
+    // That must still count as the same pad — not a cliff to climb.
+    const climb = HIP_HEIGHT * 0.48;
+    const g = supportAt(level, this.x, feet, climb);
+    if (g !== null && feet - g <= climb + 0.06) {
+      if (this.state !== "fallen") this.y = g + HIP_HEIGHT;
       return;
     }
-    if (this.state !== "fallen") this.y = g + HIP_HEIGHT;
+    const cliff = groundAt(level, this.x);
+    if (cliff !== null && cliff > feet + climb) {
+      const hit = pushOutOfSolid(level, this.x, this.y, 0.28);
+      if (hit && Math.abs(hit.nx) > 0.5) {
+        this.x += hit.nx * hit.depth;
+        if (hit.nx > 0) this.vx = Math.max(0, this.vx);
+        else this.vx = Math.min(0, this.vx);
+        const back = supportAt(level, this.x, feet, climb);
+        if (back !== null && feet - back <= climb + 0.06) {
+          if (this.state !== "fallen") this.y = back + HIP_HEIGHT;
+          return;
+        }
+      }
+    }
+    this.state = "air";
+    this.flipping = false;
+    this.vy = Math.min(this.vy, 0);
+    this.airTime = 0;
   }
 
   private beginCelebrate(): void {
@@ -1007,7 +1064,8 @@ export function drawBill(
 
   const pose = poseFor(bill, t);
   const chain = torsoChain(pose);
-  const arch = pose.arch;
+  const arch =
+    (pose.spineLumbar ?? 0) + (pose.spineThoracic ?? 0) + (pose.spineCervical ?? 0);
   const grounded = bill.state === "ground" && !bill.rag;
   if (grounded) {
     const amp = Math.min(1, Math.abs(bill.vx) / tuning.maxSpeed);
@@ -1066,17 +1124,7 @@ export function drawBill(
     drawBandage(ctx, rKnee, (pose.rThigh + pose.rShin) * 0.5, 0.09, 0.055);
   }
 
-  ctx.fillStyle = SHIRT;
-  ctx.strokeStyle = SHIRT_DARK;
-  ctx.lineWidth = 0.028;
-  ctx.beginPath();
-  ctx.moveTo(lSh.x - 0.05, lSh.y + 0.01);
-  ctx.lineTo(rSh.x + 0.07, rSh.y);
-  ctx.lineTo(rHip.x + 0.09, rHip.y - 0.05);
-  ctx.lineTo(lHip.x - 0.07, lHip.y - 0.05);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
+  drawShirt(ctx, chain, lHip, rHip, lSh, rSh);
 
   strokeColored(ctx, SKIN, 0.1, neck, head);
   drawHeadProfile(ctx, head, bill, t);
@@ -1132,9 +1180,9 @@ const THIGH_RANGE = { min: -2.12, max: 1.15 };
 const ARM_RANGE = { min: -2.0, max: 2.45 };
 const LEAN_RANGE = { min: -0.62, max: 0.88 };
 const ARCH_RANGE = { min: -0.18, max: 0.95 };
-const LUMBAR_RANGE = { min: -0.16, max: 0.5 };
-const THORACIC_RANGE = { min: -0.14, max: 0.4 };
-const CERVICAL_RANGE = { min: -0.18, max: 0.32 };
+const LUMBAR_RANGE = { min: -0.62, max: 0.92 };
+const THORACIC_RANGE = { min: -0.52, max: 0.78 };
+const CERVICAL_RANGE = { min: -0.58, max: 0.7 };
 /** 0 = pointed (in line with shin). Positive = toes toward shin. */
 const ANKLE_BEND = { min: -0.55, max: 1.45 };
 
@@ -1483,6 +1531,9 @@ function gaitArm(phase: number, amp: number, backpedal: boolean): { arm: number;
 const LAYOUT: Pose = {
   lean: -0.28,
   arch: 0.92,
+  spineLumbar: 0.4,
+  spineThoracic: 0.34,
+  spineCervical: 0.22,
   lThigh: -1.98,
   rThigh: -1.82,
   lShin: -2.08,
@@ -1497,6 +1548,9 @@ const LAYOUT: Pose = {
 const CROUCH: Pose = {
   lean: 0.14,
   arch: -0.1,
+  spineLumbar: -0.08,
+  spineThoracic: -0.04,
+  spineCervical: 0.02,
   lThigh: 0.92,
   rThigh: 0.74,
   lShin: -0.95,
@@ -1511,6 +1565,9 @@ const CROUCH: Pose = {
 const HEAP: Pose = {
   lean: 0.22,
   arch: 0.12,
+  spineLumbar: 0.52,
+  spineThoracic: -0.28,
+  spineCervical: 0.34,
   lThigh: 0.55,
   rThigh: -0.35,
   lShin: -1.35,
@@ -1710,12 +1767,32 @@ function flopToward(rag: Ragdoll, hang: number, dt: number, _grounded: boolean, 
   vel.spineCervical = vel.spineCervical ?? 0;
   integrateJoint(pose, vel, "lean", wrapPi((heap ? HEAP.lean : 0) - pose.lean) * torsoStiff, dt, heap ? 5.4 : 3.6);
   integrateJoint(pose, vel, "arch", wrapPi((heap ? HEAP.arch : 0) - pose.arch) * (torsoStiff * 0.8), dt, heap ? 4.8 : 3.2);
-  const heapLumbar = HEAP.arch * 0.42;
-  const heapThoracic = HEAP.arch * 0.36;
-  const heapCervical = HEAP.arch * 0.24;
-  integrateJoint(pose, vel, "spineLumbar", wrapPi((heap ? heapLumbar : 0) - pose.spineLumbar!) * (torsoStiff * 0.9), dt, heap ? 4.2 : 2.4);
-  integrateJoint(pose, vel, "spineThoracic", wrapPi((heap ? heapThoracic : 0) - pose.spineThoracic!) * (torsoStiff * 0.7), dt, heap ? 3.6 : 1.8);
-  integrateJoint(pose, vel, "spineCervical", wrapPi((heap ? heapCervical : 0) - pose.spineCervical!) * (torsoStiff * 0.55), dt, heap ? 3.0 : 1.35);
+  const spineStiff = heap ? 4.4 : 0.58;
+  const spineDamp = heap ? 3.4 : 0.62;
+  integrateJoint(
+    pose,
+    vel,
+    "spineLumbar",
+    wrapPi((heap ? HEAP.spineLumbar! : 0) - pose.spineLumbar!) * spineStiff - rag.omega * (heap ? 0.12 : 0.55),
+    dt,
+    spineDamp,
+  );
+  integrateJoint(
+    pose,
+    vel,
+    "spineThoracic",
+    wrapPi((heap ? HEAP.spineThoracic! : 0) - pose.spineThoracic!) * (spineStiff * 0.85) + rag.omega * (heap ? 0.08 : 0.42),
+    dt,
+    spineDamp * 0.9,
+  );
+  integrateJoint(
+    pose,
+    vel,
+    "spineCervical",
+    wrapPi((heap ? HEAP.spineCervical! : 0) - pose.spineCervical!) * (spineStiff * 0.7) + rag.omega * (heap ? 0.1 : 0.7),
+    dt,
+    spineDamp * 0.75,
+  );
   integrateJoint(pose, vel, "lThigh", pull(pose.lThigh, HEAP.lThigh, limbStiff) - rag.omega * 1.8, dt, 0.42);
   integrateJoint(pose, vel, "rThigh", pull(pose.rThigh, HEAP.rThigh, limbStiff * 0.9) - rag.omega * 1.35, dt, 0.4);
   integrateJoint(pose, vel, "lShin", pull(pose.lShin, HEAP.lShin, tipStiff) - rag.omega * 1.1, dt, 0.22);
@@ -1748,9 +1825,9 @@ function joltPose(rag: Ragdoll, impact: number, slide: number): void {
   rag.vel.lFoot = (rag.vel.lFoot ?? 0) - j * 0.22;
   rag.vel.rFoot = (rag.vel.rFoot ?? 0) - j * 0.18;
   rag.vel.lean += s * 0.08;
-  rag.vel.spineLumbar = (rag.vel.spineLumbar ?? 0) - j * 0.38;
-  rag.vel.spineThoracic = (rag.vel.spineThoracic ?? 0) + j * 0.22 + s * 0.12;
-  rag.vel.spineCervical = (rag.vel.spineCervical ?? 0) + j * 0.4;
+  rag.vel.spineLumbar = (rag.vel.spineLumbar ?? 0) - j * 0.85;
+  rag.vel.spineThoracic = (rag.vel.spineThoracic ?? 0) + j * 0.55 + s * 0.22;
+  rag.vel.spineCervical = (rag.vel.spineCervical ?? 0) + j * 0.9;
   rag.omega += s * 0.85;
 }
 
@@ -1955,7 +2032,7 @@ function bodyWorldPoints(bill: Bill): BodySample[] {
     { rig: "thoracic", r: 0.1, kind: "limb", joints: ["spineThoracic", "spineLumbar"] },
     { rig: "lHip", r: 0.11, kind: "core" },
     { rig: "rHip", r: 0.11, kind: "core" },
-    { rig: "neck", r: 0.11, kind: "core" },
+    { rig: "neck", r: 0.1, kind: "limb", joints: ["spineCervical", "spineThoracic"] },
     { rig: "head", r: 0.22, kind: "core" },
     { rig: "hair", r: 0.14, kind: "core" },
     { rig: "lSh", r: 0.08, kind: "core" },
@@ -2029,6 +2106,33 @@ function foldLimb(
   if (left > 0.08 && joints[0]) {
     noteSnap(bill, joints[0], 0, Math.abs(vel[joints[0]] ?? 0), left);
   }
+}
+
+function drawShirt(
+  ctx: CanvasRenderingContext2D,
+  chain: { lumbar: Pt; thoracic: Pt },
+  lHip: Pt,
+  rHip: Pt,
+  lSh: Pt,
+  rSh: Pt,
+): void {
+  const L = chain.lumbar;
+  const T = chain.thoracic;
+  ctx.fillStyle = SHIRT;
+  ctx.strokeStyle = SHIRT_DARK;
+  ctx.lineWidth = 0.028;
+  ctx.beginPath();
+  ctx.moveTo(lHip.x - 0.07, lHip.y - 0.04);
+  ctx.lineTo(L.x - 0.11, L.y - 0.01);
+  ctx.lineTo(T.x - 0.1, T.y);
+  ctx.lineTo(lSh.x - 0.05, lSh.y + 0.01);
+  ctx.lineTo(rSh.x + 0.07, rSh.y);
+  ctx.lineTo(T.x + 0.11, T.y + 0.01);
+  ctx.lineTo(L.x + 0.12, L.y);
+  ctx.lineTo(rHip.x + 0.09, rHip.y - 0.04);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
 }
 
 function strokeColored(
