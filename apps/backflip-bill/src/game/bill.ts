@@ -63,6 +63,8 @@ export class Bill {
   state: BillState = "ground";
   runPhase = 0;
   lockTimer = 0;
+  /** Seconds a jump press is remembered so a tap just before landing still takes off. */
+  private jumpBuf = 0;
   flipTravel = 0;
   flipDuration = tuning.flipDurationSlow;
   airTime = 0;
@@ -120,6 +122,10 @@ export class Bill {
   braceRLeg = 0;
   /** 0–1: square legs and feet for a landing. Pose only — never changes spin. */
   landPrep = 0;
+  /** 0–1: arms by the sides and extra layout arch while opening over a gap. */
+  gapArmTuck = 0;
+  /** 0–1: head-first panic — arms out at the floor. Pose only, does not save the landing. */
+  panic = 0;
   /** Debug sim: mouse is carrying him. */
   held = false;
 
@@ -134,6 +140,7 @@ export class Bill {
     this.state = "ground";
     this.runPhase = 0;
     this.lockTimer = 0;
+    this.jumpBuf = 0;
     this.flipTravel = 0;
     this.flipDuration = tuning.flipDurationSlow;
     this.airTime = 0;
@@ -172,12 +179,16 @@ export class Bill {
     this.braceLLeg = 0;
     this.braceRLeg = 0;
     this.landPrep = 0;
+    this.gapArmTuck = 0;
+    this.panic = 0;
     this.held = false;
   }
 
   public goLimp(): void {
     this.flipping = false;
     this.landPrep = 0;
+    this.gapArmTuck = 0;
+    this.panic = 0;
     this.brace = 0;
     this.spinRate = 0;
     this.held = true;
@@ -257,6 +268,8 @@ export class Bill {
     this.finished = false;
     this.restarted = false;
     if (touched) this.engaged = true;
+    if (jump) this.jumpBuf = 0.16;
+    this.jumpBuf = Math.max(0, this.jumpBuf - dt);
     for (let i = this.snapFlashes.length - 1; i >= 0; i--) {
       const f = this.snapFlashes[i]!;
       f.life -= dt;
@@ -297,7 +310,7 @@ export class Bill {
       }
       const spd = Math.min(1, Math.abs(this.vx) / tuning.maxSpeed);
       this.runPhase += Math.abs(this.vx) * dt * (2.05 + 0.85 * spd);
-      if (jump && !this.cleared && this.state !== "stumble") this.takeOff();
+      if (this.jumpBuf > 0 && !this.cleared) this.takeOff();
       this.checkGapDeath(level);
       this.tryFinish(level);
       return;
@@ -331,6 +344,8 @@ export class Bill {
 
     this.updateBrace(dt, level);
     this.updateLandPrep(dt, level);
+    this.updateGapArmTuck(dt, level);
+    this.updatePanic(dt, level);
 
     const g = groundAt(level, this.x);
     const floorLand = g !== null && this.vy <= 0 && this.y - HIP_HEIGHT <= g + 0.08;
@@ -338,7 +353,10 @@ export class Bill {
     if (this.flipping && floorLand) {
       this.land(g);
       if (this.rag) this.resolveBody(level, true);
-      else this.shoveFromHazards(level);
+      else {
+        this.shoveFromHazards(level);
+        if (this.jumpBuf > 0 && !this.cleared && !this.rag) this.takeOff();
+      }
     } else if (this.hitsObstacle(level)) {
       this.beginRagdoll("crash", floorLand ? g : null);
       this.landEvent = this.makeLand("fall", this.x, floorLand && g !== null ? g : this.y);
@@ -454,6 +472,10 @@ export class Bill {
     this.spinRate = 0;
     this.rag = null;
     this.landPrep = 0;
+    this.gapArmTuck = 0;
+    this.panic = 0;
+    this.lockTimer = 0;
+    this.jumpBuf = 0;
     const speed = Math.min(1, Math.abs(this.vx) / tuning.maxSpeed);
     this.flipDuration =
       tuning.flipDurationSlow +
@@ -474,6 +496,8 @@ export class Bill {
 
     this.flipping = false;
     this.landPrep = 0;
+    this.gapArmTuck = 0;
+    // Keep panic until the ragdoll snapshot, then clear.
 
     // On your feet: leftover angle in the stumble window, or land-prep lined the shins up.
     const onFeet = planted || off <= stumbleAng;
@@ -482,6 +506,8 @@ export class Bill {
       this.landEvent = this.makeLand("fall", this.x, g, impact);
       return;
     }
+
+    this.panic = 0;
 
     // Stick it only when opened out and close to feet-down.
     if (opened && off <= cleanAng && !tucked) {
@@ -510,6 +536,8 @@ export class Bill {
     this.rot = 0;
     this.spinRate = 0;
     this.landPrep = 0;
+    this.gapArmTuck = 0;
+    this.panic = 0;
     this.brace = 0;
     this.vx *= 0.52;
     this.vy = 0;
@@ -564,6 +592,8 @@ export class Bill {
     }
     this.brace = 0;
     this.landPrep = 0;
+    this.gapArmTuck = 0;
+    this.panic = 0;
     const omega = rolling
       ? clamp(spin * 0.8 + dir * speed * 0.22, -12, 12)
       : dir * 1.05;
@@ -773,6 +803,41 @@ export class Bill {
     const k = 1 - Math.exp(-(want > this.landPrep ? 28 : 13) * dt);
     this.landPrep += (want - this.landPrep) * k;
     if (this.landPrep < 0.02 && want <= 0) this.landPrep = 0;
+  }
+
+  /**
+   * Head-first and opened out: throw the arms at the floor. Looks desperate,
+   * does not change spin or save the landing.
+   */
+  private updatePanic(dt: number, level: Level): void {
+    const extend = Math.max(0, 1 - this.tuck);
+    const g = this.seenLanding(level);
+    const height = g === null ? 99 : this.y - HIP_HEIGHT - g;
+    const spin = Math.abs(wrapPi(this.rot));
+    const headFirst = clamp((spin - 1.52) / 0.72, 0, 1);
+    const near = g !== null && height < 4.15 && height > -0.15;
+    const falling = this.vy < 0.35;
+    const gate = clamp((extend - 0.62) / 0.22, 0, 1);
+    const reach = clamp((3.9 - height) / 2.5, 0, 1);
+    const rush = clamp(Math.max(0, -this.vy) / 9, 0, 1);
+    const want =
+      this.flipping && near && falling && headFirst > 0.08 && gate > 0
+        ? gate * headFirst * Math.min(1, 0.48 + 0.52 * reach + 0.16 * rush)
+        : 0;
+    const k = 1 - Math.exp(-(want > this.panic ? 22 : 12) * dt);
+    this.panic += (want - this.panic) * k;
+    if (this.panic < 0.02 && want <= 0) this.panic = 0;
+  }
+
+  /**
+   * Over a pit (or heading into one), pin the arms to his sides and add a
+   * bit more banana — including the neck — once he starts to open.
+   */
+  private updateGapArmTuck(dt: number, level: Level): void {
+    const want = this.flipping && crossingGap(level, this.x, this.y, this.vx, this.facing) ? 1 : 0;
+    const k = 1 - Math.exp(-(want > this.gapArmTuck ? 22 : 8) * dt);
+    this.gapArmTuck += (want - this.gapArmTuck) * k;
+    if (this.gapArmTuck < 0.02 && want <= 0) this.gapArmTuck = 0;
   }
 
   /** Closest floor in front of him — the pad he can see, not a pit behind it. */
@@ -1408,7 +1473,13 @@ function poseFor(bill: Bill, t: number): Pose {
       );
     }
     return applyLandPrep(
-      applyBrace(clampLimbPose(lerpPose(LAYOUT, CROUCH, bill.tuck)), bill),
+      applyPanic(
+        applyBrace(
+          applyGapArms(clampLimbPose(lerpPose(LAYOUT, CROUCH, bill.tuck)), bill),
+          bill,
+        ),
+        bill,
+      ),
       bill,
     );
   }
@@ -1526,6 +1597,19 @@ function gaitArm(phase: number, amp: number, backpedal: boolean): { arm: number;
   const fore = arm + 0.5 + 0.22 * amp + pump * (0.55 * amp);
   return { arm, fore };
 }
+
+/** Gap extend: arms pinned to the ribs, extra banana through the neck. */
+const GAP_EXTEND = {
+  lean: -0.38,
+  arch: 0.95,
+  spineLumbar: 0.5,
+  spineThoracic: 0.46,
+  spineCervical: 0.5,
+  lArm: -Math.PI / 2 - 0.06,
+  rArm: -Math.PI / 2 - 0.16,
+  lFore: -Math.PI / 2 + 0.32,
+  rFore: -Math.PI / 2 + 0.24,
+};
 
 /** Layout: arched back, full extension, arms and legs trailing the spin. */
 const LAYOUT: Pose = {
@@ -1901,6 +1985,77 @@ function applyBrace(pose: Pose, bill: Bill): Pose {
   return clampLimbPose(p);
 }
 
+/** Both arms toward the floor, a bit of shake — it will not break the fall. */
+function applyPanic(pose: Pose, bill: Bill): Pose {
+  const u = bill.panic;
+  if (u < 0.03) return pose;
+  const down = worldDirToLocal(bill, 0, -1);
+  const shake = Math.sin(bill.time * 34) * 0.16 * u;
+  const p = { ...pose };
+  p.lArm = mixAng(p.lArm, down + 0.24 + shake, u);
+  p.rArm = mixAng(p.rArm, down - 0.2 - shake * 0.7, u);
+  p.lFore = mixAng(p.lFore, p.lArm + 0.18, u);
+  p.rFore = mixAng(p.rFore, p.rArm + 0.16, u);
+  return clampLimbPose(p);
+}
+
+/** Pin arms to his sides and deepen the layout arch, including the neck. */
+function applyGapArms(pose: Pose, bill: Bill): Pose {
+  const open = clamp((0.62 - bill.tuck) / 0.5, 0, 1);
+  const u = bill.gapArmTuck * open;
+  if (u < 0.03) return pose;
+  const g = GAP_EXTEND;
+  const p = { ...pose };
+  p.lean = p.lean + (g.lean - p.lean) * u * 0.75;
+  p.arch = p.arch + (g.arch - p.arch) * u;
+  const lum = p.spineLumbar ?? p.arch * 0.42;
+  const tho = p.spineThoracic ?? p.arch * 0.36;
+  const cer = p.spineCervical ?? p.arch * 0.24;
+  p.spineLumbar = lum + (g.spineLumbar - lum) * u;
+  p.spineThoracic = tho + (g.spineThoracic - tho) * u;
+  p.spineCervical = cer + (g.spineCervical - cer) * u;
+  // Layout arms sit near +2.1; hang is -π/2. Shortest-angle mix wraps past
+  // ARM_RANGE.max and the clamp leaves them trailing. Lerp in real numbers.
+  const armU = 1 - (1 - u) * (1 - u);
+  p.lArm = p.lArm + (g.lArm - p.lArm) * armU;
+  p.rArm = p.rArm + (g.rArm - p.rArm) * armU;
+  p.lFore = p.lFore + (g.lFore - p.lFore) * armU;
+  p.rFore = p.rFore + (g.rFore - p.rFore) * armU;
+  return clampLimbPose(p);
+}
+
+/** Highest standable pad at x — platforms and crates, never the pit floor. */
+function padAt(level: Level, x: number): number | null {
+  let best: number | null = null;
+  for (const p of [...level.platforms, ...(level.boxes ?? [])]) {
+    if (x < p.x0 || x > p.x1) continue;
+    if (best === null || p.y > best) best = p.y;
+  }
+  return best;
+}
+
+function overGap(level: Level, x: number, y: number): boolean {
+  const g = padAt(level, x);
+  if (g === null) return true;
+  return y - HIP_HEIGHT - g > 1.55;
+}
+
+function crossingGap(
+  level: Level,
+  x: number,
+  y: number,
+  vx: number,
+  facing: number,
+): boolean {
+  if (overGap(level, x, y)) return true;
+  const dir = facing >= 0 ? 1 : -1;
+  const reach = Math.max(10, Math.abs(vx) * 1.15 + 3);
+  for (let s = 0.35; s <= reach; s += 0.4) {
+    if (overGap(level, x + dir * s, y)) return true;
+  }
+  return false;
+}
+
 /** Point thighs at world-down and flatten the feet. Joint clamps only — no spin. */
 function applyLandPrep(pose: Pose, bill: Bill): Pose {
   const u = bill.landPrep;
@@ -2213,6 +2368,7 @@ function faceMood(bill: Bill): FaceMood {
   }
   if (bill.state === "air") {
     if (!bill.flipping) return "shock";
+    if (bill.panic > 0.22) return "shock";
     if (bill.tuck >= 0.7) return "tuck";
     return "focus";
   }

@@ -16,6 +16,7 @@ import {
   LEVELS,
   makeCam,
   makeSimLevel,
+  routeAt,
   screenToWorld,
   spawnGround,
   stepTrain,
@@ -73,6 +74,11 @@ function jumpPoints(
   const attempt = Math.max(0, 400 - (tries - 1) * 100);
   const layout = layoutTicks(layoutHold) * LAYOUT_TICK_PTS;
   return clear + star + attempt + extraSpins(spins) * EXTRA_SPIN_PTS + layout;
+}
+
+function easeInOut(t: number): number {
+  const u = Math.max(0, Math.min(1, t));
+  return u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
 }
 
 function spinLabel(spins: number): string {
@@ -150,6 +156,12 @@ export class Game {
   private liveLevel: Level = cloneLevel(LEVELS[0]!);
   private warnEl: HTMLElement;
   private wasWarn = false;
+  /** Elapsed preview time. Negative = not playing. */
+  private previewT = -1;
+  private previewHold = 0.34;
+  private previewDur = 0;
+  /** Ignore jump until it is released, so a level-advance hold does not take off. */
+  private jumpLatch = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -185,6 +197,7 @@ export class Game {
     window.addEventListener("keydown", (e) => {
       if (isDebugTyping(e.target)) return;
       if (e.code === "KeyR") {
+        if (this.inPreview()) return;
         if (this.gameOver || this.bill.cleared || this.bill.state === "done") return;
         this.respawn();
       }
@@ -193,11 +206,13 @@ export class Game {
     this.syncLevelHud();
     this.syncHint();
     this.resize();
-    this.cam.x = camLookX(this.bill.x, this.cam);
     this.resetMotionSfx();
     const wanted = Number(new URLSearchParams(window.location.search).get("level"));
     if (wanted >= 1 && wanted <= LEVELS.length) this.loadLevel(wanted - 1);
-    else this.sfx.levelStart();
+    else {
+      this.sfx.levelStart();
+      this.beginPreview();
+    }
   }
 
   public start(): void {
@@ -372,13 +387,58 @@ export class Game {
     this.bill.spawn(this.level());
     this.timeScale = 1;
     this.dust.length = 0;
-    this.cam.x = camLookX(this.bill.x, this.cam);
-    this.cam.y = spawnGround(this.level()) + this.cam.h * 0.26;
     this.syncLevelHud();
     this.syncHint();
     this.hintT = 5.5;
     this.resetMotionSfx();
     this.sfx.levelStart();
+    this.beginPreview();
+  }
+
+  private inPreview(): boolean {
+    return this.previewT >= 0;
+  }
+
+  /** Sit on the flag, then pan back along the run so the player can read it. */
+  private beginPreview(): void {
+    const level = this.level();
+    if (this.sim || level.noFlag) {
+      this.previewT = -1;
+      this.cam.x = camLookX(this.bill.x, this.cam);
+      this.cam.y = spawnGround(level) + this.cam.h * 0.26;
+      return;
+    }
+    const fromX = level.flagX;
+    const toX = camLookX(this.bill.x, this.cam);
+    const dist = Math.abs(toX - fromX);
+    this.previewHold = 0.34;
+    const pan = Math.max(0.7, Math.min(2.0, dist / 16));
+    this.previewDur = this.previewHold + pan;
+    this.previewT = 0;
+    this.jumpLatch = true;
+    this.applyPreviewCam(0);
+  }
+
+  private applyPreviewCam(u: number): void {
+    const level = this.level();
+    const fromX = level.flagX;
+    const toX = camLookX(this.bill.x, this.cam);
+    this.cam.x = fromX + (toX - fromX) * u;
+    this.cam.y = routeAt(level, this.cam.x) + this.cam.h * 0.24;
+  }
+
+  private stepPreview(dt: number): void {
+    this.previewT += dt;
+    const hold = this.previewHold;
+    const pan = Math.max(0.05, this.previewDur - hold);
+    const raw = this.previewT <= hold ? 0 : Math.min(1, (this.previewT - hold) / pan);
+    this.applyPreviewCam(easeInOut(raw));
+    if (this.previewT >= this.previewDur) {
+      this.previewT = -1;
+      const level = this.level();
+      this.cam.x = camLookX(this.bill.x, this.cam);
+      this.cam.y = spawnGround(level) + this.cam.h * 0.22;
+    }
   }
 
   private playAgain(): void {
@@ -435,11 +495,20 @@ export class Game {
     this.timeScale += (want - this.timeScale) * Math.min(1, wall * 10);
     if (Math.abs(this.timeScale - want) < 0.004) this.timeScale = want;
     const dt = wall * this.timeScale;
-    if (!this.sim && !this.gameOver && this.bill.state !== "dead" && !this.bill.cleared) {
+    if (
+      !this.sim &&
+      !this.gameOver &&
+      this.bill.state !== "dead" &&
+      !this.bill.cleared &&
+      !this.inPreview()
+    ) {
       stepTrain(level, dt);
     }
 
-    if (this.gameOver) {
+    if (this.inPreview()) {
+      this.bill.step(dt, 0, false, 0, level, false);
+      this.stepPreview(wall);
+    } else if (this.gameOver) {
       this.resultsReadyT -= dt;
       if (input.jump && this.resultsReadyT <= 0) this.playAgain();
       else this.bill.step(dt, 0, false, 0, level, false);
@@ -452,7 +521,9 @@ export class Game {
       this.deathT -= dt;
       if (this.deathT <= 0) this.respawn();
     } else {
-      this.bill.step(dt, input.run, input.jump, input.tuck, level, input.touched);
+      if (this.jumpLatch && !input.jump) this.jumpLatch = false;
+      const jump = this.jumpLatch ? false : input.jump;
+      this.bill.step(dt, input.run, jump, input.tuck, level, input.touched);
       if (!this.sim) {
         if (this.bill.flipping && !this.wasFlipping) this.beginAttempt();
         if (this.bill.flipping) this.syncLiveBonuses();
@@ -541,10 +612,12 @@ export class Game {
 
     this.playMotionSfx(level);
 
-    followCam(this.cam, this.bill.x, this.bill.y, this.bill.vx, dt, level);
+    if (!this.inPreview()) {
+      followCam(this.cam, this.bill.x, this.bill.y, this.bill.vx, dt, level);
+    }
     stepDust(this.dust, dt);
     this.bannerT -= dt;
-    this.hintT -= dt;
+    if (!this.inPreview()) this.hintT -= dt;
     this.calloutEl.textContent = this.bannerT > 0 ? this.banner : "";
     this.calloutEl.classList.toggle("on", this.bannerT > 0);
     this.hintEl.classList.toggle("faded", this.hintT <= 0);
@@ -553,7 +626,9 @@ export class Game {
   }
 
   private syncHazardWarn(level: Level): void {
-    const next = !this.sim && level.train ? approachingObstacle(level, this.bill.x) : null;
+    const next = !this.sim && !this.inPreview() && level.train
+      ? approachingObstacle(level, this.bill.x)
+      : null;
     const show = !!next && next.dist > 0.55 && this.bill.state !== "dead" && !this.bill.cleared;
     this.warnEl.classList.toggle("on", show);
     this.warnEl.classList.toggle("close", show && next !== null && next.dist < 5.6);
