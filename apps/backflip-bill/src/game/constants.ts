@@ -11,6 +11,9 @@ export const VIEW_WIDTH_DESKTOP = VIEW_WIDTH * 1.44;
 
 export const JOYSTICK_DEADZONE = 0.16;
 
+/** Max takeoff |vx| (m/s) that still counts as a standing backflip. */
+export const STANDING_FLIP_MAX_VX = 1.4;
+
 export function degToRad(deg: number): number {
   return (deg * Math.PI) / 180;
 }

@@ -1,6 +1,7 @@
 import { Sfx } from "./audio";
 import { Bill, burst, drawBill, stepDust, type Dust } from "./bill";
-import { HIP_HEIGHT, TAU } from "./constants";
+import { drawParkKid } from "./spectator";
+import { HIP_HEIGHT, STANDING_FLIP_MAX_VX, TAU } from "./constants";
 import { isDebugTyping, Input, wantsTouchUi } from "./input";
 import { hintForScheme, tuning } from "./tuning";
 import {
@@ -47,6 +48,18 @@ function formatPts(n: number): string {
 
 function extraSpins(spins: number): number {
   return Math.max(0, spins - 1);
+}
+
+function landingClears(
+  level: Level,
+  bill: { x: number; takeoffSpeed: number },
+  e: { kind: string; spins: number },
+): boolean {
+  if (e.kind === "fall") return false;
+  if (level.goal === "standingFlip") {
+    return e.spins >= 1 && bill.takeoffSpeed <= STANDING_FLIP_MAX_VX;
+  }
+  return bill.x >= level.gapX1;
 }
 
 function stretchBeat(t: number): number {
@@ -263,6 +276,7 @@ export class Game {
     this.rebuildSim(true);
     this.hintEl.textContent = "Drag Bill — he goes limp. Release to drop.";
     this.hintT = 6.2;
+    this.syncLevelHud();
     this.flash("Sim — drag Bill, release to drop");
   }
 
@@ -394,7 +408,7 @@ export class Game {
     this.dust.length = 0;
     this.syncLevelHud();
     this.syncHint();
-    this.hintT = 5.5;
+    this.hintT = this.level().goal === "standingFlip" ? 8 : 5.5;
     this.resetMotionSfx();
     this.sfx.levelStart();
     this.beginPreview();
@@ -460,6 +474,7 @@ export class Game {
   private syncLevelHud(): void {
     const lv = this.level();
     this.levelEl.textContent = lv.title;
+    document.body.classList.toggle("park-level", !this.sim && lv.theme === "park");
   }
 
   private syncHint(): void {
@@ -538,7 +553,15 @@ export class Game {
         const e = this.bill.landEvent;
         if (this.sim) {
           /* sandbox: sfx only, no score */
-        } else if (e.kind !== "fall" && this.bill.x >= level.gapX1) {
+        } else if (e.kind === "slide") {
+          this.landedFar = true;
+          this.jumpClean = true;
+          this.jumpSpins = e.spins;
+          this.jumpLayout = e.layoutHold;
+          this.payLayout(e.layoutHold);
+          this.payExtra(e.spins);
+          this.payStar();
+        } else if (landingClears(level, this.bill, e) && !this.landedFar) {
           this.landedFar = true;
           this.jumpClean = e.kind === "clean";
           this.jumpSpins = e.spins;
@@ -546,13 +569,19 @@ export class Game {
           this.payLayout(e.layoutHold);
           this.payExtra(e.spins);
           if (e.kind === "clean") this.payStar();
+        } else if (e.kind !== "fall" && this.landedFar) {
+          /* drop-off after a pitch — keep the flip score */
         } else {
           this.jumpClean = false;
           this.jumpSpins = 0;
           this.jumpLayout = 0;
           this.dropLiveBonus();
         }
-        if (e.kind === "clean") {
+        if (e.kind === "slide") {
+          this.sfx.cleanLand(e.impact);
+          this.flash("On the pitch");
+          burst(this.dust, e.x, e.y, 8, "rgba(232,240,244,0.7)", 3);
+        } else if (e.kind === "clean") {
           this.sfx.cleanLand(e.impact);
           this.flash(e.spins >= 2 ? `Clean ${spinLabel(e.spins)}` : "Clean landing");
           burst(this.dust, e.x, e.y, 8, "rgba(232,240,244,0.7)", 3);
@@ -564,6 +593,10 @@ export class Game {
           this.sfx.fall(e.impact);
           this.flash("You're having a laugh");
           burst(this.dust, e.x, e.y, 16, "rgba(196,60,42,0.75)", 5);
+        }
+        if (level.goal === "standingFlip" && e.kind !== "fall" && !this.bill.cleared) {
+          if (e.spins < 1) this.flash("Need a full flip");
+          else if (this.bill.takeoffSpeed > STANDING_FLIP_MAX_VX) this.flash("From a stand — no run-up");
         }
       }
       if (this.bill.hitEvent && (!this.bill.landEvent || this.bill.hitEvent.hoop)) {
@@ -921,6 +954,9 @@ export class Game {
     const level = this.level();
     drawSky(ctx, cam, cssW, cssH);
     drawWorld(ctx, cam, cssW, cssH, level);
+    if (!this.sim) {
+      drawParkKid(ctx, cam, cssW, cssH, level, this.bill.cleared, this.t);
+    }
 
     for (const p of this.dust) {
       const s = worldToScreen(cam, cssW, cssH, p.x, p.y);

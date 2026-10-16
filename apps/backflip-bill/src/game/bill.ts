@@ -1,21 +1,27 @@
-import { degToRad, HIP_HEIGHT, TAU } from "./constants";
+import { degToRad, HIP_HEIGHT, STANDING_FLIP_MAX_VX, TAU } from "./constants";
 import { tuning } from "./tuning";
 import {
   approachingSolid,
   groundAt,
   obstacleHits,
   onFlagPlatform,
+  pitchedAt,
+  plantAngle,
+  platformNormal,
+  platformSlope,
+  platformY,
   pushOutOfHoop,
   pushOutOfSolid,
   supportAt,
   spawnGround,
   START_WALL_X,
   type Level,
+  type Platform,
 } from "./world";
 
-export type BillState = "ground" | "air" | "stumble" | "fallen" | "dead" | "done";
+export type BillState = "ground" | "air" | "stumble" | "slide" | "fallen" | "dead" | "done";
 
-export type LandKind = "clean" | "stumble" | "fall";
+export type LandKind = "clean" | "stumble" | "fall" | "slide";
 
 export interface LandEvent {
   kind: LandKind;
@@ -67,6 +73,8 @@ export class Bill {
   private jumpBuf = 0;
   flipTravel = 0;
   flipDuration = tuning.flipDurationSlow;
+  /** |vx| at takeoff — standing-flip levels reject a run-up. */
+  takeoffSpeed = 0;
   airTime = 0;
   flipping = false;
   /** 0 = layout / straight, 1 = full crouch. Default 0.5. */
@@ -128,6 +136,8 @@ export class Bill {
   panic = 0;
   /** Missed the pad and hit the pit — angry fail, then restart. */
   gapFail = false;
+  /** Left a pitched roof — next floor contact is a drop landing, not a crash. */
+  slideDrop = false;
   /** Debug sim: mouse is carrying him. */
   held = false;
 
@@ -145,6 +155,7 @@ export class Bill {
     this.jumpBuf = 0;
     this.flipTravel = 0;
     this.flipDuration = tuning.flipDurationSlow;
+    this.takeoffSpeed = 0;
     this.airTime = 0;
     this.flipping = false;
     this.tuck = 0.5;
@@ -184,6 +195,7 @@ export class Bill {
     this.gapArmTuck = 0;
     this.panic = 0;
     this.gapFail = false;
+    this.slideDrop = false;
     this.held = false;
   }
 
@@ -295,6 +307,13 @@ export class Bill {
       return;
     }
 
+    if (this.state === "slide") {
+      this.stepSlide(dt, level);
+      this.checkGapDeath(level);
+      this.tryFinish(level);
+      return;
+    }
+
     if (this.state === "ground" || this.state === "stumble") {
       this.tuck = 0.5;
       this.cushion = Math.max(0, this.cushion - dt * 1.45);
@@ -340,6 +359,9 @@ export class Bill {
       this.rot = this.flipTravel;
       this.spinRate = omega;
       if (this.tuck <= 0.12) this.layoutHold += dt;
+    } else if (this.slideDrop) {
+      this.rot += wrapPi(0 - wrapPi(this.rot)) * (1 - Math.exp(-5.2 * dt));
+      this.spinRate = 0;
     } else {
       const spd = Math.min(1, Math.abs(this.vx) / tuning.maxSpeed);
       this.runPhase += (2.6 + 2.4 * spd) * dt;
@@ -354,9 +376,12 @@ export class Bill {
     this.updatePanic(dt, level);
 
     const g = groundAt(level, this.x);
-    const floorLand = g !== null && this.vy <= 0 && this.y - HIP_HEIGHT <= g + 0.08;
+    const pitch = pitchedAt(level, this.x);
+    const floorLand = pitch
+      ? this.hittingPitch(pitch)
+      : g !== null && this.vy <= 0 && this.y - HIP_HEIGHT <= g + 0.08;
 
-    if (this.flipping && floorLand) {
+    if ((this.flipping || this.slideDrop) && floorLand && g !== null) {
       this.land(g, level);
       if (this.rag) this.resolveBody(level, true);
       else this.shoveFromHazards(level);
@@ -367,7 +392,7 @@ export class Bill {
       this.checkGapDeath(level);
       this.tryFinish(level);
       return;
-    } else if (!this.flipping) {
+    } else if (!this.flipping && !this.slideDrop) {
       const wall = this.airTime > 0.08 && this.touchingSolid(level, false);
       if (floorLand || wall) {
         if (floorLand && padAt(level, this.x) === null) this.gapFail = true;
@@ -397,7 +422,12 @@ export class Bill {
   }
 
   private tryFinish(level: Level): void {
-    if (level.noFlag || this.held) return;
+    if (this.held) return;
+    if (level.goal === "standingFlip") {
+      this.tryStandingFlip();
+      return;
+    }
+    if (level.noFlag) return;
     if (this.cleared) {
       if (this.onFeet() && Math.abs(this.vx) < 0.32 && onFlagPlatform(level, this.x)) {
         this.vx = 0;
@@ -420,6 +450,27 @@ export class Bill {
     ) {
       this.succeed();
     }
+  }
+
+  private tryStandingFlip(): void {
+    if (this.cleared) {
+      this.settleStandingWin();
+      return;
+    }
+    const e = this.landEvent;
+    if (!e || e.kind === "fall" || e.spins < 1) return;
+    if (this.takeoffSpeed > STANDING_FLIP_MAX_VX) return;
+    this.succeed();
+    this.settleStandingWin();
+  }
+
+  private settleStandingWin(): void {
+    if (this.state === "stumble" || this.rag) return;
+    if (!this.onFeet() || Math.abs(this.vx) >= 0.32) return;
+    this.vx = 0;
+    this.rot = 0;
+    this.state = "done";
+    this.beginCelebrate();
   }
 
   private succeed(): void {
@@ -467,6 +518,7 @@ export class Bill {
     this.state = "air";
     this.flipping = true;
     this.vy = tuning.jumpVy;
+    this.takeoffSpeed = Math.abs(this.vx);
     this.flipTravel = 0;
     this.rot = 0;
     this.airTime = 0;
@@ -511,6 +563,13 @@ export class Bill {
       return;
     }
 
+    const pitch = pitchedAt(level, this.x);
+    if (pitch && !this.slideDrop) {
+      this.landOnPitch(g, level, pitch, impact, planted, tucked, opened, off);
+      return;
+    }
+    this.slideDrop = false;
+
     // On your feet: leftover angle in the stumble window, or land-prep lined the shins up.
     const onFeet = planted || off <= stumbleAng;
     if (!onFeet) {
@@ -534,6 +593,100 @@ export class Bill {
 
     this.beginStumble(g);
     this.landEvent = this.makeLand("stumble", this.x, g, impact);
+  }
+
+  private hittingPitch(p: Platform): boolean {
+    const n = platformNormal(p);
+    const surf = platformY(p, this.x);
+    const closing = this.vx * n.nx + this.vy * n.ny;
+    const hip = surf + HIP_HEIGHT * Math.max(0.55, n.ny);
+    return closing <= 0.4 && this.y <= hip + 0.12;
+  }
+
+  private landOnPitch(
+    g: number,
+    _level: Level,
+    pitch: Platform,
+    impact: number,
+    planted: boolean,
+    tucked: boolean,
+    opened: boolean,
+    _worldOff: number,
+  ): void {
+    const want = plantAngle(pitch);
+    const off = Math.abs(wrapPi(this.rot - want));
+    const slideAng = degToRad(55);
+    const onFeet = planted || off <= slideAng;
+    if (!opened || tucked || !onFeet) {
+      this.beginRagdoll("crash", g);
+      this.landEvent = this.makeLand("fall", this.x, g, impact);
+      return;
+    }
+    this.panic = 0;
+    this.beginSlide(pitch, want);
+    this.landEvent = this.makeLand("slide", this.x, g, impact);
+  }
+
+  private beginSlide(pitch: Platform, want: number): void {
+    this.state = "slide";
+    this.flipping = false;
+    this.tuck = 0;
+    this.cushion = 0;
+    this.rot = want;
+    this.spinRate = 0;
+    this.landPrep = 0;
+    this.gapArmTuck = 0;
+    this.panic = 0;
+    this.lockTimer = 0;
+    this.jumpBuf = 0;
+    const s = platformSlope(pitch);
+    const inv = 1 / Math.hypot(1, s);
+    const dirx = inv;
+    const diry = s * inv;
+    const along = this.vx * dirx + this.vy * diry;
+    const speed = Math.max(2.8, along);
+    this.vx = speed * dirx;
+    this.vy = speed * diry;
+    const n = platformNormal(pitch);
+    this.y = platformY(pitch, this.x) + HIP_HEIGHT * Math.max(0.55, n.ny);
+  }
+
+  private stepSlide(dt: number, level: Level): void {
+    const pitch = pitchedAt(level, this.x);
+    if (!pitch || this.x >= pitch.x1 - 0.04) {
+      this.leaveSlide();
+      return;
+    }
+    const s = platformSlope(pitch);
+    const inv = 1 / Math.hypot(1, s);
+    const dirx = inv;
+    const diry = s * inv;
+    let speed = this.vx * dirx + this.vy * diry;
+    speed += tuning.gravity * -diry * dt;
+    speed *= Math.exp(-0.18 * dt);
+    this.vx = speed * dirx;
+    this.vy = speed * diry;
+    this.x += this.vx * dt;
+    const n = platformNormal(pitch);
+    this.rot = plantAngle(pitch);
+    this.tuck = 0;
+    this.runPhase += Math.abs(speed) * dt * 1.4;
+    const next = pitchedAt(level, this.x);
+    if (!next || this.x >= next.x1 - 0.04) {
+      this.leaveSlide();
+      return;
+    }
+    this.y = platformY(next, this.x) + HIP_HEIGHT * Math.max(0.55, n.ny);
+  }
+
+  private leaveSlide(): void {
+    this.state = "air";
+    this.flipping = false;
+    this.slideDrop = true;
+    this.airTime = 0;
+    this.landPrep = 0;
+    this.gapArmTuck = 0;
+    this.panic = 0;
   }
 
   /** Hard landing: stay up, dump the knees, keep the run. */
@@ -1146,7 +1299,7 @@ export function drawBill(
   const chain = torsoChain(pose);
   const arch =
     (pose.spineLumbar ?? 0) + (pose.spineThoracic ?? 0) + (pose.spineCervical ?? 0);
-  const grounded = bill.state === "ground" && !bill.rag;
+  const grounded = (bill.state === "ground" || bill.state === "slide") && !bill.rag;
   if (grounded) {
     const amp = Math.min(1, Math.abs(bill.vx) / tuning.maxSpeed);
     const bob = Math.abs(Math.sin(bill.runPhase)) * 0.055 * amp;
@@ -1459,6 +1612,25 @@ function celebratePose(t: number): Pose {
 function poseFor(bill: Bill, t: number): Pose {
   if (bill.celebrating) return clampLimbPose(celebratePose(bill.celebrateT));
   if (bill.rag) return clampLimbPose(bill.rag.pose);
+
+  if (bill.state === "slide") {
+    const hang = -Math.PI / 2;
+    return clampLimbPose({
+      lean: 0.06,
+      arch: -0.08,
+      spineLumbar: -0.12,
+      spineThoracic: -0.06,
+      spineCervical: 0.04,
+      lThigh: hang + 0.18,
+      rThigh: hang - 0.12,
+      lShin: hang + 0.08,
+      rShin: hang - 0.06,
+      lArm: hang - 0.22,
+      rArm: hang - 0.14,
+      lFore: hang + 0.18,
+      rFore: hang + 0.12,
+    });
+  }
 
   if (bill.state === "air") {
     if (!bill.flipping) {
@@ -2048,7 +2220,8 @@ function padAt(level: Level, x: number): number | null {
   let best: number | null = null;
   for (const p of [...level.platforms, ...(level.boxes ?? [])]) {
     if (x < p.x0 || x > p.x1) continue;
-    if (best === null || p.y > best) best = p.y;
+    const y = platformY(p, x);
+    if (best === null || y > best) best = y;
   }
   return best;
 }
