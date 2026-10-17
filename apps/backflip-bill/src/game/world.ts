@@ -469,11 +469,8 @@ export function pitFloor(level: Level): Platform {
   return { x0: level.gapX0, x1: level.gapX1, y: level.pitY };
 }
 
-function pitDeckY(level: Level, left: Platform, right?: Platform): number {
-  if (level.theme === "park" || level.theme === "woods" || level.train) return level.pitY;
-  const ly = platformY(left, left.x1);
-  const ry = right ? platformY(right, right.x0) : ly;
-  return Math.max(level.pitY, Math.max(ly, ry) - 1.22);
+function rooftopWells(level: Level): boolean {
+  return !level.train && level.theme !== "park" && level.theme !== "woods";
 }
 
 function pitSpans(level: Level): Platform[] {
@@ -482,12 +479,12 @@ function pitSpans(level: Level): Platform[] {
   for (let i = 0; i < plats.length - 1; i++) {
     const a = plats[i]!;
     const b = plats[i + 1]!;
-    if (b.x0 - a.x1 > 0.2) spans.push({ x0: a.x1, x1: b.x0, y: pitDeckY(level, a, b) });
+    if (b.x0 - a.x1 > 0.2) spans.push({ x0: a.x1, x1: b.x0, y: level.pitY });
   }
   const last = plats[plats.length - 1];
   if (last) {
     const end = Math.max(level.endX, last.x1) + 24;
-    if (end - last.x1 > 0.2) spans.push({ x0: last.x1, x1: end, y: pitDeckY(level, last) });
+    if (end - last.x1 > 0.2) spans.push({ x0: last.x1, x1: end, y: level.pitY });
   }
   return spans;
 }
@@ -836,7 +833,7 @@ export function drawWorld(
   drawDistantHarbour(ctx, cam, cssW, cssH);
   drawBackdrop(ctx, cam, cssW, cssH, level);
   drawPit(ctx, cam, cssW, cssH, level);
-  drawPitRoofs(ctx, cam, cssW, cssH, level);
+  drawWellRoofs(ctx, cam, cssW, cssH, level);
   drawGround(ctx, cam, cssW, cssH, level);
   drawBoxes(ctx, cam, cssW, cssH, level);
   drawHoop(ctx, cam, cssW, cssH, level);
@@ -1668,16 +1665,16 @@ function drawPit(
   }
 }
 
-/** Lower terrace in each well, so a missed jump lands on a roof, not empty sky. */
-function drawPitRoofs(
+function drawWellRoofs(
   ctx: CanvasRenderingContext2D,
   cam: Cam,
   cssW: number,
   cssH: number,
   level: Level,
 ): void {
+  if (!rooftopWells(level)) return;
   for (const span of pitSpans(level)) {
-    drawRooftop(ctx, cam, cssW, cssH, span, level.id);
+    drawRooftop(ctx, cam, cssW, cssH, span, level.id + 11);
   }
 }
 
