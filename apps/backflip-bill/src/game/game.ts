@@ -1,5 +1,5 @@
 import { Sfx } from "./audio";
-import { Bill, burst, drawBill, stepDust, type Dust } from "./bill";
+import { Bill, burst, drawBill, drawSkateboard, stepDust, type Dust } from "./bill";
 import { drawParkKid } from "./spectator";
 import { HIP_HEIGHT, STANDING_FLIP_MAX_VX, TAU } from "./constants";
 import { isDebugTyping, Input, wantsTouchUi } from "./input";
@@ -10,21 +10,35 @@ import {
   cloneLevel,
   drawSky,
   drawWorld,
+  drawWorldForeground,
   finishGround,
   fitView,
   followCam,
+  drawCharShadow,
   groundAt,
   LEVELS,
   makeCam,
   makeSimLevel,
+  pitchedAt,
+  platformSlope,
   routeAt,
   screenToWorld,
   spawnGround,
   stepTrain,
+  visitWindows,
   worldToScreen,
   type Cam,
   type Level,
 } from "./world";
+import {
+  drawFolkDrops,
+  ensureOddFolk,
+  resetWindowFolk,
+  seedFolk,
+  startleWindowFolk,
+  stepWindowFolk,
+  type FolkSlot,
+} from "./windowFolk";
 
 interface JumpResult {
   title: string;
@@ -178,6 +192,10 @@ export class Game {
   private previewDur = 0;
   /** Ignore jump until it is released, so a level-advance hold does not take off. */
   private jumpLatch = false;
+  /** Seconds the park kid keeps laughing after a botched landing. */
+  private kidLaughT = 0;
+  /** Botched landings this level — he laughs harder each time. */
+  private kidFalls = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -228,6 +246,7 @@ export class Game {
     const wanted = Number(new URLSearchParams(window.location.search).get("level"));
     if (wanted >= 1 && wanted <= LEVELS.length) this.loadLevel(wanted - 1);
     else {
+      this.syncWindowFolk();
       this.sfx.levelStart();
       this.beginPreview();
     }
@@ -302,7 +321,7 @@ export class Game {
     const held = this.bill.held;
     if (spawn) {
       this.bill.spawn(this.level());
-      this.cam.x = camLookX(this.bill.x, this.cam);
+      this.cam.x = this.lookX(this.bill.x);
       this.cam.y = spawnGround(this.level()) + this.cam.h * 0.26;
       this.resetMotionSfx();
     } else if (held) {
@@ -311,6 +330,7 @@ export class Game {
     }
     this.dust.length = 0;
     this.timeScale = 1;
+    this.syncWindowFolk();
     this.syncLevelHud();
     this.canvas.style.cursor = "grab";
   }
@@ -376,6 +396,27 @@ export class Game {
     return this.liveLevel;
   }
 
+  private lookX(px: number, vx = 0): number {
+    const ahead = this.level().goal === "standingFlip" ? 0 : undefined;
+    return camLookX(px, this.cam, vx, ahead);
+  }
+
+  private tickKidLaugh(base: number): void {
+    if (this.sim || this.bill.cleared) return;
+    this.kidFalls += 1;
+    const hold = base + 1.65 * this.kidFalls;
+    this.kidLaughT = Math.min(14, Math.max(this.kidLaughT, hold));
+  }
+
+  /** Peak howl from fall count, eased out over the last couple of seconds. */
+  private kidLaughHowl(): number {
+    if (this.bill.cleared || this.kidLaughT <= 0 || this.kidFalls <= 0) return 0;
+    const peak = Math.min(1, 0.16 + 0.22 * (this.kidFalls - 1));
+    const fade = 2.2;
+    const u = this.kidLaughT >= fade ? 1 : this.kidLaughT / fade;
+    return peak * easeInOut(u);
+  }
+
   private respawn(): void {
     this.tries += 1;
     this.jumpClean = false;
@@ -385,7 +426,7 @@ export class Game {
     if (!this.sim) this.liveLevel = cloneLevel(LEVELS[this.levelIndex] ?? LEVELS[0]!);
     const level = this.level();
     this.bill.spawn(level);
-    this.cam.x = camLookX(this.bill.x, this.cam);
+    this.cam.x = this.lookX(this.bill.x);
     this.cam.y = spawnGround(level) + this.cam.h * 0.26;
     this.deathT = 0;
     this.timeScale = 1;
@@ -411,7 +452,20 @@ export class Game {
     this.hintT = this.level().goal === "standingFlip" ? 8 : 5.5;
     this.resetMotionSfx();
     this.sfx.levelStart();
+    this.kidLaughT = 0;
+    this.kidFalls = 0;
+    this.syncWindowFolk();
     this.beginPreview();
+  }
+
+  private syncWindowFolk(): void {
+    resetWindowFolk();
+    const slots: FolkSlot[] = [];
+    visitWindows(this.level(), (slot) => {
+      slots.push(slot);
+      seedFolk(slot);
+    });
+    ensureOddFolk(slots);
   }
 
   private inPreview(): boolean {
@@ -423,12 +477,12 @@ export class Game {
     const level = this.level();
     if (this.sim || level.noFlag) {
       this.previewT = -1;
-      this.cam.x = camLookX(this.bill.x, this.cam);
+      this.cam.x = this.lookX(this.bill.x);
       this.cam.y = spawnGround(level) + this.cam.h * 0.26;
       return;
     }
     const fromX = level.flagX;
-    const toX = camLookX(this.bill.x, this.cam);
+    const toX = this.lookX(this.bill.x);
     const dist = Math.abs(toX - fromX);
     this.previewHold = 0.34;
     const pan = Math.max(0.7, Math.min(2.0, dist / 16));
@@ -441,9 +495,9 @@ export class Game {
   private applyPreviewCam(u: number): void {
     const level = this.level();
     const fromX = level.flagX;
-    const toX = camLookX(this.bill.x, this.cam);
+    const toX = this.lookX(this.bill.x);
     this.cam.x = fromX + (toX - fromX) * u;
-    this.cam.y = routeAt(level, this.cam.x) + this.cam.h * 0.24;
+    this.cam.y = routeAt(level, this.cam.x) + this.cam.h * 0.24 + (level.bar ? 0.7 : 0);
   }
 
   private stepPreview(dt: number): void {
@@ -455,7 +509,7 @@ export class Game {
     if (this.previewT >= this.previewDur) {
       this.previewT = -1;
       const level = this.level();
-      this.cam.x = camLookX(this.bill.x, this.cam);
+      this.cam.x = this.lookX(this.bill.x);
       this.cam.y = spawnGround(level) + this.cam.h * 0.22;
     }
   }
@@ -500,6 +554,8 @@ export class Game {
     const dt = Math.min(0.033, (now - this.last) / 1000);
     this.last = now;
     this.t += dt;
+    this.kidLaughT = Math.max(0, this.kidLaughT - dt);
+    stepWindowFolk(dt);
     this.step(dt);
     this.draw();
     requestAnimationFrame(this.frame);
@@ -510,8 +566,15 @@ export class Game {
     const level = this.level();
     if (this.grabbing) this.bill.carry(this.grabX, this.grabY);
     const inJump = this.bill.flipping && this.bill.state === "air" && !this.grabbing;
+    const inSwing = this.bill.state === "swing" && !this.grabbing;
     const want =
-      this.gameOver || this.bill.state === "dead" || this.grabbing ? 1 : inJump ? JUMP_TIME_SCALE : 1;
+      this.gameOver || this.bill.state === "dead" || this.grabbing
+        ? 1
+        : inJump
+          ? JUMP_TIME_SCALE
+          : inSwing
+            ? 0.84
+            : 1;
     this.timeScale += (want - this.timeScale) * Math.min(1, wall * 10);
     if (Math.abs(this.timeScale - want) < 0.004) this.timeScale = want;
     const dt = wall * this.timeScale;
@@ -546,9 +609,23 @@ export class Game {
       this.bill.step(dt, input.run, jump, input.tuck, level, input.touched);
       if (!this.sim) {
         if (this.bill.flipping && !this.wasFlipping) this.beginAttempt();
-        if (this.bill.flipping) this.syncLiveBonuses();
+        if (this.bill.flipping && this.bill.state !== "swing") this.syncLiveBonuses();
       }
       this.wasFlipping = this.bill.flipping;
+      if (this.bill.grabEvent) {
+        this.sfx.grab();
+        this.flash("On the bar");
+      }
+      if (this.bill.barLoopEvent) {
+        this.addLive(EXTRA_SPIN_PTS, "extra");
+        this.awardedExtra += 1;
+        this.flash("Giant");
+      }
+      if (this.bill.barKickEvent) {
+        this.sfx.jump();
+        this.flash("Kick");
+        burst(this.dust, this.bill.x, this.bill.y, 10, "rgba(232,240,244,0.75)", 4);
+      }
       if (this.bill.landEvent) {
         const e = this.bill.landEvent;
         if (this.sim) {
@@ -589,15 +666,20 @@ export class Game {
           this.sfx.stumble(e.impact);
           this.flash(e.spins >= 2 ? `Hard ${spinLabel(e.spins)}` : "Hard landing");
           burst(this.dust, e.x, e.y, 12, "rgba(240,162,58,0.8)", 4);
+          this.tickKidLaugh(1.6);
         } else {
           this.sfx.fall(e.impact);
           this.flash("You're having a laugh");
           burst(this.dust, e.x, e.y, 16, "rgba(196,60,42,0.75)", 5);
+          this.tickKidLaugh(2.4);
         }
         if (level.goal === "standingFlip" && e.kind !== "fall" && !this.bill.cleared) {
           if (e.spins < 1) this.flash("Need a full flip");
           else if (this.bill.takeoffSpeed > STANDING_FLIP_MAX_VX) this.flash("From a stand — no run-up");
         }
+        const startled = startleWindowFolk(e.x, e.y);
+        if (startled.count) this.sfx.folkYell();
+        if (startled.dropped) this.sfx.drop();
       }
       if (this.bill.hitEvent && (!this.bill.landEvent || this.bill.hitEvent.hoop)) {
         if (this.bill.hitEvent.hoop) this.sfx.hoopClang();
@@ -621,7 +703,13 @@ export class Game {
           this.respawn();
         } else {
           this.sfx.death();
-          this.flash(level.train ? "Bill's gone off the train" : "Bill's gone in the gap");
+          this.flash(
+            level.train
+              ? "Bill's gone off the train"
+              : level.theme === "woods"
+                ? "Bill's gone in the river"
+                : "Bill's gone in the gap",
+          );
           this.deathT = tuning.deathTime;
           this.dropLiveBonus();
         }
@@ -641,9 +729,21 @@ export class Game {
         const g = groundAt(level, this.bill.x) ?? spawnGround(level);
         burst(this.dust, this.bill.x, g, 6, "rgba(200,221,230,0.55)", 2.4);
       }
+      if (this.bill.boardKickEvent) {
+        burst(this.dust, this.bill.x, this.bill.y - HIP_HEIGHT, 8, "rgba(180,170,155,0.7)", 3.2);
+      }
+      if (this.bill.boardSplashEvent) {
+        this.sfx.splash();
+        const b = this.bill.board;
+        burst(this.dust, b?.x ?? this.bill.x, b?.y ?? level.pitY, 14, "rgba(150,190,180,0.8)", 4.2, true);
+      }
     }
 
-    if (this.bill.state === "ground" && Math.abs(this.bill.vx) > 3.5 && Math.random() < dt * 8) {
+    if (
+      (this.bill.state === "ground" || this.bill.state === "slide") &&
+      Math.abs(this.bill.vx) > 3.5 &&
+      Math.random() < dt * 8
+    ) {
       const g = groundAt(level, this.bill.x) ?? spawnGround(level);
       burst(this.dust, this.bill.x, g, 1, "rgba(180,170,155,0.55)", 1.4);
     }
@@ -953,9 +1053,20 @@ export class Game {
     const { ctx, cssW, cssH, cam } = this;
     const level = this.level();
     drawSky(ctx, cam, cssW, cssH);
-    drawWorld(ctx, cam, cssW, cssH, level);
+    drawWorld(ctx, cam, cssW, cssH, level, this.t);
+    drawFolkDrops(ctx, (x, y) => worldToScreen(cam, cssW, cssH, x, y));
     if (!this.sim) {
-      drawParkKid(ctx, cam, cssW, cssH, level, this.bill.cleared, this.t);
+      const howl = this.kidLaughHowl();
+      drawParkKid(
+        ctx,
+        cam,
+        cssW,
+        cssH,
+        level,
+        this.bill.cleared ? "sad" : howl > 0.02 ? "laugh" : "smug",
+        this.t,
+        howl,
+      );
     }
 
     for (const p of this.dust) {
@@ -971,14 +1082,22 @@ export class Game {
     const s = worldToScreen(cam, cssW, cssH, this.bill.x, this.bill.y);
     const g = groundAt(level, this.bill.x);
     if (g !== null) {
-      const shadowY = worldToScreen(cam, cssW, cssH, this.bill.x, g);
-      ctx.save();
-      ctx.globalAlpha = Math.max(0.08, 0.28 - Math.max(0, this.bill.y - g - 0.9) * 0.04);
-      ctx.fillStyle = "#000";
-      ctx.beginPath();
-      ctx.ellipse(shadowY.x, shadowY.y, s.ppm * 0.32, s.ppm * 0.08, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
+      const pad = pitchedAt(level, this.bill.x);
+      const laid = Math.abs(Math.sin(this.bill.rot));
+      drawCharShadow(ctx, cam, cssW, cssH, this.bill.x, g, {
+        air: Math.max(0, this.bill.y - HIP_HEIGHT - g),
+        width:
+          this.bill.state === "fallen" || this.bill.rag
+            ? 1.22
+            : 1 - 0.16 * this.bill.tuck,
+        stretch: 1 + 0.7 * laid * (1 - this.bill.tuck * 0.5),
+        slope: pad ? platformSlope(pad, this.bill.x) : 0,
+      });
+    }
+    const board = this.bill.board;
+    if (board) {
+      const bs = worldToScreen(cam, cssW, cssH, board.x, board.y);
+      drawSkateboard(ctx, board, bs.x, bs.y, bs.ppm);
     }
     if (this.bill.state === "air" && this.bill.flipTravel > 0.15) {
       const saved = this.bill.rot;
@@ -1016,6 +1135,8 @@ export class Game {
       }
       ctx.restore();
     }
+
+    drawWorldForeground(ctx, cam, cssW, cssH, level);
 
     if (this.bill.state === "dead") {
       ctx.fillStyle = "rgba(7,20,26,0.45)";

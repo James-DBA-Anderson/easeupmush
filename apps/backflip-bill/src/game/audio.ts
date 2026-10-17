@@ -70,6 +70,12 @@ export class Sfx {
     this.thud(92, 0.09, 0.1);
   }
 
+  public splash(): void {
+    this.noiseBurst(0.14, 0.1, 320, 1.3);
+    this.thud(56, 0.1, 0.08);
+    this.sweep(210, 70, 0.18, 0.07, "sine");
+  }
+
   public cleanLand(impact = 6): void {
     const k = clamp(impact / 10, 0.45, 1.15);
     this.thud(78, 0.14, 0.16 * k);
@@ -204,11 +210,19 @@ export class Sfx {
   public grab(): void {
     this.noiseBurst(0.08, 0.05, 380, 0.8);
     this.thud(70, 0.08, 0.06);
+    this.sweep(180, 320, 0.1, 0.04, "sine");
   }
 
   public drop(): void {
     this.noiseBurst(0.1, 0.045, 500, 1);
     this.sweep(240, 90, 0.1, 0.04, "triangle");
+  }
+
+  public folkYell(): void {
+    if (!this.gate("yell", 0.38)) return;
+    this.sweep(430, 190, 0.2, 0.075, "square");
+    this.sweep(520, 260, 0.12, 0.045, "sawtooth");
+    this.noiseBurst(0.09, 0.04, 980, 1.5);
   }
 
   private ensureLoops(): void {

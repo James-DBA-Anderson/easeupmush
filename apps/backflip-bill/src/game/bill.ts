@@ -2,6 +2,7 @@ import { degToRad, HIP_HEIGHT, STANDING_FLIP_MAX_VX, TAU } from "./constants";
 import { tuning } from "./tuning";
 import {
   approachingSolid,
+  barReach,
   groundAt,
   obstacleHits,
   onFlagPlatform,
@@ -15,11 +16,12 @@ import {
   supportAt,
   spawnGround,
   START_WALL_X,
+  type HighBar,
   type Level,
   type Platform,
 } from "./world";
 
-export type BillState = "ground" | "air" | "stumble" | "slide" | "fallen" | "dead" | "done";
+export type BillState = "ground" | "air" | "stumble" | "slide" | "swing" | "fallen" | "dead" | "done";
 
 export type LandKind = "clean" | "stumble" | "fall" | "slide";
 
@@ -51,6 +53,20 @@ export interface SnapFlash {
   life: number;
   max: number;
 }
+
+export interface Board {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  rot: number;
+  omega: number;
+  on: boolean;
+  wet: number;
+}
+
+const SKATE_CAP = 9.7;
+const JUMP_TO_BOARD = 0.4;
 
 type BandageSpot = "lKnee" | "rKnee" | "lElb" | "rElb";
 type SoreSpot = "lHip" | "rHip" | "coccyx" | "back";
@@ -138,6 +154,19 @@ export class Bill {
   gapFail = false;
   /** Left a pitched roof — next floor contact is a drop landing, not a crash. */
   slideDrop = false;
+  swingAng = 0;
+  swingOmega = 0;
+  swingTravel = 0;
+  barLooped = false;
+  barLockT = 0;
+  grabEvent = false;
+  barKickEvent = false;
+  barLoopEvent = false;
+  board: Board | null = null;
+  boardKickEvent = false;
+  boardSplashEvent = false;
+  /** 0–1: holding run-forward on the board — extra push. */
+  push = 0;
   /** Debug sim: mouse is carrying him. */
   held = false;
 
@@ -196,7 +225,21 @@ export class Bill {
     this.panic = 0;
     this.gapFail = false;
     this.slideDrop = false;
+    this.swingAng = 0;
+    this.swingOmega = 0;
+    this.swingTravel = 0;
+    this.barLooped = false;
+    this.barLockT = 0;
+    this.grabEvent = false;
+    this.barKickEvent = false;
+    this.barLoopEvent = false;
+    this.boardKickEvent = false;
+    this.boardSplashEvent = false;
+    this.push = 0;
     this.held = false;
+    this.board = level.theme === "woods"
+      ? { x: this.x, y: this.y - HIP_HEIGHT + 0.04, vx: 0, vy: 0, rot: 0, omega: 0, on: true, wet: 0 }
+      : null;
   }
 
   public goLimp(): void {
@@ -277,26 +320,38 @@ export class Bill {
     this.landEvent = null;
     this.hitEvent = null;
     this.celebrateEvent = false;
+    this.grabEvent = false;
+    this.barKickEvent = false;
+    this.barLoopEvent = false;
+    this.boardKickEvent = false;
+    this.boardSplashEvent = false;
     this.snapEvents.length = 0;
     this.time += dt;
     this.died = false;
     this.finished = false;
     this.restarted = false;
     if (touched) this.engaged = true;
+    this.push = this.board?.on && !this.cleared ? Math.max(0, run) : 0;
     // FLIP in the air is tuck / layout, not a queued bounce. Only buffer a
     // takeoff from a press that already happened on the pad.
     const onPad = this.state === "ground" || this.state === "stumble";
-    if (jump && onPad && !this.cleared) this.jumpBuf = 0.16;
+    const onBoard = this.state === "slide" && !!this.board?.on;
+    if (jump && (onPad || onBoard) && !this.cleared) this.jumpBuf = 0.16;
     this.jumpBuf = Math.max(0, this.jumpBuf - dt);
+    this.barLockT = Math.max(0, this.barLockT - dt);
     for (let i = this.snapFlashes.length - 1; i >= 0; i--) {
       const f = this.snapFlashes[i]!;
       f.life -= dt;
       if (f.life <= 0) this.snapFlashes.splice(i, 1);
     }
 
-    if (this.state === "dead") return;
+    if (this.state === "dead") {
+      this.stepBoard(dt, level);
+      return;
+    }
     if (this.state === "done") {
       if (this.celebrating) this.celebrateT += dt;
+      this.stepBoard(dt, level);
       return;
     }
 
@@ -304,13 +359,23 @@ export class Bill {
       this.stepRagdoll(dt, level);
       if (!this.held) this.checkGapDeath(level);
       this.tryFinish(level);
+      this.stepBoard(dt, level);
       return;
     }
 
     if (this.state === "slide") {
-      this.stepSlide(dt, level);
+      this.stepSlide(dt, level, run);
       this.checkGapDeath(level);
       this.tryFinish(level);
+      this.stepBoard(dt, level);
+      return;
+    }
+
+    if (this.state === "swing") {
+      this.stepSwing(dt, jump, tuckAxis, level);
+      this.checkGapDeath(level);
+      this.tryFinish(level);
+      this.stepBoard(dt, level);
       return;
     }
 
@@ -320,6 +385,15 @@ export class Bill {
       if (this.state === "stumble") {
         this.lockTimer -= dt;
         if (this.lockTimer <= 0) this.state = "ground";
+      }
+      const pitch = pitchedAt(level, this.x);
+      if (pitch && this.state === "ground") {
+        this.beginSlide(pitch, plantAngle(pitch, this.x));
+        this.stepSlide(dt, level, run);
+        this.checkGapDeath(level);
+        this.tryFinish(level);
+        this.stepBoard(dt, level);
+        return;
       }
       if (!this.cleared) this.tryFinish(level);
       this.groundMove(dt, run);
@@ -331,13 +405,15 @@ export class Bill {
         this.landEvent = this.makeLand("fall", this.x, g ?? this.y);
         this.resolveBody(level, true);
         this.checkGapDeath(level);
+        this.stepBoard(dt, level);
         return;
       }
       const spd = Math.min(1, Math.abs(this.vx) / tuning.maxSpeed);
       this.runPhase += Math.abs(this.vx) * dt * (2.05 + 0.85 * spd);
-      if (this.jumpBuf > 0 && !this.cleared) this.takeOff();
+      if (this.jumpBuf > 0 && !this.cleared) this.takeOff(level);
       this.checkGapDeath(level);
       this.tryFinish(level);
+      this.stepBoard(dt, level);
       return;
     }
 
@@ -375,6 +451,13 @@ export class Bill {
     this.updateGapArmTuck(dt, level);
     this.updatePanic(dt, level);
 
+    if (this.tryGrabBar(level)) {
+      this.checkGapDeath(level);
+      this.tryFinish(level);
+      this.stepBoard(dt, level);
+      return;
+    }
+
     const g = groundAt(level, this.x);
     const pitch = pitchedAt(level, this.x);
     const floorLand = pitch
@@ -391,6 +474,7 @@ export class Bill {
       this.resolveBody(level, true);
       this.checkGapDeath(level);
       this.tryFinish(level);
+      this.stepBoard(dt, level);
       return;
     } else if (!this.flipping && !this.slideDrop) {
       const wall = this.airTime > 0.08 && this.touchingSolid(level, false);
@@ -414,6 +498,7 @@ export class Bill {
 
     this.checkGapDeath(level);
     this.tryFinish(level);
+    this.stepBoard(dt, level);
   }
 
   private onFeet(): boolean {
@@ -484,6 +569,25 @@ export class Bill {
 
   private groundMove(dt: number, run: number): void {
     if (this.cleared) run = 0;
+    if (this.board?.on) {
+      this.vx += run * tuning.accel * 1.05 * dt;
+      this.vx *= Math.exp(-(this.cleared ? 2.4 : run > 0.2 ? 0.12 : 0.32) * dt);
+      const cap = run > 0.2 ? SKATE_CAP + 2.6 : SKATE_CAP;
+      if (this.vx > cap) this.vx = cap;
+      if (this.vx < -8) this.vx = -8;
+      this.x += this.vx * dt;
+      const minX = START_WALL_X + 0.5;
+      if (this.x < minX) {
+        this.x = minX;
+        if (this.vx < 0) this.vx = 0;
+      }
+      this.rot += (0 - wrapPi(this.rot)) * (1 - Math.exp(-12 * dt));
+      this.tuck = 0.34;
+      this.canTurn = false;
+      this.facing = 1;
+      this.runPhase += (Math.abs(this.vx) * 1.7 + Math.max(0, run) * 5.2) * dt;
+      return;
+    }
     const target = run * tuning.maxSpeed;
     if (Math.abs(run) > 0.05) {
       const accel =
@@ -514,10 +618,16 @@ export class Bill {
     else this.rot = -0.36 * n * (0.5 + 0.5 * amp);
   }
 
-  private takeOff(): void {
+  private takeOff(level: Level): void {
+    const riding = !!this.board?.on;
+    const fromSlide = this.state === "slide";
+    const pitch = fromSlide ? pitchedAt(level, this.x) : null;
+    const n = pitch ? platformNormal(pitch, this.x) : { nx: 0, ny: 1 };
+    const kick = tuning.jumpVy;
+    if (riding) this.kickBoard(n.nx, n.ny, kick * JUMP_TO_BOARD);
     this.state = "air";
     this.flipping = true;
-    this.vy = tuning.jumpVy;
+    this.vy = kick * (riding ? 0.82 : 1);
     this.takeoffSpeed = Math.abs(this.vx);
     this.flipTravel = 0;
     this.rot = 0;
@@ -564,7 +674,12 @@ export class Bill {
     }
 
     const pitch = pitchedAt(level, this.x);
-    if (pitch && !this.slideDrop) {
+    if (pitch) {
+      if (this.slideDrop) {
+        this.slideDrop = false;
+        this.beginSlide(pitch, plantAngle(pitch, this.x));
+        return;
+      }
       this.landOnPitch(g, level, pitch, impact, planted, tucked, opened, off);
       return;
     }
@@ -596,7 +711,7 @@ export class Bill {
   }
 
   private hittingPitch(p: Platform): boolean {
-    const n = platformNormal(p);
+    const n = platformNormal(p, this.x);
     const surf = platformY(p, this.x);
     const closing = this.vx * n.nx + this.vy * n.ny;
     const hip = surf + HIP_HEIGHT * Math.max(0.55, n.ny);
@@ -613,9 +728,11 @@ export class Bill {
     opened: boolean,
     _worldOff: number,
   ): void {
-    const want = plantAngle(pitch);
+    const want = plantAngle(pitch, this.x);
     const off = Math.abs(wrapPi(this.rot - want));
-    const slideAng = degToRad(55);
+    // Must actually match the slope — a world-upright plant on a 45° roof is ~45° off
+    // and used to snap into a frozen 45° stand.
+    const slideAng = degToRad(32);
     const onFeet = planted || off <= slideAng;
     if (!opened || tucked || !onFeet) {
       this.beginRagdoll("crash", g);
@@ -627,59 +744,102 @@ export class Bill {
     this.landEvent = this.makeLand("slide", this.x, g, impact);
   }
 
+  /** Unit tangent pointing downhill (the way world y falls). */
+  private downhill(pitch: Platform): { dx: number; dy: number } {
+    const s = platformSlope(pitch, this.x);
+    const len = Math.hypot(1, s) || 1;
+    const dx = 1 / len;
+    const dy = s / len;
+    const sign = dy <= 0 ? 1 : -1;
+    return { dx: dx * sign, dy: dy * sign };
+  }
+
   private beginSlide(pitch: Platform, want: number): void {
     this.state = "slide";
     this.flipping = false;
-    this.tuck = 0;
-    this.cushion = 0;
-    this.rot = want;
+    this.slideDrop = false;
+    this.tuck = 0.28;
+    this.cushion = 0.22;
+    if (!this.board?.on) this.rot = want;
     this.spinRate = 0;
     this.landPrep = 0;
     this.gapArmTuck = 0;
     this.panic = 0;
     this.lockTimer = 0;
-    this.jumpBuf = 0;
-    const s = platformSlope(pitch);
-    const inv = 1 / Math.hypot(1, s);
-    const dirx = inv;
-    const diry = s * inv;
-    const along = this.vx * dirx + this.vy * diry;
-    const speed = Math.max(2.8, along);
-    this.vx = speed * dirx;
-    this.vy = speed * diry;
-    const n = platformNormal(pitch);
+    if (!this.board?.on) this.jumpBuf = 0;
+    const { dx, dy } = this.downhill(pitch);
+    const along = this.vx * dx + this.vy * dy;
+    const speed = this.board?.on ? Math.max(0.35, along) : Math.max(4.6, along);
+    this.vx = speed * dx;
+    this.vy = speed * dy;
+    const n = platformNormal(pitch, this.x);
     this.y = platformY(pitch, this.x) + HIP_HEIGHT * Math.max(0.55, n.ny);
   }
 
-  private stepSlide(dt: number, level: Level): void {
+  private stepSlide(dt: number, level: Level, run = 0): void {
+    if (this.jumpBuf > 0 && this.board?.on && !this.cleared) {
+      this.takeOff(level);
+      return;
+    }
     const pitch = pitchedAt(level, this.x);
-    if (!pitch || this.x >= pitch.x1 - 0.04) {
-      this.leaveSlide();
+    if (!pitch) {
+      this.leaveSlide(null, level);
       return;
     }
-    const s = platformSlope(pitch);
-    const inv = 1 / Math.hypot(1, s);
-    const dirx = inv;
-    const diry = s * inv;
-    let speed = this.vx * dirx + this.vy * diry;
-    speed += tuning.gravity * -diry * dt;
-    speed *= Math.exp(-0.18 * dt);
-    this.vx = speed * dirx;
-    this.vy = speed * diry;
+    const endPad = this.board?.on ? pitch.x1 : pitch.x1 - 0.08;
+    if (this.x >= endPad) {
+      this.leaveSlide(pitch, level);
+      return;
+    }
+    const { dx, dy } = this.downhill(pitch);
+    let speed = this.vx * dx + this.vy * dy;
+    speed += tuning.gravity * -dy * dt;
+    if (this.board?.on && run > 0.05) speed += run * 9.8 * dt;
+    speed *= Math.exp(-0.22 * dt);
+    if (!this.board?.on && speed < 3.8) speed = 3.8;
+    const cap = this.board?.on ? (run > 0.2 ? SKATE_CAP + 2.8 : SKATE_CAP) : 1e9;
+    if (speed > cap) speed = cap;
+    this.vx = speed * dx;
+    this.vy = speed * dy;
     this.x += this.vx * dt;
-    const n = platformNormal(pitch);
-    this.rot = plantAngle(pitch);
-    this.tuck = 0;
-    this.runPhase += Math.abs(speed) * dt * 1.4;
+    const want = plantAngle(pitch, this.x);
+    this.rot += (want - this.rot) * (1 - Math.exp(-14 * dt));
+    this.tuck = 0.28;
+    this.runPhase += (Math.abs(speed) * 2.2 + Math.max(0, run) * 5.2) * dt;
     const next = pitchedAt(level, this.x);
-    if (!next || this.x >= next.x1 - 0.04) {
-      this.leaveSlide();
+    const nextEnd = next ? (this.board?.on ? next.x1 : next.x1 - 0.08) : 0;
+    if (!next || this.x >= nextEnd) {
+      this.leaveSlide(next ?? pitch, level);
       return;
     }
+    const n = platformNormal(next, this.x);
     this.y = platformY(next, this.x) + HIP_HEIGHT * Math.max(0.55, n.ny);
   }
 
-  private leaveSlide(): void {
+  private leaveSlide(pitch: Platform | null, level: Level): void {
+    if (pitch && this.x < pitch.x1 + 0.04 && !this.board?.on) {
+      this.x = pitch.x1 + 0.08;
+      const { dx, dy } = this.downhill(pitch);
+      const speed = Math.max(4.2, this.vx * dx + this.vy * dy);
+      this.vx = speed * dx;
+      this.vy = speed * dy;
+    }
+    if (this.board?.on) {
+      const feet = this.y - HIP_HEIGHT;
+      const floor = supportAt(level, this.x, feet, 0.8);
+      if (floor !== null && this.x < level.gapX0 - 0.04) {
+        const { dx, dy } = pitch ? this.downhill(pitch) : { dx: 1, dy: 0 };
+        const speed = Math.max(0, this.vx * dx + this.vy * dy);
+        this.state = "ground";
+        this.flipping = false;
+        this.slideDrop = false;
+        this.vx = speed;
+        this.vy = 0;
+        this.y = floor + HIP_HEIGHT;
+        return;
+      }
+      this.kickBoard(0, 1, 1.6);
+    }
     this.state = "air";
     this.flipping = false;
     this.slideDrop = true;
@@ -687,6 +847,181 @@ export class Bill {
     this.landPrep = 0;
     this.gapArmTuck = 0;
     this.panic = 0;
+  }
+
+  private kickBoard(nx: number, ny: number, impulse: number): void {
+    const b = this.board;
+    if (!b || !b.on) return;
+    b.on = false;
+    b.x = this.x + 0.14;
+    b.y = this.y - HIP_HEIGHT + 0.05;
+    b.vx = this.vx * 1.1 + 2.2 - nx * impulse;
+    b.vy = 1.6 - ny * impulse * 0.85;
+    b.rot = this.state === "slide" ? this.rot : 0;
+    b.omega = -2.6 - Math.abs(this.vx) * 0.18;
+    this.boardKickEvent = true;
+  }
+
+  private syncBoardRide(): void {
+    const b = this.board;
+    if (!b?.on) return;
+    b.x = this.x;
+    b.y = this.y - HIP_HEIGHT + 0.04;
+    b.vx = this.vx;
+    b.vy = this.vy;
+    b.rot = this.state === "slide" ? this.rot : 0;
+    b.omega = 0;
+  }
+
+  private stepBoard(dt: number, level: Level): void {
+    const b = this.board;
+    if (!b) return;
+    if (b.on) {
+      this.syncBoardRide();
+      return;
+    }
+    b.vy -= tuning.gravity * dt;
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+    b.rot += b.omega * dt;
+    b.omega *= Math.exp(-0.45 * dt);
+    const water = level.theme === "woods" ? level.pitY : null;
+    const inRiver =
+      water !== null && b.x > level.gapX0 - 0.2 && b.x < level.gapX1 + 0.4 && b.y < water + 0.22;
+    if (inRiver && water !== null) {
+      if (b.wet <= 0 && b.vy < -1) this.boardSplashEvent = true;
+      b.wet = Math.min(1, b.wet + dt * 0.85);
+      b.vy *= Math.exp(-4.2 * dt);
+      b.vx *= Math.exp(-1.5 * dt);
+      b.omega *= Math.exp(-2.4 * dt);
+      const sink = water - 0.1 - b.wet * 0.55;
+      b.y += (sink - b.y) * Math.min(1, dt * 2.4);
+      return;
+    }
+    const floor = supportAt(level, b.x, b.y + 0.2, 0.5);
+    if (floor !== null && b.y < floor + 0.05) {
+      b.y = floor + 0.05;
+      if (b.vy < 0) b.vy *= -0.28;
+      b.vx *= Math.exp(-0.9 * dt);
+      b.omega *= 0.72;
+      b.rot += (0 - wrapPi(b.rot)) * (1 - Math.exp(-8 * dt));
+    }
+  }
+
+  private tryGrabBar(level: Level): boolean {
+    const bar = level.bar;
+    if (!bar || this.barLockT > 0 || this.cleared) return false;
+    if (this.tuck > 0.4) return false;
+    const reach = barReach(bar);
+    const dist = Math.hypot(this.x - bar.x, this.y - bar.y);
+    if (dist < 0.16 || dist > reach * 1.45) return false;
+    this.catchBar(bar);
+    return true;
+  }
+
+  private catchBar(bar: HighBar): void {
+    const r = barReach(bar);
+    const ang = Math.atan2(this.x - bar.x, bar.y - this.y);
+    const rx = r * Math.sin(ang);
+    const ry = -r * Math.cos(ang);
+    let omega = (rx * this.vy - ry * this.vx) / (r * r);
+    omega += this.spinRate * 0.32;
+    omega *= 1.12;
+    this.swingAng = ang;
+    this.swingOmega = clamp(omega, -16, 16);
+    this.tuck = Math.min(this.tuck, 0.2);
+    this.swingTravel = 0;
+    this.barLooped = false;
+    this.state = "swing";
+    this.flipping = true;
+    this.slideDrop = false;
+    this.panic = 0;
+    this.landPrep = 0;
+    this.gapArmTuck = 0;
+    this.brace = 0;
+    this.rot = ang;
+    this.x = bar.x + rx;
+    this.y = bar.y + ry;
+    this.vx = r * this.swingOmega * Math.cos(ang);
+    this.vy = r * this.swingOmega * Math.sin(ang);
+    this.grabEvent = true;
+  }
+
+  private stepSwing(dt: number, jump: boolean, tuckAxis: number, level: Level): void {
+    const bar = level.bar;
+    if (!bar) {
+      this.releaseBar(false);
+      return;
+    }
+    const r = barReach(bar);
+    const targetTuck = 0.5 + 0.5 * Math.max(-1, Math.min(1, tuckAxis));
+    const k = 1 - Math.exp(-tuning.tuckLerp * dt);
+    this.tuck += (targetTuck - this.tuck) * k;
+    this.swingOmega += -(tuning.gravity / r) * Math.sin(this.swingAng) * dt;
+    this.swingOmega *= Math.exp(-0.1 * dt);
+    this.swingOmega = clamp(this.swingOmega, -16, 16);
+    const prev = this.swingTravel;
+    this.swingAng += this.swingOmega * dt;
+    this.swingTravel += Math.abs(this.swingOmega) * dt;
+    if (!this.barLooped && prev < TAU && this.swingTravel >= TAU) {
+      this.barLooped = true;
+      this.barLoopEvent = true;
+    }
+    this.rot = this.swingAng;
+    this.x = bar.x + r * Math.sin(this.swingAng);
+    this.y = bar.y - r * Math.cos(this.swingAng);
+    this.vx = r * this.swingOmega * Math.cos(this.swingAng);
+    this.vy = r * this.swingOmega * Math.sin(this.swingAng);
+    this.spinRate = this.swingOmega;
+    this.flipTravel = this.swingAng;
+    if (jump) {
+      this.releaseBar(true);
+      return;
+    }
+    if (this.tuck > 0.58) {
+      this.releaseBar(false);
+      return;
+    }
+    const hang = Math.abs(wrapPi(this.swingAng));
+    if (this.swingTravel > 1.15 && Math.abs(this.swingOmega) < 1.05 && hang < 0.7) {
+      this.releaseBar(false);
+    }
+  }
+
+  /** Kick off in the rising window, otherwise just let go with current speed. */
+  private barKickGood(): boolean {
+    const a = wrapPi(this.swingAng);
+    return this.swingOmega > 2.4 && a > 0.28 && a < 1.52;
+  }
+
+  private releaseBar(kick: boolean): void {
+    const good = kick && this.barKickGood();
+    if (kick && good) {
+      const tx = Math.cos(this.swingAng);
+      const ty = Math.sin(this.swingAng);
+      const dir = Math.sign(this.swingOmega) || 1;
+      this.vx += dir * tx * 4.4;
+      this.vy += dir * ty * 4.4 + 3.1;
+      this.barKickEvent = true;
+    } else if (kick) {
+      this.vy += 1.35;
+    }
+    this.state = "air";
+    this.flipping = true;
+    this.barLockT = 0.32;
+    this.airTime = 0;
+    this.slideDrop = false;
+    this.landPrep = 0;
+    this.gapArmTuck = 0;
+    this.panic = 0;
+    const rate =
+      tuning.tuckRateStraight +
+      (tuning.tuckRateCrouch - tuning.tuckRateStraight) * this.tuck;
+    const omega = Math.max(2.8, Math.abs(this.swingOmega));
+    this.flipDuration = (TAU * Math.max(0.35, rate)) / omega;
+    this.rot = wrapPi(this.rot);
+    this.flipTravel = this.rot;
+    this.spinRate = this.swingOmega;
   }
 
   /** Hard landing: stay up, dump the knees, keep the run. */
@@ -721,6 +1056,7 @@ export class Bill {
   }
 
   private beginRagdoll(kind: "hard" | "crash", g: number | null): void {
+    if (this.board?.on) this.kickBoard(0, 1, 2.2);
     const crash = kind === "crash";
     const impact = Math.max(0, -this.vy);
     const slide = this.vx;
@@ -1271,15 +1607,60 @@ export function stepDust(list: Dust[], dt: number): void {
 }
 
 const SKIN = "#f3d2bc";
+const SKIN_LIT = "#fbe6d4";
+const SKIN_SHADE = "#c89676";
 const SKIN_LINE = "#d9ae96";
 const HAIR = "#efd56a";
 const HAIR_DARK = "#d4b445";
 const SHIRT = "#9aa0a6";
+const SHIRT_LIT = "#c4c8cc";
 const SHIRT_DARK = "#6e747a";
 const JEANS = "#3a5c9e";
 const JEANS_DARK = "#2a4478";
 const SHOE = "#f6f6f4";
 const SHOE_SOLE = "#c5c5c0";
+
+export function drawSkateboard(
+  ctx: CanvasRenderingContext2D,
+  board: Board,
+  sx: number,
+  sy: number,
+  ppm: number,
+): void {
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.scale(ppm, -ppm);
+  ctx.rotate(board.rot);
+  ctx.globalAlpha *= 1 - board.wet * 0.42;
+  const wr = 0.048;
+  ctx.fillStyle = "#1a1410";
+  ctx.beginPath();
+  ctx.arc(-0.26, -0.038, wr, 0, TAU);
+  ctx.arc(0.26, -0.038, wr, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = "#6a3a28";
+  ctx.beginPath();
+  ctx.moveTo(-0.42, 0.008);
+  ctx.lineTo(-0.38, -0.012);
+  ctx.lineTo(0.38, -0.012);
+  ctx.lineTo(0.44, 0.028);
+  ctx.lineTo(0.38, 0.03);
+  ctx.lineTo(-0.38, 0.028);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#2a2622";
+  ctx.fillRect(-0.36, 0.01, 0.74, 0.016);
+  ctx.fillStyle = "#c45a3a";
+  ctx.globalAlpha *= 0.85;
+  ctx.beginPath();
+  ctx.moveTo(-0.08, 0.012);
+  ctx.lineTo(0.12, 0.012);
+  ctx.lineTo(0.04, 0.026);
+  ctx.lineTo(-0.14, 0.026);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
 
 /** Draw Backflip Bill — clothed figure, always backflips backward. */
 export function drawBill(
@@ -1299,7 +1680,8 @@ export function drawBill(
   const chain = torsoChain(pose);
   const arch =
     (pose.spineLumbar ?? 0) + (pose.spineThoracic ?? 0) + (pose.spineCervical ?? 0);
-  const grounded = (bill.state === "ground" || bill.state === "slide") && !bill.rag;
+  const grounded =
+    (bill.state === "ground" || bill.state === "slide") && !bill.rag;
   if (grounded) {
     const amp = Math.min(1, Math.abs(bill.vx) / tuning.maxSpeed);
     const bob = Math.abs(Math.sin(bill.runPhase)) * 0.055 * amp;
@@ -1316,8 +1698,8 @@ export function drawBill(
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  const neck = chain.neck;
   const head = chain.head;
+  const { lSh, rSh, collar } = poseShoulders(chain);
 
   const lHip: Pt = { x: -0.03 - pose.lean * 0.1, y: -0.01 };
   const rHip: Pt = { x: 0.03 - pose.lean * 0.1, y: -0.01 };
@@ -1325,10 +1707,6 @@ export function drawBill(
   const rKnee = polar(rHip, pose.rThigh, 0.46);
   const lAnkle = polar(lKnee, pose.lShin, 0.36);
   const rAnkle = polar(rKnee, pose.rShin, 0.36);
-
-  const cervical = pose.spineCervical ?? arch * 0.24;
-  const lSh: Pt = { x: neck.x - 0.05 - cervical * 0.08, y: neck.y - 0.05 };
-  const rSh: Pt = { x: neck.x - 0.04 - cervical * 0.08, y: neck.y - 0.05 };
   const lSleeve = polar(lSh, pose.lArm, 0.15);
   const rSleeve = polar(rSh, pose.rArm, 0.15);
   const lElb = polar(lSh, pose.lArm, 0.32);
@@ -1357,9 +1735,9 @@ export function drawBill(
     drawBandage(ctx, rKnee, (pose.rThigh + pose.rShin) * 0.5, 0.09, 0.055);
   }
 
-  drawShirt(ctx, chain, lHip, rHip, lSh, rSh);
+  drawShirt(ctx, chain, lHip, rHip, collar);
 
-  strokeColored(ctx, SKIN, 0.1, neck, head);
+  strokeColored(ctx, SKIN, 0.11, collar, head);
   drawHeadProfile(ctx, head, bill, t);
   drawHairFront(ctx, head, arch);
 
@@ -1425,18 +1803,42 @@ function fillSpine(pose: Pose): void {
   pose.spineCervical = pose.spineCervical ?? pose.arch * 0.24;
 }
 
-function torsoChain(pose: Pose): { lumbar: Pt; thoracic: Pt; neck: Pt; head: Pt } {
+interface TorsoChain {
+  lumbar: Pt;
+  thoracic: Pt;
+  neck: Pt;
+  head: Pt;
+  lumAng: number;
+  chestAng: number;
+  neckAng: number;
+}
+
+function torsoChain(pose: Pose): TorsoChain {
   fillSpine(pose);
   const pelvis: Pt = { x: -pose.lean * 0.04, y: 0.02 };
   let ang = Math.PI / 2 + pose.lean * 0.18;
   ang += pose.spineLumbar!;
   const lumbar = polar(pelvis, ang, 0.21);
+  const lumAng = ang;
   ang += pose.spineThoracic!;
   const thoracic = polar(lumbar, ang, 0.23);
+  const chestAng = ang;
   ang += pose.spineCervical!;
   const neck = polar(thoracic, ang, 0.2);
   const head = polar(neck, ang + 0.12 + pose.lean * 0.08, 0.21);
-  return { lumbar, thoracic, neck, head };
+  return { lumbar, thoracic, neck, head, lumAng, chestAng, neckAng: ang };
+}
+
+/** Arms attach near the collar centre; the shirt yoke is wider than the neck. */
+function poseShoulders(chain: TorsoChain): { lSh: Pt; rSh: Pt; collar: Pt } {
+  const front = chain.chestAng - Math.PI / 2;
+  const back = chain.chestAng + Math.PI / 2;
+  const collar = polar(chain.neck, chain.chestAng + Math.PI, 0.05);
+  return {
+    collar,
+    lSh: polar(collar, back, 0.03),
+    rSh: polar(collar, front, 0.045),
+  };
 }
 
 function idleRest(t: number): Pose {
@@ -1613,22 +2015,69 @@ function poseFor(bill: Bill, t: number): Pose {
   if (bill.celebrating) return clampLimbPose(celebratePose(bill.celebrateT));
   if (bill.rag) return clampLimbPose(bill.rag.pose);
 
+  if (bill.state === "swing") {
+    const hang = -Math.PI / 2;
+    const stretch = 1 - bill.tuck;
+    return clampLimbPose({
+      lean: 0.08,
+      arch: 0.22 * stretch,
+      spineLumbar: 0.1 * stretch,
+      spineThoracic: 0.08 * stretch,
+      spineCervical: 0.12,
+      lThigh: hang + 0.12 + 0.2 * stretch,
+      rThigh: hang + 0.02 + 0.16 * stretch,
+      lShin: hang - 0.08 - 0.12 * stretch,
+      rShin: hang - 0.04 - 0.1 * stretch,
+      lArm: Math.PI / 2 - 0.18,
+      rArm: Math.PI / 2 - 0.1,
+      lFore: Math.PI / 2 + 0.04,
+      rFore: Math.PI / 2 + 0.08,
+    });
+  }
+
+  if (bill.board?.on && (bill.state === "ground" || bill.state === "slide")) {
+    const hang = -Math.PI / 2;
+    const push = Math.max(0, Math.min(1, bill.push));
+    const stroke = Math.sin(bill.runPhase);
+    const kick = push * Math.max(0, stroke);
+    const carve = stroke * 0.08;
+    const squat = 0.46 + 0.08 * push;
+    const slope = bill.state === "slide" ? 0.16 : 0;
+    return clampLimbPose({
+      lean: 0.18 + carve + 0.22 * push + slope,
+      arch: -0.1 - 0.08 * push,
+      spineLumbar: -0.12 - 0.08 * push,
+      spineThoracic: -0.06,
+      spineCervical: 0.08,
+      lThigh: hang + squat + 0.06 - 0.42 * kick,
+      rThigh: hang + squat - 0.04 + 0.22 * kick,
+      lShin: hang - squat * 0.68 + 0.38 * kick,
+      rShin: hang - squat * 0.6 - 0.12 * kick,
+      lArm: hang - 0.5 - 0.28 * kick - 0.1 * carve,
+      rArm: hang - 0.32 + 0.22 * kick + 0.1 * carve,
+      lFore: hang + 0.12 + 0.18 * kick,
+      rFore: hang + 0.16 - 0.1 * kick,
+    });
+  }
+
   if (bill.state === "slide") {
     const hang = -Math.PI / 2;
+    const pump = Math.sin(bill.runPhase);
+    const squat = 0.42;
     return clampLimbPose({
-      lean: 0.06,
-      arch: -0.08,
-      spineLumbar: -0.12,
-      spineThoracic: -0.06,
-      spineCervical: 0.04,
-      lThigh: hang + 0.18,
-      rThigh: hang - 0.12,
-      lShin: hang + 0.08,
-      rShin: hang - 0.06,
-      lArm: hang - 0.22,
-      rArm: hang - 0.14,
-      lFore: hang + 0.18,
-      rFore: hang + 0.12,
+      lean: 0.34,
+      arch: -0.16,
+      spineLumbar: -0.18,
+      spineThoracic: -0.08,
+      spineCervical: 0.06,
+      lThigh: hang + squat + 0.28 * pump,
+      rThigh: hang + squat - 0.22 * pump,
+      lShin: hang - squat * 0.72 - 0.1 * pump,
+      rShin: hang - squat * 0.62 + 0.12 * pump,
+      lArm: hang - 0.55 - 0.18 * pump,
+      rArm: hang - 0.38 + 0.16 * pump,
+      lFore: hang + 0.08,
+      rFore: hang + 0.16,
     });
   }
 
@@ -2310,15 +2759,13 @@ function makeRig(pose: Pose, airFeet: boolean): Rig {
   const chain = torsoChain(pose);
   const neck = chain.neck;
   const head = chain.head;
+  const { lSh, rSh } = poseShoulders(chain);
   const lHip: Pt = { x: -0.03 - pose.lean * 0.1, y: -0.01 };
   const rHip: Pt = { x: 0.03 - pose.lean * 0.1, y: -0.01 };
   const lKnee = polar(lHip, pose.lThigh, 0.46);
   const rKnee = polar(rHip, pose.rThigh, 0.46);
   const lAnkle = polar(lKnee, pose.lShin, 0.36);
   const rAnkle = polar(rKnee, pose.rShin, 0.36);
-  const cervical = pose.spineCervical ?? pose.arch * 0.24;
-  const lSh: Pt = { x: neck.x - 0.05 - cervical * 0.08, y: neck.y - 0.05 };
-  const rSh: Pt = { x: neck.x - 0.04 - cervical * 0.08, y: neck.y - 0.05 };
   const lElb = polar(lSh, pose.lArm, 0.32);
   const rElb = polar(rSh, pose.rArm, 0.32);
   const lHand = polar(lElb, pose.lFore, 0.3);
@@ -2457,25 +2904,38 @@ function foldLimb(
 
 function drawShirt(
   ctx: CanvasRenderingContext2D,
-  chain: { lumbar: Pt; thoracic: Pt },
+  chain: TorsoChain,
   lHip: Pt,
   rHip: Pt,
-  lSh: Pt,
-  rSh: Pt,
+  collar: Pt,
 ): void {
   const L = chain.lumbar;
   const T = chain.thoracic;
-  ctx.fillStyle = SHIRT;
+  const frontL = chain.lumAng - Math.PI / 2;
+  const backL = chain.lumAng + Math.PI / 2;
+  const frontC = chain.chestAng - Math.PI / 2;
+  const backC = chain.chestAng + Math.PI / 2;
+  const open = Math.max(0, chain.chestAng - Math.PI / 2);
+  const puff = 0.04 * Math.min(1, open / 0.7);
+  const backLumbar = polar(L, backL, 0.1);
+  const frontLumbar = polar(L, frontL, 0.12);
+  const backChest = polar(T, backC, 0.11);
+  const frontChest = polar(T, frontC, 0.13 + puff);
+  const nape = polar(collar, backC, 0.1);
+  const yoke = polar(collar, frontC, 0.12 + puff * 0.5);
+  const shade = ctx.createLinearGradient(frontChest.x, frontChest.y, backLumbar.x, backLumbar.y);
+  shade.addColorStop(0, SHIRT_LIT);
+  shade.addColorStop(0.45, SHIRT);
+  shade.addColorStop(1, "#4e545a");
+  ctx.fillStyle = shade;
   ctx.strokeStyle = SHIRT_DARK;
   ctx.lineWidth = 0.028;
   ctx.beginPath();
   ctx.moveTo(lHip.x - 0.07, lHip.y - 0.04);
-  ctx.lineTo(L.x - 0.11, L.y - 0.01);
-  ctx.lineTo(T.x - 0.1, T.y);
-  ctx.lineTo(lSh.x - 0.05, lSh.y + 0.01);
-  ctx.lineTo(rSh.x + 0.07, rSh.y);
-  ctx.lineTo(T.x + 0.11, T.y + 0.01);
-  ctx.lineTo(L.x + 0.12, L.y);
+  ctx.quadraticCurveTo(backLumbar.x, backLumbar.y, backChest.x, backChest.y);
+  ctx.lineTo(nape.x, nape.y);
+  ctx.lineTo(yoke.x, yoke.y);
+  ctx.quadraticCurveTo(frontChest.x, frontChest.y, frontLumbar.x, frontLumbar.y);
   ctx.lineTo(rHip.x + 0.09, rHip.y - 0.04);
   ctx.closePath();
   ctx.fill();
@@ -2559,6 +3019,7 @@ function faceMood(bill: Bill): FaceMood {
     }
     return "wince";
   }
+  if (bill.state === "swing") return "focus";
   if (bill.state === "air") {
     if (!bill.flipping) return "shock";
     if (bill.panic > 0.22) return "shock";
@@ -2575,7 +3036,11 @@ function faceMood(bill: Bill): FaceMood {
 function drawHeadProfile(ctx: CanvasRenderingContext2D, head: Pt, bill: Bill, t: number): void {
   const hx = head.x;
   const hy = head.y;
-  ctx.fillStyle = SKIN;
+  const shade = ctx.createLinearGradient(hx + 0.14, hy + 0.12, hx - 0.12, hy - 0.12);
+  shade.addColorStop(0, SKIN_LIT);
+  shade.addColorStop(0.52, SKIN);
+  shade.addColorStop(1, SKIN_SHADE);
+  ctx.fillStyle = shade;
   ctx.beginPath();
   ctx.ellipse(hx + 0.02, hy, 0.145, 0.162, 0.12, 0, TAU);
   ctx.fill();

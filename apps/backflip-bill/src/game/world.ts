@@ -1,7 +1,20 @@
 import { VIEW_WIDTH, VIEW_WIDTH_DESKTOP } from "./constants";
+import { occupyWindow, type FolkSlot } from "./windowFolk";
 
 /** World x of the start wall. Camera is locked here, so this sits on the left of the screen. */
 export const START_WALL_X = 0.55;
+
+/** Facade below the pads. Bill is ~1.75m; windows should read as real rooms, not dollhouse. */
+const FACADE_STOREY = 3.2;
+const FACADE_WIN_W = 1.12;
+const FACADE_WIN_H = 1.52;
+const FACADE_WIN_PITCH = 2.24;
+const FACADE_WIN_DROP = 0.92;
+const TRAIN_RAIL_DROP = 3.7;
+const TRAIN_WIN_W = 1.12;
+const TRAIN_WIN_H = 1.05;
+const TRAIN_WIN_DROP = 0.5;
+const TRAIN_WIN_PITCH = 1.72;
 
 export interface Platform {
   x0: number;
@@ -9,6 +22,8 @@ export interface Platform {
   y: number;
   /** Height at `x1`. When set, the pad pitches from `(x0, y)` to `(x1, y1)`. */
   y1?: number;
+  /** Smoothstep the pitch so the ends are flat and the middle is steep. */
+  ease?: boolean;
 }
 
 export interface Obstacle {
@@ -17,6 +32,9 @@ export interface Obstacle {
   h: number;
   /** Extra chimney / vent on top of the crate. */
   stack?: number;
+  /** Bottom of river junk. Defaults to the roof for train crates. */
+  y?: number;
+  kind?: "tyre" | "trolley" | "bag" | "cone";
 }
 
 export interface Train {
@@ -45,12 +63,14 @@ export interface Level {
   noFlag?: boolean;
   /** Circus hoop: only a tucked pose fits the hole. */
   hoop?: Hoop;
+  /** High bar along Z — grab if extended, giant, then kick off. */
+  bar?: HighBar;
   /** Roof-height blocks that slide toward the player. */
   obstacles?: Obstacle[];
   train?: Train;
   hint?: string;
   /** Lawn / rec ground instead of terrace rooftops. */
-  theme?: "park";
+  theme?: "park" | "woods";
   /** Land a no-run-up backflip. Default: reach the flag on your feet. */
   goal?: "standingFlip";
 }
@@ -62,6 +82,14 @@ export interface Hoop {
   outer: number;
   /** 0 layout … 1 crouch. Must be at least this tucked to pass. */
   tuck: number;
+}
+
+/** Horizontal bar through Z, same yaw as the hoop so it reads as a rail not a wall. */
+export interface HighBar {
+  x: number;
+  y: number;
+  /** Hip-to-bar hang length, metres. */
+  reach?: number;
 }
 
 /** Face the runner, 10° off edge-on so the hole still reads as a hoop. */
@@ -167,6 +195,33 @@ export const LEVELS: Level[] = [
     id: 7,
     title: "Level 7",
     spawnX: 4.2,
+    platforms: [
+      { x0: -2, x1: 5.55, y: 10.4 },
+      { x0: 5.55, x1: 15.85, y: 10.4, y1: 0, ease: true },
+      { x0: 15.85, x1: 19.15, y: 0 },
+      { x0: 26.45, x1: 56, y: -0.22 },
+    ],
+    gapX0: 19.15,
+    gapX1: 26.45,
+    pitY: -0.68,
+    flagX: 29.7,
+    killY: -8,
+    endX: 40,
+    theme: "woods",
+    obstacles: [
+      { kind: "tyre", x: 19.85, y: -0.68, w: 0.82, h: 0.7 },
+      { kind: "trolley", x: 21.28, y: -0.68, w: 1.12, h: 1.18 },
+      { kind: "bag", x: 22.62, y: -0.5, w: 0.52, h: 0.4 },
+      { kind: "tyre", x: 23.22, y: -0.74, w: 0.74, h: 0.62 },
+      { kind: "cone", x: 24.12, y: -0.58, w: 0.36, h: 0.7 },
+      { kind: "trolley", x: 24.72, y: -0.68, w: 1.06, h: 1.12 },
+    ],
+    hint: "Ride the board down the woods, FLIP off the flat, and clear the river junk.",
+  },
+  {
+    id: 8,
+    title: "Level 8",
+    spawnX: 4.2,
     platforms: [{ x0: -4, x1: 42, y: 0 }],
     gapX0: 42,
     gapX1: 8.5,
@@ -182,6 +237,23 @@ export const LEVELS: Level[] = [
     ],
     hint: "You're on the 6:42 out of Fratton. Flip over three oncoming blocks — look right for the warning.",
   },
+  {
+    id: 9,
+    title: "Level 9",
+    spawnX: 4.2,
+    platforms: [
+      { x0: -4, x1: 15.5, y: 0 },
+      { x0: 24.9, x1: 50, y: -1.35 },
+    ],
+    gapX0: 15.5,
+    gapX1: 24.9,
+    pitY: -7.4,
+    flagX: 28.6,
+    killY: -13,
+    endX: 38,
+    bar: { x: 17.7, y: 3.82 },
+    hint: "Open up to catch the bar, swing a giant if you can, then FLIP on the way up to fly the gap.",
+  },
 ];
 
 export function cloneLevel(src: Level): Level {
@@ -190,6 +262,7 @@ export function cloneLevel(src: Level): Level {
     platforms: src.platforms.map((p) => ({ ...p })),
     boxes: src.boxes?.map((p) => ({ ...p })),
     hoop: src.hoop ? { ...src.hoop } : undefined,
+    bar: src.bar ? { ...src.bar } : undefined,
     obstacles: src.obstacles?.map((o) => ({ ...o })),
     train: src.train ? { ...src.train, scroll: 0 } : undefined,
   };
@@ -207,8 +280,8 @@ function roofY(level: Level): number {
 }
 
 export function obstacleBox(level: Level, o: Obstacle): { x0: number; x1: number; y0: number; y1: number } {
-  const roof = roofY(level);
-  return { x0: o.x, x1: o.x + o.w, y0: roof, y1: roof + o.h + (o.stack ?? 0) };
+  const y0 = o.y ?? roofY(level);
+  return { x0: o.x, x1: o.x + o.w, y0, y1: y0 + o.h + (o.stack ?? 0) };
 }
 
 function aabbHit(
@@ -305,21 +378,30 @@ export function isPitched(p: Platform): boolean {
   return p.y1 !== undefined && Math.abs(p.y1 - p.y) > 0.05;
 }
 
-export function platformY(p: Platform, x: number): number {
-  if (p.y1 === undefined) return p.y;
+function padU(p: Platform, x: number): number {
   const span = Math.max(0.001, p.x1 - p.x0);
-  const u = Math.max(0, Math.min(1, (x - p.x0) / span));
-  return p.y + (p.y1 - p.y) * u;
+  return Math.max(0, Math.min(1, (x - p.x0) / span));
 }
 
-export function platformSlope(p: Platform): number {
+export function platformY(p: Platform, x: number): number {
+  if (p.y1 === undefined) return p.y;
+  const u = padU(p, x);
+  const t = p.ease ? u * u * (3 - 2 * u) : u;
+  return p.y + (p.y1 - p.y) * t;
+}
+
+export function platformSlope(p: Platform, x?: number): number {
   if (p.y1 === undefined) return 0;
-  return (p.y1 - p.y) / Math.max(0.001, p.x1 - p.x0);
+  const span = Math.max(0.001, p.x1 - p.x0);
+  const raw = (p.y1 - p.y) / span;
+  if (!p.ease) return raw;
+  const u = padU(p, x ?? p.x0);
+  return raw * 6 * u * (1 - u);
 }
 
 /** Upward unit normal of the pad. */
-export function platformNormal(p: Platform): { nx: number; ny: number } {
-  const s = platformSlope(p);
+export function platformNormal(p: Platform, x?: number): { nx: number; ny: number } {
+  const s = platformSlope(p, x);
   const inv = 1 / Math.hypot(1, s);
   return { nx: -s * inv, ny: inv };
 }
@@ -333,8 +415,8 @@ export function pitchedAt(level: Level, x: number): Platform | null {
 }
 
 /** Body angle (feet-down = 0) that plants on this pad. Negative = lean down a right-hand pitch. */
-export function plantAngle(p: Platform): number {
-  return Math.atan(platformSlope(p));
+export function plantAngle(p: Platform, x?: number): number {
+  return Math.atan(platformSlope(p, x));
 }
 
 export function spawnGround(level: Level): number {
@@ -387,18 +469,25 @@ export function pitFloor(level: Level): Platform {
   return { x0: level.gapX0, x1: level.gapX1, y: level.pitY };
 }
 
+function pitDeckY(level: Level, left: Platform, right?: Platform): number {
+  if (level.theme === "park" || level.theme === "woods" || level.train) return level.pitY;
+  const ly = platformY(left, left.x1);
+  const ry = right ? platformY(right, right.x0) : ly;
+  return Math.max(level.pitY, Math.max(ly, ry) - 1.22);
+}
+
 function pitSpans(level: Level): Platform[] {
   const plats = [...level.platforms].sort((a, b) => a.x0 - b.x0);
   const spans: Platform[] = [];
   for (let i = 0; i < plats.length - 1; i++) {
     const a = plats[i]!;
     const b = plats[i + 1]!;
-    if (b.x0 - a.x1 > 0.2) spans.push({ x0: a.x1, x1: b.x0, y: level.pitY });
+    if (b.x0 - a.x1 > 0.2) spans.push({ x0: a.x1, x1: b.x0, y: pitDeckY(level, a, b) });
   }
   const last = plats[plats.length - 1];
   if (last) {
     const end = Math.max(level.endX, last.x1) + 24;
-    if (end - last.x1 > 0.2) spans.push({ x0: last.x1, x1: end, y: level.pitY });
+    if (end - last.x1 > 0.2) spans.push({ x0: last.x1, x1: end, y: pitDeckY(level, last) });
   }
   return spans;
 }
@@ -475,6 +564,13 @@ function closestOnPlatform(p: Platform, x: number, y: number): NearSolid {
 }
 
 function closestOnPitched(p: Platform, x: number, y: number): NearSolid {
+  if (p.ease) {
+    const px = Math.max(p.x0, Math.min(p.x1, x));
+    const py = platformY(p, px);
+    const { nx, ny } = platformNormal(p, px);
+    const signed = (x - px) * nx + (y - py) * ny;
+    return { px, py, nx, ny, dist: Math.abs(signed) };
+  }
   const dx = p.x1 - p.x0;
   const dy = (p.y1 ?? p.y) - p.y;
   const len2 = Math.max(1e-8, dx * dx + dy * dy);
@@ -484,7 +580,7 @@ function closestOnPitched(p: Platform, x: number, y: number): NearSolid {
   const py = p.y + t * dy;
   const rx = x - px;
   const ry = y - py;
-  const { nx, ny } = platformNormal(p);
+  const { nx, ny } = platformNormal(p, px);
   if (t > 0.001 && t < 0.999) {
     const signed = rx * nx + ry * ny;
     return { px, py, nx, ny, dist: Math.abs(signed) };
@@ -591,7 +687,7 @@ export function pushOutOfSolid(
       if (x < p.x0 - r || x > p.x1 + r) continue;
       const cx = Math.max(p.x0, Math.min(p.x1, x));
       const surf = platformY(p, cx);
-      const n = platformNormal(p);
+      const n = platformNormal(p, cx);
       const signed = (x - cx) * n.nx + (y - surf) * n.ny;
       const depth = r - signed;
       if (depth > 0 && (!best || depth > best.depth)) best = { nx: n.nx, ny: n.ny, depth };
@@ -650,9 +746,9 @@ export function fitView(cssW: number, cssH: number, desktop = false): { w: numbe
 /** Fraction of view width to keep ahead of Bill so more of the run is on screen. */
 const CAM_AHEAD = 0.18;
 
-export function camLookX(px: number, cam: Cam, vx = 0): number {
+export function camLookX(px: number, cam: Cam, vx = 0, ahead = CAM_AHEAD): number {
   const look = Math.max(-2.2, Math.min(2.2, vx * 0.28));
-  return px + cam.w * CAM_AHEAD + look;
+  return px + cam.w * ahead + look;
 }
 
 export function followCam(
@@ -663,16 +759,18 @@ export function followCam(
   dt: number,
   level: Level,
 ): void {
-  const targetX = camLookX(px, cam, vx);
+  const ahead = level.goal === "standingFlip" ? 0 : CAM_AHEAD;
+  const targetX = camLookX(px, cam, vx, ahead);
   cam.x += (targetX - cam.x) * Math.min(1, dt * 6);
   const minX = cam.w * 0.38;
   const maxX = level.endX - cam.w * 0.4;
   cam.x = Math.max(minX, Math.min(maxX, cam.x));
   const floor = groundAt(level, px);
   const falling = floor === null || py - floor > 1.4;
-  const targetY = falling
+  let targetY = falling
     ? py + cam.h * 0.22
     : floor + cam.h * 0.22;
+  if (level.bar && !falling) targetY += 0.55;
   cam.y += (targetY - cam.y) * Math.min(1, dt * (falling ? 14 : 5.5));
   // Keep a band of view under him so the ground can enter the frame before impact.
   const minBelow = cam.h * 0.34;
@@ -704,12 +802,23 @@ export function drawWorld(
   cssW: number,
   cssH: number,
   level: Level,
+  t = 0,
 ): void {
   if (level.train) {
     drawTrainCountry(ctx, cam, cssW, cssH, level);
     drawPit(ctx, cam, cssW, cssH, level);
     drawTrain(ctx, cam, cssW, cssH, level);
     drawObstacles(ctx, cam, cssW, cssH, level);
+    drawStartWall(ctx, cam, cssW, cssH, level);
+    if (!level.noFlag) drawFlag(ctx, cam, cssW, cssH, level);
+    return;
+  }
+  if (level.theme === "woods") {
+    drawWoodsBack(ctx, cam, cssW, cssH, level);
+    drawWoodsGround(ctx, cam, cssW, cssH, level);
+    drawWoodsRiver(ctx, cam, cssW, cssH, level, t);
+    drawRiverJunk(ctx, cam, cssW, cssH, level);
+    drawWoodsTrees(ctx, cam, cssW, cssH, level, false);
     drawStartWall(ctx, cam, cssW, cssH, level);
     if (!level.noFlag) drawFlag(ctx, cam, cssW, cssH, level);
     return;
@@ -727,11 +836,352 @@ export function drawWorld(
   drawDistantHarbour(ctx, cam, cssW, cssH);
   drawBackdrop(ctx, cam, cssW, cssH, level);
   drawPit(ctx, cam, cssW, cssH, level);
+  drawPitRoofs(ctx, cam, cssW, cssH, level);
   drawGround(ctx, cam, cssW, cssH, level);
   drawBoxes(ctx, cam, cssW, cssH, level);
   drawHoop(ctx, cam, cssW, cssH, level);
+  drawBar(ctx, cam, cssW, cssH, level);
   drawStartWall(ctx, cam, cssW, cssH, level);
   if (!level.noFlag) drawFlag(ctx, cam, cssW, cssH, level);
+}
+
+/** Near-camera trees drawn after Bill so he rides behind the trunks. */
+export function drawWorldForeground(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  if (level.theme !== "woods") return;
+  drawWoodsTrees(ctx, cam, cssW, cssH, level, true);
+}
+
+function drawWoodsBack(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  const ridgeY = cssH * 0.3;
+  const g = ctx.createLinearGradient(0, 0, 0, cssH);
+  g.addColorStop(0, "rgba(16, 28, 20, 0.42)");
+  g.addColorStop(0.38, "rgba(28, 42, 26, 0.55)");
+  g.addColorStop(1, "rgba(22, 32, 18, 0.78)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, cssW, cssH);
+
+  const ppm = cssW / cam.w;
+  const shift = cam.x * ppm * 0.07;
+  const step = 22;
+  const phase = ((shift % step) + step) % step;
+  const first = Math.floor(shift / step) - 2;
+  const n = Math.ceil(cssW / step) + 8;
+  ctx.fillStyle = "rgba(14, 24, 14, 0.72)";
+  ctx.beginPath();
+  ctx.moveTo(-40, ridgeY + 28);
+  for (let i = 0; i < n; i++) {
+    const id = first + i;
+    const sx = i * step - phase;
+    const h = 42 + Math.abs((id * 17 + 3) % 48);
+    const bw = 16 + Math.abs((id * 7) % 14);
+    ctx.lineTo(sx, ridgeY - h);
+    ctx.quadraticCurveTo(sx + bw * 0.5, ridgeY - h - 22, sx + bw, ridgeY - h * 0.35);
+  }
+  ctx.lineTo(cssW + 40, ridgeY + 28);
+  ctx.closePath();
+  ctx.fill();
+
+  const crest = worldToScreenY(cam, cssH, level.platforms[0]?.y ?? 10);
+  if (crest > ridgeY) {
+    const floor = ctx.createLinearGradient(0, ridgeY, 0, Math.max(crest, cssH));
+    floor.addColorStop(0, "rgba(32, 46, 26, 0.55)");
+    floor.addColorStop(1, "#24301c");
+    ctx.fillStyle = floor;
+    ctx.fillRect(0, ridgeY, cssW, cssH - ridgeY);
+  }
+}
+
+function drawWoodsGround(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  const ppm = cssW / cam.w;
+  const bot = cssH + 48;
+  for (const p of level.platforms) {
+    const sx0 = worldToScreenX(cam, cssW, p.x0);
+    const sx1 = worldToScreenX(cam, cssW, p.x1);
+    if (sx1 < -40 || sx0 > cssW + 40) continue;
+    const steps = p.ease || isPitched(p) ? 20 : 1;
+    const trace = (oy: number) => {
+      for (let i = 0; i <= steps; i++) {
+        const x = p.x0 + ((p.x1 - p.x0) * i) / steps;
+        const sx = worldToScreenX(cam, cssW, x);
+        const sy = worldToScreenY(cam, cssH, platformY(p, x)) + oy;
+        if (i === 0) ctx.moveTo(sx, sy);
+        else ctx.lineTo(sx, sy);
+      }
+    };
+    ctx.fillStyle = "#2a3820";
+    ctx.beginPath();
+    trace(0);
+    ctx.lineTo(sx1, bot);
+    ctx.lineTo(sx0, bot);
+    ctx.closePath();
+    ctx.fill();
+    const yTop = worldToScreenY(cam, cssH, Math.max(p.y, p.y1 ?? p.y));
+    const shade = ctx.createLinearGradient(0, yTop, 0, bot);
+    shade.addColorStop(0, "rgba(18, 26, 12, 0)");
+    shade.addColorStop(1, "rgba(8, 12, 8, 0.5)");
+    ctx.fillStyle = shade;
+    ctx.beginPath();
+    trace(0);
+    ctx.lineTo(sx1, bot);
+    ctx.lineTo(sx0, bot);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "#4a3a28";
+    ctx.lineWidth = Math.max(6, 0.16 * ppm);
+    ctx.beginPath();
+    trace(0);
+    ctx.stroke();
+    ctx.strokeStyle = "#6a5a40";
+    ctx.lineWidth = Math.max(3, 0.08 * ppm);
+    ctx.beginPath();
+    trace(-2);
+    ctx.stroke();
+    ctx.strokeStyle = "#3d5230";
+    ctx.lineWidth = Math.max(2, 0.05 * ppm);
+    ctx.beginPath();
+    trace(-4);
+    ctx.stroke();
+  }
+}
+
+function drawWoodsRiver(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+  t: number,
+): void {
+  const x0 = worldToScreenX(cam, cssW, level.gapX0);
+  const x1 = worldToScreenX(cam, cssW, level.gapX1);
+  const waterY = worldToScreenY(cam, cssH, level.pitY);
+  const leftLip = worldToScreenY(cam, cssH, platformY(level.platforms[2] ?? level.platforms[0]!, level.gapX0));
+  const rightLip = worldToScreenY(
+    cam,
+    cssH,
+    platformY(level.platforms[3] ?? level.platforms[0]!, level.gapX1),
+  );
+  const w = Math.max(4, x1 - x0);
+  if (x1 < -20 || x0 > cssW + 20) return;
+
+  ctx.fillStyle = "#3a2c1c";
+  ctx.beginPath();
+  ctx.moveTo(x0 - 10, leftLip);
+  ctx.lineTo(x0 + 18, waterY);
+  ctx.lineTo(x0 - 10, waterY + 40);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x1 + 10, rightLip);
+  ctx.lineTo(x1 - 18, waterY);
+  ctx.lineTo(x1 + 10, waterY + 40);
+  ctx.closePath();
+  ctx.fill();
+
+  const water = ctx.createLinearGradient(0, waterY - 8, 0, cssH);
+  water.addColorStop(0, "#2a4a48");
+  water.addColorStop(0.18, "#1c3a3c");
+  water.addColorStop(0.55, "#163032");
+  water.addColorStop(1, "#0c1c1e");
+  ctx.fillStyle = water;
+  ctx.fillRect(x0, waterY, w, cssH - waterY + 8);
+
+  ctx.fillStyle = "rgba(70, 110, 96, 0.35)";
+  ctx.fillRect(x0, waterY, w, Math.max(4, 0.08 * (cssW / cam.w)));
+  ctx.strokeStyle = "rgba(180, 210, 196, 0.22)";
+  ctx.lineWidth = 1.4;
+  const ppm = cssW / cam.w;
+  for (let i = 0; i < 7; i++) {
+    const y = waterY + 6 + i * 9;
+    const wobble = Math.sin(t * 1.7 + i * 1.3) * 10;
+    ctx.globalAlpha = 0.18 + (i % 2) * 0.08;
+    ctx.beginPath();
+    ctx.moveTo(x0 + 6, y);
+    ctx.bezierCurveTo(x0 + w * 0.3 + wobble, y + 3, x0 + w * 0.65 - wobble, y - 2, x1 - 6, y + 1);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.fillStyle = "#2a3a1c";
+  for (let i = 0; i < 9; i++) {
+    const side = i % 2 === 0 ? leftLip : rightLip;
+    const edge = i % 2 === 0 ? x0 : x1;
+    const reedX = i % 2 === 0 ? edge + 6 + (i % 3) * 5 : edge - 8 - (i % 3) * 4;
+    ctx.fillRect(reedX, side - 10 - (i % 4) * 4, Math.max(2, 0.04 * ppm), 16 + (i % 3) * 6);
+  }
+}
+
+function drawRiverJunk(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  const ppm = cssW / cam.w;
+  for (const o of level.obstacles ?? []) {
+    if (!o.kind) continue;
+    const b = obstacleBox(level, o);
+    const x0 = worldToScreenX(cam, cssW, b.x0);
+    const x1 = worldToScreenX(cam, cssW, b.x1);
+    const top = worldToScreenY(cam, cssH, b.y1);
+    const bot = worldToScreenY(cam, cssH, b.y0);
+    const cx = (x0 + x1) * 0.5;
+    const w = Math.max(6, x1 - x0);
+    const h = Math.max(6, bot - top);
+    if (x1 < -40 || x0 > cssW + 40) continue;
+    if (o.kind === "tyre") {
+      ctx.fillStyle = "#1a1614";
+      ctx.beginPath();
+      ctx.ellipse(cx, (top + bot) * 0.5, w * 0.48, h * 0.42, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#3a3632";
+      ctx.beginPath();
+      ctx.ellipse(cx, (top + bot) * 0.5, w * 0.22, h * 0.2, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#5a5248";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(cx, (top + bot) * 0.5, w * 0.36, h * 0.3, 0.2, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (o.kind === "trolley") {
+      ctx.strokeStyle = "#6a6e72";
+      ctx.lineWidth = Math.max(1.5, 0.03 * ppm);
+      ctx.strokeRect(x0 + 4, top + 8, w - 8, h * 0.55);
+      ctx.beginPath();
+      ctx.moveTo(x0 + 6, top + 8);
+      ctx.lineTo(x0 + 6, top + 8 + h * 0.55);
+      ctx.moveTo(x1 - 6, top + 8);
+      ctx.lineTo(x1 - 6, top + 8 + h * 0.55);
+      ctx.moveTo(x0 + 4, top + 8 + h * 0.28);
+      ctx.lineTo(x1 - 4, top + 8 + h * 0.28);
+      ctx.stroke();
+      ctx.strokeStyle = "#8a8e92";
+      ctx.beginPath();
+      ctx.moveTo(x0 + 8, top + 8);
+      ctx.lineTo(x0 - 4, top - 6);
+      ctx.lineTo(x0 + 10, top - 8);
+      ctx.stroke();
+      ctx.fillStyle = "#1a1614";
+      const wr = Math.max(4, 0.08 * ppm);
+      ctx.beginPath();
+      ctx.arc(x0 + 10, bot - 4, wr, 0, Math.PI * 2);
+      ctx.arc(x1 - 10, bot - 4, wr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(40, 70, 62, 0.35)";
+      ctx.fillRect(x0 + 6, top + 10, w - 12, h * 0.22);
+    } else if (o.kind === "bag") {
+      ctx.fillStyle = "#2a2e28";
+      ctx.beginPath();
+      ctx.ellipse(cx, (top + bot) * 0.55, w * 0.48, h * 0.42, -0.15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#3a3e36";
+      ctx.beginPath();
+      ctx.moveTo(cx - 4, top + 4);
+      ctx.lineTo(cx + 4, top + 4);
+      ctx.lineTo(cx + 2, top - 4);
+      ctx.lineTo(cx - 2, top - 4);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.fillStyle = "#e07028";
+      ctx.beginPath();
+      ctx.moveTo(cx, top);
+      ctx.lineTo(x1 - 2, bot - 4);
+      ctx.lineTo(x0 + 2, bot - 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#f0f4f6";
+      ctx.fillRect(cx - 4, top + h * 0.28, 8, Math.max(3, 0.06 * ppm));
+    }
+  }
+}
+
+const WOODS_TREES: { x: number; s: number; fg: boolean }[] = [
+  { x: 0.95, s: 1.2, fg: false },
+  { x: 2.55, s: 1.35, fg: false },
+  { x: 6.85, s: 1.18, fg: false },
+  { x: 9.4, s: 1.12, fg: true },
+  { x: 10.4, s: 1.08, fg: false },
+  { x: 13.7, s: 1.0, fg: false },
+  { x: 16.2, s: 1.14, fg: true },
+  { x: 17.15, s: 1.12, fg: false },
+  { x: 21.4, s: 1.22, fg: true },
+  { x: 27.7, s: 1.15, fg: false },
+  { x: 31.1, s: 1.18, fg: true },
+  { x: 34.2, s: 1.05, fg: false },
+];
+
+function drawWoodsTrees(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+  foreground: boolean,
+): void {
+  const ppm = cssW / cam.w;
+  for (const tree of WOODS_TREES) {
+    if (tree.fg !== foreground) continue;
+    const gy = routeAt(level, tree.x);
+    const sx = worldToScreenX(cam, cssW, tree.x);
+    const sy = worldToScreenY(cam, cssH, gy);
+    if (sx < -90 || sx > cssW + 90) continue;
+    const scale = tree.s * (foreground ? 1.12 : 1);
+    drawWoodsTree(ctx, sx, sy, ppm, Math.abs(Math.floor(tree.x * 17)), scale, foreground);
+  }
+}
+
+function drawWoodsTree(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  gy: number,
+  ppm: number,
+  seed: number,
+  scale: number,
+  near: boolean,
+): void {
+  const h = (4.8 + (seed % 7) * 0.55) * ppm * scale;
+  const trunkW = Math.max(5, 0.18 * ppm * scale);
+  ctx.fillStyle = near ? "#1a1410" : "#241c16";
+  ctx.fillRect(sx - trunkW * 0.5, gy - h * 0.74, trunkW, h * 0.74);
+  ctx.fillStyle = near ? "rgba(18, 12, 8, 0.28)" : "rgba(10, 8, 6, 0.18)";
+  ctx.fillRect(sx + trunkW * 0.15, gy - h * 0.74, trunkW * 0.28, h * 0.74);
+  const canopy = near ? "#1a3018" : "#243822";
+  const dark = near ? "#122414" : "#1c2e1a";
+  ctx.fillStyle = canopy;
+  ctx.beginPath();
+  ctx.ellipse(sx, gy - h * 0.82, h * 0.3, h * 0.26, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = dark;
+  ctx.beginPath();
+  ctx.ellipse(sx - h * 0.16, gy - h * 0.7, h * 0.22, h * 0.18, -0.45, 0, Math.PI * 2);
+  ctx.ellipse(sx + h * 0.18, gy - h * 0.72, h * 0.2, h * 0.16, 0.4, 0, Math.PI * 2);
+  ctx.fill();
+  if (near) {
+    ctx.fillStyle = "rgba(28, 48, 24, 0.55)";
+    ctx.beginPath();
+    ctx.ellipse(sx + h * 0.05, gy - h * 0.9, h * 0.18, h * 0.14, 0.15, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 function drawTrainCountry(
@@ -804,7 +1254,7 @@ function drawTrain(
   const x0 = worldToScreenX(cam, cssW, p.x0);
   const x1 = worldToScreenX(cam, cssW, p.x1);
   const gy = worldToScreenY(cam, cssH, roof);
-  const rail = worldToScreenY(cam, cssH, roof - 2.05);
+  const rail = worldToScreenY(cam, cssH, roof - TRAIN_RAIL_DROP);
   const w = x1 - x0;
   const bodyH = Math.max(8, rail - gy);
 
@@ -836,19 +1286,8 @@ function drawTrain(
     const xEnd = worldToScreenX(cam, cssW, Math.min(p.x1, wx + carW));
     ctx.fillStyle = "#2a343c";
     ctx.fillRect(xEnd - 4, gy + 6, 8, bodyH - 10);
-    ctx.fillStyle = "#b8e4f4";
-    ctx.strokeStyle = "#2a343c";
-    ctx.lineWidth = 2;
-    for (let i = 0; i < 4; i++) {
-      const win = worldToScreenX(cam, cssW, wx + 1.15 + i * 1.55);
-      const ww = Math.max(12, 0.48 * ppm);
-      const wh = Math.max(16, 0.42 * ppm);
-      if (win < x0 || win > x1 - ww) continue;
-      ctx.fillRect(win, gy + 20, ww, wh);
-      ctx.strokeRect(win, gy + 20, ww, wh);
-    }
     const wheelY = rail - 4;
-    const wr = Math.max(8, 0.26 * ppm);
+    const wr = Math.max(10, 0.46 * ppm);
     const w1 = worldToScreenX(cam, cssW, wx + 1.8);
     const w2 = worldToScreenX(cam, cssW, wx + 6.6);
     ctx.fillStyle = "#1a1410";
@@ -863,6 +1302,25 @@ function drawTrain(
     ctx.arc(w2, wheelY, wr * 0.45, 0, Math.PI * 2);
     ctx.stroke();
   }
+
+  const frame = Math.max(2, 0.04 * ppm);
+  visitTrainWindows(level, (slot) => {
+    const win = worldToScreenX(cam, cssW, slot.wx);
+    const ww = slot.ww * ppm;
+    const wh = slot.wh * ppm;
+    if (win < x0 || win > x1 - ww) return;
+    const winTop = worldToScreenY(cam, cssH, slot.wy);
+    ctx.fillStyle = "#b8e4f4";
+    ctx.fillRect(win, winTop, ww, wh);
+    occupyWindow(ctx, { sx: win, sy: winTop, sw: ww, sh: wh, ppm, slot });
+    ctx.strokeStyle = "#2a343c";
+    ctx.lineWidth = frame;
+    ctx.strokeRect(win, winTop, ww, wh);
+    ctx.beginPath();
+    ctx.moveTo(win, winTop + wh * 0.5);
+    ctx.lineTo(win + ww, winTop + wh * 0.5);
+    ctx.stroke();
+  });
 }
 
 function drawObstacles(
@@ -874,6 +1332,7 @@ function drawObstacles(
 ): void {
   const ppm = cssW / cam.w;
   for (const o of level.obstacles ?? []) {
+    if (o.kind) continue;
     const b = obstacleBox(level, o);
     const x0 = worldToScreenX(cam, cssW, b.x0);
     const x1 = worldToScreenX(cam, cssW, b.x1);
@@ -1192,13 +1651,13 @@ function drawPit(
   level: Level,
 ): void {
   const leftY = level.platforms[0]?.y ?? 0;
-  const y0 = worldToScreenY(cam, cssH, leftY);
-  const yFloor = worldToScreenY(cam, cssH, level.pitY);
-  const h = Math.max(0, yFloor - y0);
   for (const span of pitSpans(level)) {
     const x0 = worldToScreenX(cam, cssW, span.x0);
     const x1 = worldToScreenX(cam, cssW, span.x1);
     const w = Math.max(0, x1 - x0);
+    const y0 = worldToScreenY(cam, cssH, leftY);
+    const yFloor = worldToScreenY(cam, cssH, span.y);
+    const h = Math.max(0, yFloor - y0);
     if (w < 2 || h < 2) continue;
     const g = ctx.createLinearGradient(0, y0, 0, yFloor);
     g.addColorStop(0, "rgba(8, 14, 22, 0.08)");
@@ -1206,6 +1665,78 @@ function drawPit(
     g.addColorStop(1, "rgba(6, 10, 16, 0.42)");
     ctx.fillStyle = g;
     ctx.fillRect(x0, y0, w, h);
+  }
+}
+
+/** Lower terrace in each well, so a missed jump lands on a roof, not empty sky. */
+function drawPitRoofs(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  for (const span of pitSpans(level)) {
+    drawRooftop(ctx, cam, cssW, cssH, span, level.id);
+  }
+}
+
+export function visitWindows(level: Level, fn: (w: FolkSlot) => void): void {
+  if (level.theme === "park" || level.theme === "woods") return;
+  if (level.train) {
+    visitTrainWindows(level, fn);
+    return;
+  }
+  for (const p of level.platforms) visitPadWindows(level.id, p, fn);
+}
+
+function visitPadWindows(levelId: number, p: Platform, fn: (w: FolkSlot) => void): void {
+  const pitched = isPitched(p);
+  const roofTop = Math.max(p.y, p.y1 ?? p.y);
+  const first = Math.ceil((p.x0 + 0.7) / FACADE_WIN_PITCH) * FACADE_WIN_PITCH;
+  for (let storey = 0; storey < 10; storey++) {
+    const wy = roofTop - FACADE_WIN_DROP - storey * FACADE_STOREY;
+    for (let wx = first; wx + FACADE_WIN_W * 0.5 < p.x1; wx += FACADE_WIN_PITCH) {
+      if (pitched) {
+        const surf = platformY(p, wx);
+        if (wy > surf - 1.05) continue;
+      }
+      const mid = wx + FACADE_WIN_W * 0.5;
+      fn({
+        id: `${levelId}:f:${wx.toFixed(2)}:${storey}`,
+        wx,
+        wy,
+        ww: FACADE_WIN_W,
+        wh: FACADE_WIN_H,
+        storey,
+        roofY: pitched ? platformY(p, mid) : p.y,
+        kind: "facade",
+        block: `${levelId}:${p.x0.toFixed(2)}:${p.y.toFixed(2)}`,
+      });
+    }
+  }
+}
+
+function visitTrainWindows(level: Level, fn: (w: FolkSlot) => void): void {
+  const p = level.platforms[0];
+  if (!p) return;
+  const roof = p.y;
+  const carW = 8.6;
+  for (let carX = p.x0; carX < p.x1 - 0.4; carX += carW) {
+    for (let i = 0; i < 4; i++) {
+      const wx = carX + 1.15 + i * TRAIN_WIN_PITCH;
+      if (wx < p.x0 || wx > p.x1 - TRAIN_WIN_W) continue;
+      fn({
+        id: `${level.id}:t:${wx.toFixed(2)}`,
+        wx,
+        wy: roof - TRAIN_WIN_DROP,
+        ww: TRAIN_WIN_W,
+        wh: TRAIN_WIN_H,
+        storey: 0,
+        roofY: roof,
+        kind: "train",
+      });
+    }
   }
 }
 
@@ -1217,8 +1748,58 @@ function drawGround(
   level: Level,
 ): void {
   for (const p of level.platforms) {
-    drawRooftop(ctx, cam, cssW, cssH, p);
+    drawRooftop(ctx, cam, cssW, cssH, p, level.id);
   }
+}
+
+function drawFacadeWindows(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  p: Platform,
+  levelId: number,
+): void {
+  const ppm = cssW / cam.w;
+  const x0 = worldToScreenX(cam, cssW, p.x0);
+  const x1 = worldToScreenX(cam, cssW, p.x1);
+  const winW = FACADE_WIN_W * ppm;
+  const winH = FACADE_WIN_H * ppm;
+  const pitched = isPitched(p);
+  const roofTop = Math.max(p.y, p.y1 ?? p.y);
+  const frame = Math.max(1.5, 0.03 * ppm);
+  for (let storey = 0; storey < 10; storey++) {
+    const wy = roofTop - FACADE_WIN_DROP - storey * FACADE_STOREY;
+    const y = worldToScreenY(cam, cssH, wy);
+    if (y > cssH + 8) break;
+    if (!pitched) {
+      ctx.strokeStyle = "rgba(40, 18, 16, 0.3)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x0, y - 8);
+      ctx.lineTo(x1, y - 8);
+      ctx.stroke();
+    }
+  }
+  visitPadWindows(levelId, p, (slot) => {
+    const y = worldToScreenY(cam, cssH, slot.wy);
+    if (y > cssH + 8) return;
+    const sx = worldToScreenX(cam, cssW, slot.wx);
+    if (sx + winW < x0 || sx > x1) return;
+    const lit = Math.abs(Math.floor(slot.wx * 11 + slot.storey * 5)) % 5 === 0;
+    ctx.fillStyle = lit ? "rgba(240, 162, 58, 0.58)" : "#1c2830";
+    ctx.fillRect(sx, y, winW, winH);
+    occupyWindow(ctx, { sx, sy: y, sw: winW, sh: winH, ppm, slot });
+    ctx.strokeStyle = "rgba(210, 204, 196, 0.45)";
+    ctx.lineWidth = frame;
+    ctx.strokeRect(sx, y, winW, winH);
+    ctx.beginPath();
+    ctx.moveTo(sx, y + winH * 0.5);
+    ctx.lineTo(sx + winW, y + winH * 0.5);
+    ctx.moveTo(sx + winW * 0.5, y);
+    ctx.lineTo(sx + winW * 0.5, y + winH);
+    ctx.stroke();
+  });
 }
 
 function drawRooftop(
@@ -1227,9 +1808,10 @@ function drawRooftop(
   cssW: number,
   cssH: number,
   p: Platform,
+  levelId: number,
 ): void {
   if (isPitched(p)) {
-    drawPitchedRooftop(ctx, cam, cssW, cssH, p);
+    drawPitchedRooftop(ctx, cam, cssW, cssH, p, levelId);
     return;
   }
   const ppm = cssW / cam.w;
@@ -1249,35 +1831,7 @@ function drawRooftop(
   ctx.fillStyle = down;
   ctx.fillRect(x0, gy, w, depth);
 
-  const winW = Math.max(9, 0.4 * ppm);
-  const winH = Math.max(13, 0.58 * ppm);
-  const pitch = 1.12;
-  const first = Math.ceil((p.x0 + 0.38) / pitch) * pitch;
-  for (let storey = 0; storey < 7; storey++) {
-    const wy = p.y - 0.52 - storey * 2.72;
-    const y = worldToScreenY(cam, cssH, wy);
-    if (y > cssH + 8) break;
-    ctx.strokeStyle = "rgba(40, 18, 16, 0.3)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x0, y - 6);
-    ctx.lineTo(x1, y - 6);
-    ctx.stroke();
-    for (let wx = first; wx + 0.45 < p.x1; wx += pitch) {
-      const sx = worldToScreenX(cam, cssW, wx);
-      if (sx + winW < x0 || sx > x1) continue;
-      const lit = Math.abs(Math.floor(wx * 11 + storey * 5)) % 5 === 0;
-      ctx.fillStyle = lit ? "rgba(240, 162, 58, 0.58)" : "#1c2830";
-      ctx.fillRect(sx, y, winW, winH);
-      ctx.strokeStyle = "rgba(210, 204, 196, 0.45)";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(sx, y, winW, winH);
-      ctx.beginPath();
-      ctx.moveTo(sx, y + winH * 0.5);
-      ctx.lineTo(sx + winW, y + winH * 0.5);
-      ctx.stroke();
-    }
-  }
+  drawFacadeWindows(ctx, cam, cssW, cssH, p, levelId);
 
   ctx.fillStyle = "#3c3c42";
   ctx.fillRect(x0, gy, w, Math.max(7, 0.2 * ppm));
@@ -1317,6 +1871,7 @@ function drawPitchedRooftop(
   cssW: number,
   cssH: number,
   p: Platform,
+  levelId: number,
 ): void {
   const ppm = cssW / cam.w;
   const x0 = worldToScreenX(cam, cssW, p.x0);
@@ -1346,31 +1901,7 @@ function drawPitchedRooftop(
   ctx.closePath();
   ctx.fill();
 
-  const winW = Math.max(9, 0.4 * ppm);
-  const winH = Math.max(13, 0.58 * ppm);
-  const pitch = 1.12;
-  const first = Math.ceil((p.x0 + 0.38) / pitch) * pitch;
-  const roofTop = Math.max(p.y, p.y1 ?? p.y);
-  for (let storey = 0; storey < 8; storey++) {
-    const wy = roofTop - 0.52 - storey * 2.72;
-    for (let wx = first; wx + 0.45 < p.x1; wx += pitch) {
-      const surf = platformY(p, wx);
-      if (wy > surf - 0.7) continue;
-      const sx = worldToScreenX(cam, cssW, wx);
-      const sy = worldToScreenY(cam, cssH, wy);
-      if (sy > cssH + 8 || sx + winW < x0 || sx > x1) continue;
-      const lit = Math.abs(Math.floor(wx * 11 + storey * 5)) % 5 === 0;
-      ctx.fillStyle = lit ? "rgba(240, 162, 58, 0.58)" : "#1c2830";
-      ctx.fillRect(sx, sy, winW, winH);
-      ctx.strokeStyle = "rgba(210, 204, 196, 0.45)";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(sx, sy, winW, winH);
-      ctx.beginPath();
-      ctx.moveTo(sx, sy + winH * 0.5);
-      ctx.lineTo(sx + winW, sy + winH * 0.5);
-      ctx.stroke();
-    }
-  }
+  drawFacadeWindows(ctx, cam, cssW, cssH, p, levelId);
 
   ctx.strokeStyle = "#3c3c42";
   ctx.lineWidth = Math.max(7, 0.2 * ppm);
@@ -1491,6 +2022,75 @@ function drawHoop(
   ctx.stroke();
 }
 
+const BAR_LEN_Z = 2.9;
+const BAR_RADIUS = 0.11;
+
+export function barReach(bar: HighBar): number {
+  return bar.reach ?? 0.76;
+}
+
+function drawBar(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  const bar = level.bar;
+  if (!bar) return;
+  const ppm = cssW / cam.w;
+  const sx = worldToScreenX(cam, cssW, bar.x);
+  const sy = worldToScreenY(cam, cssH, bar.y);
+  const half = Math.max(7, 0.5 * BAR_LEN_Z * HOOP_FORESHORTEN * ppm);
+  const rad = Math.max(4.5, BAR_RADIUS * ppm);
+  const nearX = sx - half;
+  const farX = sx + half * 0.78;
+  const farY = sy + rad * 0.38;
+  const farR = rad * 0.7;
+  const pit = worldToScreenY(cam, cssH, level.pitY);
+  ctx.strokeStyle = "#3a342e";
+  ctx.lineWidth = Math.max(3, 0.055 * ppm);
+  ctx.beginPath();
+  ctx.moveTo(farX, farY);
+  ctx.lineTo(farX + 5, pit);
+  ctx.stroke();
+  ctx.strokeStyle = "#2a2420";
+  ctx.lineWidth = Math.max(5, 0.1 * ppm);
+  ctx.beginPath();
+  ctx.moveTo(nearX, sy);
+  ctx.lineTo(nearX - 3, pit);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(42, 36, 32, 0.55)";
+  ctx.beginPath();
+  ctx.ellipse(sx - 4, sy + 3, half + rad * 0.4, rad * 1.2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const steel = ctx.createLinearGradient(sx, sy - rad * 2.2, sx, sy + rad * 2.2);
+  steel.addColorStop(0, "#f2f6f8");
+  steel.addColorStop(0.42, "#b7c0c6");
+  steel.addColorStop(1, "#5e666c");
+  ctx.fillStyle = steel;
+  ctx.beginPath();
+  ctx.ellipse(sx, sy, half, rad, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#dfe6ea";
+  ctx.beginPath();
+  ctx.arc(nearX, sy, rad * 1.12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#6e767c";
+  ctx.beginPath();
+  ctx.arc(farX, farY, farR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255, 248, 236, 0.62)";
+  ctx.lineWidth = Math.max(1.6, 0.03 * ppm);
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - rad * 0.32, half * 0.7, rad * 0.32, 0, Math.PI, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(246, 248, 250, 0.8)";
+  ctx.beginPath();
+  ctx.ellipse(sx, sy, Math.max(3, 0.07 * ppm), rad * 0.82, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawStartWall(
   ctx: CanvasRenderingContext2D,
   cam: Cam,
@@ -1513,7 +2113,7 @@ function drawStartWall(
     ctx.fillRect(x - 5, 0, 5, gy);
     return;
   }
-  if (level.theme === "park") {
+  if (level.theme === "park" || level.theme === "woods") {
     ctx.fillStyle = "#24301c";
     ctx.fillRect(0, gy, x, cssH - gy);
     ctx.fillStyle = "#2f4a28";
@@ -1592,6 +2192,61 @@ export function worldToScreen(
     y: worldToScreenY(cam, cssH, y),
     ppm: cssW / cam.w,
   };
+}
+
+/** Soft dusk contact blob on the pad under a character. Shrinks and fades with height. */
+export function drawCharShadow(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  x: number,
+  surfaceY: number,
+  opts: { air?: number; width?: number; stretch?: number; slope?: number } = {},
+): void {
+  const air = Math.max(0, opts.air ?? 0);
+  if (air > 13) return;
+  const s = worldToScreen(cam, cssW, cssH, x, surfaceY);
+  if (s.x < -140 || s.x > cssW + 140) return;
+
+  const close = 1 / (1 + air * 0.4);
+  const fade = Math.max(0, 1 - air / 8.5);
+  if (fade < 0.03) return;
+  const width = opts.width ?? 1;
+  const stretch = Math.max(0.72, opts.stretch ?? 1);
+  const rx = s.ppm * (0.22 + 0.38 * close) * width * stretch;
+  const ry = s.ppm * (0.05 + 0.09 * close) * width * (0.72 + 0.28 / Math.sqrt(stretch));
+  const a = 0.58 * fade * close * close;
+  const ox = -s.ppm * (0.045 + Math.min(0.28, air * 0.035));
+  const oy = s.ppm * 0.02;
+
+  ctx.save();
+  ctx.translate(s.x + ox, s.y + oy);
+  const slope = opts.slope ?? 0;
+  if (Math.abs(slope) > 0.02) ctx.rotate(-Math.atan(slope));
+  ctx.scale(rx, ry);
+
+  const wash = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  wash.addColorStop(0, `rgba(10, 8, 16, ${a * 0.42})`);
+  wash.addColorStop(0.42, `rgba(10, 8, 16, ${a * 0.22})`);
+  wash.addColorStop(1, "rgba(10, 8, 16, 0)");
+  ctx.fillStyle = wash;
+  ctx.beginPath();
+  ctx.arc(0, 0, 1, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (close > 0.32) {
+    const coreA = a * 0.95 * close;
+    const core = ctx.createRadialGradient(0, 0, 0, 0, 0, 0.52);
+    core.addColorStop(0, `rgba(6, 5, 10, ${coreA})`);
+    core.addColorStop(0.5, `rgba(6, 5, 10, ${coreA * 0.38})`);
+    core.addColorStop(1, "rgba(6, 5, 10, 0)");
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(0, 0, 0.52, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 export function screenToWorld(
