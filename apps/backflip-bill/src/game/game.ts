@@ -740,6 +740,12 @@ export class Game {
           this.flash(e.spins >= 2 ? `Hard ${spinLabel(e.spins)}` : "Hard landing");
           burst(this.dust, e.x, e.y, 12, "rgba(240,162,58,0.8)", 4);
           this.tickKidLaugh(1.6);
+        } else if (this.bill.splashEvent) {
+          this.sfx.splash(true);
+          this.flash("You're having a laugh");
+          burst(this.dust, e.x, e.y, 22, "rgba(150,190,180,0.88)", 5.6, true);
+          burst(this.dust, e.x, e.y + 0.08, 10, "rgba(210,230,220,0.7)", 3.4, true);
+          this.tickKidLaugh(2.4);
         } else {
           this.sfx.fall(e.impact);
           this.flash("You're having a laugh");
@@ -813,6 +819,10 @@ export class Game {
       }
       if (this.bill.boardKickEvent) {
         burst(this.dust, this.bill.x, this.bill.y - HIP_HEIGHT, 8, "rgba(180,170,155,0.7)", 3.2);
+      }
+      if (this.bill.pushPlantEvent) {
+        this.sfx.grit();
+        burst(this.dust, this.bill.x - 0.22, this.bill.y - HIP_HEIGHT, 6, "rgba(180,170,155,0.7)", 2.8);
       }
       if (this.bill.boardSplashEvent) {
         this.sfx.splash();

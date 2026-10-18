@@ -78,10 +78,16 @@ export class Sfx {
     this.thud(92, 0.09, 0.1);
   }
 
-  public splash(): void {
-    this.noiseBurst(0.14, 0.1, 320, 1.3);
-    this.thud(56, 0.1, 0.08);
-    this.sweep(210, 70, 0.18, 0.07, "sine");
+  public splash(heavy = false): void {
+    const k = heavy ? 1.5 : 1;
+    this.noiseBurst(0.14 * k, 0.1 * k, 280, 1.3);
+    this.thud(56, 0.1 * k, 0.08 * k);
+    this.sweep(210, 70, 0.18 * k, 0.07, "sine");
+    if (heavy) {
+      this.noiseBurst(0.22, 0.16, 160, 0.7);
+      this.thud(38, 0.2, 0.14);
+      this.sweep(140, 42, 0.28, 0.09, "sine");
+    }
   }
 
   public cleanLand(impact = 6): void {

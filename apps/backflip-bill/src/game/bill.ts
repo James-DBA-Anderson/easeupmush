@@ -70,6 +70,8 @@ export interface Board {
 }
 
 const SKATE_CAP = 9.7;
+/** Hip-to-deck length while riding — keeps the board under the shoes. */
+const BOARD_RIDE = 0.05;
 const JUMP_TO_BOARD = 0.4;
 const BAR_SWING_MAX = 20;
 /** Reach for the rail from well before it is on camera. */
@@ -80,9 +82,18 @@ function slideSitRot(want: number): number {
   return want * 0.72;
 }
 
+function skateHipFactor(ny: number): number {
+  return 1 - 0.16 * Math.min(1, (1 - ny) * 2.2);
+}
+
 function slideHip(ny: number, board: boolean): number {
-  if (board) return Math.max(0.55, ny);
+  if (board) return skateHipFactor(ny);
   return Math.max(0.48, ny * 0.88);
+}
+
+function skateLeanBack(slope: number): number {
+  const steep = Math.min(1, Math.abs(slope) / 0.85);
+  return slope * (0.86 - 0.08 * steep);
 }
 
 type BandageSpot = "lKnee" | "rKnee" | "lElb" | "rElb";
@@ -189,8 +200,16 @@ export class Bill {
   board: Board | null = null;
   boardKickEvent = false;
   boardSplashEvent = false;
+  splashEvent = false;
   /** 0–1: holding run-forward on the board — extra push. */
   push = 0;
+  /** Slope the deck follows while riding. Body lean-back is separate. */
+  boardAng = 0;
+  /** 0–1: kicking foot off the ground for a push. */
+  pushKick = 0;
+  private pushT = 0;
+  private pushU = 0;
+  pushPlantEvent = false;
   /** Debug sim: mouse is carrying him. */
   held = false;
 
@@ -264,10 +283,16 @@ export class Bill {
     this.barLoopEvent = false;
     this.boardKickEvent = false;
     this.boardSplashEvent = false;
+    this.splashEvent = false;
     this.push = 0;
+    this.boardAng = 0;
+    this.pushKick = 0;
+    this.pushT = 0;
+    this.pushU = 0;
+    this.pushPlantEvent = false;
     this.held = false;
     this.board = level.theme === "woods"
-      ? { x: this.x, y: this.y - HIP_HEIGHT + 0.04, vx: 0, vy: 0, rot: 0, omega: 0, on: true, wet: 0 }
+      ? { x: this.x, y: this.y - (HIP_HEIGHT - BOARD_RIDE), vx: 0, vy: 0, rot: 0, omega: 0, on: true, wet: 0 }
       : null;
   }
 
@@ -357,6 +382,8 @@ export class Bill {
     this.barLoopEvent = false;
     this.boardKickEvent = false;
     this.boardSplashEvent = false;
+    this.splashEvent = false;
+    this.pushPlantEvent = false;
     this.snapEvents.length = 0;
     this.time += dt;
     this.died = false;
@@ -390,7 +417,7 @@ export class Bill {
 
     if (this.rag) {
       this.stepRagdoll(dt, level);
-      if (!this.held) this.checkGapDeath(level);
+      if (!this.held) this.checkGapDeath(level, dt);
       this.tryFinish(level);
       this.stepBoard(dt, level);
       return;
@@ -398,7 +425,7 @@ export class Bill {
 
     if (this.state === "slide") {
       this.stepSlide(dt, level, run);
-      this.checkGapDeath(level);
+      this.checkGapDeath(level, dt);
       this.tryFinish(level);
       this.stepBoard(dt, level);
       return;
@@ -406,7 +433,7 @@ export class Bill {
 
     if (this.state === "swing") {
       this.stepSwing(dt, jump, tuckAxis, level);
-      this.checkGapDeath(level);
+      this.checkGapDeath(level, dt);
       this.tryFinish(level);
       this.stepBoard(dt, level);
       return;
@@ -423,7 +450,7 @@ export class Bill {
       if (pitch && this.state === "ground") {
         this.beginSlide(pitch, plantAngle(pitch, this.x));
         this.stepSlide(dt, level, run);
-        this.checkGapDeath(level);
+        this.checkGapDeath(level, dt);
         this.tryFinish(level);
         this.stepBoard(dt, level);
         return;
@@ -437,14 +464,14 @@ export class Bill {
         this.beginRagdoll("crash", g);
         this.landEvent = this.makeLand("fall", this.x, g ?? this.y);
         this.resolveBody(level, true);
-        this.checkGapDeath(level);
+        this.checkGapDeath(level, dt);
         this.stepBoard(dt, level);
         return;
       }
       const spd = Math.min(1, Math.abs(this.vx) / tuning.maxSpeed);
       this.runPhase += Math.abs(this.vx) * dt * (2.05 + 0.85 * spd);
       if (this.jumpBuf > 0 && !this.cleared) this.takeOff(level);
-      this.checkGapDeath(level);
+      this.checkGapDeath(level, dt);
       this.tryFinish(level);
       this.stepBoard(dt, level);
       return;
@@ -486,7 +513,7 @@ export class Bill {
     this.updateBarGrab(dt, level);
 
     if (this.tryGrabBar(level)) {
-      this.checkGapDeath(level);
+      this.checkGapDeath(level, dt);
       this.tryFinish(level);
       this.stepBoard(dt, level);
       return;
@@ -494,7 +521,7 @@ export class Bill {
     if (this.hitsBar(level)) {
       this.strikeBar(level);
       this.resolveBody(level, true);
-      this.checkGapDeath(level);
+      this.checkGapDeath(level, dt);
       this.tryFinish(level);
       this.stepBoard(dt, level);
       return;
@@ -514,7 +541,7 @@ export class Bill {
       this.beginRagdoll("crash", floorLand ? g : null);
       this.landEvent = this.makeLand("fall", this.x, floorLand && g !== null ? g : this.y);
       this.resolveBody(level, true);
-      this.checkGapDeath(level);
+      this.checkGapDeath(level, dt);
       this.tryFinish(level);
       this.stepBoard(dt, level);
       return;
@@ -538,7 +565,7 @@ export class Bill {
       this.resolveBody(level, false);
     }
 
-    this.checkGapDeath(level);
+    this.checkGapDeath(level, dt);
     this.tryFinish(level);
     this.stepBoard(dt, level);
   }
@@ -612,10 +639,9 @@ export class Bill {
   private groundMove(dt: number, run: number): void {
     if (this.cleared) run = 0;
     if (this.board?.on) {
-      this.vx += run * tuning.accel * 1.05 * dt;
-      this.vx *= Math.exp(-(this.cleared ? 2.4 : run > 0.2 ? 0.12 : 0.32) * dt);
-      const cap = run > 0.2 ? SKATE_CAP + 2.6 : SKATE_CAP;
-      if (this.vx > cap) this.vx = cap;
+      this.vx += this.stepSkatePush(dt, run);
+      this.vx *= Math.exp(-(this.cleared ? 2.4 : this.pushKick > 0.4 ? 0.18 : 0.55) * dt);
+      if (this.vx > SKATE_CAP) this.vx = SKATE_CAP;
       if (this.vx < -8) this.vx = -8;
       this.x += this.vx * dt;
       const minX = START_WALL_X + 0.5;
@@ -623,11 +649,12 @@ export class Bill {
         this.x = minX;
         if (this.vx < 0) this.vx = 0;
       }
+      this.boardAng += (0 - this.boardAng) * (1 - Math.exp(-10 * dt));
       this.rot += (0 - wrapPi(this.rot)) * (1 - Math.exp(-12 * dt));
-      this.tuck = 0.34;
+      this.tuck = 0.22;
       this.canTurn = false;
       this.facing = 1;
-      this.runPhase += (Math.abs(this.vx) * 1.7 + Math.max(0, run) * 5.2) * dt;
+      this.runPhase += (Math.abs(this.vx) * 1.2 + this.pushKick * 4.2) * dt;
       return;
     }
     const target = run * tuning.maxSpeed;
@@ -793,7 +820,7 @@ export class Bill {
     this.state = "slide";
     this.flipping = false;
     this.slideDrop = false;
-    this.tuck = 0.28;
+    this.tuck = this.board?.on ? 0.22 : 0.28;
     this.cushion = 0.22;
     if (!this.board?.on) this.rot = slideSitRot(want);
     this.spinRate = 0;
@@ -830,19 +857,20 @@ export class Bill {
     const { dx, dy } = padDownhill(pitch, this.x);
     let speed = this.vx * dx + this.vy * dy;
     speed += tuning.gravity * -dy * dt;
-    if (this.board?.on && run > 0.05) speed += run * 9.8 * dt;
-    speed *= Math.exp(-0.22 * dt);
+    if (this.board?.on) speed += this.stepSkatePush(dt, run);
+    speed *= Math.exp(-(this.board?.on ? (this.pushKick > 0.4 ? 0.12 : 0.28) : 0.22) * dt);
     if (!this.board?.on && speed < 3.8) speed = 3.8;
-    const cap = this.board?.on ? (run > 0.2 ? SKATE_CAP + 2.8 : SKATE_CAP) : 1e9;
+    const cap = this.board?.on ? SKATE_CAP : 1e9;
     if (speed > cap) speed = cap;
     this.vx = speed * dx;
     this.vy = speed * dy;
     this.x += this.vx * dt;
     const want = plantAngle(pitch, this.x);
-    const sit = this.board?.on ? want : slideSitRot(want);
+    if (this.board?.on) this.boardAng = want;
+    const sit = this.board?.on ? skateLeanBack(want) : slideSitRot(want);
     this.rot += (sit - this.rot) * (1 - Math.exp(-14 * dt));
-    this.tuck = 0.28;
-    this.runPhase += (Math.abs(speed) * 2.2 + Math.max(0, run) * 5.2) * dt;
+    this.tuck = this.board?.on ? 0.22 : 0.28;
+    this.runPhase += (Math.abs(speed) * 1.4 + this.pushKick * 4.2) * dt;
     const next = pitchedAt(level, this.x);
     const nextEnd = next ? (this.board?.on ? next.x1 : next.x1 - 0.08) : 0;
     if (!next || this.x >= nextEnd) {
@@ -862,7 +890,7 @@ export class Bill {
       this.vy = speed * dy;
     }
     if (this.board?.on) {
-      const feet = this.y - HIP_HEIGHT;
+      const feet = this.y - HIP_HEIGHT * skateHipFactor(Math.cos(this.boardAng));
       const floor = supportAt(level, this.x, feet, 0.8);
       if (floor !== null && this.x < level.gapX0 - 0.04) {
         const { dx, dy } = pitch ? padDownhill(pitch, this.x) : { dx: 1, dy: 0 };
@@ -887,15 +915,35 @@ export class Bill {
     this.barGrab = 0;
   }
 
+  private stepSkatePush(dt: number, run: number): number {
+    if (this.cleared || run < 0.18 || Math.abs(this.boardAng) > 0.22) {
+      this.pushKick += (0 - this.pushKick) * Math.min(1, dt * 9);
+      this.pushT = 0;
+      this.pushU = 0;
+      return 0;
+    }
+    this.pushT += dt / 0.56;
+    const u = this.pushT % 1;
+    let kick = 0;
+    if (u > 0.3 && u < 0.48) kick = (u - 0.3) / 0.18;
+    else if (u >= 0.48 && u < 0.7) kick = 1;
+    else if (u >= 0.7 && u < 0.88) kick = 1 - (u - 0.7) / 0.18;
+    this.pushKick = kick;
+    const planted = u >= 0.5 && this.pushU < 0.5;
+    this.pushU = u;
+    if (!planted) return 0;
+    this.pushPlantEvent = true;
+    return 3.3;
+  }
+
   private kickBoard(nx: number, ny: number, impulse: number): void {
     const b = this.board;
     if (!b || !b.on) return;
+    this.syncBoardRide();
     b.on = false;
-    b.x = this.x + 0.14;
-    b.y = this.y - HIP_HEIGHT + 0.05;
+    b.x += 0.1;
     b.vx = this.vx * 1.1 + 2.2 - nx * impulse;
     b.vy = 1.6 - ny * impulse * 0.85;
-    b.rot = this.state === "slide" ? this.rot : 0;
     b.omega = -2.6 - Math.abs(this.vx) * 0.18;
     this.boardKickEvent = true;
   }
@@ -903,11 +951,14 @@ export class Bill {
   private syncBoardRide(): void {
     const b = this.board;
     if (!b?.on) return;
-    b.x = this.x;
-    b.y = this.y - HIP_HEIGHT + 0.04;
+    const nx = -Math.sin(this.boardAng);
+    const ny = Math.cos(this.boardAng);
+    const surfY = this.y - HIP_HEIGHT * skateHipFactor(ny);
+    b.x = this.x + nx * BOARD_RIDE;
+    b.y = surfY + ny * BOARD_RIDE;
     b.vx = this.vx;
     b.vy = this.vy;
-    b.rot = this.state === "slide" ? this.rot : 0;
+    b.rot = this.boardAng;
     b.omega = 0;
   }
 
@@ -1333,8 +1384,9 @@ export class Bill {
     if (!moving) rag.stillTime += dt;
     else rag.stillTime = 0;
 
-    const stopped = rag.stillTime >= 0.12;
+    const stopped = rag.stillTime >= (this.gapFail && level.theme === "woods" ? 0.9 : 0.12);
     const timedOut = rag.age >= rag.maxAge;
+    if (this.gapFail && level.theme === "woods" && rag.age < 1.05) return;
     // After a standing finish he may tumble off a ledge — let that play out until
     // he actually stops (or hits killY). Fail ragdolls still cap at maxAge, then
     // always go back to the level start — never stand up mid-run.
@@ -1745,8 +1797,12 @@ export class Bill {
     this.celebrateEvent = true;
   }
 
-  private checkGapDeath(level: Level): void {
+  private checkGapDeath(level: Level, dt: number): void {
     if (this.held) return;
+    if (level.theme === "woods") {
+      this.stepRiver(level, dt);
+      return;
+    }
     if (this.y >= level.killY) return;
     if (this.cleared) {
       this.state = "done";
@@ -1762,6 +1818,43 @@ export class Bill {
     }
     this.y = Math.max(this.y, level.killY + 0.2);
     this.vy = Math.max(this.vy, -3);
+  }
+
+  private stepRiver(level: Level, dt: number): void {
+    const inRiver = this.x > level.gapX0 && this.x < level.gapX1;
+    if (!inRiver) {
+      if (this.y < level.killY && !this.cleared) {
+        this.gapFail = true;
+        this.y = Math.max(this.y, level.killY + 0.2);
+        this.vy = Math.max(this.vy, -3);
+      }
+      return;
+    }
+    const water = level.pitY;
+    if (this.y - 0.18 > water + 0.08) return;
+    if (this.cleared) {
+      this.state = "done";
+      this.vx = 0;
+      this.vy = 0;
+      return;
+    }
+    if (!this.gapFail) {
+      this.gapFail = true;
+      this.splashEvent = true;
+      this.landEvent = this.makeLand("fall", this.x, water, Math.max(0.4, -this.vy));
+      if (!this.rag) this.beginRagdoll("crash", null);
+      this.vy = Math.min(-0.35, this.vy * 0.32);
+      this.vx *= 0.55;
+    }
+    this.vx *= Math.exp(-1.8 * dt);
+    this.vy *= Math.exp(-3.2 * dt);
+    this.vy -= 2.2 * dt;
+    const settle = water - 0.4;
+    if (this.y < settle) {
+      this.y += (settle - this.y) * Math.min(1, dt * 4.5);
+      this.vy = Math.max(this.vy, 0);
+    }
+    this.y = Math.max(this.y, level.killY + 0.2);
   }
 }
 
@@ -1905,6 +1998,145 @@ export function drawSkateboard(
   ctx.restore();
 }
 
+/** Chest to camera, profile head looking ahead, feet facing us, kick off the ground. */
+function drawBillSkate(ctx: CanvasRenderingContext2D, bill: Bill, pose: Pose, t: number): void {
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  const back = -pose.lean;
+  const k = Math.max(0, Math.min(1, bill.pushKick));
+  const arch =
+    (pose.spineLumbar ?? 0) + (pose.spineThoracic ?? 0) + (pose.spineCervical ?? 0);
+  const lHip: Pt = { x: -0.1 + back * 0.04, y: 0 };
+  const rHip: Pt = { x: 0.1 + back * 0.04, y: 0 };
+  const chest: Pt = { x: -back * 0.1, y: 0.4 };
+  const collar: Pt = { x: -back * 0.1, y: 0.58 };
+  const head: Pt = { x: 0.02 - back * 0.1, y: 0.78 };
+  const lSh: Pt = { x: -0.16 - back * 0.08, y: 0.5 };
+  const rSh: Pt = { x: 0.16 - back * 0.08, y: 0.5 };
+  const lElb = polar(lSh, pose.lArm, 0.32);
+  const rElb = polar(rSh, pose.rArm, 0.32);
+  const lHand = polar(lElb, pose.lFore, 0.3);
+  const rHand = polar(rElb, pose.rFore, 0.3);
+
+  const deck = 0.055;
+  const lPlant = skateDeckFoot(bill, -0.17, deck);
+  const rPlant = skateDeckFoot(bill, 0.15, deck);
+  const lKick = { x: lHip.x + 0.14, y: lPlant.y - 0.3 };
+  const lAnkle = {
+    x: lPlant.x + (lKick.x - lPlant.x) * k,
+    y: lPlant.y + (lKick.y - lPlant.y) * k,
+  };
+  const rAnkle = rPlant;
+  const lKnee = skateKnee(lHip, lAnkle, 1);
+  const rKnee = skateKnee(rHip, rAnkle, 1);
+
+  strokeColored(ctx, SHIRT_DARK, 0.12, lSh, polar(lSh, pose.lArm, 0.14));
+  strokeColored(ctx, SKIN, 0.08, polar(lSh, pose.lArm, 0.14), lElb, lHand);
+  fillDot(ctx, lHand, 0.045, SKIN);
+  drawTrainerFront(ctx, rAnkle);
+  strokeColored(ctx, JEANS, 0.15, rHip, rKnee, rAnkle);
+  drawJeansWaist(ctx, lHip, rHip);
+  drawShirtFront(ctx, lHip, rHip, lSh, rSh, collar, chest);
+  drawHairBack(ctx, head, arch);
+  drawHeadProfile(ctx, head, bill, t);
+  drawHairFront(ctx, head, arch);
+  strokeColored(ctx, SHIRT, 0.125, rSh, polar(rSh, pose.rArm, 0.14));
+  strokeColored(ctx, SKIN, 0.082, polar(rSh, pose.rArm, 0.14), rElb, rHand);
+  fillDot(ctx, rHand, 0.045, SKIN);
+  strokeColored(ctx, JEANS_DARK, 0.15, lHip, lKnee, lAnkle);
+  drawTrainerFront(ctx, lAnkle);
+}
+
+function skateDeckFoot(bill: Bill, along: number, lift: number): Pt {
+  const b = bill.board;
+  if (!b) return { x: along, y: -0.8 };
+  const c = Math.cos(b.rot);
+  const s = Math.sin(b.rot);
+  return localOf(bill, b.x + along * c - lift * s, b.y + along * s + lift * c);
+}
+
+function skateKnee(hip: Pt, ankle: Pt, sign: number): Pt {
+  const dx = ankle.x - hip.x;
+  const dy = ankle.y - hip.y;
+  const d = Math.hypot(dx, dy) || 1;
+  const thigh = 0.46;
+  const shin = 0.36;
+  const a = (thigh * thigh - shin * shin + d * d) / (2 * d);
+  const h = Math.sqrt(Math.max(0, thigh * thigh - a * a));
+  const ux = dx / d;
+  const uy = dy / d;
+  return { x: hip.x + ux * a - uy * h * sign, y: hip.y + uy * a + ux * h * sign };
+}
+
+function localOf(bill: Bill, wx: number, wy: number): Pt {
+  const fx = bill.facing || 1;
+  const dx = (wx - bill.x) / fx;
+  const dy = wy - bill.y;
+  const c = Math.cos(bill.rot);
+  const s = Math.sin(bill.rot);
+  return { x: dx * c + dy * s, y: -dx * s + dy * c };
+}
+
+function drawJeansWaist(ctx: CanvasRenderingContext2D, lHip: Pt, rHip: Pt): void {
+  const midX = (lHip.x + rHip.x) * 0.5;
+  const belt = (lHip.y + rHip.y) * 0.5 + 0.05;
+  const crotch = belt - 0.16;
+  ctx.fillStyle = JEANS;
+  ctx.beginPath();
+  ctx.moveTo(lHip.x - 0.1, belt);
+  ctx.lineTo(rHip.x + 0.1, belt);
+  ctx.quadraticCurveTo(rHip.x + 0.08, crotch + 0.04, midX + 0.04, crotch);
+  ctx.quadraticCurveTo(midX, crotch - 0.02, midX - 0.04, crotch);
+  ctx.quadraticCurveTo(lHip.x - 0.08, crotch + 0.04, lHip.x - 0.1, belt);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#3d3428";
+  ctx.fillRect(lHip.x - 0.09, belt - 0.018, rHip.x - lHip.x + 0.18, 0.04);
+}
+
+function drawShirtFront(
+  ctx: CanvasRenderingContext2D,
+  lHip: Pt,
+  rHip: Pt,
+  lSh: Pt,
+  rSh: Pt,
+  collar: Pt,
+  chest: Pt,
+): void {
+  const hemY = (lHip.y + rHip.y) * 0.5 + 0.04;
+  const waistY = hemY + 0.14;
+  const lHem = { x: lHip.x - 0.09, y: hemY };
+  const rHem = { x: rHip.x + 0.09, y: hemY };
+  const lWaist = { x: Math.min(lHip.x, lSh.x) + 0.03, y: waistY };
+  const rWaist = { x: Math.max(rHip.x, rSh.x) - 0.03, y: waistY };
+  const shade = ctx.createLinearGradient(lSh.x, lSh.y, rSh.x, rHip.y);
+  shade.addColorStop(0, SHIRT_DARK);
+  shade.addColorStop(0.45, SHIRT);
+  shade.addColorStop(1, SHIRT_LIT);
+  ctx.fillStyle = shade;
+  ctx.strokeStyle = SHIRT_DARK;
+  ctx.lineWidth = 0.028;
+  ctx.beginPath();
+  ctx.moveTo(lHem.x, lHem.y);
+  ctx.lineTo(lWaist.x, lWaist.y);
+  ctx.lineTo(lSh.x - 0.04, lSh.y + 0.04);
+  ctx.lineTo(collar.x - 0.04, collar.y + 0.02);
+  ctx.lineTo(collar.x + 0.04, collar.y + 0.02);
+  ctx.lineTo(rSh.x + 0.04, rSh.y + 0.04);
+  ctx.lineTo(rWaist.x, rWaist.y);
+  ctx.lineTo(rHem.x, rHem.y);
+  ctx.quadraticCurveTo(chest.x, hemY - 0.05, lHem.x, lHem.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = SHIRT_LIT;
+  ctx.beginPath();
+  ctx.moveTo(collar.x - 0.055, collar.y + 0.01);
+  ctx.quadraticCurveTo(collar.x, collar.y + 0.05, collar.x + 0.055, collar.y + 0.01);
+  ctx.quadraticCurveTo(collar.x, collar.y - 0.01, collar.x - 0.055, collar.y + 0.01);
+  ctx.fill();
+}
+
 /** Draw Backflip Bill — clothed figure, always backflips backward. */
 export function drawBill(
   ctx: CanvasRenderingContext2D,
@@ -1920,12 +2152,17 @@ export function drawBill(
   ctx.rotate(bill.rot);
 
   const pose = poseFor(bill, t);
+  if (bill.board?.on && !bill.rag && (bill.state === "ground" || bill.state === "slide")) {
+    drawBillSkate(ctx, bill, pose, t);
+    ctx.restore();
+    return;
+  }
   const chain = torsoChain(pose);
   const arch =
     (pose.spineLumbar ?? 0) + (pose.spineThoracic ?? 0) + (pose.spineCervical ?? 0);
   const grounded =
     (bill.state === "ground" || bill.state === "slide") && !bill.rag;
-  if (grounded) {
+  if (grounded && !bill.board?.on) {
     const amp = Math.min(1, Math.abs(bill.vx) / tuning.maxSpeed);
     const bob = Math.abs(Math.sin(bill.runPhase)) * 0.055 * amp;
     // Don't hip-shift while idle — that skates the planted feet.
@@ -2280,26 +2517,23 @@ function poseFor(bill: Bill, t: number): Pose {
 
   if (bill.board?.on && (bill.state === "ground" || bill.state === "slide")) {
     const hang = -Math.PI / 2;
-    const push = Math.max(0, Math.min(1, bill.push));
-    const stroke = Math.sin(bill.runPhase);
-    const kick = push * Math.max(0, stroke);
-    const carve = stroke * 0.08;
-    const squat = 0.46 + 0.08 * push;
-    const slope = bill.state === "slide" ? 0.16 : 0;
+    const k = Math.max(0, Math.min(1, bill.pushKick));
+    const steep = Math.min(1, Math.abs(bill.boardAng) / 0.85);
+    const squat = 0.16 + 0.1 * k + 0.34 * steep;
     return clampLimbPose({
-      lean: 0.18 + carve + 0.22 * push + slope,
-      arch: -0.1 - 0.08 * push,
-      spineLumbar: -0.12 - 0.08 * push,
-      spineThoracic: -0.06,
-      spineCervical: 0.08,
-      lThigh: hang + squat + 0.06 - 0.42 * kick,
-      rThigh: hang + squat - 0.04 + 0.22 * kick,
-      lShin: hang - squat * 0.68 + 0.38 * kick,
-      rShin: hang - squat * 0.6 - 0.12 * kick,
-      lArm: hang - 0.5 - 0.28 * kick - 0.1 * carve,
-      rArm: hang - 0.32 + 0.22 * kick + 0.1 * carve,
-      lFore: hang + 0.12 + 0.18 * kick,
-      rFore: hang + 0.16 - 0.1 * kick,
+      lean: -0.04 - 0.12 * steep + 0.08 * k,
+      arch: -0.06 - 0.06 * steep,
+      spineLumbar: -0.08 - 0.16 * steep,
+      spineThoracic: -0.04 - 0.04 * steep,
+      spineCervical: 0.12 + 0.06 * steep,
+      lThigh: hang - 0.08 - 0.72 * k + squat * 0.15,
+      rThigh: hang + 0.1 + squat * 0.2,
+      lShin: hang - 0.06 - 0.55 * k - squat * 0.35,
+      rShin: hang - squat * 0.7,
+      lArm: hang - 0.55 - 0.15 * k,
+      rArm: hang + 0.72 + 0.08 * k,
+      lFore: hang + 0.12 + 0.1 * k,
+      rFore: hang + 0.95 + 0.06 * k,
     });
   }
 
@@ -3512,6 +3746,13 @@ function drawFace(ctx: CanvasRenderingContext2D, hx: number, hy: number, mood: F
 
 function footAngle(bill: Bill, shin: number, thigh: number): number {
   if (bill.rag) return shin;
+  if (bill.board?.on && (bill.state === "ground" || bill.state === "slide")) {
+    if (bill.pushKick > 0.28 && Math.abs(wrapPi(thigh - shin)) < 2) {
+      const kickShin = wrapPi(shin + Math.PI / 2) > 0.2;
+      if (kickShin || thigh < -Math.PI / 2 - 0.2) return shin;
+    }
+    return 0;
+  }
   if (bill.state === "slide" && !bill.board?.on) return -Math.PI / 2;
   if (bill.state === "air") {
     if (bill.landPrep > 0.04) {
@@ -3532,6 +3773,20 @@ function footAngle(bill: Bill, shin: number, thigh: number): number {
   // Trailing shin: toe points down a little. Leading/planted: flatter along the ground.
   if (rel < 0) return clamp(rel * 0.7, -0.62, 0);
   return clamp(rel * 0.28, 0, 0.38);
+}
+
+function drawTrainerFront(ctx: CanvasRenderingContext2D, ankle: Pt): void {
+  ctx.save();
+  ctx.translate(ankle.x, ankle.y);
+  ctx.fillStyle = SHOE;
+  ctx.beginPath();
+  ctx.ellipse(0.01, -0.008, 0.068, 0.052, 0, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = SHOE_SOLE;
+  ctx.beginPath();
+  ctx.ellipse(0.01, -0.04, 0.072, 0.02, 0, 0, TAU);
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawTrainer(ctx: CanvasRenderingContext2D, ankle: Pt, ang: number): void {

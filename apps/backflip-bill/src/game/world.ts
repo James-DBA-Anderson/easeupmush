@@ -34,6 +34,8 @@ export interface Obstacle {
   stack?: number;
   /** Bottom of river junk. Defaults to the roof for train crates. */
   y?: number;
+  /** Tilt in the river, radians. */
+  rot?: number;
   kind?: "tyre" | "trolley" | "bag" | "cone";
 }
 
@@ -209,12 +211,11 @@ export const LEVELS: Level[] = [
     endX: 40,
     theme: "woods",
     obstacles: [
-      { kind: "tyre", x: 19.85, y: -0.68, w: 0.82, h: 0.7 },
-      { kind: "trolley", x: 21.28, y: -0.68, w: 1.12, h: 1.18 },
-      { kind: "bag", x: 22.62, y: -0.5, w: 0.52, h: 0.4 },
-      { kind: "tyre", x: 23.22, y: -0.74, w: 0.74, h: 0.62 },
-      { kind: "cone", x: 24.12, y: -0.58, w: 0.36, h: 0.7 },
-      { kind: "trolley", x: 24.72, y: -0.68, w: 1.06, h: 1.12 },
+      { kind: "tyre", x: 19.95, y: -0.98, w: 0.82, h: 0.7, rot: -0.28 },
+      { kind: "trolley", x: 21.55, y: -1.02, w: 1.12, h: 1.18, rot: 0.16 },
+      { kind: "bag", x: 23.05, y: -0.9, w: 0.52, h: 0.4, rot: 0.42 },
+      { kind: "tyre", x: 23.85, y: -1.0, w: 0.74, h: 0.62, rot: -0.46 },
+      { kind: "cone", x: 24.85, y: -0.96, w: 0.36, h: 0.7, rot: 0.31 },
     ],
     hint: "Ride the board down the woods, FLIP off the flat, and clear the river junk.",
   },
@@ -825,6 +826,7 @@ export function drawWorld(
     drawWoodsGround(ctx, cam, cssW, cssH, level);
     drawWoodsRiver(ctx, cam, cssW, cssH, level, t);
     drawRiverJunk(ctx, cam, cssW, cssH, level);
+    drawRiverSurface(ctx, cam, cssW, cssH, level, t);
     drawWoodsTrees(ctx, cam, cssW, cssH, level, false);
     drawWoodsSign(ctx, cam, cssW, cssH, level);
     drawStartWall(ctx, cam, cssW, cssH, level);
@@ -1053,74 +1055,118 @@ function drawRiverJunk(
     const top = worldToScreenY(cam, cssH, b.y1);
     const bot = worldToScreenY(cam, cssH, b.y0);
     const cx = (x0 + x1) * 0.5;
+    const cy = (top + bot) * 0.5;
     const w = Math.max(6, x1 - x0);
     const h = Math.max(6, bot - top);
     if (x1 < -40 || x0 > cssW + 40) continue;
+    const l = -w * 0.5;
+    const r = w * 0.5;
+    const t = -h * 0.5;
+    const d = h * 0.5;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(o.rot ?? 0);
     if (o.kind === "tyre") {
       ctx.fillStyle = "#1a1614";
       ctx.beginPath();
-      ctx.ellipse(cx, (top + bot) * 0.5, w * 0.48, h * 0.42, 0.2, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, w * 0.48, h * 0.42, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#3a3632";
       ctx.beginPath();
-      ctx.ellipse(cx, (top + bot) * 0.5, w * 0.22, h * 0.2, 0.2, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, w * 0.22, h * 0.2, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = "#5a5248";
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.ellipse(cx, (top + bot) * 0.5, w * 0.36, h * 0.3, 0.2, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, w * 0.36, h * 0.3, 0, 0, Math.PI * 2);
       ctx.stroke();
     } else if (o.kind === "trolley") {
       ctx.strokeStyle = "#6a6e72";
       ctx.lineWidth = Math.max(1.5, 0.03 * ppm);
-      ctx.strokeRect(x0 + 4, top + 8, w - 8, h * 0.55);
+      ctx.strokeRect(l + 4, t + 8, w - 8, h * 0.55);
       ctx.beginPath();
-      ctx.moveTo(x0 + 6, top + 8);
-      ctx.lineTo(x0 + 6, top + 8 + h * 0.55);
-      ctx.moveTo(x1 - 6, top + 8);
-      ctx.lineTo(x1 - 6, top + 8 + h * 0.55);
-      ctx.moveTo(x0 + 4, top + 8 + h * 0.28);
-      ctx.lineTo(x1 - 4, top + 8 + h * 0.28);
+      ctx.moveTo(l + 6, t + 8);
+      ctx.lineTo(l + 6, t + 8 + h * 0.55);
+      ctx.moveTo(r - 6, t + 8);
+      ctx.lineTo(r - 6, t + 8 + h * 0.55);
+      ctx.moveTo(l + 4, t + 8 + h * 0.28);
+      ctx.lineTo(r - 4, t + 8 + h * 0.28);
       ctx.stroke();
       ctx.strokeStyle = "#8a8e92";
       ctx.beginPath();
-      ctx.moveTo(x0 + 8, top + 8);
-      ctx.lineTo(x0 - 4, top - 6);
-      ctx.lineTo(x0 + 10, top - 8);
+      ctx.moveTo(l + 8, t + 8);
+      ctx.lineTo(l - 4, t - 6);
+      ctx.lineTo(l + 10, t - 8);
       ctx.stroke();
       ctx.fillStyle = "#1a1614";
       const wr = Math.max(4, 0.08 * ppm);
       ctx.beginPath();
-      ctx.arc(x0 + 10, bot - 4, wr, 0, Math.PI * 2);
-      ctx.arc(x1 - 10, bot - 4, wr, 0, Math.PI * 2);
+      ctx.arc(l + 10, d - 4, wr, 0, Math.PI * 2);
+      ctx.arc(r - 10, d - 4, wr, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "rgba(40, 70, 62, 0.35)";
-      ctx.fillRect(x0 + 6, top + 10, w - 12, h * 0.22);
+      ctx.fillRect(l + 6, t + 10, w - 12, h * 0.22);
     } else if (o.kind === "bag") {
       ctx.fillStyle = "#2a2e28";
       ctx.beginPath();
-      ctx.ellipse(cx, (top + bot) * 0.55, w * 0.48, h * 0.42, -0.15, 0, Math.PI * 2);
+      ctx.ellipse(0, h * 0.05, w * 0.48, h * 0.42, -0.15, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#3a3e36";
       ctx.beginPath();
-      ctx.moveTo(cx - 4, top + 4);
-      ctx.lineTo(cx + 4, top + 4);
-      ctx.lineTo(cx + 2, top - 4);
-      ctx.lineTo(cx - 2, top - 4);
+      ctx.moveTo(-4, t + 4);
+      ctx.lineTo(4, t + 4);
+      ctx.lineTo(2, t - 4);
+      ctx.lineTo(-2, t - 4);
       ctx.closePath();
       ctx.fill();
     } else {
       ctx.fillStyle = "#e07028";
       ctx.beginPath();
-      ctx.moveTo(cx, top);
-      ctx.lineTo(x1 - 2, bot - 4);
-      ctx.lineTo(x0 + 2, bot - 4);
+      ctx.moveTo(0, t);
+      ctx.lineTo(r - 2, d - 4);
+      ctx.lineTo(l + 2, d - 4);
       ctx.closePath();
       ctx.fill();
       ctx.fillStyle = "#f0f4f6";
-      ctx.fillRect(cx - 4, top + h * 0.28, 8, Math.max(3, 0.06 * ppm));
+      ctx.fillRect(-4, t + h * 0.28, 8, Math.max(3, 0.06 * ppm));
     }
+    ctx.restore();
   }
+}
+
+function drawRiverSurface(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+  t: number,
+): void {
+  const x0 = worldToScreenX(cam, cssW, level.gapX0);
+  const x1 = worldToScreenX(cam, cssW, level.gapX1);
+  const waterY = worldToScreenY(cam, cssH, level.pitY);
+  const w = Math.max(4, x1 - x0);
+  if (x1 < -20 || x0 > cssW + 20) return;
+  const film = ctx.createLinearGradient(0, waterY, 0, cssH);
+  film.addColorStop(0, "rgba(42, 74, 72, 0.38)");
+  film.addColorStop(0.22, "rgba(22, 48, 50, 0.5)");
+  film.addColorStop(1, "rgba(12, 28, 30, 0.28)");
+  ctx.fillStyle = film;
+  ctx.fillRect(x0, waterY, w, cssH - waterY + 8);
+  ctx.fillStyle = "rgba(70, 110, 96, 0.32)";
+  ctx.fillRect(x0, waterY, w, Math.max(3, 0.06 * (cssW / cam.w)));
+  ctx.strokeStyle = "rgba(180, 210, 196, 0.2)";
+  ctx.lineWidth = 1.4;
+  for (let i = 0; i < 5; i++) {
+    const y = waterY + 5 + i * 10;
+    const wobble = Math.sin(t * 1.7 + i * 1.3) * 10;
+    ctx.globalAlpha = 0.16 + (i % 2) * 0.07;
+    ctx.beginPath();
+    ctx.moveTo(x0 + 6, y);
+    ctx.bezierCurveTo(x0 + w * 0.3 + wobble, y + 3, x0 + w * 0.65 - wobble, y - 2, x1 - 6, y + 1);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
 }
 
 const WOODS_TREES: { x: number; s: number; fg: boolean }[] = [
@@ -1132,7 +1178,6 @@ const WOODS_TREES: { x: number; s: number; fg: boolean }[] = [
   { x: 13.7, s: 1.0, fg: false },
   { x: 16.2, s: 1.14, fg: true },
   { x: 17.15, s: 1.12, fg: false },
-  { x: 21.4, s: 1.22, fg: true },
   { x: 27.7, s: 1.15, fg: false },
   { x: 31.1, s: 1.18, fg: true },
   { x: 34.2, s: 1.05, fg: false },
