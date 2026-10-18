@@ -558,7 +558,7 @@
       }
 
       .results-card {
-        width: min(22rem, calc(100vw - 2rem));
+        width: min(24rem, calc(100vw - 2rem));
         max-height: calc(100dvh - 2rem);
         overflow: auto;
         background: rgba(7, 20, 26, 0.88);
@@ -597,7 +597,8 @@
         font-weight: 600;
       }
 
-      #results-list .jump-tries {
+      #results-list .jump-tries,
+      #results-board .jump-tries {
         color: var(--foam);
         font-variant-numeric: tabular-nums;
         font-size: var(--type-label);
@@ -614,12 +615,14 @@
         text-shadow: 0 0 8px #f0c14a88;
       }
 
-      #results-list .jump-star.empty {
+      #results-list .jump-star.empty,
+      #results-board .jump-star.empty {
         color: transparent;
         text-shadow: none;
       }
 
-      #results-list .jump-spins {
+      #results-list .jump-spins,
+      #results-board .jump-spins {
         min-width: 1.55rem;
         text-align: right;
         font-size: var(--type-label);
@@ -628,11 +631,13 @@
         color: #ffd24a;
       }
 
-      #results-list .jump-spins.empty {
+      #results-list .jump-spins.empty,
+      #results-board .jump-spins.empty {
         color: transparent;
       }
 
-      #results-list .jump-layout {
+      #results-list .jump-layout,
+      #results-board .jump-layout {
         min-width: 2.4rem;
         text-align: right;
         font-size: var(--type-label);
@@ -641,11 +646,13 @@
         color: var(--foam);
       }
 
-      #results-list .jump-layout.empty {
+      #results-list .jump-layout.empty,
+      #results-board .jump-layout.empty {
         color: transparent;
       }
 
-      #results-list .jump-pts {
+      #results-list .jump-pts,
+      #results-board .jump-pts {
         font-family: var(--font-display);
         font-size: var(--type-display);
         font-weight: 400;
@@ -679,7 +686,8 @@
         color: #ffd24a;
       }
 
-      #results-again {
+      #results-again,
+      #results-continue {
         display: block;
         width: 100%;
         margin-top: 0.9rem;
@@ -697,7 +705,8 @@
         box-shadow: 0 3px 0 #0003;
       }
 
-      #results-again:active {
+      #results-again:active,
+      #results-continue:active {
         transform: scale(0.98);
       }
 
@@ -767,31 +776,18 @@
         cursor: default;
       }
 
-      .results-board {
-        margin-top: 0.95rem;
-      }
-
-      .results-board h3 {
-        margin-bottom: 0.4rem;
-        font-family: var(--font-ui);
-        font-size: var(--type-micro);
-        font-weight: 700;
-        letter-spacing: var(--tracking-label);
-        text-transform: uppercase;
-        color: var(--foam);
-      }
-
       #results-board {
         list-style: none;
         display: grid;
         gap: 0.28rem;
+        margin-top: 0.35rem;
       }
 
       #results-board li {
         display: grid;
-        grid-template-columns: 1.6rem 1fr auto;
-        gap: 0.45rem;
-        align-items: baseline;
+        grid-template-columns: 1.35rem minmax(0, 1.1fr) auto auto auto auto auto;
+        gap: 0.5rem;
+        align-items: center;
         padding: 0.32rem 0.5rem;
         background: rgba(200, 221, 230, 0.06);
         border-radius: 0.45rem;
@@ -809,11 +805,36 @@
         font-variant-numeric: tabular-nums;
       }
 
-      #results-board .board-pts {
-        font-family: var(--font-display);
-        letter-spacing: var(--tracking-display);
+      #results-board .board-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+
+      #results-board .jump-star {
+        min-width: 1.7rem;
+        text-align: center;
         color: #ffd24a;
-        font-variant-numeric: tabular-nums;
+        font-size: var(--type-label);
+        line-height: 1;
+        text-shadow: 0 0 8px #f0c14a88;
+      }
+
+      #results-board .jump-star.empty {
+        color: transparent;
+        text-shadow: none;
+      }
+
+      #results-board .board-empty {
+        display: block;
+        padding: 0.7rem 0.5rem;
+        text-align: center;
+        font-family: var(--font-ui);
+        font-size: var(--type-label);
+        font-weight: 600;
+        color: var(--foam);
+        opacity: 0.8;
       }
     </style>
   </head>
@@ -846,11 +867,16 @@
     </div>
 
     <div id="results" hidden>
-      <div class="results-card">
+      <div class="results-card" id="results-run">
         <h2>Bill's jumps</h2>
         <ol id="results-list"></ol>
         <p class="results-total"><span>Total</span><b id="results-score">£0</b></p>
-        <form id="results-name-form" class="results-name">
+        <button type="button" id="results-continue">FLIP to continue</button>
+        <p class="results-hint">Star = clean · extras & layout time bonus</p>
+      </div>
+      <div class="results-card" id="results-board-card" hidden>
+        <h2>High scores</h2>
+        <form id="results-name-form" class="results-name" hidden>
           <label for="results-name">Your name</label>
           <div class="results-name-row">
             <input id="results-name" name="name" maxlength="18" autocomplete="nickname" placeholder="Your name" />
@@ -858,12 +884,9 @@
           </div>
           <p id="results-name-status" class="results-hint" hidden></p>
         </form>
-        <section class="results-board" aria-label="High scores">
-          <h3>High scores</h3>
-          <ol id="results-board"></ol>
-        </section>
+        <ol id="results-board" aria-label="High scores"></ol>
         <button type="button" id="results-again">FLIP to play again</button>
-        <p class="results-hint">Star = clean · extras & layout time bonus</p>
+        <p class="results-hint">Fails · star = clean lands · × flips · hang time</p>
       </div>
     </div>
 

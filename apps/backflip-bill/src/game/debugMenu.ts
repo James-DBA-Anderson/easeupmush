@@ -275,6 +275,9 @@ export function mountDebugMenu(game: Game): void {
                   `<button type="button" data-level="${i}" aria-pressed="false">${lv.title}</button>`,
               ).join("")}
             </div>
+            <div class="actions" style="margin-top:0.4rem">
+              <button type="button" class="primary results-preview">Finish screen</button>
+            </div>
           </fieldset>
           <fieldset>
             <legend>Simulation</legend>
@@ -378,6 +381,10 @@ export function mountDebugMenu(game: Game): void {
     game.debugGotoLevel(index);
     refresh();
     status.textContent = `Jumped to ${LEVELS[index]?.title ?? "level"}.`;
+  });
+  root.querySelector(".results-preview")?.addEventListener("click", () => {
+    game.debugShowResults();
+    status.textContent = "Finish screen.";
   });
 
   root.querySelector('[data-sim="gap"]')?.addEventListener("change", (e) => {

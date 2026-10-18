@@ -27,18 +27,45 @@ function scoresPlugin(): Plugin {
     if (n < 0 || n > maxScore) return null;
     return n;
   };
-  const parseBoard = (raw: unknown): { name: string; score: number; at: number }[] => {
+  const cleanCount = (raw: unknown): number => {
+    if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
+    return Math.max(0, Math.min(9999, Math.floor(raw)));
+  };
+  const cleanHang = (raw: unknown): number => {
+    if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
+    return Math.max(0, Math.min(600, Math.round(raw * 100) / 100));
+  };
+  type ScoreEntry = {
+    name: string;
+    score: number;
+    at: number;
+    fails: number;
+    flips: number;
+    hang: number;
+    cleans: number;
+  };
+  const parseBoard = (raw: unknown): ScoreEntry[] => {
     if (!raw || typeof raw !== "object") return [];
     const entries = (raw as { entries?: unknown }).entries;
     if (!Array.isArray(entries)) return [];
-    const out: { name: string; score: number; at: number }[] = [];
+    const out: ScoreEntry[] = [];
     for (const row of entries) {
       if (!row || typeof row !== "object") continue;
       const r = row as Record<string, unknown>;
       const name = cleanName(r.name);
       const score = cleanScore(r.score);
       const at = typeof r.at === "number" && Number.isFinite(r.at) ? r.at : 0;
-      if (name && score !== null) out.push({ name, score, at });
+      if (name && score !== null) {
+        out.push({
+          name,
+          score,
+          at,
+          fails: cleanCount(r.fails),
+          flips: cleanCount(r.flips),
+          hang: cleanHang(r.hang),
+          cleans: cleanCount(r.cleans),
+        });
+      }
     }
     return out;
   };
@@ -90,7 +117,16 @@ function scoresPlugin(): Plugin {
               const key = name.toLowerCase();
               const rest = prev.filter((e) => e.name.toLowerCase() !== key);
               const old = prev.find((e) => e.name.toLowerCase() === key);
-              const best = old && old.score > score ? old : { name, score, at: Date.now() };
+              const next = {
+                name,
+                score,
+                at: Date.now(),
+                fails: cleanCount(rec.fails),
+                flips: cleanCount(rec.flips),
+                hang: cleanHang(rec.hang),
+                cleans: cleanCount(rec.cleans),
+              };
+              const best = old && old.score > score ? old : next;
               rest.push(best);
               rest.sort((a, b) => b.score - a.score || a.at - b.at);
               const entries = rest.slice(0, maxRows);

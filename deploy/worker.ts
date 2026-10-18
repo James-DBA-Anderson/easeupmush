@@ -11,6 +11,10 @@ interface ScoreEntry {
   name: string;
   score: number;
   at: number;
+  fails: number;
+  flips: number;
+  hang: number;
+  cleans: number;
 }
 
 export default {
@@ -44,7 +48,15 @@ async function handleScores(request: Request, env: Env): Promise<Response> {
     return json({ error: "Need a name and a score" }, 400);
   }
   const prev = await readBoard(env);
-  const entries = upsert(prev, name, score);
+  const entries = upsert(prev, {
+    name,
+    score,
+    at: Date.now(),
+    fails: cleanCount(rec.fails),
+    flips: cleanCount(rec.flips),
+    hang: cleanHang(rec.hang),
+    cleans: cleanCount(rec.cleans),
+  });
   await env.SCORES.put(BOARD_KEY, JSON.stringify({ entries }));
   const rank = entries.findIndex((e) => e.name.toLowerCase() === name.toLowerCase()) + 1;
   return json({ entries, rank });
@@ -66,16 +78,26 @@ function parseBoard(raw: unknown): ScoreEntry[] {
     const name = cleanName(r.name);
     const score = cleanScore(r.score);
     const at = typeof r.at === "number" && Number.isFinite(r.at) ? r.at : 0;
-    if (name && score !== null) out.push({ name, score, at });
+    if (name && score !== null) {
+      out.push({
+        name,
+        score,
+        at,
+        fails: cleanCount(r.fails),
+        flips: cleanCount(r.flips),
+        hang: cleanHang(r.hang),
+        cleans: cleanCount(r.cleans),
+      });
+    }
   }
   return out;
 }
 
-function upsert(board: ScoreEntry[], name: string, score: number): ScoreEntry[] {
-  const key = name.toLowerCase();
+function upsert(board: ScoreEntry[], next: ScoreEntry): ScoreEntry[] {
+  const key = next.name.toLowerCase();
   const rest = board.filter((e) => e.name.toLowerCase() !== key);
   const prev = board.find((e) => e.name.toLowerCase() === key);
-  const best = prev && prev.score > score ? prev : { name, score, at: Date.now() };
+  const best = prev && prev.score > next.score ? prev : next;
   rest.push(best);
   rest.sort((a, b) => b.score - a.score || a.at - b.at);
   return rest.slice(0, MAX_ROWS);
@@ -94,6 +116,16 @@ function cleanScore(raw: unknown): number | null {
   const n = Math.floor(raw);
   if (n < 0 || n > MAX_SCORE) return null;
   return n;
+}
+
+function cleanCount(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.min(9999, Math.floor(raw)));
+}
+
+function cleanHang(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.min(600, Math.round(raw * 100) / 100));
 }
 
 function json(data: unknown, status = 200): Response {
