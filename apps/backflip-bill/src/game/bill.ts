@@ -8,11 +8,12 @@ import {
   groundAt,
   obstacleHits,
   onFlagPlatform,
+  padDownhill,
   pitchedAt,
   plantAngle,
   platformNormal,
-  platformSlope,
   platformY,
+  pushOutOfBar,
   pushOutOfHoop,
   pushOutOfSolid,
   supportAt,
@@ -42,6 +43,7 @@ export interface LandEvent {
 export interface HitEvent {
   mag: number;
   hoop: boolean;
+  bar?: boolean;
 }
 
 export interface SnapEvent {
@@ -69,6 +71,19 @@ export interface Board {
 
 const SKATE_CAP = 9.7;
 const JUMP_TO_BOARD = 0.4;
+const BAR_SWING_MAX = 20;
+/** Reach for the rail from well before it is on camera. */
+const BAR_REACH_DIST = 12;
+
+/** Sit the torso back from the pitch so a 45° roof isn't a full 45° plant. */
+function slideSitRot(want: number): number {
+  return want * 0.72;
+}
+
+function slideHip(ny: number, board: boolean): number {
+  if (board) return Math.max(0.55, ny);
+  return Math.max(0.48, ny * 0.88);
+}
 
 type BandageSpot = "lKnee" | "rKnee" | "lElb" | "rElb";
 type SoreSpot = "lHip" | "rHip" | "coccyx" | "back";
@@ -164,7 +179,11 @@ export class Bill {
   swingTravel = 0;
   barLooped = false;
   barLockT = 0;
+  /** After a missed catch — clamp joints, do not snap them past their stops. */
+  barProtectT = 0;
   grabEvent = false;
+  takeoffEvent = false;
+  barHitEvent = false;
   barKickEvent = false;
   barLoopEvent = false;
   board: Board | null = null;
@@ -237,7 +256,10 @@ export class Bill {
     this.swingTravel = 0;
     this.barLooped = false;
     this.barLockT = 0;
+    this.barProtectT = 0;
     this.grabEvent = false;
+    this.takeoffEvent = false;
+    this.barHitEvent = false;
     this.barKickEvent = false;
     this.barLoopEvent = false;
     this.boardKickEvent = false;
@@ -329,6 +351,8 @@ export class Bill {
     this.hitEvent = null;
     this.celebrateEvent = false;
     this.grabEvent = false;
+    this.takeoffEvent = false;
+    this.barHitEvent = false;
     this.barKickEvent = false;
     this.barLoopEvent = false;
     this.boardKickEvent = false;
@@ -347,6 +371,7 @@ export class Bill {
     if (jump && (onPad || onBoard) && !this.cleared) this.jumpBuf = 0.16;
     this.jumpBuf = Math.max(0, this.jumpBuf - dt);
     this.barLockT = Math.max(0, this.barLockT - dt);
+    this.barProtectT = Math.max(0, this.barProtectT - dt);
     for (let i = this.snapFlashes.length - 1; i >= 0; i--) {
       const f = this.snapFlashes[i]!;
       f.life -= dt;
@@ -467,8 +492,7 @@ export class Bill {
       return;
     }
     if (this.hitsBar(level)) {
-      this.beginRagdoll("crash", null);
-      this.landEvent = this.makeLand("fall", this.x, this.y);
+      this.strikeBar(level);
       this.resolveBody(level, true);
       this.checkGapDeath(level);
       this.tryFinish(level);
@@ -661,6 +685,7 @@ export class Bill {
     this.barGrab = 0;
     this.lockTimer = 0;
     this.jumpBuf = 0;
+    this.takeoffEvent = true;
     const speed = Math.min(1, Math.abs(this.vx) / tuning.maxSpeed);
     this.flipDuration =
       tuning.flipDurationSlow +
@@ -764,23 +789,13 @@ export class Bill {
     this.landEvent = this.makeLand("slide", this.x, g, impact);
   }
 
-  /** Unit tangent pointing downhill (the way world y falls). */
-  private downhill(pitch: Platform): { dx: number; dy: number } {
-    const s = platformSlope(pitch, this.x);
-    const len = Math.hypot(1, s) || 1;
-    const dx = 1 / len;
-    const dy = s / len;
-    const sign = dy <= 0 ? 1 : -1;
-    return { dx: dx * sign, dy: dy * sign };
-  }
-
   private beginSlide(pitch: Platform, want: number): void {
     this.state = "slide";
     this.flipping = false;
     this.slideDrop = false;
     this.tuck = 0.28;
     this.cushion = 0.22;
-    if (!this.board?.on) this.rot = want;
+    if (!this.board?.on) this.rot = slideSitRot(want);
     this.spinRate = 0;
     this.landPrep = 0;
     this.gapArmTuck = 0;
@@ -788,13 +803,13 @@ export class Bill {
     this.barGrab = 0;
     this.lockTimer = 0;
     if (!this.board?.on) this.jumpBuf = 0;
-    const { dx, dy } = this.downhill(pitch);
+    const { dx, dy } = padDownhill(pitch, this.x);
     const along = this.vx * dx + this.vy * dy;
     const speed = this.board?.on ? Math.max(0.35, along) : Math.max(4.6, along);
     this.vx = speed * dx;
     this.vy = speed * dy;
     const n = platformNormal(pitch, this.x);
-    this.y = platformY(pitch, this.x) + HIP_HEIGHT * Math.max(0.55, n.ny);
+    this.y = platformY(pitch, this.x) + HIP_HEIGHT * slideHip(n.ny, !!this.board?.on);
   }
 
   private stepSlide(dt: number, level: Level, run = 0): void {
@@ -812,7 +827,7 @@ export class Bill {
       this.leaveSlide(pitch, level);
       return;
     }
-    const { dx, dy } = this.downhill(pitch);
+    const { dx, dy } = padDownhill(pitch, this.x);
     let speed = this.vx * dx + this.vy * dy;
     speed += tuning.gravity * -dy * dt;
     if (this.board?.on && run > 0.05) speed += run * 9.8 * dt;
@@ -824,7 +839,8 @@ export class Bill {
     this.vy = speed * dy;
     this.x += this.vx * dt;
     const want = plantAngle(pitch, this.x);
-    this.rot += (want - this.rot) * (1 - Math.exp(-14 * dt));
+    const sit = this.board?.on ? want : slideSitRot(want);
+    this.rot += (sit - this.rot) * (1 - Math.exp(-14 * dt));
     this.tuck = 0.28;
     this.runPhase += (Math.abs(speed) * 2.2 + Math.max(0, run) * 5.2) * dt;
     const next = pitchedAt(level, this.x);
@@ -834,13 +850,13 @@ export class Bill {
       return;
     }
     const n = platformNormal(next, this.x);
-    this.y = platformY(next, this.x) + HIP_HEIGHT * Math.max(0.55, n.ny);
+    this.y = platformY(next, this.x) + HIP_HEIGHT * slideHip(n.ny, !!this.board?.on);
   }
 
   private leaveSlide(pitch: Platform | null, level: Level): void {
     if (pitch && this.x < pitch.x1 + 0.04 && !this.board?.on) {
       this.x = pitch.x1 + 0.08;
-      const { dx, dy } = this.downhill(pitch);
+      const { dx, dy } = padDownhill(pitch, this.x);
       const speed = Math.max(4.2, this.vx * dx + this.vy * dy);
       this.vx = speed * dx;
       this.vy = speed * dy;
@@ -849,7 +865,7 @@ export class Bill {
       const feet = this.y - HIP_HEIGHT;
       const floor = supportAt(level, this.x, feet, 0.8);
       if (floor !== null && this.x < level.gapX0 - 0.04) {
-        const { dx, dy } = pitch ? this.downhill(pitch) : { dx: 1, dy: 0 };
+        const { dx, dy } = pitch ? padDownhill(pitch, this.x) : { dx: 1, dy: 0 };
         const speed = Math.max(0, this.vx * dx + this.vy * dy);
         this.state = "ground";
         this.flipping = false;
@@ -953,11 +969,101 @@ export class Bill {
   /** Any body part clipping the rail — tucked or not, this is a smash if you did not catch. */
   private hitsBar(level: Level): boolean {
     const bar = level.bar;
-    if (!bar || this.barLockT > 0) return false;
+    if (!bar || this.barLockT > 0 || this.state === "swing") return false;
+    return this.barContact(bar) !== null;
+  }
+
+  private barContact(
+    bar: HighBar,
+  ): { nx: number; ny: number; depth: number; core: boolean } | null {
+    let best: { nx: number; ny: number; depth: number; core: boolean } | null = null;
     for (const pt of bodyWorldPoints(this)) {
-      if (Math.hypot(pt.x - bar.x, pt.y - bar.y) < pt.r + BAR_RADIUS) return true;
+      const hit = pushOutOfBar(bar, pt.x, pt.y, pt.r);
+      if (!hit) continue;
+      if (!best || hit.depth > best.depth) best = { ...hit, core: pt.kind === "core" };
     }
-    return false;
+    return best;
+  }
+
+  /** Too tucked (or hands missed): bounce off a glancing hit, or fold over a body hit. */
+  private strikeBar(level: Level): void {
+    const bar = level.bar;
+    if (!bar) return;
+    const hit = this.barContact(bar);
+    if (!hit) return;
+    const rx = this.x - bar.x;
+    const ry = this.y - bar.y;
+    const dist = Math.hypot(rx, ry) || 1;
+    const nx = hit.nx;
+    const ny = hit.ny;
+    const vn = this.vx * nx + this.vy * ny;
+    const speed = Math.hypot(this.vx, this.vy);
+    const wrap = hit.core && vn < -0.8 && dist < 1.05;
+
+    this.x += nx * (hit.depth + 0.05);
+    this.y += ny * (hit.depth + 0.05);
+
+    let outVx = this.vx;
+    let outVy = this.vy;
+    let omega = this.spinRate;
+    if (wrap) {
+      const r = Math.max(0.5, dist);
+      omega = (rx * this.vy - ry * this.vx) / (r * r);
+      omega += this.spinRate * 0.35;
+      omega += (Math.sign(omega) || this.facing) * 2.8;
+      omega = clamp(omega, -14, 14);
+      const nr = Math.max(dist, BAR_RADIUS + 0.38);
+      this.x = bar.x + (rx / dist) * nr;
+      this.y = bar.y + (ry / dist) * nr;
+      outVx = -omega * (this.y - bar.y) * 0.85;
+      outVy = omega * (this.x - bar.x) * 0.85;
+    } else {
+      if (vn < 0) {
+        const e = 0.55;
+        outVx -= (1 + e) * vn * nx;
+        outVy -= (1 + e) * vn * ny;
+      }
+      outVx += nx * 1.15;
+      outVy += ny * 1.15;
+      const torque = (rx * ny - ry * nx) * Math.max(2.2, -vn);
+      omega = clamp(this.spinRate + torque * 0.9 + this.facing * 1.6, -14, 14);
+    }
+
+    this.beginRagdoll("crash", null);
+    this.vx = outVx;
+    this.vy = outVy;
+    this.barLockT = 0.16;
+    this.barProtectT = 0.65;
+    this.barHitEvent = true;
+    this.hitEvent = { mag: Math.max(3.2, speed), hoop: false, bar: true };
+    if (this.rag) {
+      this.rag.rolling = true;
+      this.rag.omega = omega;
+      this.foldOverBar(wrap);
+    }
+  }
+
+  private foldOverBar(wrap: boolean): void {
+    const rag = this.rag;
+    if (!rag) return;
+    const p = rag.pose;
+    const k = wrap ? 1 : 0.55;
+    p.spineLumbar = (p.spineLumbar ?? 0) - 0.5 * k;
+    p.spineThoracic = (p.spineThoracic ?? 0) + 0.22 * k;
+    p.spineCervical = (p.spineCervical ?? 0) + 0.18 * k;
+    p.lThigh += 0.7 * k;
+    p.rThigh += 0.62 * k;
+    p.lShin -= 0.35 * k;
+    p.rShin -= 0.3 * k;
+    p.lArm -= 0.4 * k;
+    p.rArm += 0.35 * k;
+    clampLimbPose(p);
+    rag.vel.spineLumbar = (rag.vel.spineLumbar ?? 0) - 2.2 * k;
+    rag.vel.lThigh += 2.8 * k;
+    rag.vel.rThigh += 2.4 * k;
+    rag.vel.lArm -= 1.6 * k;
+    rag.vel.rArm += 1.6 * k;
+    limitJointVel(p, rag.vel);
   }
 
   private catchBar(bar: HighBar): void {
@@ -966,10 +1072,11 @@ export class Bill {
     const rx = r * Math.sin(ang);
     const ry = -r * Math.cos(ang);
     let omega = (rx * this.vy - ry * this.vx) / (r * r);
-    omega += this.spinRate * 0.32;
-    omega *= 1.12;
+    omega += this.spinRate * 0.58;
+    omega += (Math.sign(omega) || 1) * Math.hypot(this.vx, this.vy) * 0.2;
+    omega *= 1.42;
     this.swingAng = ang;
-    this.swingOmega = clamp(omega, -16, 16);
+    this.swingOmega = clamp(omega, -BAR_SWING_MAX, BAR_SWING_MAX);
     this.tuck = Math.min(this.tuck, 0.2);
     this.swingTravel = 0;
     this.barLooped = false;
@@ -1000,8 +1107,8 @@ export class Bill {
     const k = 1 - Math.exp(-tuning.tuckLerp * dt);
     this.tuck += (targetTuck - this.tuck) * k;
     this.swingOmega += -(tuning.gravity / r) * Math.sin(this.swingAng) * dt;
-    this.swingOmega *= Math.exp(-0.1 * dt);
-    this.swingOmega = clamp(this.swingOmega, -16, 16);
+    this.swingOmega *= Math.exp(-0.055 * dt);
+    this.swingOmega = clamp(this.swingOmega, -BAR_SWING_MAX, BAR_SWING_MAX);
     const prev = this.swingTravel;
     this.swingAng += this.swingOmega * dt;
     this.swingTravel += Math.abs(this.swingOmega) * dt;
@@ -1380,34 +1487,35 @@ export class Bill {
    * bit more banana — including the neck — once he starts to open.
    */
   private updateGapArmTuck(dt: number, level: Level): void {
-    const bar = level.bar;
-    const forBar =
-      !!bar &&
-      this.flipping &&
-      1 - this.tuck >= BAR_GRAB_EXTEND &&
-      Math.hypot(this.x - bar.x, this.y - bar.y) < 2.6;
     const want =
-      !forBar && this.flipping && crossingGap(level, this.x, this.y, this.vx, this.facing) ? 1 : 0;
+      !this.reachingForBar(level) &&
+      this.flipping &&
+      crossingGap(level, this.x, this.y, this.vx, this.facing)
+        ? 1
+        : 0;
     const k = 1 - Math.exp(-(want > this.gapArmTuck ? 22 : 8) * dt);
     this.gapArmTuck += (want - this.gapArmTuck) * k;
     if (this.gapArmTuck < 0.02 && want <= 0) this.gapArmTuck = 0;
   }
 
-  /** Reach both arms at the rail once he is open enough to actually catch it. */
+  /** Reach both arms at the rail once he is open enough — no need to see it yet. */
   private updateBarGrab(dt: number, level: Level): void {
     const bar = level.bar;
-    const dist = bar ? Math.hypot(this.x - bar.x, this.y - bar.y) : 99;
-    const open = 1 - this.tuck >= BAR_GRAB_EXTEND;
-    const want =
-      bar && this.flipping && this.barLockT <= 0 && open && dist < 2.45 && dist > 0.14
-        ? clamp((2.35 - dist) / 1.35, 0, 1)
-        : 0;
-    const k = 1 - Math.exp(-(want > this.barGrab ? 18 : 10) * dt);
+    const want = this.reachingForBar(level) ? 1 : 0;
+    const k = 1 - Math.exp(-(want > this.barGrab ? 28 : 10) * dt);
     this.barGrab += (want - this.barGrab) * k;
     if (this.barGrab < 0.02 && want <= 0) this.barGrab = 0;
     if (bar && this.barGrab > 0.03) {
       this.barGrabAng = worldDirToLocal(this, bar.x - this.x, bar.y - this.y);
     }
+  }
+
+  private reachingForBar(level: Level): boolean {
+    const bar = level.bar;
+    if (!bar || !this.flipping || this.barLockT > 0 || this.cleared) return false;
+    if (1 - this.tuck < BAR_GRAB_EXTEND) return false;
+    const dist = Math.hypot(this.x - bar.x, this.y - bar.y);
+    return dist > 0.14 && dist < BAR_REACH_DIST;
   }
 
   /** Closest floor in front of him — the pad he can see, not a pit behind it. */
@@ -1499,6 +1607,10 @@ export class Bill {
       let hits = 0;
       let coreHit = false;
       let hoopContact = false;
+      let barNx = 0;
+      let barNy = 0;
+      let barDepth = 0;
+      const bar = this.state === "swing" ? null : level.bar;
       for (const pt of pts) {
         let hit = pushOutOfSolid(level, pt.x, pt.y, pt.r);
         if (hit && !floorToo && hit.ny > 0.5) hit = null;
@@ -1506,6 +1618,20 @@ export class Bill {
         if (hoop && (!hit || hoop.depth > hit.depth)) {
           hit = hoop;
           hoopContact = true;
+        }
+        const rail = bar ? pushOutOfBar(bar, pt.x, pt.y, pt.r) : null;
+        if (rail) {
+          if (rag && pt.kind === "limb" && pt.joints) {
+            foldLimb(this, rag.pose, rag.vel, pt.rig, airFeet, rail.nx, rail.ny, rail.depth, pt.joints);
+          }
+          if (rail.depth > barDepth) {
+            barDepth = rail.depth;
+            barNx = rail.nx;
+            barNy = rail.ny;
+          }
+          accT += (pt.x - this.x) * rail.ny - (pt.y - this.y) * rail.nx;
+          hits++;
+          if (pt.kind === "core") coreHit = true;
         }
         if (!hit) continue;
         if (rag && pt.kind === "limb" && pt.joints) {
@@ -1529,15 +1655,20 @@ export class Bill {
         const floorSpeed = up > 0 ? Math.max(0, -this.vy) : 0;
         const wallSpeed =
           left > right ? Math.max(0, this.vx) : right > left ? Math.max(0, -this.vx) : 0;
-        const impact = Math.max(floorSpeed, wallSpeed, hoopContact ? Math.hypot(this.vx, this.vy) : 0);
+        const railSpeed = barDepth > 0 ? Math.max(0, -(this.vx * barNx + this.vy * barNy)) : 0;
+        const impact = Math.max(
+          floorSpeed,
+          wallSpeed,
+          hoopContact || barDepth > 0 ? Math.hypot(this.vx, this.vy) : 0,
+        );
         if (rag && impact > 2) {
           const slide = floorSpeed >= wallSpeed ? this.vx : this.vy;
           joltPose(rag, impact, slide);
         }
-        if (impact > 2 || (hoopContact && impact > 1.2)) {
-          const mag = Math.max(impact, hoopContact ? 3 : 0);
+        if (impact > 2 || (hoopContact && impact > 1.2) || railSpeed > 1.2) {
+          const mag = Math.max(impact, hoopContact || barDepth > 0 ? 3 : 0);
           if (!this.hitEvent || mag > this.hitEvent.mag) {
-            this.hitEvent = { mag, hoop: hoopContact };
+            this.hitEvent = { mag, hoop: hoopContact, bar: barDepth > 0 && !hoopContact };
           }
         }
       }
@@ -1547,6 +1678,16 @@ export class Bill {
       if (up > 0 && this.vy < 0 && (!rag || coreHit)) this.vy = 0;
       if (right > left) this.vx = Math.max(0, this.vx);
       else if (left > right) this.vx = Math.min(0, this.vx);
+      if (barDepth > 0) {
+        this.x += barNx * barDepth;
+        this.y += barNy * barDepth;
+        const vn = this.vx * barNx + this.vy * barNy;
+        if (vn < 0) {
+          const e = rag ? 0.32 : 0.5;
+          this.vx -= (1 + e) * vn * barNx;
+          this.vy -= (1 + e) * vn * barNy;
+        }
+      }
       if (rag?.rolling) {
         rag.omega += accT * 2.8;
         rag.omega = clamp(rag.omega, -12, 12);
@@ -1637,6 +1778,7 @@ export interface Dust {
   max: number;
   size: number;
   color: string;
+  streak?: boolean;
 }
 
 export function burst(
@@ -1660,6 +1802,38 @@ export function burst(
       max: 0.6,
       size: 2 + Math.random() * 3,
       color,
+    });
+  }
+}
+
+/** Grit and sparks trailing uphill from a shoe on a pitched roof. */
+export function skidSpray(
+  list: Dust[],
+  x: number,
+  y: number,
+  dx: number,
+  dy: number,
+  nx: number,
+  ny: number,
+  speed: number,
+): void {
+  const n = 2 + (Math.random() < 0.5 ? 1 : 0);
+  const rush = 0.55 + Math.min(1.35, speed / 8);
+  for (let i = 0; i < n; i++) {
+    const along = -(2.2 + Math.random() * 3.4) * rush;
+    const lift = 1.15 + Math.random() * 2.6;
+    const jitter = (Math.random() - 0.5) * 1.7;
+    const spark = Math.random() < 0.24;
+    list.push({
+      x: x + (Math.random() - 0.5) * 0.14,
+      y: y + 0.015 + Math.random() * 0.04,
+      vx: dx * along + nx * lift * 0.4 - dy * jitter,
+      vy: dy * along + ny * lift + dx * jitter,
+      life: spark ? 0.16 + Math.random() * 0.12 : 0.3 + Math.random() * 0.28,
+      max: spark ? 0.3 : 0.6,
+      size: spark ? 1.1 + Math.random() * 1.5 : 2.1 + Math.random() * 3.2,
+      color: spark ? "rgba(255, 214, 140, 0.92)" : "rgba(196, 178, 150, 0.72)",
+      streak: true,
     });
   }
 }
@@ -1857,7 +2031,7 @@ interface Ragdoll {
 const KNEE_BEND = { min: -2.05, max: 0.06 };
 const ELBOW_BEND = { min: -0.06, max: 2.0 };
 const THIGH_RANGE = { min: -2.12, max: 1.15 };
-const ARM_RANGE = { min: -2.0, max: 2.45 };
+const ARM_RANGE = { min: -2.28, max: 2.45 };
 const LEAN_RANGE = { min: -0.62, max: 0.88 };
 const ARCH_RANGE = { min: -0.18, max: 0.95 };
 const LUMBAR_RANGE = { min: -0.62, max: 0.92 };
@@ -2131,22 +2305,22 @@ function poseFor(bill: Bill, t: number): Pose {
 
   if (bill.state === "slide") {
     const hang = -Math.PI / 2;
-    const pump = Math.sin(bill.runPhase);
-    const squat = 0.42;
+    const wobble = Math.sin(bill.runPhase * 0.85);
+    const steep = Math.min(1, Math.abs(bill.rot) / 0.62);
     return clampLimbPose({
-      lean: 0.34,
-      arch: -0.16,
-      spineLumbar: -0.18,
-      spineThoracic: -0.08,
-      spineCervical: 0.06,
-      lThigh: hang + squat + 0.28 * pump,
-      rThigh: hang + squat - 0.22 * pump,
-      lShin: hang - squat * 0.72 - 0.1 * pump,
-      rShin: hang - squat * 0.62 + 0.12 * pump,
-      lArm: hang - 0.55 - 0.18 * pump,
-      rArm: hang - 0.38 + 0.16 * pump,
-      lFore: hang + 0.08,
-      rFore: hang + 0.16,
+      lean: 0.62 + 0.24 * steep + 0.05 * wobble,
+      arch: -0.1,
+      spineLumbar: -0.34 - 0.12 * steep,
+      spineThoracic: -0.1,
+      spineCervical: 0.16,
+      lThigh: hang + 0.9 + 0.05 * wobble,
+      rThigh: hang - 0.5 - 0.04 * wobble,
+      lShin: hang - 0.2 + 0.03 * wobble,
+      rShin: hang - 0.44,
+      lArm: hang + 0.95 + 0.1 * wobble,
+      rArm: hang - 0.72 - 0.08 * wobble,
+      lFore: hang + 0.42,
+      rFore: hang - 0.18,
     });
   }
 
@@ -2516,7 +2690,42 @@ function enforceRagdollJoints(bill: Bill): void {
   if (!rag) return;
   const hits = jointOvershoot(rag.pose, rag.vel);
   clampLimbPose(rag.pose);
+  limitJointVel(rag.pose, rag.vel);
+  if (bill.barProtectT > 0) return;
   for (const h of hits) noteSnap(bill, h.key, h.excess, h.speed);
+}
+
+/** Kill drive that would push a clamped joint further through its stop. */
+function limitJointVel(pose: Pose, vel: Pose): void {
+  const abs = (key: keyof Pose, min: number, max: number) => {
+    const v = pose[key] ?? 0;
+    const s = vel[key] ?? 0;
+    if (v <= min + 0.012 && s < 0) vel[key] = 0;
+    if (v >= max - 0.012 && s > 0) vel[key] = 0;
+  };
+  const rel = (child: keyof Pose, parent: keyof Pose, min: number, max: number) => {
+    const parentAng = pose[parent] ?? 0;
+    const childAng = pose[child] ?? parentAng;
+    const r = wrapPi(childAng - parentAng);
+    const rVel = (vel[child] ?? 0) - (vel[parent] ?? 0);
+    if (r <= min + 0.012 && rVel < 0) vel[child] = vel[parent] ?? 0;
+    if (r >= max - 0.012 && rVel > 0) vel[child] = vel[parent] ?? 0;
+  };
+  abs("lean", LEAN_RANGE.min, LEAN_RANGE.max);
+  abs("arch", ARCH_RANGE.min, ARCH_RANGE.max);
+  abs("spineLumbar", LUMBAR_RANGE.min, LUMBAR_RANGE.max);
+  abs("spineThoracic", THORACIC_RANGE.min, THORACIC_RANGE.max);
+  abs("spineCervical", CERVICAL_RANGE.min, CERVICAL_RANGE.max);
+  abs("lThigh", THIGH_RANGE.min, THIGH_RANGE.max);
+  abs("rThigh", THIGH_RANGE.min, THIGH_RANGE.max);
+  abs("lArm", ARM_RANGE.min, ARM_RANGE.max);
+  abs("rArm", ARM_RANGE.min, ARM_RANGE.max);
+  rel("lShin", "lThigh", KNEE_BEND.min, KNEE_BEND.max);
+  rel("rShin", "rThigh", KNEE_BEND.min, KNEE_BEND.max);
+  rel("lFore", "lArm", ELBOW_BEND.min, ELBOW_BEND.max);
+  rel("rFore", "rArm", ELBOW_BEND.min, ELBOW_BEND.max);
+  rel("lFoot", "lShin", ANKLE_BEND.min, ANKLE_BEND.max);
+  rel("rFoot", "rShin", ANKLE_BEND.min, ANKLE_BEND.max);
 }
 
 function clampLimbPose(pose: Pose): Pose {
@@ -2715,12 +2924,14 @@ function applyPanic(pose: Pose, bill: Bill): Pose {
 function applyBarReach(pose: Pose, bill: Bill): Pose {
   const u = bill.barGrab;
   if (u < 0.03) return pose;
-  const ang = bill.barGrabAng;
   const p = { ...pose };
-  p.lArm = mixAng(p.lArm, ang + 0.1, u);
-  p.rArm = mixAng(p.rArm, ang - 0.08, u);
-  p.lFore = mixAng(p.lFore, p.lArm + 0.05, u);
-  p.rFore = mixAng(p.rFore, p.rArm + 0.05, u);
+  const reach = 1 - (1 - u) * (1 - u);
+  const lWant = clamp(bill.barGrabAng + 0.1, ARM_RANGE.min, ARM_RANGE.max);
+  const rWant = clamp(bill.barGrabAng - 0.08, ARM_RANGE.min, ARM_RANGE.max);
+  p.lArm = p.lArm + (lWant - p.lArm) * reach;
+  p.rArm = p.rArm + (rWant - p.rArm) * reach;
+  p.lFore = hinge(p.lArm + 0.08, p.lArm, ELBOW_BEND.min, ELBOW_BEND.max);
+  p.rFore = hinge(p.rArm + 0.08, p.rArm, ELBOW_BEND.min, ELBOW_BEND.max);
   return clampLimbPose(p);
 }
 
@@ -2974,15 +3185,16 @@ function foldLimb(
       }
     }
     if (bestGain < 1e-4) continue;
-    const scale = Math.min(1.2, left / bestGain);
+    const scale = Math.min(1, left / bestGain);
     pose[joint] = orig + bestStep * scale;
+    clampLimbPose(pose);
     vel[joint] = (vel[joint] ?? 0) * 0.18;
     enforceRagdollJoints(bill);
     const now = makeRig(pose, airFeet)[rigKey];
     const w = worldOf(bill, now.x, now.y);
     left -= (w.x - w0.x) * nx + (w.y - w0.y) * ny;
   }
-  if (left > 0.08 && joints[0]) {
+  if (left > 0.08 && joints[0] && bill.barProtectT <= 0) {
     noteSnap(bill, joints[0], 0, Math.abs(vel[joints[0]] ?? 0), left);
   }
 }
@@ -3300,6 +3512,7 @@ function drawFace(ctx: CanvasRenderingContext2D, hx: number, hy: number, mood: F
 
 function footAngle(bill: Bill, shin: number, thigh: number): number {
   if (bill.rag) return shin;
+  if (bill.state === "slide" && !bill.board?.on) return -Math.PI / 2;
   if (bill.state === "air") {
     if (bill.landPrep > 0.04) {
       const flat = worldDirToLocal(bill, 1, 0);

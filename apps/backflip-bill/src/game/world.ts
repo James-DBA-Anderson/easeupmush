@@ -63,7 +63,7 @@ export interface Level {
   noFlag?: boolean;
   /** Circus hoop: only a tucked pose fits the hole. */
   hoop?: Hoop;
-  /** High bar along Z — grab if 60% extended and a hand can touch it. */
+  /** High bar along Z — grab if 50% extended and a hand can touch it. */
   bar?: HighBar;
   /** Roof-height blocks that slide toward the player. */
   obstacles?: Obstacle[];
@@ -251,8 +251,8 @@ export const LEVELS: Level[] = [
     flagX: 28.6,
     killY: -13,
     endX: 38,
-    bar: { x: 18.3, y: 3.5 },
-    hint: "Stay at least 60% extended so your hands can catch the bar, swing a giant if you can, then FLIP on the way up to fly the gap.",
+    bar: { x: 18.3, y: 3.22 },
+    hint: "Stay at least 50% extended so your hands can catch the bar, swing a giant if you can, then FLIP on the way up to fly the gap.",
   },
 ];
 
@@ -404,6 +404,16 @@ export function platformNormal(p: Platform, x?: number): { nx: number; ny: numbe
   const s = platformSlope(p, x);
   const inv = 1 / Math.hypot(1, s);
   return { nx: -s * inv, ny: inv };
+}
+
+/** Unit tangent pointing downhill (the way world y falls). */
+export function padDownhill(p: Platform, x: number): { dx: number; dy: number } {
+  const s = platformSlope(p, x);
+  const len = Math.hypot(1, s) || 1;
+  const dx = 1 / len;
+  const dy = s / len;
+  const sign = dy <= 0 ? 1 : -1;
+  return { dx: dx * sign, dy: dy * sign };
 }
 
 export function pitchedAt(level: Level, x: number): Platform | null {
@@ -2069,10 +2079,26 @@ function drawHoop(
 const BAR_LEN_Z = 2.9;
 export const BAR_RADIUS = 0.11;
 /** Minimum layout (0 tucked … 1 straight) to catch the bar. */
-export const BAR_GRAB_EXTEND = 0.6;
+export const BAR_GRAB_EXTEND = 0.5;
 
 export function barReach(bar: HighBar): number {
   return bar.reach ?? 0.76;
+}
+
+/** Circle vs the high bar. Normal points out from the rail. */
+export function pushOutOfBar(
+  bar: HighBar,
+  x: number,
+  y: number,
+  r: number,
+): { nx: number; ny: number; depth: number } | null {
+  const dx = x - bar.x;
+  const dy = y - bar.y;
+  const dist = Math.hypot(dx, dy);
+  const need = BAR_RADIUS + r;
+  if (dist >= need) return null;
+  if (dist < 1e-4) return { nx: 0, ny: 1, depth: need };
+  return { nx: dx / dist, ny: dy / dist, depth: need - dist };
 }
 
 function drawBar(
@@ -2292,6 +2318,44 @@ export function drawCharShadow(
     ctx.arc(0, 0, 0.52, 0, Math.PI * 2);
     ctx.fill();
   }
+  ctx.restore();
+}
+
+/** Small pad scuff at the last takeoff — sits on the roof so the player can walk the jump up again. */
+export function drawTakeoffMark(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  x: number,
+  y: number,
+  slope = 0,
+): void {
+  const s = worldToScreen(cam, cssW, cssH, x, y);
+  if (s.x < -48 || s.x > cssW + 48) return;
+  const ppm = s.ppm;
+  const arm = 0.09 * ppm;
+  ctx.save();
+  ctx.translate(s.x, s.y + 0.03 * ppm);
+  if (Math.abs(slope) > 0.02) ctx.rotate(-Math.atan(slope));
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(18, 22, 28, 0.55)";
+  ctx.lineWidth = Math.max(3, ppm * 0.04);
+  ctx.beginPath();
+  ctx.moveTo(-arm, -arm * 0.72);
+  ctx.lineTo(arm, arm * 0.72);
+  ctx.moveTo(arm, -arm * 0.72);
+  ctx.lineTo(-arm, arm * 0.72);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(240, 162, 58, 0.95)";
+  ctx.lineWidth = Math.max(1.6, ppm * 0.022);
+  ctx.beginPath();
+  ctx.moveTo(-arm, -arm * 0.72);
+  ctx.lineTo(arm, arm * 0.72);
+  ctx.moveTo(arm, -arm * 0.72);
+  ctx.lineTo(-arm, arm * 0.72);
+  ctx.stroke();
   ctx.restore();
 }
 

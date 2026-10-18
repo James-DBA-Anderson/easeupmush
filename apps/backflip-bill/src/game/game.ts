@@ -1,5 +1,5 @@
 import { Sfx } from "./audio";
-import { Bill, burst, drawBill, drawSkateboard, stepDust, type Dust } from "./bill";
+import { Bill, burst, drawBill, drawSkateboard, skidSpray, stepDust, type Dust } from "./bill";
 import { drawParkKid } from "./spectator";
 import { HIP_HEIGHT, STANDING_FLIP_MAX_VX, TAU } from "./constants";
 import { isDebugTyping, Input, wantsTouchUi } from "./input";
@@ -9,6 +9,7 @@ import {
   camLookX,
   cloneLevel,
   drawSky,
+  drawTakeoffMark,
   drawWorld,
   drawWorldForeground,
   finishGround,
@@ -19,8 +20,11 @@ import {
   LEVELS,
   makeCam,
   makeSimLevel,
+  padDownhill,
   pitchedAt,
+  platformNormal,
   platformSlope,
+  platformY,
   routeAt,
   screenToWorld,
   spawnGround,
@@ -75,6 +79,10 @@ function landingClears(
     return e.spins >= 1 && bill.takeoffSpeed <= STANDING_FLIP_MAX_VX;
   }
   return bill.x >= level.gapX1;
+}
+
+function showsTakeoffMark(level: Level): boolean {
+  return !level.train && level.theme !== "park";
 }
 
 function stretchBeat(t: number): number {
@@ -173,6 +181,7 @@ export class Game {
   private sim = false;
   private simGap = false;
   private simBoxes = false;
+  private takeoffMark: { x: number; y: number } | null = null;
   private grabbing = false;
   private grabX = 0;
   private grabY = 0;
@@ -470,6 +479,7 @@ export class Game {
     this.sfx.levelStart();
     this.kidLaughT = 0;
     this.kidFalls = 0;
+    this.takeoffMark = null;
     this.syncWindowFolk();
     this.beginPreview();
   }
@@ -634,6 +644,12 @@ export class Game {
         this.sfx.grab();
         this.flash("On the bar");
       }
+      if (this.bill.barHitEvent) {
+        this.sfx.hoopClang();
+        this.flash("Off the bar");
+        burst(this.dust, this.bill.x, this.bill.y, 10, "rgba(232,240,244,0.7)", 3.6);
+        this.tickKidLaugh(1.5);
+      }
       if (this.bill.barLoopEvent) {
         this.addLive(EXTRA_SPIN_PTS, "extra");
         this.awardedExtra += 1;
@@ -674,6 +690,7 @@ export class Game {
         }
         if (e.kind === "slide") {
           this.sfx.cleanLand(e.impact);
+          this.sfx.skid();
           this.flash("On the pitch");
           burst(this.dust, e.x, e.y, 8, "rgba(232,240,244,0.7)", 3);
         } else if (e.kind === "clean") {
@@ -699,8 +716,8 @@ export class Game {
         if (startled.count) this.sfx.folkYell();
         if (startled.dropped) this.sfx.drop();
       }
-      if (this.bill.hitEvent && (!this.bill.landEvent || this.bill.hitEvent.hoop)) {
-        if (this.bill.hitEvent.hoop) this.sfx.hoopClang();
+      if (this.bill.hitEvent && (!this.bill.landEvent || this.bill.hitEvent.hoop || this.bill.hitEvent.bar)) {
+        if (this.bill.hitEvent.hoop || this.bill.hitEvent.bar) this.sfx.hoopClang();
         else this.sfx.bodyHit(this.bill.hitEvent.mag);
       }
       if (this.bill.snapEvents.length) {
@@ -742,6 +759,15 @@ export class Game {
           this.showResults();
         }
       }
+      if (this.bill.takeoffEvent && showsTakeoffMark(level)) {
+        const pad = pitchedAt(level, this.bill.x);
+        this.takeoffMark = {
+          x: this.bill.x,
+          y: pad
+            ? platformY(pad, this.bill.x)
+            : (groundAt(level, this.bill.x) ?? this.bill.y - HIP_HEIGHT),
+        };
+      }
       if (input.jump && this.bill.state === "air" && this.bill.airTime < 0.08) {
         this.sfx.jump();
         const g = groundAt(level, this.bill.x) ?? spawnGround(level);
@@ -758,12 +784,27 @@ export class Game {
     }
 
     if (
-      (this.bill.state === "ground" || this.bill.state === "slide") &&
+      this.bill.state === "ground" &&
       Math.abs(this.bill.vx) > 3.5 &&
       Math.random() < dt * 8
     ) {
       const g = groundAt(level, this.bill.x) ?? spawnGround(level);
       burst(this.dust, this.bill.x, g, 1, "rgba(180,170,155,0.55)", 1.4);
+    }
+    if (this.bill.state === "slide" && !this.bill.board?.on) {
+      const pad = pitchedAt(level, this.bill.x);
+      if (pad) {
+        const { dx, dy } = padDownhill(pad, this.bill.x);
+        const n = platformNormal(pad, this.bill.x);
+        const speed = Math.hypot(this.bill.vx, this.bill.vy);
+        const rate = 16 + Math.min(26, speed * 2);
+        if (Math.random() < dt * rate) {
+          const rearX = this.bill.x - dx * 0.22;
+          const frontX = this.bill.x + dx * 0.28;
+          skidSpray(this.dust, rearX, platformY(pad, rearX), dx, dy, n.nx, n.ny, speed);
+          skidSpray(this.dust, frontX, platformY(pad, frontX), dx, dy, n.nx, n.ny, speed);
+        }
+      }
     }
 
     this.playMotionSfx(level);
@@ -1079,12 +1120,14 @@ export class Game {
   private playMotionSfx(level: Level): void {
     const bill = this.bill;
     const air = bill.state === "air" || !!bill.rag || bill.held;
+    const speed = Math.hypot(bill.vx, bill.vy);
     this.sfx.tick({
       flipping: bill.flipping && !bill.held,
       omega: bill.spinRate,
       air,
       fall: Math.max(0, -bill.vy),
-      speed: Math.hypot(bill.vx, bill.vy),
+      speed,
+      scrape: bill.state === "slide" && !bill.board?.on ? Math.min(1, speed / 8.5) : 0,
     });
 
     const standing =
@@ -1127,6 +1170,8 @@ export class Game {
 
     if (bill.cleared && !this.wasCleared && Math.abs(bill.vx) > 2) this.sfx.skid();
     this.wasCleared = bill.cleared;
+
+    if (bill.state === "slide" && !bill.board?.on && speed > 3.2) this.sfx.grit();
   }
 
   private draw(): void {
@@ -1134,6 +1179,18 @@ export class Game {
     const level = this.level();
     drawSky(ctx, cam, cssW, cssH);
     drawWorld(ctx, cam, cssW, cssH, level, this.t);
+    if (this.takeoffMark && showsTakeoffMark(level)) {
+      const pad = pitchedAt(level, this.takeoffMark.x);
+      drawTakeoffMark(
+        ctx,
+        cam,
+        cssW,
+        cssH,
+        this.takeoffMark.x,
+        this.takeoffMark.y,
+        pad ? platformSlope(pad, this.takeoffMark.x) : 0,
+      );
+    }
     drawFolkDrops(ctx, (x, y) => worldToScreen(cam, cssW, cssH, x, y));
     if (!this.sim) {
       const howl = this.kidLaughHowl();
@@ -1152,10 +1209,21 @@ export class Game {
     for (const p of this.dust) {
       const s = worldToScreen(cam, cssW, cssH, p.x, p.y);
       ctx.globalAlpha = Math.max(0, p.life / p.max);
-      ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, p.size, 0, Math.PI * 2);
-      ctx.fill();
+      if (p.streak) {
+        const len = Math.min(18, Math.hypot(p.vx, p.vy) * 0.04 * s.ppm);
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = p.size;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(s.x - (p.vx / (Math.hypot(p.vx, p.vy) || 1)) * len, s.y + (p.vy / (Math.hypot(p.vx, p.vy) || 1)) * len);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.globalAlpha = 1;
     }
 

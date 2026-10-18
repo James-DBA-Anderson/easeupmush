@@ -13,6 +13,7 @@ export class Sfx {
   private brown: AudioBuffer | null = null;
   private whoosh: LoopVoice | null = null;
   private wind: LoopVoice | null = null;
+  private scrape: LoopVoice | null = null;
   private lastAt = new Map<string, number>();
 
   private ensure(): AudioContext | null {
@@ -44,9 +45,10 @@ export class Sfx {
     air: boolean;
     fall: number;
     speed: number;
+    scrape?: number;
   }): void {
     const ctx = this.ensure();
-    if (!ctx || !this.whoosh || !this.wind) return;
+    if (!ctx || !this.whoosh || !this.wind || !this.scrape) return;
     const t = ctx.currentTime;
     const spin = info.flipping ? Math.max(0, info.omega) : 0;
     const whooshGain = info.air && spin > 0.4 ? Math.min(0.11, 0.018 + spin * 0.014) : 0.0001;
@@ -62,6 +64,12 @@ export class Sfx {
     const windHz = 480 + Math.min(1400, fall * 70 + info.speed * 22);
     setParam(this.wind.gain.gain, windGain, t, 0.12);
     setParam(this.wind.filter.frequency, windHz, t, 0.14);
+
+    const scrape = Math.max(0, info.scrape ?? 0);
+    const scrapeGain = scrape > 0.05 ? Math.min(0.1, 0.02 + scrape * 0.075) : 0.0001;
+    const scrapeHz = 620 + scrape * 780 + Math.sin(t * 31) * 90;
+    setParam(this.scrape.gain.gain, scrapeGain, t, 0.07);
+    setParam(this.scrape.filter.frequency, scrapeHz, t, 0.09);
   }
 
   public jump(): void {
@@ -157,6 +165,11 @@ export class Sfx {
     this.sweep(180, 70, 0.18, 0.05, "sawtooth");
   }
 
+  public grit(): void {
+    if (!this.gate("grit", 0.2)) return;
+    this.noiseBurst(0.055, 0.03 + Math.random() * 0.028, 780 + Math.random() * 820, 1.7);
+  }
+
   public tuck(): void {
     if (!this.gate("tuck", 0.16)) return;
     this.sweep(520, 180, 0.1, 0.045, "triangle");
@@ -226,9 +239,10 @@ export class Sfx {
   }
 
   private ensureLoops(): void {
-    if (!this.ctx || !this.master || !this.brown || this.whoosh) return;
-    this.whoosh = this.loopVoice(this.brown, "bandpass", 500, 0.9);
-    this.wind = this.loopVoice(this.brown, "highpass", 700, 0.5);
+    if (!this.ctx || !this.master || !this.brown) return;
+    if (!this.whoosh) this.whoosh = this.loopVoice(this.brown, "bandpass", 500, 0.9);
+    if (!this.wind) this.wind = this.loopVoice(this.brown, "highpass", 700, 0.5);
+    if (!this.scrape) this.scrape = this.loopVoice(this.noise ?? this.brown, "bandpass", 920, 1.2);
   }
 
   private loopVoice(
