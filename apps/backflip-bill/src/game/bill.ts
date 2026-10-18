@@ -2,6 +2,8 @@ import { degToRad, HIP_HEIGHT, STANDING_FLIP_MAX_VX, TAU } from "./constants";
 import { tuning } from "./tuning";
 import {
   approachingSolid,
+  BAR_GRAB_EXTEND,
+  BAR_RADIUS,
   barReach,
   groundAt,
   obstacleHits,
@@ -150,6 +152,9 @@ export class Bill {
   gapArmTuck = 0;
   /** 0–1: head-first panic — arms out at the floor. Pose only, does not save the landing. */
   panic = 0;
+  /** 0–1: arms reaching for the high bar. Pose only until a hand actually touches. */
+  barGrab = 0;
+  barGrabAng = 0;
   /** Missed the pad and hit the pit — angry fail, then restart. */
   gapFail = false;
   /** Left a pitched roof — next floor contact is a drop landing, not a crash. */
@@ -223,6 +228,8 @@ export class Bill {
     this.landPrep = 0;
     this.gapArmTuck = 0;
     this.panic = 0;
+    this.barGrab = 0;
+    this.barGrabAng = 0;
     this.gapFail = false;
     this.slideDrop = false;
     this.swingAng = 0;
@@ -247,6 +254,7 @@ export class Bill {
     this.landPrep = 0;
     this.gapArmTuck = 0;
     this.panic = 0;
+    this.barGrab = 0;
     this.brace = 0;
     this.spinRate = 0;
     this.held = true;
@@ -450,8 +458,18 @@ export class Bill {
     this.updateLandPrep(dt, level);
     this.updateGapArmTuck(dt, level);
     this.updatePanic(dt, level);
+    this.updateBarGrab(dt, level);
 
     if (this.tryGrabBar(level)) {
+      this.checkGapDeath(level);
+      this.tryFinish(level);
+      this.stepBoard(dt, level);
+      return;
+    }
+    if (this.hitsBar(level)) {
+      this.beginRagdoll("crash", null);
+      this.landEvent = this.makeLand("fall", this.x, this.y);
+      this.resolveBody(level, true);
       this.checkGapDeath(level);
       this.tryFinish(level);
       this.stepBoard(dt, level);
@@ -640,6 +658,7 @@ export class Bill {
     this.landPrep = 0;
     this.gapArmTuck = 0;
     this.panic = 0;
+    this.barGrab = 0;
     this.lockTimer = 0;
     this.jumpBuf = 0;
     const speed = Math.min(1, Math.abs(this.vx) / tuning.maxSpeed);
@@ -664,6 +683,7 @@ export class Bill {
     this.flipping = false;
     this.landPrep = 0;
     this.gapArmTuck = 0;
+    this.barGrab = 0;
     // Keep panic until the ragdoll snapshot, then clear.
 
     if (padAt(level, this.x) === null) {
@@ -765,6 +785,7 @@ export class Bill {
     this.landPrep = 0;
     this.gapArmTuck = 0;
     this.panic = 0;
+    this.barGrab = 0;
     this.lockTimer = 0;
     if (!this.board?.on) this.jumpBuf = 0;
     const { dx, dy } = this.downhill(pitch);
@@ -847,6 +868,7 @@ export class Bill {
     this.landPrep = 0;
     this.gapArmTuck = 0;
     this.panic = 0;
+    this.barGrab = 0;
   }
 
   private kickBoard(nx: number, ny: number, impulse: number): void {
@@ -911,12 +933,31 @@ export class Bill {
   private tryGrabBar(level: Level): boolean {
     const bar = level.bar;
     if (!bar || this.barLockT > 0 || this.cleared) return false;
-    if (this.tuck > 0.4) return false;
-    const reach = barReach(bar);
-    const dist = Math.hypot(this.x - bar.x, this.y - bar.y);
-    if (dist < 0.16 || dist > reach * 1.45) return false;
+    if (1 - this.tuck < BAR_GRAB_EXTEND) return false;
+    if (!this.handsOnBar(bar)) return false;
     this.catchBar(bar);
     return true;
+  }
+
+  private handsOnBar(bar: HighBar): boolean {
+    const pose = poseFor(this, 0);
+    const rig = makeRig(pose, true);
+    const touch = BAR_RADIUS + 0.12;
+    for (const h of [rig.lHand, rig.rHand]) {
+      const w = worldOf(this, h.x, h.y);
+      if (Math.hypot(w.x - bar.x, w.y - bar.y) < touch) return true;
+    }
+    return false;
+  }
+
+  /** Any body part clipping the rail — tucked or not, this is a smash if you did not catch. */
+  private hitsBar(level: Level): boolean {
+    const bar = level.bar;
+    if (!bar || this.barLockT > 0) return false;
+    for (const pt of bodyWorldPoints(this)) {
+      if (Math.hypot(pt.x - bar.x, pt.y - bar.y) < pt.r + BAR_RADIUS) return true;
+    }
+    return false;
   }
 
   private catchBar(bar: HighBar): void {
@@ -936,6 +977,7 @@ export class Bill {
     this.flipping = true;
     this.slideDrop = false;
     this.panic = 0;
+    this.barGrab = 0;
     this.landPrep = 0;
     this.gapArmTuck = 0;
     this.brace = 0;
@@ -1014,6 +1056,7 @@ export class Bill {
     this.landPrep = 0;
     this.gapArmTuck = 0;
     this.panic = 0;
+    this.barGrab = 0;
     const rate =
       tuning.tuckRateStraight +
       (tuning.tuckRateCrouch - tuning.tuckRateStraight) * this.tuck;
@@ -1038,6 +1081,7 @@ export class Bill {
     this.landPrep = 0;
     this.gapArmTuck = 0;
     this.panic = 0;
+    this.barGrab = 0;
     this.brace = 0;
     this.vx *= 0.52;
     this.vy = 0;
@@ -1095,6 +1139,7 @@ export class Bill {
     this.landPrep = 0;
     this.gapArmTuck = 0;
     this.panic = 0;
+    this.barGrab = 0;
     const omega = rolling
       ? clamp(spin * 0.8 + dir * speed * 0.22, -12, 12)
       : dir * 1.05;
@@ -1335,10 +1380,34 @@ export class Bill {
    * bit more banana — including the neck — once he starts to open.
    */
   private updateGapArmTuck(dt: number, level: Level): void {
-    const want = this.flipping && crossingGap(level, this.x, this.y, this.vx, this.facing) ? 1 : 0;
+    const bar = level.bar;
+    const forBar =
+      !!bar &&
+      this.flipping &&
+      1 - this.tuck >= BAR_GRAB_EXTEND &&
+      Math.hypot(this.x - bar.x, this.y - bar.y) < 2.6;
+    const want =
+      !forBar && this.flipping && crossingGap(level, this.x, this.y, this.vx, this.facing) ? 1 : 0;
     const k = 1 - Math.exp(-(want > this.gapArmTuck ? 22 : 8) * dt);
     this.gapArmTuck += (want - this.gapArmTuck) * k;
     if (this.gapArmTuck < 0.02 && want <= 0) this.gapArmTuck = 0;
+  }
+
+  /** Reach both arms at the rail once he is open enough to actually catch it. */
+  private updateBarGrab(dt: number, level: Level): void {
+    const bar = level.bar;
+    const dist = bar ? Math.hypot(this.x - bar.x, this.y - bar.y) : 99;
+    const open = 1 - this.tuck >= BAR_GRAB_EXTEND;
+    const want =
+      bar && this.flipping && this.barLockT <= 0 && open && dist < 2.45 && dist > 0.14
+        ? clamp((2.35 - dist) / 1.35, 0, 1)
+        : 0;
+    const k = 1 - Math.exp(-(want > this.barGrab ? 18 : 10) * dt);
+    this.barGrab += (want - this.barGrab) * k;
+    if (this.barGrab < 0.02 && want <= 0) this.barGrab = 0;
+    if (bar && this.barGrab > 0.03) {
+      this.barGrabAng = worldDirToLocal(this, bar.x - this.x, bar.y - this.y);
+    }
   }
 
   /** Closest floor in front of him — the pad he can see, not a pit behind it. */
@@ -2109,9 +2178,12 @@ function poseFor(bill: Bill, t: number): Pose {
       );
     }
     return applyLandPrep(
-      applyPanic(
-        applyBrace(
-          applyGapArms(clampLimbPose(lerpPose(LAYOUT, CROUCH, bill.tuck)), bill),
+      applyBarReach(
+        applyPanic(
+          applyBrace(
+            applyGapArms(clampLimbPose(lerpPose(LAYOUT, CROUCH, bill.tuck)), bill),
+            bill,
+          ),
           bill,
         ),
         bill,
@@ -2636,6 +2708,19 @@ function applyPanic(pose: Pose, bill: Bill): Pose {
   p.rArm = mixAng(p.rArm, down - 0.2 - shake * 0.7, u);
   p.lFore = mixAng(p.lFore, p.lArm + 0.18, u);
   p.rFore = mixAng(p.rFore, p.rArm + 0.16, u);
+  return clampLimbPose(p);
+}
+
+/** Both arms toward the high bar so the hands can actually take it. */
+function applyBarReach(pose: Pose, bill: Bill): Pose {
+  const u = bill.barGrab;
+  if (u < 0.03) return pose;
+  const ang = bill.barGrabAng;
+  const p = { ...pose };
+  p.lArm = mixAng(p.lArm, ang + 0.1, u);
+  p.rArm = mixAng(p.rArm, ang - 0.08, u);
+  p.lFore = mixAng(p.lFore, p.lArm + 0.05, u);
+  p.rFore = mixAng(p.rFore, p.rArm + 0.05, u);
   return clampLimbPose(p);
 }
 

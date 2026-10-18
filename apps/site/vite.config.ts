@@ -38,6 +38,10 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
+      "/api/backflip-bill": {
+        target: "http://127.0.0.1:5306",
+        changeOrigin: true,
+      },
     },
   },
   preview: {

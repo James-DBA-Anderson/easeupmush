@@ -63,7 +63,7 @@ export interface Level {
   noFlag?: boolean;
   /** Circus hoop: only a tucked pose fits the hole. */
   hoop?: Hoop;
-  /** High bar along Z — grab if extended, giant, then kick off. */
+  /** High bar along Z — grab if 60% extended and a hand can touch it. */
   bar?: HighBar;
   /** Roof-height blocks that slide toward the player. */
   obstacles?: Obstacle[];
@@ -251,8 +251,8 @@ export const LEVELS: Level[] = [
     flagX: 28.6,
     killY: -13,
     endX: 38,
-    bar: { x: 17.7, y: 3.82 },
-    hint: "Open up to catch the bar, swing a giant if you can, then FLIP on the way up to fly the gap.",
+    bar: { x: 18.3, y: 3.5 },
+    hint: "Stay at least 60% extended so your hands can catch the bar, swing a giant if you can, then FLIP on the way up to fly the gap.",
   },
 ];
 
@@ -816,6 +816,7 @@ export function drawWorld(
     drawWoodsRiver(ctx, cam, cssW, cssH, level, t);
     drawRiverJunk(ctx, cam, cssW, cssH, level);
     drawWoodsTrees(ctx, cam, cssW, cssH, level, false);
+    drawWoodsSign(ctx, cam, cssW, cssH, level);
     drawStartWall(ctx, cam, cssW, cssH, level);
     if (!level.noFlag) drawFlag(ctx, cam, cssW, cssH, level);
     return;
@@ -1126,6 +1127,52 @@ const WOODS_TREES: { x: number; s: number; fg: boolean }[] = [
   { x: 31.1, s: 1.18, fg: true },
   { x: 34.2, s: 1.05, fg: false },
 ];
+
+/** Trail name board in the trees, just right of the crest spawn. */
+function drawWoodsSign(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+): void {
+  const x = 5.72;
+  const gy = routeAt(level, x);
+  const ppm = cssW / cam.w;
+  const sx = worldToScreenX(cam, cssW, x);
+  const sy = worldToScreenY(cam, cssH, gy);
+  if (sx < -100 || sx > cssW + 100) return;
+
+  const postH = 1.62 * ppm;
+  const postW = Math.max(4, 0.1 * ppm);
+  const boardW = 1.78 * ppm;
+  const boardH = 0.82 * ppm;
+  const boardY = sy - postH + 0.1 * ppm;
+  const postInset = boardW * 0.36;
+
+  ctx.fillStyle = "#2e2418";
+  ctx.fillRect(sx - postInset - postW * 0.5, sy - postH, postW, postH);
+  ctx.fillRect(sx + postInset - postW * 0.5, sy - postH, postW, postH);
+  ctx.fillStyle = "rgba(18, 12, 8, 0.28)";
+  ctx.fillRect(sx - postInset, sy - postH, postW * 0.28, postH);
+  ctx.fillRect(sx + postInset + postW * 0.08, sy - postH, postW * 0.28, postH);
+
+  ctx.fillStyle = "#4a3824";
+  ctx.fillRect(sx - boardW * 0.5, boardY, boardW, boardH);
+  ctx.fillStyle = "#5c4630";
+  ctx.fillRect(sx - boardW * 0.5 + 4, boardY + 4, boardW - 8, boardH - 8);
+  ctx.strokeStyle = "#c4a878";
+  ctx.lineWidth = Math.max(1.6, 0.028 * ppm);
+  ctx.strokeRect(sx - boardW * 0.5 + 8, boardY + 8, boardW - 16, boardH - 16);
+
+  ctx.fillStyle = "#efe4c8";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `400 ${Math.max(13, 0.3 * ppm)}px Anton, Impact, sans-serif`;
+  ctx.fillText("Foxes", sx, boardY + boardH * 0.36);
+  ctx.font = `400 ${Math.max(12, 0.26 * ppm)}px Anton, Impact, sans-serif`;
+  ctx.fillText("Forest", sx, boardY + boardH * 0.68);
+}
 
 function drawWoodsTrees(
   ctx: CanvasRenderingContext2D,
@@ -2020,7 +2067,9 @@ function drawHoop(
 }
 
 const BAR_LEN_Z = 2.9;
-const BAR_RADIUS = 0.11;
+export const BAR_RADIUS = 0.11;
+/** Minimum layout (0 tucked … 1 straight) to catch the bar. */
+export const BAR_GRAB_EXTEND = 0.6;
 
 export function barReach(bar: HighBar): number {
   return bar.reach ?? 0.76;

@@ -32,6 +32,7 @@ A Cloudflare API token with permissions to deploy to Pages.
 3. Use the "Edit Cloudflare Workers" template or create a custom token with:
    - **Permissions:**
      - Account → Cloudflare Pages → Edit
+     - Account → Workers KV Storage → Edit
      - Account → Account Settings → Read
    - **Account Resources:** Include your account
 4. Copy the token and add it to GitHub:
@@ -109,6 +110,8 @@ To check a deploy without uploading, run `npm run build && npm ci --prefix deplo
 
 This is the error you get if `cf deploy` is run from the repo root. Run it from `deploy/` instead.
 
+The Worker entrypoint is `deploy/worker.ts`. API routes run first (`assets.runWorkerFirst`); everything else is the static `dist/` site. Backflip Bill high scores live in a Workers KV binding named `SCORES`. KV is not rebuilt with the site, so names and scores survive deploys on the free tier. Local game dev writes the same JSON shape to `apps/backflip-bill/.local/scores.json` (gitignored).
+
 ## Cloudflare Free Tier
 
 This deployment configuration is compatible with Cloudflare's free tier:
@@ -119,6 +122,7 @@ This deployment configuration is compatible with Cloudflare's free tier:
 - ✅ Custom domain (easeupmush.com)
 - ✅ Automatic HTTPS
 - ✅ Global CDN
+- ✅ Workers KV (Backflip Bill high scores, persists between deploys)
 
 ## Troubleshooting
 

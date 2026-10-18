@@ -710,6 +710,111 @@
         color: var(--foam);
         opacity: 0.75;
       }
+
+      .results-name {
+        margin-top: 0.9rem;
+      }
+
+      .results-name label {
+        display: block;
+        margin-bottom: 0.35rem;
+        font-family: var(--font-ui);
+        font-size: var(--type-micro);
+        font-weight: 700;
+        letter-spacing: var(--tracking-label);
+        text-transform: uppercase;
+        color: var(--foam);
+      }
+
+      .results-name-row {
+        display: flex;
+        gap: 0.4rem;
+      }
+
+      #results-name {
+        flex: 1;
+        min-width: 0;
+        border: 1px solid rgba(200, 221, 230, 0.28);
+        border-radius: 0.55rem;
+        padding: 0.48rem 0.65rem;
+        background: rgba(7, 20, 26, 0.65);
+        color: #e8f0f4;
+        font-family: var(--font-ui);
+        font-size: var(--type-body);
+        font-weight: 600;
+      }
+
+      #results-name:focus {
+        outline: 2px solid var(--sodium);
+        outline-offset: 1px;
+      }
+
+      #results-save {
+        border: 0;
+        border-radius: 0.55rem;
+        padding: 0.48rem 0.75rem;
+        background: var(--sodium);
+        color: var(--ink);
+        font-family: var(--font-display);
+        font-size: var(--type-label);
+        letter-spacing: var(--tracking-display);
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+
+      #results-save:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+
+      .results-board {
+        margin-top: 0.95rem;
+      }
+
+      .results-board h3 {
+        margin-bottom: 0.4rem;
+        font-family: var(--font-ui);
+        font-size: var(--type-micro);
+        font-weight: 700;
+        letter-spacing: var(--tracking-label);
+        text-transform: uppercase;
+        color: var(--foam);
+      }
+
+      #results-board {
+        list-style: none;
+        display: grid;
+        gap: 0.28rem;
+      }
+
+      #results-board li {
+        display: grid;
+        grid-template-columns: 1.6rem 1fr auto;
+        gap: 0.45rem;
+        align-items: baseline;
+        padding: 0.32rem 0.5rem;
+        background: rgba(200, 221, 230, 0.06);
+        border-radius: 0.45rem;
+        font-family: var(--font-ui);
+        font-size: var(--type-label);
+        font-weight: 600;
+      }
+
+      #results-board li.me {
+        background: rgba(240, 162, 58, 0.18);
+      }
+
+      #results-board .board-rank {
+        color: var(--foam);
+        font-variant-numeric: tabular-nums;
+      }
+
+      #results-board .board-pts {
+        font-family: var(--font-display);
+        letter-spacing: var(--tracking-display);
+        color: #ffd24a;
+        font-variant-numeric: tabular-nums;
+      }
     </style>
   </head>
   <body>
@@ -745,6 +850,18 @@
         <h2>Bill's jumps</h2>
         <ol id="results-list"></ol>
         <p class="results-total"><span>Total</span><b id="results-score">£0</b></p>
+        <form id="results-name-form" class="results-name">
+          <label for="results-name">Your name</label>
+          <div class="results-name-row">
+            <input id="results-name" name="name" maxlength="18" autocomplete="nickname" placeholder="Your name" />
+            <button type="submit" id="results-save">Save</button>
+          </div>
+          <p id="results-name-status" class="results-hint" hidden></p>
+        </form>
+        <section class="results-board" aria-label="High scores">
+          <h3>High scores</h3>
+          <ol id="results-board"></ol>
+        </section>
         <button type="button" id="results-again">FLIP to play again</button>
         <p class="results-hint">Star = clean · extras & layout time bonus</p>
       </div>

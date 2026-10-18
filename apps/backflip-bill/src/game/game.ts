@@ -39,6 +39,7 @@ import {
   stepWindowFolk,
   type FolkSlot,
 } from "./windowFolk";
+import { fetchBoard, loadSavedName, rememberName, submitScore, type ScoreRow } from "./scores";
 
 interface JumpResult {
   title: string;
@@ -148,6 +149,12 @@ export class Game {
   private resultsEl: HTMLElement;
   private resultsListEl: HTMLElement;
   private resultsScoreEl: HTMLElement;
+  private resultsNameForm: HTMLFormElement;
+  private resultsNameEl: HTMLInputElement;
+  private resultsSaveEl: HTMLButtonElement;
+  private resultsNameStatus: HTMLElement;
+  private resultsBoardEl: HTMLElement;
+  private scoreSaved = false;
   private score = 0;
   private tries = 1;
   private jumpClean = false;
@@ -218,9 +225,18 @@ export class Game {
     this.resultsEl = document.getElementById("results")!;
     this.resultsListEl = document.getElementById("results-list")!;
     this.resultsScoreEl = document.getElementById("results-score")!;
+    this.resultsNameForm = document.getElementById("results-name-form") as HTMLFormElement;
+    this.resultsNameEl = document.getElementById("results-name") as HTMLInputElement;
+    this.resultsSaveEl = document.getElementById("results-save") as HTMLButtonElement;
+    this.resultsNameStatus = document.getElementById("results-name-status")!;
+    this.resultsBoardEl = document.getElementById("results-board")!;
     this.warnEl = document.getElementById("hazard-warn")!;
     document.getElementById("results-again")?.addEventListener("click", () => {
       if (this.gameOver && this.resultsReadyT <= 0) this.playAgain();
+    });
+    this.resultsNameForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      void this.saveScore();
     });
     window.addEventListener("resize", this.resize);
     const unlock = (): void => this.sfx.resume();
@@ -519,6 +535,7 @@ export class Game {
     this.jumps = [];
     this.gameOver = false;
     this.resultsReadyT = 0;
+    this.scoreSaved = false;
     this.hideResults();
     this.syncScoreHud(false);
     this.loadLevel(0);
@@ -593,8 +610,9 @@ export class Game {
       this.stepPreview(wall);
     } else if (this.gameOver) {
       this.resultsReadyT -= dt;
-      if (input.jump && this.resultsReadyT <= 0) this.playAgain();
-      else this.bill.step(dt, 0, false, 0, level, false);
+      if (input.jump && this.resultsReadyT <= 0 && !isDebugTyping(document.activeElement)) {
+        this.playAgain();
+      } else this.bill.step(dt, 0, false, 0, level, false);
     } else if ((this.bill.state === "done" || this.bill.cleared) && input.jump) {
       if (this.levelIndex < LEVELS.length - 1) {
         this.loadLevel(this.levelIndex + 1);
@@ -964,10 +982,18 @@ export class Game {
       }),
     );
     this.resultsScoreEl.textContent = formatPts(this.score);
+    this.scoreSaved = false;
+    this.resultsSaveEl.disabled = false;
+    this.resultsNameEl.disabled = false;
+    this.resultsNameEl.value = loadSavedName();
+    this.resultsNameStatus.hidden = true;
+    this.resultsNameStatus.textContent = "";
     this.resultsEl.hidden = false;
     this.resultsEl.classList.add("open");
     document.body.classList.add("results-open");
     this.sfx.results();
+    this.resultsNameEl.focus();
+    void this.refreshBoard();
   }
 
   private hideResults(): void {
@@ -975,6 +1001,60 @@ export class Game {
     this.resultsEl.classList.remove("open");
     document.body.classList.remove("results-open");
     this.resultsListEl.replaceChildren();
+    this.resultsBoardEl.replaceChildren();
+  }
+
+  private paintBoard(entries: ScoreRow[], mine = ""): void {
+    const who = mine.trim().toLowerCase();
+    this.resultsBoardEl.replaceChildren(
+      ...entries.slice(0, 20).map((row, i) => {
+        const li = document.createElement("li");
+        if (who && row.name.toLowerCase() === who) li.className = "me";
+        const rank = document.createElement("span");
+        rank.className = "board-rank";
+        rank.textContent = `${i + 1}`;
+        const name = document.createElement("span");
+        name.textContent = row.name;
+        const pts = document.createElement("span");
+        pts.className = "board-pts";
+        pts.textContent = formatPts(row.score);
+        li.append(rank, name, pts);
+        return li;
+      }),
+    );
+  }
+
+  private async refreshBoard(): Promise<void> {
+    try {
+      this.paintBoard(await fetchBoard(), this.resultsNameEl.value);
+    } catch {
+      this.resultsBoardEl.replaceChildren();
+    }
+  }
+
+  private async saveScore(): Promise<void> {
+    if (this.scoreSaved) return;
+    const name = this.resultsNameEl.value.replace(/\s+/g, " ").trim();
+    if (!name) {
+      this.resultsNameStatus.hidden = false;
+      this.resultsNameStatus.textContent = "Enter a name to get on the board.";
+      this.resultsNameEl.focus();
+      return;
+    }
+    this.resultsSaveEl.disabled = true;
+    try {
+      const entries = await submitScore(name, this.score);
+      rememberName(name);
+      this.scoreSaved = true;
+      this.resultsNameEl.disabled = true;
+      this.resultsNameStatus.hidden = false;
+      this.resultsNameStatus.textContent = "On the board.";
+      this.paintBoard(entries, name);
+    } catch {
+      this.resultsSaveEl.disabled = false;
+      this.resultsNameStatus.hidden = false;
+      this.resultsNameStatus.textContent = "Could not save — try again.";
+    }
   }
 
   private flash(msg: string): void {
