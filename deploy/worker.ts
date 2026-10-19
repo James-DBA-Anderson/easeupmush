@@ -1,3 +1,5 @@
+import { isFilthyName } from "../apps/backflip-bill/src/game/profanity.ts";
+
 const BOARD_KEY = "backflip-bill:board";
 const MAX_NAME = 18;
 const MAX_SCORE = 1_000_000;
@@ -42,6 +44,9 @@ async function handleScores(request: Request, env: Env): Promise<Response> {
     return json({ error: "Expected JSON" }, 400);
   }
   const rec = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  if (typeof rec.name === "string" && isFilthyName(rec.name)) {
+    return json({ error: "filth" }, 400);
+  }
   const name = cleanName(rec.name);
   const score = cleanScore(rec.score);
   if (!name || score === null) {
@@ -108,6 +113,7 @@ function cleanName(raw: unknown): string | null {
   const name = raw.replace(/\s+/g, " ").trim();
   if (name.length < 1 || name.length > MAX_NAME) return null;
   if (!/^[\p{L}\p{N} .'\-]+$/u.test(name)) return null;
+  if (isFilthyName(name)) return null;
   return name;
 }
 

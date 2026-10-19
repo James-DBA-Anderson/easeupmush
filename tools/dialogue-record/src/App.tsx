@@ -25,9 +25,28 @@ import {
 } from './lib/loudness'
 import type { Take } from './lib/types'
 import { CharacterStage } from './preview/CharacterStage'
+import phraseology from '@easeupmush/shared/phraseology'
 import './App.css'
 
 const EMPTY_TAKES: Take[] = []
+const POMPEY = phraseology.phrases
+const POMPEY_MATCH = [...POMPEY].sort((a, b) => b.phrase.length - a.phrase.length)
+
+function escapeRe(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function lineHitsGlossary(text: string): Set<string> {
+  const padded = ` ${text.toLowerCase()} `
+  const hits = new Set<string>()
+  for (const entry of POMPEY_MATCH) {
+    const needle = entry.phrase.toLowerCase()
+    if (new RegExp(`[^a-z0-9]${escapeRe(needle)}[^a-z0-9]`).test(padded)) {
+      hits.add(entry.phrase)
+    }
+  }
+  return hits
+}
 
 function pickMime(): string {
   const types = [
@@ -68,7 +87,7 @@ export default function App() {
     character.lines.find((l) => l.id === lineId) ?? character.lines[0]!
   const [query, setQuery] = useState('')
   const [byLine, setByLine] = useState<Record<string, Take[]>>({})
-  const [liveByLine, setLiveByLine] = useState<Record<string, string>>({})
+  const [liveByLine, setLiveByLine] = useState<Record<string, string[]>>({})
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState('Ready')
   const [recording, setRecording] = useState(false)
@@ -325,11 +344,15 @@ export default function App() {
   }
 
   const toggleLive = async (take: Take) => {
-    const next = liveByLine[line.id] === take.id ? null : take.id
+    const on = liveByLine[line.id]?.includes(take.id)
     try {
-      await setLiveTake(game.id, character.id, line.id, next)
+      await setLiveTake(game.id, character.id, line.id, take.id)
       await reload()
-      setStatus(next ? 'Live take set — used on next game load' : 'Live take cleared')
+      setStatus(
+        on
+          ? 'Removed from live pool'
+          : 'Added to live pool — used on next game load',
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not set live take')
     }
@@ -527,7 +550,8 @@ export default function App() {
           <ul className="lines">
             {lines.map((item) => {
               const n = byLine[item.id]?.length ?? 0
-              const live = Boolean(liveByLine[item.id])
+              const liveN = liveByLine[item.id]?.length ?? 0
+              const live = liveN > 0
               return (
                 <li key={item.id}>
                   <button
@@ -538,7 +562,11 @@ export default function App() {
                     <span className="set">{item.set}</span>
                     <span className="text">{item.text}</span>
                     <span className="marks">
-                      {live && <span className="badge live">live</span>}
+                      {live && (
+                        <span className="badge live">
+                          {liveN > 1 ? `live ×${liveN}` : 'live'}
+                        </span>
+                      )}
                       {n > 0 && <span className="badge">{n}</span>}
                     </span>
                   </button>
@@ -554,6 +582,7 @@ export default function App() {
             {error && <p className="err">{error}</p>}
             <p className="cue-set">{line.set}</p>
             <p className="cue">{line.text}</p>
+            <PompeyWords text={line.text} />
             <div className="desk-row">
               <button
                 type="button"
@@ -580,7 +609,7 @@ export default function App() {
               )}
               <ul>
                 {takes.map((take, i) => {
-                  const live = liveByLine[line.id] === take.id
+                  const live = Boolean(liveByLine[line.id]?.includes(take.id))
                   return (
                     <li key={take.id} className={live ? 'is-live' : undefined}>
                       <span className="take-n">#{i + 1}</span>
@@ -652,5 +681,22 @@ export default function App() {
         </section>
       </main>
     </div>
+  )
+}
+
+function PompeyWords({ text }: { text: string }) {
+  const hits = lineHitsGlossary(text)
+  return (
+    <p className="pompey" aria-label="Pompey phraseology">
+      {POMPEY.map((entry) => (
+        <span
+          key={entry.phrase}
+          className={hits.has(entry.phrase) ? 'hit' : undefined}
+          title={entry.meaning}
+        >
+          {entry.phrase}
+        </span>
+      ))}
+    </p>
   )
 }

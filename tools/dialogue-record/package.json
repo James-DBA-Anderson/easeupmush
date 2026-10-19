@@ -13,6 +13,7 @@
     "start": "tsx server/index.ts"
   },
   "dependencies": {
+    "@easeupmush/backflip-bill": "*",
     "@easeupmush/canoe-lake-cleanup": "*",
     "@easeupmush/shared": "*",
     "cors": "^2.8.5",

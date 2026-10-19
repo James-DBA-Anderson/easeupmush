@@ -17,6 +17,7 @@ import {
   type Pose,
   SPRITE_NEGATIVE,
 } from './lib/prompts'
+import { GameSprites } from './editor/GameSprites'
 import './App.css'
 
 type GalleryItem = GenerateDone & { createdAt: number }
@@ -46,6 +47,7 @@ function App() {
   const [current, setCurrent] = useState<GenerateDone | null>(null)
   const [gallery, setGallery] = useState<GalleryItem[]>([])
   const [checker, setChecker] = useState(true)
+  const [mode, setMode] = useState<'generate' | 'game'>('game')
   const brandRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -151,6 +153,22 @@ function App() {
             <p className="brand-sub">Local character sprites for 2D games</p>
           </div>
         </div>
+        <div className="seg mode-tabs">
+          <button
+            type="button"
+            className={mode === 'game' ? 'active' : ''}
+            onClick={() => setMode('game')}
+          >
+            Game sprites
+          </button>
+          <button
+            type="button"
+            className={mode === 'generate' ? 'active' : ''}
+            onClick={() => setMode('generate')}
+          >
+            Generate
+          </button>
+        </div>
         <div
           className={`status ${
             health?.diffusers?.loading
@@ -169,6 +187,10 @@ function App() {
         </div>
       </header>
 
+      <div hidden={mode !== 'game'}>
+        <GameSprites active={mode === 'game'} />
+      </div>
+      <div hidden={mode !== 'generate'}>
       <main className="layout">
         <section className="panel controls">
           <div className="field">
@@ -411,6 +433,7 @@ function App() {
           )}
         </section>
       </main>
+      </div>
     </div>
   )
 }

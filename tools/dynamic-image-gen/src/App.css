@@ -58,7 +58,7 @@ a {
   position: relative;
   min-height: 100vh;
   padding: 1.25rem clamp(1rem, 3vw, 2rem) 2.5rem;
-  overflow: hidden;
+  overflow-x: hidden;
 }
 
 .backdrop {
@@ -88,6 +88,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
@@ -550,9 +551,175 @@ input:focus {
   object-fit: cover;
 }
 
+.mode-tabs {
+  margin-left: auto;
+}
+
+.mode-tabs kbd,
+.seg kbd {
+  margin-left: 0.35rem;
+  opacity: 0.55;
+  font-size: 0.7rem;
+}
+
+.editor-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.editor-side {
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+}
+
+.sheet-list {
+  display: grid;
+  gap: 0.28rem;
+  max-height: 11.5rem;
+  overflow: auto;
+}
+
+.sheet-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(4, 16, 13, 0.55);
+  padding: 0.28rem 0.55rem;
+}
+
+.sheet-item strong {
+  font-size: 0.85rem;
+}
+
+.sheet-item span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.sheet-item.active {
+  border-color: color-mix(in srgb, var(--accent) 70%, white 10%);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.swatch {
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: #102018;
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.7);
+}
+
+.swatch.none {
+  background:
+    linear-gradient(45deg, #1b3b33 25%, transparent 25%),
+    linear-gradient(-45deg, #1b3b33 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #1b3b33 75%),
+    linear-gradient(-45deg, transparent 75%, #1b3b33 75%);
+  background-size: 10px 10px;
+  background-position: 0 0, 0 5px, 5px -5px, -5px 0;
+  background-color: #16332c;
+}
+
+.swatch.active {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.zoom {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted);
+}
+
+.editor-file {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  word-break: break-all;
+}
+
+.pixel-stage {
+  min-height: min(56vh, 640px);
+  overflow: auto;
+}
+
+.pixel-canvas {
+  image-rendering: pixelated;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.pixel-canvas.tool-fill {
+  cursor: cell;
+}
+
+.pixel-canvas.tool-eyedrop {
+  cursor: copy;
+}
+
+.frame-strip {
+  display: flex;
+  gap: 0.5rem;
+  overflow: auto;
+  margin-top: 0.9rem;
+  padding-bottom: 0.2rem;
+}
+
+.frame-thumb {
+  flex: 0 0 auto;
+  width: 88px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.35rem;
+  background: #0a1a16;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.frame-thumb img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.frame-thumb span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.frame-thumb.active {
+  border-color: color-mix(in srgb, var(--accent) 70%, white 10%);
+}
+
 @media (max-width: 960px) {
   .layout {
     grid-template-columns: 1fr;
+  }
+
+  .editor-layout {
+    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
   }
 
   .stage {
@@ -562,6 +729,17 @@ input:focus {
   .top {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .editor-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .editor-side {
+    position: static;
+    max-height: none;
   }
 }
 

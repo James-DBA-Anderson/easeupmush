@@ -37,6 +37,7 @@ type LineMeta = {
   set?: string
   takes?: Take[]
   liveTakeId?: string | null
+  liveTakeIds?: string[] | null
 }
 
 type LiveClip = {
@@ -57,6 +58,7 @@ type LineLog = {
   set: string
   takes: Take[]
   liveTakeId: string | null
+  liveTakeIds: string[]
 }
 
 type MasterLog = {
@@ -118,10 +120,19 @@ async function loadMeta(
   return readJson<LineMeta>(takesPath(game, character, lineId), { takes: [] })
 }
 
+function liveIdsOf(meta: LineMeta): string[] {
+  const takes = meta.takes ?? []
+  const known = new Set(takes.map((t) => t.id))
+  const listed = meta.liveTakeIds
+  if (Array.isArray(listed)) {
+    return listed.filter((id) => known.has(id))
+  }
+  const one = meta.liveTakeId ?? null
+  return one && known.has(one) ? [one] : []
+}
+
 function liveIdOf(meta: LineMeta): string | null {
-  const id = meta.liveTakeId ?? null
-  if (!id) return null
-  return meta.takes?.some((t) => t.id === id) ? id : null
+  return liveIdsOf(meta)[0] ?? null
 }
 
 function takesPath(game: string, character: string, lineId: string): string {
@@ -182,25 +193,26 @@ async function publishLive(game: string): Promise<LiveClip[]> {
       .map((d) => d.name)
     for (const lineId of lines) {
       const meta = await loadMeta(game, character, lineId)
-      const liveId = liveIdOf(meta)
-      if (!liveId) continue
-      const take = meta.takes?.find((t) => t.id === liveId)
-      if (!take) continue
-      const src = join(lineDir(game, character, lineId), take.file)
-      if (!(await pathExists(src))) continue
-      const file = `${character}/${lineId}${extOf(take.file)}`
-      const dest = join(destRoot, file)
-      await mkdir(dirname(dest), { recursive: true })
-      await copyFile(src, dest)
-      clips.push({
-        characterId: character,
-        lineId,
-        set: meta.set ?? '',
-        text: meta.text ?? '',
-        file,
-        takeId: take.id,
-        gainDb: take.gainDb ?? 0,
-      })
+      const liveIds = liveIdsOf(meta)
+      for (const liveId of liveIds) {
+        const take = meta.takes?.find((t) => t.id === liveId)
+        if (!take) continue
+        const src = join(lineDir(game, character, lineId), take.file)
+        if (!(await pathExists(src))) continue
+        const file = `${character}/${lineId}/${take.id}${extOf(take.file)}`
+        const dest = join(destRoot, file)
+        await mkdir(dirname(dest), { recursive: true })
+        await copyFile(src, dest)
+        clips.push({
+          characterId: character,
+          lineId,
+          set: meta.set ?? '',
+          text: meta.text ?? '',
+          file,
+          takeId: take.id,
+          gainDb: take.gainDb ?? 0,
+        })
+      }
     }
   }
 
@@ -244,6 +256,7 @@ async function rebuildLog(): Promise<MasterLog> {
           set: meta.set ?? '',
           takes,
           liveTakeId: liveIdOf(meta),
+          liveTakeIds: liveIdsOf(meta),
         })
       }
     }
@@ -299,15 +312,17 @@ app.get('/api/recordings', async (req, res) => {
       return
     }
     const meta = await loadMeta(game, character, lineId)
+    const liveTakeIds = liveIdsOf(meta)
     res.json({
       takes: meta.takes ?? [],
-      liveTakeId: liveIdOf(meta),
+      liveTakeId: liveTakeIds[0] ?? null,
+      liveTakeIds,
     })
     return
   }
 
   const byLine: Record<string, Take[]> = {}
-  const liveByLine: Record<string, string> = {}
+  const liveByLine: Record<string, string[]> = {}
   const charDir = join(RECORDINGS, game, character)
   let dirs: string[] = []
   try {
@@ -322,8 +337,8 @@ app.get('/api/recordings', async (req, res) => {
     const takes = meta.takes ?? []
     if (takes.length === 0) continue
     byLine[id] = takes
-    const liveId = liveIdOf(meta)
-    if (liveId) liveByLine[id] = liveId
+    const liveIds = liveIdsOf(meta)
+    if (liveIds.length) liveByLine[id] = liveIds
   }
   res.json({ byLine, liveByLine })
 })
@@ -377,7 +392,7 @@ app.post('/api/recordings', async (req, res) => {
     text: text || existing.text || '',
     set: set || existing.set || '',
     takes,
-    liveTakeId: liveIdOf({ ...existing, takes }),
+    liveTakeIds: liveIdsOf({ ...existing, takes }),
   })
   await rebuildLog()
   res.json({ take })
@@ -398,7 +413,7 @@ app.delete('/api/recordings/:game/:character/:line/:takeId', async (req, res) =>
   const dir = lineDir(game, character, line)
   await rm(join(dir, take.file), { force: true })
   const takes = existing.takes!.filter((t) => t.id !== takeId)
-  const wasLive = existing.liveTakeId === takeId
+  const wasLive = liveIdsOf(existing).includes(takeId)
   if (takes.length === 0) {
     await rm(dir, { recursive: true, force: true })
     const charDir = join(RECORDINGS, game, character)
@@ -414,7 +429,11 @@ app.delete('/api/recordings/:game/:character/:line/:takeId', async (req, res) =>
       text: existing.text ?? '',
       set: existing.set ?? '',
       takes,
-      liveTakeId: wasLive ? null : liveIdOf({ ...existing, takes }),
+      liveTakeIds: liveIdsOf({
+        ...existing,
+        takes,
+        liveTakeIds: liveIdsOf(existing).filter((id) => id !== takeId),
+      }),
     })
   }
   await rebuildLog()
@@ -451,14 +470,15 @@ app.patch('/api/recordings/:game/:character/:line/:takeId', async (req, res) => 
   if (rmsDb !== undefined) next.rmsDb = rmsDb
   if (gainDb !== undefined) next.gainDb = gainDb
   const takes = existing.takes!.map((t) => (t.id === takeId ? next : t))
+  const liveTakeIds = liveIdsOf({ ...existing, takes })
   await writeJson(takesPath(game, character, line), {
     text: existing.text ?? '',
     set: existing.set ?? '',
     takes,
-    liveTakeId: liveIdOf({ ...existing, takes }),
+    liveTakeIds,
   })
   await rebuildLog()
-  if (liveIdOf({ ...existing, takes }) === takeId) {
+  if (liveTakeIds.includes(takeId)) {
     try {
       await publishLive(game)
     } catch (err) {
@@ -496,16 +516,24 @@ app.put('/api/live', async (req, res) => {
     return
   }
 
+  const current = liveIdsOf(meta)
+  const liveTakeIds =
+    takeId === null
+      ? []
+      : current.includes(takeId)
+        ? current.filter((id) => id !== takeId)
+        : [...current, takeId]
+
   await writeJson(takesPath(game, character, lineId), {
     text: meta.text ?? '',
     set: meta.set ?? '',
     takes,
-    liveTakeId: takeId,
+    liveTakeIds,
   })
   await rebuildLog()
   try {
     const clips = await publishLive(game)
-    res.json({ liveTakeId: takeId, clips })
+    res.json({ liveTakeId: liveTakeIds[0] ?? null, liveTakeIds, clips })
   } catch (err) {
     res.status(500).json({
       error: err instanceof Error ? err.message : 'live publish failed',

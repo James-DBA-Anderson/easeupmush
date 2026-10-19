@@ -37,6 +37,27 @@ export interface Obstacle {
   /** Tilt in the river, radians. */
   rot?: number;
   kind?: "tyre" | "trolley" | "bag" | "cone";
+  vx?: number;
+  vy?: number;
+  omega?: number;
+  /** Sit-height in the river, captured on first step. */
+  restY?: number;
+  /** Bill is crumpled in this trolley. */
+  cargo?: boolean;
+}
+
+export type WaterSlop = {
+  x: number;
+  amp: number;
+  t: number;
+  spread: number;
+};
+
+export interface JunkHit {
+  x: number;
+  y: number;
+  mag: number;
+  kind: NonNullable<Obstacle["kind"]>;
 }
 
 export interface Train {
@@ -75,6 +96,8 @@ export interface Level {
   theme?: "park" | "woods";
   /** Land a no-run-up backflip. Default: reach the flag on your feet. */
   goal?: "standingFlip";
+  /** Splash rings on the woods river. */
+  slop?: WaterSlop[];
 }
 
 export interface Hoop {
@@ -141,9 +164,9 @@ export const LEVELS: Level[] = [
     gapX0: 15.4,
     gapX1: 25.2,
     pitY: -20.6,
-    flagX: 40.5,
+    flagX: 29.4,
     killY: -28,
-    endX: 52,
+    endX: 38,
   },
   {
     id: 4,
@@ -264,8 +287,9 @@ export function cloneLevel(src: Level): Level {
     boxes: src.boxes?.map((p) => ({ ...p })),
     hoop: src.hoop ? { ...src.hoop } : undefined,
     bar: src.bar ? { ...src.bar } : undefined,
-    obstacles: src.obstacles?.map((o) => ({ ...o })),
+    obstacles: src.obstacles?.map((o) => ({ ...o, cargo: undefined })),
     train: src.train ? { ...src.train, scroll: 0 } : undefined,
+    slop: [],
   };
 }
 
@@ -321,8 +345,13 @@ function aabbHit(
   return depth > 0 ? { nx, ny, depth } : null;
 }
 
+export function isRiverJunk(o: Obstacle): boolean {
+  return o.kind !== undefined;
+}
+
 export function obstacleHits(level: Level, x: number, y: number, r: number): boolean {
   for (const o of level.obstacles ?? []) {
+    if (isRiverJunk(o)) continue;
     if (aabbHit(obstacleBox(level, o), x, y, r)) return true;
   }
   return false;
@@ -336,12 +365,257 @@ export function approachingObstacle(
 ): { dist: number } | null {
   let best: { dist: number } | null = null;
   for (const o of level.obstacles ?? []) {
+    if (isRiverJunk(o)) continue;
     const dist = o.x - px;
     if (dist + o.w < 0.35) continue;
     if (dist > maxDist) continue;
     if (!best || dist < best.dist) best = { dist };
   }
   return best;
+}
+
+function junkMass(o: Obstacle): number {
+  if (o.kind === "trolley") return o.cargo ? 5.4 : 3.7;
+  if (o.kind === "tyre") return 1.55;
+  if (o.kind === "bag") return 0.48;
+  if (o.kind === "cone") return 0.4;
+  return 8;
+}
+
+function junkRadius(o: Obstacle): number {
+  return Math.hypot(o.w, o.h) * 0.36;
+}
+
+function junkSpin(o: Obstacle): number {
+  if (o.kind === "trolley") return 0.55;
+  if (o.kind === "tyre") return 1.7;
+  if (o.kind === "cone") return 1.85;
+  return 1.15;
+}
+
+function junkCenter(o: Obstacle): { x: number; y: number } {
+  return { x: o.x + o.w * 0.5, y: (o.y ?? 0) + o.h * 0.5 };
+}
+
+function ensureJunkMotion(o: Obstacle): void {
+  if (o.vx === undefined) o.vx = 0;
+  if (o.vy === undefined) o.vy = 0;
+  if (o.omega === undefined) o.omega = 0;
+  if (o.restY === undefined) o.restY = o.y ?? 0;
+  if (o.y === undefined) o.y = o.restY;
+  if (o.rot === undefined) o.rot = 0;
+}
+
+function applyJunkImpulse(
+  o: Obstacle,
+  nx: number,
+  ny: number,
+  j: number,
+  px: number,
+  py: number,
+): void {
+  const m = junkMass(o);
+  o.vx = (o.vx ?? 0) - nx * (j / m);
+  o.vy = (o.vy ?? 0) - ny * (j / m);
+  const c = junkCenter(o);
+  const rx = px - c.x;
+  const ry = py - c.y;
+  const inertia = m * (o.w * o.w + o.h * o.h) * 0.09;
+  o.omega = (o.omega ?? 0) + ((ry * nx - rx * ny) * j * junkSpin(o)) / Math.max(0.08, inertia);
+}
+
+function recordJunkHit(o: Obstacle, mag: number): JunkHit | null {
+  if (!o.kind || mag < 0.55) return null;
+  const c = junkCenter(o);
+  return { x: c.x, y: c.y, mag, kind: o.kind };
+}
+
+/** Knock river debris with Bill / the board. Impulse only while closing. */
+export function strikeRiverJunk(
+  level: Level,
+  samples: { x: number; y: number; r: number; vx: number; vy: number }[],
+  strikerMass = 1.15,
+): { hits: JunkHit[]; rx: number; ry: number } {
+  const hits: JunkHit[] = [];
+  let rx = 0;
+  let ry = 0;
+  if (!samples.length) return { hits, rx, ry };
+  for (const o of level.obstacles ?? []) {
+    if (!isRiverJunk(o)) continue;
+    ensureJunkMotion(o);
+    const c = junkCenter(o);
+    const rr = junkRadius(o);
+    let best: {
+      nx: number;
+      ny: number;
+      depth: number;
+      px: number;
+      py: number;
+      svx: number;
+      svy: number;
+    } | null = null;
+    for (const s of samples) {
+      const dx = s.x - c.x;
+      const dy = s.y - c.y;
+      const dist = Math.hypot(dx, dy) || 1e-6;
+      const depth = rr + s.r - dist;
+      if (depth <= 0) continue;
+      if (!best || depth > best.depth) {
+        best = {
+          nx: dx / dist,
+          ny: dy / dist,
+          depth,
+          px: s.x,
+          py: s.y,
+          svx: s.vx,
+          svy: s.vy,
+        };
+      }
+    }
+    if (!best) continue;
+    const m = junkMass(o);
+    const rel = (best.svx - (o.vx ?? 0)) * best.nx + (best.svy - (o.vy ?? 0)) * best.ny;
+    let j = 0;
+    if (rel < -0.14) {
+      j = Math.min(16, (-(1.22) * rel) / (1 / strikerMass + 1 / m));
+      applyJunkImpulse(o, best.nx, best.ny, j, best.px, best.py);
+      rx += best.nx * (j / strikerMass);
+      ry += best.ny * (j / strikerMass);
+      const hit = recordJunkHit(o, Math.max(-rel, j * 0.45));
+      if (hit) hits.push(hit);
+    }
+    const push = best.depth * (strikerMass / (strikerMass + m));
+    o.x -= best.nx * push;
+    o.y = (o.y ?? 0) - best.ny * push;
+  }
+  return { hits, rx, ry };
+}
+
+function collideJunkPair(a: Obstacle, b: Obstacle): JunkHit | null {
+  ensureJunkMotion(a);
+  ensureJunkMotion(b);
+  const ca = junkCenter(a);
+  const cb = junkCenter(b);
+  const dx = cb.x - ca.x;
+  const dy = cb.y - ca.y;
+  const dist = Math.hypot(dx, dy) || 1e-6;
+  const min = junkRadius(a) + junkRadius(b);
+  const depth = min - dist;
+  if (depth <= 0) return null;
+  const nx = dx / dist;
+  const ny = dy / dist;
+  const ma = junkMass(a);
+  const mb = junkMass(b);
+  const rel = ((a.vx ?? 0) - (b.vx ?? 0)) * nx + ((a.vy ?? 0) - (b.vy ?? 0)) * ny;
+  const shareA = mb / (ma + mb);
+  const shareB = ma / (ma + mb);
+  a.x -= nx * depth * shareA;
+  a.y = (a.y ?? 0) - ny * depth * shareA;
+  b.x += nx * depth * shareB;
+  b.y = (b.y ?? 0) + ny * depth * shareB;
+  if (rel <= 0.12) return null;
+  const j = Math.min(12, (1.18 * rel) / (1 / ma + 1 / mb));
+  const px = (ca.x + cb.x) * 0.5;
+  const py = (ca.y + cb.y) * 0.5;
+  applyJunkImpulse(a, nx, ny, j, px, py);
+  applyJunkImpulse(b, -nx, -ny, j, px, py);
+  const louder = (ma >= mb ? a : b).kind ?? a.kind ?? "tyre";
+  const c = louder === a.kind ? ca : cb;
+  return { x: c.x, y: c.y, mag: rel, kind: louder };
+}
+
+export function splashRiver(level: Level, x: number, mag: number): void {
+  if (level.theme !== "woods") return;
+  const waves = level.slop ?? (level.slop = []);
+  waves.push({
+    x,
+    amp: Math.min(0.38, 0.07 + mag * 0.055),
+    t: 0,
+    spread: 0.7 + Math.min(2.4, mag * 0.18),
+  });
+}
+
+export function stepRiverSlop(level: Level, dt: number): void {
+  const waves = level.slop;
+  if (!waves?.length) return;
+  for (const w of waves) {
+    w.t += dt;
+    w.amp *= Math.exp(-1.65 * dt);
+    w.spread += dt * 1.85;
+  }
+  level.slop = waves.filter((w) => w.amp > 0.01 && w.t < 2.6);
+}
+
+export function riverSurfaceY(level: Level, x: number, t = 0): number {
+  let y = level.pitY + Math.sin(x * 2.2 + t * 1.7) * 0.01;
+  for (const w of level.slop ?? []) {
+    const d = x - w.x;
+    const env = Math.exp(-(d * d) / (2 * w.spread * w.spread));
+    y += w.amp * env * Math.sin(w.t * 11.2 - Math.abs(d) * 5.4);
+  }
+  return y;
+}
+
+/** Bob, drag, bank, and knock river junk into each other. */
+export function stepRiverJunk(level: Level, dt: number): JunkHit[] {
+  const hits: JunkHit[] = [];
+  if (level.theme !== "woods") return hits;
+  const list = (level.obstacles ?? []).filter(isRiverJunk);
+  if (!list.length) return hits;
+  const water = level.pitY;
+  const bed = water - 0.55;
+  for (const o of list) {
+    ensureJunkMotion(o);
+    const m = junkMass(o);
+    o.vy = (o.vy ?? 0) - 16 * dt;
+    const y = o.y ?? 0;
+    const sub = Math.max(0, Math.min(1, (water + 0.08 - y) / Math.max(0.16, o.h)));
+    o.vy += sub * (20 / m) * dt;
+    const drag = 0.35 + sub * 2.5;
+    o.vx = (o.vx ?? 0) * Math.exp(-drag * dt);
+    o.vy *= Math.exp(-(0.22 + sub * 2.6) * dt);
+    o.omega = (o.omega ?? 0) * Math.exp(-(0.32 + sub * 2.2) * dt);
+    o.vx = Math.max(-11, Math.min(11, o.vx ?? 0));
+    o.vy = Math.max(-12, Math.min(8, o.vy ?? 0));
+    o.omega = Math.max(-16, Math.min(16, o.omega ?? 0));
+    o.x += o.vx * dt;
+    o.y = y + o.vy * dt;
+    o.rot = (o.rot ?? 0) + o.omega * dt;
+    if (o.kind === "tyre" && (o.y ?? 0) <= bed + 0.1) {
+      const r = Math.max(0.18, junkRadius(o));
+      o.omega += ((o.vx ?? 0) / r - (o.omega ?? 0)) * Math.min(1, dt * 5.5);
+    }
+    if ((o.y ?? 0) < bed) {
+      const impact = -(o.vy ?? 0);
+      o.y = bed;
+      if ((o.vy ?? 0) < 0) {
+        o.vy *= -0.22;
+        o.omega = (o.omega ?? 0) + (Math.random() - 0.5) * impact * 0.45;
+        const hit = recordJunkHit(o, impact);
+        if (hit && impact > 1.3) hits.push(hit);
+      }
+    }
+    const rest = o.restY ?? bed;
+    if ((o.y ?? 0) < rest + 0.14) o.vy = (o.vy ?? 0) + (rest - (o.y ?? 0)) * 9 * dt;
+    const left = level.gapX0 - 0.22;
+    const right = level.gapX1 + 0.18 - o.w;
+    if (o.x < left) {
+      o.x = left;
+      o.vx = Math.abs(o.vx ?? 0) * 0.42;
+      o.omega = (o.omega ?? 0) + 1.4;
+    } else if (o.x > right) {
+      o.x = right;
+      o.vx = -Math.abs(o.vx ?? 0) * 0.42;
+      o.omega = (o.omega ?? 0) - 1.4;
+    }
+  }
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      const hit = collideJunkPair(list[i]!, list[j]!);
+      if (hit && hit.mag > 0.9) hits.push(hit);
+    }
+  }
+  return hits;
 }
 
 /** Debug sandbox: flat run, optional gap and crates, no finish line. */
@@ -501,7 +775,8 @@ function pitSpans(level: Level): Platform[] {
 }
 
 function solids(level: Level): Platform[] {
-  return [...level.platforms, ...(level.boxes ?? []), ...pitSpans(level)];
+  const pit = level.theme === "woods" ? [] : pitSpans(level);
+  return [...level.platforms, ...(level.boxes ?? []), ...pit];
 }
 
 export function groundAt(level: Level, x: number): number | null {
@@ -622,6 +897,7 @@ export function approachingSolid(
   consider({ px: START_WALL_X, py: y, nx: 1, ny: 0, dist: x - START_WALL_X });
   if (level.hoop) consider(closestOnHoop(level.hoop, x, y));
   for (const o of level.obstacles ?? []) {
+    if (isRiverJunk(o)) continue;
     const b = obstacleBox(level, o);
     const hit = aabbHit(b, x, y, 0);
     if (hit) consider({ px: x, py: y, nx: hit.nx, ny: hit.ny, dist: 0 });
@@ -692,13 +968,22 @@ export function pushOutOfSolid(
   let best: { nx: number; ny: number; depth: number } | null = null;
   for (const p of solids(level)) {
     if (isPitched(p)) {
-      if (x < p.x0 - r || x > p.x1 + r) continue;
+      const pad = level.theme === "woods" ? 0 : r;
+      if (x < p.x0 - pad || x > p.x1 + pad) continue;
       const cx = Math.max(p.x0, Math.min(p.x1, x));
       const surf = platformY(p, cx);
       const n = platformNormal(p, cx);
       const signed = (x - cx) * n.nx + (y - surf) * n.ny;
       const depth = r - signed;
       if (depth > 0 && (!best || depth > best.depth)) best = { nx: n.nx, ny: n.ny, depth };
+      continue;
+    }
+    if (level.theme === "woods") {
+      if (x < p.x0 || x > p.x1) continue;
+      const surf = p.y;
+      if (y > surf + r || y < surf - 0.38) continue;
+      const depth = surf + r - y;
+      if (depth > 0 && (!best || depth > best.depth)) best = { nx: 0, ny: 1, depth };
       continue;
     }
     const left = p.x0 - r;
@@ -728,6 +1013,7 @@ export function pushOutOfSolid(
     best = { nx: 1, ny: 0, depth: wallDepth };
   }
   for (const o of level.obstacles ?? []) {
+    if (isRiverJunk(o)) continue;
     const hit = aabbHit(obstacleBox(level, o), x, y, r);
     if (hit && (!best || hit.depth > best.depth)) best = hit;
   }
@@ -884,24 +1170,8 @@ function drawWoodsBack(
 
   const ppm = cssW / cam.w;
   const shift = cam.x * ppm * 0.07;
-  const step = 22;
-  const phase = ((shift % step) + step) % step;
-  const first = Math.floor(shift / step) - 2;
-  const n = Math.ceil(cssW / step) + 8;
-  ctx.fillStyle = "rgba(14, 24, 14, 0.72)";
-  ctx.beginPath();
-  ctx.moveTo(-40, ridgeY + 28);
-  for (let i = 0; i < n; i++) {
-    const id = first + i;
-    const sx = i * step - phase;
-    const h = 42 + Math.abs((id * 17 + 3) % 48);
-    const bw = 16 + Math.abs((id * 7) % 14);
-    ctx.lineTo(sx, ridgeY - h);
-    ctx.quadraticCurveTo(sx + bw * 0.5, ridgeY - h - 22, sx + bw, ridgeY - h * 0.35);
-  }
-  ctx.lineTo(cssW + 40, ridgeY + 28);
-  ctx.closePath();
-  ctx.fill();
+  drawTreeLine(ctx, cssW, ridgeY + 8, shift, 18, "rgba(10, 18, 10, 0.78)", 1.15);
+  drawTreeLine(ctx, cssW, ridgeY + 18, shift * 1.35, 20, "rgba(16, 28, 16, 0.82)", 0.82);
 
   const crest = worldToScreenY(cam, cssH, level.platforms[0]?.y ?? 10);
   if (crest > ridgeY) {
@@ -1012,10 +1282,8 @@ function drawWoodsRiver(
   water.addColorStop(0.55, "#163032");
   water.addColorStop(1, "#0c1c1e");
   ctx.fillStyle = water;
-  ctx.fillRect(x0, waterY, w, cssH - waterY + 8);
-
-  ctx.fillStyle = "rgba(70, 110, 96, 0.35)";
-  ctx.fillRect(x0, waterY, w, Math.max(4, 0.08 * (cssW / cam.w)));
+  fillRiverBody(ctx, cam, cssW, cssH, level, t);
+  strokeRiverSurface(ctx, cam, cssW, cssH, level, t, "rgba(70, 110, 96, 0.55)", Math.max(3, 0.08 * (cssW / cam.w)));
   ctx.strokeStyle = "rgba(180, 210, 196, 0.22)";
   ctx.lineWidth = 1.4;
   const ppm = cssW / cam.w;
@@ -1030,12 +1298,12 @@ function drawWoodsRiver(
   }
   ctx.globalAlpha = 1;
 
-  ctx.fillStyle = "#2a3a1c";
-  for (let i = 0; i < 9; i++) {
-    const side = i % 2 === 0 ? leftLip : rightLip;
-    const edge = i % 2 === 0 ? x0 : x1;
-    const reedX = i % 2 === 0 ? edge + 6 + (i % 3) * 5 : edge - 8 - (i % 3) * 4;
-    ctx.fillRect(reedX, side - 10 - (i % 4) * 4, Math.max(2, 0.04 * ppm), 16 + (i % 3) * 6);
+  for (let i = 0; i < 11; i++) {
+    const left = i % 2 === 0;
+    const side = left ? leftLip : rightLip;
+    const edge = left ? x0 : x1;
+    const reedX = left ? edge + 4 + (i % 4) * 6 : edge - 6 - (i % 4) * 5;
+    drawReed(ctx, reedX, side, 14 + (i % 5) * 5, left ? 3 : -3, ppm);
   }
 }
 
@@ -1152,9 +1420,8 @@ function drawRiverSurface(
   film.addColorStop(0.22, "rgba(22, 48, 50, 0.5)");
   film.addColorStop(1, "rgba(12, 28, 30, 0.28)");
   ctx.fillStyle = film;
-  ctx.fillRect(x0, waterY, w, cssH - waterY + 8);
-  ctx.fillStyle = "rgba(70, 110, 96, 0.32)";
-  ctx.fillRect(x0, waterY, w, Math.max(3, 0.06 * (cssW / cam.w)));
+  fillRiverBody(ctx, cam, cssW, cssH, level, t);
+  strokeRiverSurface(ctx, cam, cssW, cssH, level, t, "rgba(70, 110, 96, 0.4)", Math.max(3, 0.06 * (cssW / cam.w)));
   ctx.strokeStyle = "rgba(180, 210, 196, 0.2)";
   ctx.lineWidth = 1.4;
   for (let i = 0; i < 5; i++) {
@@ -1169,18 +1436,79 @@ function drawRiverSurface(
   ctx.globalAlpha = 1;
 }
 
+function fillRiverBody(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+  t: number,
+): void {
+  const x0 = level.gapX0;
+  const x1 = level.gapX1;
+  const n = 28;
+  ctx.beginPath();
+  for (let i = 0; i <= n; i++) {
+    const x = x0 + (x1 - x0) * (i / n);
+    const sx = worldToScreenX(cam, cssW, x);
+    const sy = worldToScreenY(cam, cssH, riverSurfaceY(level, x, t));
+    if (i === 0) ctx.moveTo(sx, sy);
+    else ctx.lineTo(sx, sy);
+  }
+  ctx.lineTo(worldToScreenX(cam, cssW, x1), cssH + 12);
+  ctx.lineTo(worldToScreenX(cam, cssW, x0), cssH + 12);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function strokeRiverSurface(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+  t: number,
+  color: string,
+  width: number,
+): void {
+  const x0 = level.gapX0;
+  const x1 = level.gapX1;
+  const n = 28;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  for (let i = 0; i <= n; i++) {
+    const x = x0 + (x1 - x0) * (i / n);
+    const sx = worldToScreenX(cam, cssW, x);
+    const sy = worldToScreenY(cam, cssH, riverSurfaceY(level, x, t));
+    if (i === 0) ctx.moveTo(sx, sy);
+    else ctx.lineTo(sx, sy);
+  }
+  ctx.stroke();
+}
+
 const WOODS_TREES: { x: number; s: number; fg: boolean }[] = [
   { x: 0.95, s: 1.2, fg: false },
   { x: 2.55, s: 1.35, fg: false },
   { x: 6.85, s: 1.18, fg: false },
+  { x: 8.2, s: 1.12, fg: false },
   { x: 9.4, s: 1.12, fg: true },
   { x: 10.4, s: 1.08, fg: false },
   { x: 13.7, s: 1.0, fg: false },
-  { x: 16.2, s: 1.14, fg: true },
-  { x: 17.15, s: 1.12, fg: false },
-  { x: 27.7, s: 1.15, fg: false },
+  { x: 14.45, s: 1.14, fg: true },
   { x: 31.1, s: 1.18, fg: true },
+  { x: 32.6, s: 1.15, fg: false },
   { x: 34.2, s: 1.05, fg: false },
+];
+
+const WOODS_BUSHES: { x: number; s: number }[] = [
+  { x: 1.7, s: 0.9 },
+  { x: 4.05, s: 0.72 },
+  { x: 8.15, s: 0.85 },
+  { x: 12.2, s: 0.7 },
+  { x: 14.05, s: 0.8 },
+  { x: 30.4, s: 0.78 },
+  { x: 33.4, s: 0.88 },
 ];
 
 /** Trail name board in the trees, just right of the crest spawn. */
@@ -1204,13 +1532,18 @@ function drawWoodsSign(
   const boardH = 0.82 * ppm;
   const boardY = sy - postH + 0.1 * ppm;
   const postInset = boardW * 0.36;
+  const top = sy - postH;
+  const poles = [x - postInset / ppm, x + postInset / ppm];
 
-  ctx.fillStyle = "#2e2418";
-  ctx.fillRect(sx - postInset - postW * 0.5, sy - postH, postW, postH);
-  ctx.fillRect(sx + postInset - postW * 0.5, sy - postH, postW, postH);
-  ctx.fillStyle = "rgba(18, 12, 8, 0.28)";
-  ctx.fillRect(sx - postInset, sy - postH, postW * 0.28, postH);
-  ctx.fillRect(sx + postInset + postW * 0.08, sy - postH, postW * 0.28, postH);
+  for (const px of poles) {
+    const psx = worldToScreenX(cam, cssW, px);
+    const ground = worldToScreenY(cam, cssH, routeAt(level, px)) + 4;
+    const h = Math.max(postW, ground - top);
+    ctx.fillStyle = "#2e2418";
+    ctx.fillRect(psx - postW * 0.5, top, postW, h);
+    ctx.fillStyle = "rgba(18, 12, 8, 0.28)";
+    ctx.fillRect(psx - postW * 0.12, top, postW * 0.28, h);
+  }
 
   ctx.fillStyle = "#4a3824";
   ctx.fillRect(sx - boardW * 0.5, boardY, boardW, boardH);
@@ -1238,6 +1571,15 @@ function drawWoodsTrees(
   foreground: boolean,
 ): void {
   const ppm = cssW / cam.w;
+  if (!foreground) {
+    for (const bush of WOODS_BUSHES) {
+      const gy = routeAt(level, bush.x);
+      const sx = worldToScreenX(cam, cssW, bush.x);
+      const sy = worldToScreenY(cam, cssH, gy);
+      if (sx < -70 || sx > cssW + 70) continue;
+      drawBush(ctx, sx, sy, ppm, Math.abs(Math.floor(bush.x * 19)), bush.s, "woods");
+    }
+  }
   for (const tree of WOODS_TREES) {
     if (tree.fg !== foreground) continue;
     const gy = routeAt(level, tree.x);
@@ -1245,40 +1587,205 @@ function drawWoodsTrees(
     const sy = worldToScreenY(cam, cssH, gy);
     if (sx < -90 || sx > cssW + 90) continue;
     const scale = tree.s * (foreground ? 1.12 : 1);
-    drawWoodsTree(ctx, sx, sy, ppm, Math.abs(Math.floor(tree.x * 17)), scale, foreground);
+    drawFoliageTree(
+      ctx,
+      sx,
+      sy,
+      ppm,
+      Math.abs(Math.floor(tree.x * 17)),
+      scale,
+      foreground ? "near" : "woods",
+    );
   }
 }
 
-function drawWoodsTree(
+type FoliageKind = "near" | "woods" | "park" | "far";
+
+function foliagePalette(kind: FoliageKind): {
+  trunk: string;
+  shade: string;
+  dark: string;
+  mid: string;
+  lit: string;
+} {
+  if (kind === "near") {
+    return { trunk: "#1c1410", shade: "#120c08", dark: "#101c10", mid: "#1a3018", lit: "#2c4a26" };
+  }
+  if (kind === "woods") {
+    return { trunk: "#241c16", shade: "#16100c", dark: "#162214", mid: "#243822", lit: "#334a2c" };
+  }
+  if (kind === "park") {
+    return { trunk: "#2a2018", shade: "#1a140e", dark: "#1c2c18", mid: "#2a4024", lit: "#3d5630" };
+  }
+  return { trunk: "#1a2214", shade: "#10160e", dark: "#1a2816", mid: "#2a3c22", lit: "#3a4e2c" };
+}
+
+function drawFoliageTree(
   ctx: CanvasRenderingContext2D,
   sx: number,
   gy: number,
   ppm: number,
   seed: number,
   scale: number,
-  near: boolean,
+  kind: FoliageKind,
 ): void {
-  const h = (4.8 + (seed % 7) * 0.55) * ppm * scale;
-  const trunkW = Math.max(5, 0.18 * ppm * scale);
-  ctx.fillStyle = near ? "#1a1410" : "#241c16";
-  ctx.fillRect(sx - trunkW * 0.5, gy - h * 0.74, trunkW, h * 0.74);
-  ctx.fillStyle = near ? "rgba(18, 12, 8, 0.28)" : "rgba(10, 8, 6, 0.18)";
-  ctx.fillRect(sx + trunkW * 0.15, gy - h * 0.74, trunkW * 0.28, h * 0.74);
-  const canopy = near ? "#1a3018" : "#243822";
-  const dark = near ? "#122414" : "#1c2e1a";
-  ctx.fillStyle = canopy;
+  const pal = foliagePalette(kind);
+  const tall = kind === "park" ? 2.05 : 4.7;
+  const h = (tall + (seed % 7) * (kind === "park" ? 0.18 : 0.5)) * ppm * scale;
+  const tw = Math.max(4, (kind === "park" ? 0.12 : 0.16) * ppm * scale);
+  const lean = ((seed % 5) - 2) * 0.012 * h;
+  const th = h * (kind === "park" ? 0.52 : 0.7);
+  ctx.fillStyle = pal.trunk;
   ctx.beginPath();
-  ctx.ellipse(sx, gy - h * 0.82, h * 0.3, h * 0.26, 0, 0, Math.PI * 2);
+  ctx.moveTo(sx - tw, gy);
+  ctx.lineTo(sx - tw * 0.42 + lean, gy - th);
+  ctx.lineTo(sx + tw * 0.38 + lean, gy - th);
+  ctx.lineTo(sx + tw * 1.08, gy);
+  ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = dark;
+  ctx.fillStyle = pal.shade;
   ctx.beginPath();
-  ctx.ellipse(sx - h * 0.16, gy - h * 0.7, h * 0.22, h * 0.18, -0.45, 0, Math.PI * 2);
-  ctx.ellipse(sx + h * 0.18, gy - h * 0.72, h * 0.2, h * 0.16, 0.4, 0, Math.PI * 2);
+  ctx.moveTo(sx + tw * 0.2, gy);
+  ctx.lineTo(sx + tw * 0.12 + lean, gy - th);
+  ctx.lineTo(sx + tw * 0.38 + lean, gy - th);
+  ctx.lineTo(sx + tw * 1.08, gy);
+  ctx.closePath();
   ctx.fill();
-  if (near) {
-    ctx.fillStyle = "rgba(28, 48, 24, 0.55)";
+
+  const pine = kind !== "park" && seed % 5 === 0;
+  if (pine) {
+    drawPineCrown(ctx, sx + lean * 0.6, gy - th, h, seed, pal);
+  } else {
+    drawBroadCrown(ctx, sx + lean * 0.55, gy - th, h, seed, pal, kind === "park");
+  }
+  if (kind !== "far") {
+    drawBush(ctx, sx - tw * 1.6, gy, ppm, seed + 3, 0.45 + (seed % 3) * 0.08, kind);
+  }
+}
+
+function drawBroadCrown(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  top: number,
+  h: number,
+  seed: number,
+  pal: { dark: string; mid: string; lit: string },
+  park: boolean,
+): void {
+  const cr = h * (park ? 0.42 : 0.34);
+  const cy = top - cr * 0.15;
+  const jx = ((seed % 5) - 2) * cr * 0.04;
+  const jy = ((seed % 3) - 1) * cr * 0.03;
+  const blob = (x: number, y: number, rx: number, ry: number, rot: number, fill: string) => {
+    ctx.fillStyle = fill;
     ctx.beginPath();
-    ctx.ellipse(sx + h * 0.05, gy - h * 0.9, h * 0.18, h * 0.14, 0.15, 0, Math.PI * 2);
+    ctx.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  blob(sx - cr * 0.32 + jx, cy + cr * 0.22 + jy, cr * 0.72, cr * 0.5, -0.4, pal.dark);
+  blob(sx + cr * 0.38 - jx, cy + cr * 0.18, cr * 0.62, cr * 0.46, 0.35, pal.dark);
+  blob(sx + jx * 0.4, cy - cr * 0.04, cr * 0.92, cr * 0.7, 0.05, pal.mid);
+  blob(sx - cr * 0.52 + jx, cy - cr * 0.08, cr * 0.5, cr * 0.46, -0.5, pal.mid);
+  blob(sx + cr * 0.48, cy - cr * 0.12 + jy, cr * 0.48, cr * 0.4, 0.45, pal.mid);
+  blob(sx + cr * 0.1, cy - cr * 0.42, cr * 0.46, cr * 0.34, 0.12, pal.lit);
+  blob(sx - cr * 0.18, cy - cr * 0.22, cr * 0.28, cr * 0.22, -0.2, pal.lit);
+}
+
+function drawPineCrown(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  top: number,
+  h: number,
+  seed: number,
+  pal: { dark: string; mid: string; lit: string },
+): void {
+  const w = h * 0.3;
+  const layers = 5;
+  for (let i = 0; i < layers; i++) {
+    const u = i / (layers - 1);
+    const yw = w * (1.08 - u * 0.72);
+    const y = top - h * (0.14 + u * 0.58);
+    ctx.fillStyle = i === layers - 1 ? pal.lit : i % 2 === 0 ? pal.mid : pal.dark;
+    ctx.beginPath();
+    ctx.ellipse(sx + ((seed % 3) - 1) * yw * 0.04, y, yw, yw * 0.52, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawBush(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  gy: number,
+  ppm: number,
+  seed: number,
+  scale: number,
+  kind: FoliageKind,
+): void {
+  const pal = foliagePalette(kind);
+  const w = 0.42 * ppm * scale;
+  const h = 0.28 * ppm * scale;
+  ctx.fillStyle = pal.dark;
+  ctx.beginPath();
+  ctx.ellipse(sx - w * 0.28, gy - h * 0.35, w * 0.55, h * 0.7, -0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = pal.mid;
+  ctx.beginPath();
+  ctx.ellipse(sx + w * 0.22, gy - h * 0.42, w * 0.62, h * 0.78, 0.15, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = pal.lit;
+  ctx.beginPath();
+  ctx.ellipse(sx + ((seed % 3) - 1) * w * 0.12, gy - h * 0.7, w * 0.38, h * 0.42, 0.08, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawReed(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  base: number,
+  h: number,
+  lean: number,
+  ppm: number,
+): void {
+  ctx.strokeStyle = "#2a3c1c";
+  ctx.lineWidth = Math.max(1.4, 0.035 * ppm);
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(x, base);
+  ctx.quadraticCurveTo(x + lean, base - h * 0.55, x + lean * 1.35, base - h);
+  ctx.stroke();
+  ctx.strokeStyle = "#3d5230";
+  ctx.lineWidth = Math.max(1.1, 0.024 * ppm);
+  ctx.beginPath();
+  ctx.moveTo(x + 2, base);
+  ctx.quadraticCurveTo(x + lean * 0.4, base - h * 0.45, x + lean * 0.9, base - h * 0.78);
+  ctx.stroke();
+}
+
+function drawTreeLine(
+  ctx: CanvasRenderingContext2D,
+  cssW: number,
+  ridgeY: number,
+  shift: number,
+  step: number,
+  fill: string,
+  hMul: number,
+): void {
+  const phase = ((shift % step) + step) % step;
+  const first = Math.floor(shift / step) - 2;
+  const n = Math.ceil(cssW / step) + 8;
+  ctx.fillStyle = fill;
+  ctx.fillRect(-40, ridgeY, cssW + 80, 40);
+  for (let i = 0; i < n; i++) {
+    const id = first + i;
+    const sx = i * step - phase;
+    const h = (20 + Math.abs((id * 17 + 3) % 36)) * hMul;
+    const bw = 16 + Math.abs((id * 7) % 18);
+    ctx.beginPath();
+    ctx.ellipse(sx + bw * 0.4, ridgeY - h * 0.22, bw * 0.7, h * 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (id % 3 !== 0) continue;
+    ctx.beginPath();
+    ctx.ellipse(sx + bw * 0.15, ridgeY - h * 0.42, bw * 0.38, h * 0.4, -0.2, 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -1316,12 +1823,7 @@ function drawTrainCountry(
     const sx = worldToScreenX(cam, cssW, groundX);
     if (sx < -40 || sx > cssW + 40) continue;
     const gy = horizon;
-    ctx.fillStyle = "#1c2818";
-    ctx.fillRect(sx - 5, gy - 52, 10, 52);
-    ctx.fillStyle = "#3d5a32";
-    ctx.beginPath();
-    ctx.ellipse(sx, gy - 58, 22, 16, 0, 0, Math.PI * 2);
-    ctx.fill();
+    drawFoliageTree(ctx, sx, gy, cssW / cam.w, Math.abs(Math.floor(wx * 9)), 0.42, "far");
   }
   const postStart = Math.floor((left + scroll) / 7.4) * 7.4;
   for (let wx = postStart; wx < right + scroll + 8; wx += 7.4) {
@@ -1580,24 +2082,8 @@ function drawParkHorizon(
   const ppm = cssW / cam.w;
   const ridgeY = cssH * 0.4;
   const shift = cam.x * ppm * 0.08;
-  const step = 28;
-  const phase = ((shift % step) + step) % step;
-  const first = Math.floor(shift / step) - 2;
-  const n = Math.ceil(cssW / step) + 6;
-  ctx.fillStyle = "rgba(22, 34, 20, 0.55)";
-  ctx.beginPath();
-  ctx.moveTo(-40, ridgeY + 18);
-  for (let i = 0; i < n; i++) {
-    const id = first + i;
-    const sx = i * step - phase;
-    const h = 10 + Math.abs((id * 13 + 7) % 16);
-    const bw = 16 + Math.abs((id * 5) % 10);
-    ctx.lineTo(sx, ridgeY - h);
-    ctx.quadraticCurveTo(sx + bw * 0.5, ridgeY - h - 8, sx + bw, ridgeY - h * 0.4);
-  }
-  ctx.lineTo(cssW + 40, ridgeY + 18);
-  ctx.closePath();
-  ctx.fill();
+  drawTreeLine(ctx, cssW, ridgeY + 6, shift, 24, "rgba(18, 30, 16, 0.62)", 0.55);
+  drawTreeLine(ctx, cssW, ridgeY + 14, shift * 1.4, 26, "rgba(24, 38, 20, 0.7)", 0.38);
 }
 
 function drawParkGround(
@@ -1639,28 +2125,6 @@ function drawParkGround(
   }
 }
 
-function drawParkTree(
-  ctx: CanvasRenderingContext2D,
-  sx: number,
-  gy: number,
-  ppm: number,
-  seed: number,
-): void {
-  const h = (1.8 + (seed % 5) * 0.22) * ppm;
-  const trunkW = Math.max(4, 0.14 * ppm);
-  ctx.fillStyle = "#2a2018";
-  ctx.fillRect(sx - trunkW * 0.5, gy - h * 0.55, trunkW, h * 0.55);
-  ctx.fillStyle = seed % 2 === 0 ? "#243820" : "#2a4224";
-  ctx.beginPath();
-  ctx.ellipse(sx, gy - h * 0.62, h * 0.38, h * 0.32, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#1c2e18";
-  ctx.beginPath();
-  ctx.ellipse(sx - h * 0.16, gy - h * 0.5, h * 0.24, h * 0.2, -0.4, 0, Math.PI * 2);
-  ctx.ellipse(sx + h * 0.18, gy - h * 0.52, h * 0.22, h * 0.18, 0.35, 0, Math.PI * 2);
-  ctx.fill();
-}
-
 function drawParkProps(
   ctx: CanvasRenderingContext2D,
   cam: Cam,
@@ -1674,7 +2138,12 @@ function drawParkProps(
   for (const wx of trees) {
     const sx = worldToScreenX(cam, cssW, wx);
     if (sx < -50 || sx > cssW + 50) continue;
-    drawParkTree(ctx, sx, gy, ppm, Math.abs(Math.floor(wx * 11)));
+    drawFoliageTree(ctx, sx, gy, ppm, Math.abs(Math.floor(wx * 11)), 1.08, "park");
+  }
+  for (const wx of [1.55, 8.4, 11.4, 15.6]) {
+    const sx = worldToScreenX(cam, cssW, wx);
+    if (sx < -40 || sx > cssW + 40) continue;
+    drawBush(ctx, sx, gy, ppm, Math.abs(Math.floor(wx * 13)), 0.95, "park");
   }
 
   const benchX = worldToScreenX(cam, cssW, 7.35);

@@ -15,8 +15,14 @@ export default defineConfig({
           import.meta.url,
         ),
       ),
+      '@easeupmush/backflip-bill/dialogue': fileURLToPath(
+        new URL('../../apps/backflip-bill/src/dialogue/index.ts', import.meta.url),
+      ),
       '@easeupmush/shared/dialogue': fileURLToPath(
         new URL('../../shared/dialogue.ts', import.meta.url),
+      ),
+      '@easeupmush/shared/phraseology': fileURLToPath(
+        new URL('../../shared/phraseology.json', import.meta.url),
       ),
       '@easeupmush/shared/tool-switch': fileURLToPath(
         new URL('../../shared/toolSwitch.ts', import.meta.url),

@@ -5,6 +5,7 @@ export type DialogueFigure =
   | 'gardener'
   | 'public'
   | 'kid'
+  | 'bill'
 
 export type DialogueLine = {
   id: string

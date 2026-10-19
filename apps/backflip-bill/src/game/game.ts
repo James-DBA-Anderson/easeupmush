@@ -1,6 +1,19 @@
-import { Sfx } from "./audio";
-import { Bill, burst, drawBill, drawSkateboard, skidSpray, stepDust, type Dust } from "./bill";
-import { drawParkKid } from "./spectator";
+import { ambienceOf, Sfx } from "./audio";
+import {
+  Bill,
+  burst,
+  drawBill,
+  drawSkateboard,
+  puffDust,
+  skidSpray,
+  splashSlop,
+  stepDust,
+  type Dust,
+  type LandKind,
+  type SnapKind,
+} from "./bill";
+import { drawParkKid, takeParkKidVoice } from "./spectator";
+import { voices } from "./voices";
 import { HIP_HEIGHT, STANDING_FLIP_MAX_VX, TAU } from "./constants";
 import { isDebugTyping, Input, wantsTouchUi } from "./input";
 import { hintForScheme, tuning } from "./tuning";
@@ -28,6 +41,9 @@ import {
   routeAt,
   screenToWorld,
   spawnGround,
+  splashRiver,
+  stepRiverJunk,
+  stepRiverSlop,
   stepTrain,
   visitWindows,
   worldToScreen,
@@ -46,6 +62,8 @@ import {
 import {
   BOARD_TOP,
   fetchBoard,
+  FILTH_MESSAGE,
+  isFilthyName,
   loadSavedName,
   rememberName,
   submitScore,
@@ -66,6 +84,25 @@ interface JumpResult {
 const EXTRA_SPIN_PTS = 400;
 const STAR_PTS = 500;
 const LAYOUT_TICK = 0.05;
+
+const BILL_BREAK_SET: Record<SnapKind, string> = {
+  lKnee: "break-knee-left",
+  rKnee: "break-knee-right",
+  lElb: "break-elbow-left",
+  rElb: "break-elbow-right",
+  lHip: "break-hip-left",
+  rHip: "break-hip-right",
+  back: "break-back",
+  coccyx: "break-coccyx",
+};
+
+function billLandSet(kind: LandKind, splash: boolean): string {
+  if (splash) return "land-splash";
+  if (kind === "clean") return "land-clean";
+  if (kind === "stumble") return "land-stumble";
+  if (kind === "slide") return "land-slide";
+  return "land-fall";
+}
 const LAYOUT_TICK_PTS = 25;
 /** Wall-clock scale while flipping. Run and ragdoll stay at 1. */
 const JUMP_TIME_SCALE = 0.76;
@@ -267,7 +304,11 @@ export class Game {
       void this.saveScore();
     });
     window.addEventListener("resize", this.resize);
-    const unlock = (): void => this.sfx.resume();
+    void voices.load();
+    const unlock = (): void => {
+      this.sfx.resume();
+      voices.resume();
+    };
     window.addEventListener("pointerdown", unlock, { once: true });
     window.addEventListener("keydown", unlock, { once: true });
     this.canvas.addEventListener("pointerdown", this.onSimPointerDown);
@@ -695,11 +736,13 @@ export class Game {
       }
       if (this.bill.barKickEvent) {
         this.sfx.jump();
+        voices.playSet("bill", "jump-run", "jump");
         this.flash("Kick");
         burst(this.dust, this.bill.x, this.bill.y, 10, "rgba(232,240,244,0.75)", 4);
       }
       if (this.bill.landEvent) {
         const e = this.bill.landEvent;
+        voices.playSet("bill", billLandSet(e.kind, this.bill.splashEvent), "land");
         if (this.sim) {
           /* sandbox: sfx only, no score */
         } else if (e.kind === "slide") {
@@ -730,26 +773,30 @@ export class Game {
           this.sfx.cleanLand(e.impact);
           this.sfx.skid();
           this.flash("On the pitch");
-          burst(this.dust, e.x, e.y, 8, "rgba(232,240,244,0.7)", 3);
+          puffDust(this.dust, e.x, e.y, { n: 8 + e.impact * 0.4, speed: 2.2 + e.impact * 0.12, spread: 0.28 });
         } else if (e.kind === "clean") {
           this.sfx.cleanLand(e.impact);
           this.flash(e.spins >= 2 ? `Clean ${spinLabel(e.spins)}` : "Clean landing");
-          burst(this.dust, e.x, e.y, 8, "rgba(232,240,244,0.7)", 3);
+          puffDust(this.dust, e.x, e.y, { n: 7 + e.impact * 0.35, speed: 2 + e.impact * 0.1, spread: 0.24 });
         } else if (e.kind === "stumble") {
           this.sfx.stumble(e.impact);
           this.flash(e.spins >= 2 ? `Hard ${spinLabel(e.spins)}` : "Hard landing");
-          burst(this.dust, e.x, e.y, 12, "rgba(240,162,58,0.8)", 4);
+          puffDust(this.dust, e.x, e.y, { n: 11 + e.impact * 0.5, speed: 2.6 + e.impact * 0.16, spread: 0.32 });
+          burst(this.dust, e.x, e.y, 6, "rgba(240,162,58,0.8)", 4);
           this.tickKidLaugh(1.6);
         } else if (this.bill.splashEvent) {
           this.sfx.splash(true);
           this.flash("You're having a laugh");
-          burst(this.dust, e.x, e.y, 22, "rgba(150,190,180,0.88)", 5.6, true);
-          burst(this.dust, e.x, e.y + 0.08, 10, "rgba(210,230,220,0.7)", 3.4, true);
+          splashRiver(level, e.x, e.impact);
+          splashSlop(this.dust, e.x, e.y, e.impact);
+          burst(this.dust, e.x, e.y, 16, "rgba(150,190,180,0.88)", 4.8, true);
+          burst(this.dust, e.x, e.y + 0.08, 8, "rgba(210,230,220,0.7)", 3.2, true);
           this.tickKidLaugh(2.4);
         } else {
           this.sfx.fall(e.impact);
           this.flash("You're having a laugh");
-          burst(this.dust, e.x, e.y, 16, "rgba(196,60,42,0.75)", 5);
+          puffDust(this.dust, e.x, e.y, { n: 12 + e.impact * 0.5, speed: 3 + e.impact * 0.18, spread: 0.36 });
+          burst(this.dust, e.x, e.y, 10, "rgba(196,60,42,0.75)", 5);
           this.tickKidLaugh(2.4);
         }
         if (level.goal === "standingFlip" && e.kind !== "fall" && !this.bill.cleared) {
@@ -770,6 +817,7 @@ export class Game {
         for (const e of this.bill.snapEvents) {
           burst(this.dust, e.x, e.y, 14, "rgba(255,248,230,0.95)", 6, true);
           burst(this.dust, e.x, e.y, 8, "rgba(196,60,42,0.7)", 4, true);
+          if (e.kind) voices.playSet("bill", BILL_BREAK_SET[e.kind], "break");
         }
       }
       if (this.bill.celebrateEvent) this.sfx.celebrate();
@@ -803,31 +851,69 @@ export class Game {
           this.showResults();
         }
       }
-      if (this.bill.takeoffEvent && showsTakeoffMark(level)) {
+      if (this.bill.takeoffEvent) {
+        const standing = this.bill.takeoffSpeed <= STANDING_FLIP_MAX_VX;
+        voices.playSet("bill", standing ? "jump-stand" : "jump-run", "jump");
         const pad = pitchedAt(level, this.bill.x);
-        this.takeoffMark = {
-          x: this.bill.x,
-          y: pad
-            ? platformY(pad, this.bill.x)
-            : (groundAt(level, this.bill.x) ?? this.bill.y - HIP_HEIGHT),
-        };
+        const gy = pad
+          ? platformY(pad, this.bill.x)
+          : (groundAt(level, this.bill.x) ?? this.bill.y - HIP_HEIGHT);
+        puffDust(this.dust, this.bill.x, gy, {
+          n: standing ? 6 : 8 + this.bill.takeoffSpeed * 0.35,
+          speed: standing ? 1.8 : 2.1 + this.bill.takeoffSpeed * 0.08,
+          spread: standing ? 0.16 : 0.22,
+        });
+        if (showsTakeoffMark(level)) {
+          this.takeoffMark = {
+            x: this.bill.x,
+            y: gy,
+          };
+        }
       }
       if (input.jump && this.bill.state === "air" && this.bill.airTime < 0.08) {
         this.sfx.jump();
-        const g = groundAt(level, this.bill.x) ?? spawnGround(level);
-        burst(this.dust, this.bill.x, g, 6, "rgba(200,221,230,0.55)", 2.4);
       }
       if (this.bill.boardKickEvent) {
         burst(this.dust, this.bill.x, this.bill.y - HIP_HEIGHT, 8, "rgba(180,170,155,0.7)", 3.2);
       }
       if (this.bill.pushPlantEvent) {
         this.sfx.grit();
-        burst(this.dust, this.bill.x - 0.22, this.bill.y - HIP_HEIGHT, 6, "rgba(180,170,155,0.7)", 2.8);
+        burst(
+          this.dust,
+          this.bill.x + this.bill.facing * 0.2,
+          this.bill.y - HIP_HEIGHT,
+          6,
+          "rgba(180,170,155,0.7)",
+          2.8,
+        );
       }
       if (this.bill.boardSplashEvent) {
         this.sfx.splash();
         const b = this.bill.board;
-        burst(this.dust, b?.x ?? this.bill.x, b?.y ?? level.pitY, 14, "rgba(150,190,180,0.8)", 4.2, true);
+        const sx = b?.x ?? this.bill.x;
+        const sy = b?.y ?? level.pitY;
+        splashRiver(level, sx, 1.4);
+        splashSlop(this.dust, sx, sy, 1.2);
+        burst(this.dust, sx, sy, 12, "rgba(150,190,180,0.8)", 3.8, true);
+      }
+    }
+
+    const live = this.level();
+    this.bill.knockJunk(live);
+    stepRiverSlop(live, dt);
+    const junkSettle = stepRiverJunk(live, dt);
+    for (const h of [...this.bill.junkHits, ...junkSettle]) {
+      this.sfx.junkClatter(h.kind, h.mag);
+      if (h.mag > 2.3) {
+        burst(
+          this.dust,
+          h.x,
+          h.y,
+          5 + Math.round(Math.min(10, h.mag)),
+          "rgba(150,190,180,0.72)",
+          2.2 + h.mag * 0.18,
+          true,
+        );
       }
     }
 
@@ -1183,7 +1269,7 @@ export class Game {
   }
 
   private async saveScore(): Promise<void> {
-    if (this.scoreSaved || !this.madeBoard) return;
+    if (this.scoreSaved) return;
     const name = this.resultsNameEl.value.replace(/\s+/g, " ").trim();
     if (!name) {
       this.resultsNameStatus.hidden = false;
@@ -1191,6 +1277,13 @@ export class Game {
       this.resultsNameEl.focus();
       return;
     }
+    if (isFilthyName(name)) {
+      this.resultsNameStatus.hidden = false;
+      this.resultsNameStatus.textContent = FILTH_MESSAGE;
+      this.resultsNameEl.focus();
+      return;
+    }
+    if (!this.madeBoard) return;
     this.resultsSaveEl.disabled = true;
     try {
       const entries = await submitScore(name, this.score, this.runStats());
@@ -1201,10 +1294,13 @@ export class Game {
       this.resultsNameStatus.hidden = false;
       this.resultsNameStatus.textContent = "On the board.";
       this.paintBoard(entries, name);
-    } catch {
+    } catch (err) {
       this.resultsSaveEl.disabled = false;
       this.resultsNameStatus.hidden = false;
-      this.resultsNameStatus.textContent = "Could not save — try again.";
+      this.resultsNameStatus.textContent =
+        err instanceof Error && err.message === FILTH_MESSAGE
+          ? FILTH_MESSAGE
+          : "Could not save — try again.";
     }
   }
 
@@ -1231,6 +1327,7 @@ export class Game {
     const bill = this.bill;
     const air = bill.state === "air" || !!bill.rag || bill.held;
     const speed = Math.hypot(bill.vx, bill.vy);
+    const riverMid = (level.gapX0 + level.gapX1) * 0.5;
     this.sfx.tick({
       flipping: bill.flipping && !bill.held,
       omega: bill.spinRate,
@@ -1238,6 +1335,12 @@ export class Game {
       fall: Math.max(0, -bill.vy),
       speed,
       scrape: bill.state === "slide" && !bill.board?.on ? Math.min(1, speed / 8.5) : 0,
+      ambience: this.sim ? "rooftop" : ambienceOf(level),
+      river:
+        level.theme === "woods"
+          ? Math.max(0, 1 - Math.abs(bill.x - riverMid) / 12)
+          : 0,
+      hush: this.gameOver ? 0.85 : 0,
     });
 
     const standing =
@@ -1314,27 +1417,8 @@ export class Game {
         this.t,
         howl,
       );
-    }
-
-    for (const p of this.dust) {
-      const s = worldToScreen(cam, cssW, cssH, p.x, p.y);
-      ctx.globalAlpha = Math.max(0, p.life / p.max);
-      if (p.streak) {
-        const len = Math.min(18, Math.hypot(p.vx, p.vy) * 0.04 * s.ppm);
-        ctx.strokeStyle = p.color;
-        ctx.lineWidth = p.size;
-        ctx.lineCap = "round";
-        ctx.beginPath();
-        ctx.moveTo(s.x, s.y);
-        ctx.lineTo(s.x - (p.vx / (Math.hypot(p.vx, p.vy) || 1)) * len, s.y + (p.vy / (Math.hypot(p.vx, p.vy) || 1)) * len);
-        ctx.stroke();
-      } else {
-        ctx.fillStyle = p.color;
-        ctx.beginPath();
-        ctx.arc(s.x, s.y, p.size, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.globalAlpha = 1;
+      const cue = takeParkKidVoice();
+      if (cue) voices.playText("park-kid", cue);
     }
 
     const s = worldToScreen(cam, cssW, cssH, this.bill.x, this.bill.y);
@@ -1369,6 +1453,40 @@ export class Game {
       this.bill.rot = saved;
     }
     drawBill(ctx, this.bill, s.x, s.y, s.ppm, this.t);
+
+    for (const p of this.dust) {
+      const ds = worldToScreen(cam, cssW, cssH, p.x, p.y);
+      ctx.globalAlpha = Math.max(0, p.life / p.max);
+      if (p.streak) {
+        const len = Math.min(18, Math.hypot(p.vx, p.vy) * 0.04 * ds.ppm);
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = p.size;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(ds.x, ds.y);
+        ctx.lineTo(
+          ds.x - (p.vx / (Math.hypot(p.vx, p.vy) || 1)) * len,
+          ds.y + (p.vy / (Math.hypot(p.vx, p.vy) || 1)) * len,
+        );
+        ctx.stroke();
+      } else if (p.puff) {
+        const r = p.size * Math.max(0.85, ds.ppm / 72);
+        ctx.fillStyle = p.color;
+        ctx.save();
+        ctx.translate(ds.x, ds.y);
+        ctx.rotate(p.ang ?? 0);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r, r * (p.aspect ?? 0.58), 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      } else {
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(ds.x, ds.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
 
     for (const f of this.bill.snapFlashes) {
       const p = worldToScreen(cam, cssW, cssH, f.x, f.y);

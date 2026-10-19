@@ -1,3 +1,6 @@
+import { FILTH_MESSAGE, isFilthyName } from "./profanity";
+
+export { FILTH_MESSAGE, isFilthyName };
 export const SCORES_API = "/api/backflip-bill/scores";
 export const BOARD_TOP = 10;
 const NAME_KEY = "backflip-bill-name";
@@ -58,8 +61,16 @@ export async function submitScore(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, score, ...stats }),
   });
-  if (!res.ok) throw new Error("Could not save score");
-  return ranked(readEntries(await res.json()));
+  if (res.ok) return ranked(readEntries(await res.json()));
+  let error = "";
+  try {
+    const body = (await res.json()) as { error?: unknown };
+    error = typeof body.error === "string" ? body.error : "";
+  } catch {
+    /* not JSON */
+  }
+  if (error === "filth") throw new Error(FILTH_MESSAGE);
+  throw new Error("Could not save score");
 }
 
 function ranked(entries: ScoreRow[]): ScoreRow[] {

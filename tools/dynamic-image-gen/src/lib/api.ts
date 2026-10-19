@@ -109,3 +109,58 @@ export async function generateSprite(
   }
   return donePayload
 }
+
+export type SpritePalette = {
+  id: string
+  label: string
+  colors: Record<string, string>
+}
+
+export type SpriteFrame = {
+  id: string
+  label: string
+  path: string[]
+  rows: string[]
+  width: number
+  height: number
+}
+
+export type SpriteSheet = {
+  id: string
+  label: string
+  file: string
+  palettes: SpritePalette[]
+  frames: SpriteFrame[]
+}
+
+export type SpriteGame = {
+  id: string
+  label: string
+  sheets: SpriteSheet[]
+}
+
+export type SpriteCatalog = {
+  games: SpriteGame[]
+}
+
+export async function fetchSprites(): Promise<SpriteCatalog> {
+  const res = await fetch('/api/sprites')
+  if (!res.ok) throw new Error(await res.text())
+  return (await res.json()) as SpriteCatalog
+}
+
+export async function saveSprite(args: {
+  file: string
+  path: string[]
+  rows: string[]
+}): Promise<void> {
+  const res = await fetch('/api/sprites', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args),
+  })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(body.error || `Save failed (${res.status})`)
+  }
+}

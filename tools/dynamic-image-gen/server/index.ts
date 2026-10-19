@@ -4,9 +4,11 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadCatalog, saveFrame, validateRows } from './sprites'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
+const REPO = path.resolve(ROOT, '../..')
 const OUTPUT_DIR = path.join(ROOT, 'generated')
 const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434'
 const DIFFUSERS_URL = process.env.DIFFUSERS_URL ?? 'http://127.0.0.1:8790'
@@ -41,6 +43,30 @@ function preferredBackend(): Backend {
   // Ollama image generation is currently Apple Silicon only
   return os.arch() === 'arm64' ? 'ollama' : 'diffusers'
 }
+
+app.get('/api/sprites', async (_req, res) => {
+  try {
+    res.json(await loadCatalog(REPO))
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to load sprites',
+    })
+  }
+})
+
+app.put('/api/sprites', async (req, res) => {
+  const file = typeof req.body?.file === 'string' ? req.body.file : ''
+  const framePath = Array.isArray(req.body?.path) ? req.body.path.map(String) : []
+  try {
+    const rows = validateRows(req.body?.rows)
+    await saveFrame(REPO, file, framePath, rows)
+    res.json({ ok: true, file, path: framePath })
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : 'Failed to save sprite',
+    })
+  }
+})
 
 app.get('/api/health', async (_req, res) => {
   const backend = preferredBackend()

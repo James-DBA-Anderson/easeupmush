@@ -36,6 +36,18 @@ npm run dev                 # http://localhost:5300/games/backflip-bill/
 - Floating virtual joystick, **bottom left** — left / right run on the ground. Left / right in the air changes tuck. Press the left half of the screen to float the stick under your thumb.
 - **FLIP** button, **bottom right** — jump / backflip.
 
+## Dialogue
+
+Spoken lines live in `src/dialogue/` — one catalog Linebench imports, the game picks from at runtime. Add a line there (with `pack('set', [...])`) rather than a local string array. Sprinkle Pompey slang from `shared/phraseology.json`; don't dump every word in.
+
+**Park kid** openers are speech — a few per level, matching that run, him hoping Bill bottles it. **Bill** is effort only — takeoff, landings, and each joint break — no bubbles. Mark more than one take **Use in game** on a line and the game plays one at random.
+
+Recorded takes play in-game only if you mark them **Use in game** in Linebench, then reload.
+
+```bash
+npm run dialogue          # → http://localhost:5175
+```
+
 ## Debug
 
 `npm run dev:backflip-bill` (Vite DEV) shows a **Debug** button, bottom left. Production / deployed builds do not.

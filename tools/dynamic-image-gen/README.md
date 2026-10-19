@@ -20,6 +20,14 @@ npm run dev
 
 PNGs land in `generated/` (gitignored). Download from the UI, then drop them into a game’s `public/` or `src/` assets.
 
+## Game sprite editor
+
+**Game sprites** loads the pixel arrays from each game’s `src/**/sprites` TypeScript files (Pompeymon kid, mons, NPCs, and so on). Paint a frame and **Save to game** writes those rows back into the source file.
+
+- Pencil / eraser / fill / pick (B, E, G, I)
+- Ctrl/Cmd+S saves, Ctrl/Cmd+Z undoes
+- Outfit palettes are preview-only; the pixels themselves are shared
+
 ## Backends
 
 | Machine | Backend | Model |

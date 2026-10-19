@@ -64,9 +64,50 @@ function buildPublic(kid = false): THREE.Group {
   return group
 }
 
+/** Backflip Bill — blond, grey tee, blue jeans. */
+function buildBill(): THREE.Group {
+  const group = new THREE.Group()
+  const skin = matt(0xf0c8a0)
+  const hair = matt(0xf2d15a)
+  const tee = matt(0x8a939c)
+  const jeans = matt(0x3a5a9a)
+  const shoe = matt(0xe8eef2)
+
+  group.add(box(0.3, 0.16, 0.18, jeans, 0, 0.92, 0))
+  const torso = new THREE.Group()
+  torso.position.y = 1.0
+  group.add(torso)
+  torso.add(box(0.36, 0.5, 0.2, tee, 0, 0.26, 0))
+
+  for (const side of [-1, 1] as const) {
+    const arm = new THREE.Group()
+    arm.position.set(0.22 * side, 0.4, 0)
+    torso.add(arm)
+    arm.add(box(0.09, 0.4, 0.09, tee, 0, -0.16, 0))
+    arm.add(box(0.08, 0.08, 0.08, skin, 0, -0.4, 0))
+
+    const leg = new THREE.Group()
+    leg.position.set(0.09 * side, 0.91, 0)
+    group.add(leg)
+    leg.add(box(0.12, 0.48, 0.13, jeans, 0, -0.24, 0))
+    leg.add(box(0.12, 0.07, 0.2, shoe, 0, -0.52, 0.04))
+  }
+
+  const head = new THREE.Group()
+  head.position.set(0, 0.62, 0.03)
+  torso.add(head)
+  head.add(box(0.22, 0.24, 0.22, skin, 0, 0.08, 0))
+  head.add(box(0.24, 0.12, 0.24, hair, -0.02, 0.2, -0.02))
+  const face = new Face(skin, 1, true)
+  face.group.position.set(0, 0.02, 0.04)
+  head.add(face.group)
+  return group
+}
+
 export function buildFigure(kind: FigureKind): THREE.Group {
   if (kind === 'warden') return buildWarden().group
   if (kind === 'boatman') return buildBoatman().group
   if (kind === 'gardener') return buildGardener().group
+  if (kind === 'bill') return buildBill()
   return buildPublic(kind === 'kid')
 }

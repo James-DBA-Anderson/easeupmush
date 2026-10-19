@@ -11,6 +11,7 @@
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true,
+    "resolveJsonModule": true,
     "jsx": "react-jsx",
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -23,7 +24,11 @@
       "@easeupmush/canoe-lake-cleanup/dialogue": [
         "../../apps/canoe-lake-cleanup/src/dialogue/index.ts"
       ],
+      "@easeupmush/backflip-bill/dialogue": [
+        "../../apps/backflip-bill/src/dialogue/index.ts"
+      ],
       "@easeupmush/shared/dialogue": ["../../shared/dialogue.ts"],
+      "@easeupmush/shared/phraseology": ["../../shared/phraseology.json"],
       "@easeupmush/shared/tool-switch": ["../../shared/toolSwitch.ts"]
     }
   },

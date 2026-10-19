@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
+import { isFilthyName } from "./src/game/profanity";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const base = process.env.GAME_BASE ?? "./";
@@ -19,6 +20,7 @@ function scoresPlugin(): Plugin {
     const name = raw.replace(/\s+/g, " ").trim();
     if (name.length < 1 || name.length > maxName) return null;
     if (!/^[\p{L}\p{N} .'\-]+$/u.test(name)) return null;
+    if (isFilthyName(name)) return null;
     return name;
   };
   const cleanScore = (raw: unknown): number | null => {
@@ -107,6 +109,10 @@ function scoresPlugin(): Plugin {
           void (async () => {
             try {
               const rec = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+              if (typeof rec.name === "string" && isFilthyName(rec.name)) {
+                send(res, { error: "filth" }, 400);
+                return;
+              }
               const name = cleanName(rec.name);
               const score = cleanScore(rec.score);
               if (!name || score === null) {
@@ -190,6 +196,11 @@ function tuningSavePlugin(): Plugin {
 export default defineConfig({
   base,
   plugins: [tuningSavePlugin(), scoresPlugin()],
+  resolve: {
+    alias: {
+      "@easeupmush/shared/dialogue": resolve(root, "../../shared/dialogue.ts"),
+    },
+  },
   server: {
     port: 5306,
     strictPort: true,

@@ -1,5 +1,14 @@
 /** Procedural SFX for Backflip Bill — no sample files. */
 
+export type AmbienceKind = "park" | "rooftop" | "woods" | "train";
+
+export function ambienceOf(level: { theme?: string; train?: unknown }): AmbienceKind {
+  if (level.train) return "train";
+  if (level.theme === "woods") return "woods";
+  if (level.theme === "park") return "park";
+  return "rooftop";
+}
+
 interface LoopVoice {
   src: AudioBufferSourceNode;
   filter: BiquadFilterNode;
@@ -14,6 +23,13 @@ export class Sfx {
   private whoosh: LoopVoice | null = null;
   private wind: LoopVoice | null = null;
   private scrape: LoopVoice | null = null;
+  private bedAir: LoopVoice | null = null;
+  private bedHum: LoopVoice | null = null;
+  private bedLeaves: LoopVoice | null = null;
+  private bedWater: LoopVoice | null = null;
+  private ambience: AmbienceKind | "off" = "off";
+  private nextCueAt = 0;
+  private nextClackAt = 0;
   private lastAt = new Map<string, number>();
 
   private ensure(): AudioContext | null {
@@ -38,7 +54,7 @@ export class Sfx {
     this.ensure();
   }
 
-  /** Keep air whoosh / fall wind in step with the body. */
+  /** Keep air whoosh / fall wind in step with the body, and the level bed. */
   public tick(info: {
     flipping: boolean;
     omega: number;
@@ -46,6 +62,9 @@ export class Sfx {
     fall: number;
     speed: number;
     scrape?: number;
+    ambience?: AmbienceKind | "off";
+    river?: number;
+    hush?: number;
   }): void {
     const ctx = this.ensure();
     if (!ctx || !this.whoosh || !this.wind || !this.scrape) return;
@@ -70,6 +89,8 @@ export class Sfx {
     const scrapeHz = 620 + scrape * 780 + Math.sin(t * 31) * 90;
     setParam(this.scrape.gain.gain, scrapeGain, t, 0.07);
     setParam(this.scrape.filter.frequency, scrapeHz, t, 0.09);
+
+    this.tickAmbience(info.ambience ?? "off", info.river ?? 0, info.hush ?? 0, fall);
   }
 
   public jump(): void {
@@ -161,8 +182,8 @@ export class Sfx {
     if (!this.gate("foot", 0.11)) return;
     const k = 0.45 + 0.55 * clamp(speed, 0.2, 1);
     const jitter = 1 + (Math.random() - 0.5) * 0.12;
-    this.thud(88 * jitter, 0.055, 0.055 * k);
-    this.noiseBurst(0.04, 0.028 * k, 700, 1.4);
+    this.thud(82 * jitter, 0.07, 0.14 * k);
+    this.noiseBurst(0.055, 0.07 * k, 640, 1.3);
   }
 
   public skid(): void {
@@ -199,6 +220,29 @@ export class Sfx {
     this.noiseBurst(0.08, 0.1, 1800, 2.8);
     this.sweep(1480, 420, 0.09, 0.08, "square");
     this.sweep(880, 220, 0.12, 0.05, "triangle");
+  }
+
+  public junkClatter(kind: string, mag: number): void {
+    const k = clamp(mag / 7, 0.32, 1.2);
+    if (kind === "trolley") {
+      if (!this.gate("trolley", 0.07)) return;
+      this.noiseBurst(0.07 * k, 0.11 * k, 1500 + Math.random() * 500, 2.5);
+      this.sweep(880 + Math.random() * 220, 160, 0.12, 0.075 * k, "square");
+      this.thud(64 + Math.random() * 18, 0.08, 0.09 * k);
+      this.sweep(420, 90, 0.16, 0.04 * k, "triangle");
+    } else if (kind === "tyre") {
+      if (!this.gate("tyre", 0.09)) return;
+      this.thud(46 + Math.random() * 10, 0.13, 0.1 * k);
+      this.noiseBurst(0.11, 0.07 * k, 210 + Math.random() * 80, 0.7);
+    } else if (kind === "cone") {
+      if (!this.gate("cone", 0.06)) return;
+      this.noiseBurst(0.05, 0.065 * k, 1900 + Math.random() * 500, 3);
+      this.sweep(1420, 560, 0.07, 0.05 * k, "triangle");
+    } else {
+      if (!this.gate("bag", 0.09)) return;
+      this.noiseBurst(0.13, 0.08 * k, 170, 0.75);
+      this.thud(40, 0.1, 0.055 * k);
+    }
   }
 
   public bodyHit(mag: number): void {
@@ -244,11 +288,211 @@ export class Sfx {
     this.noiseBurst(0.09, 0.04, 980, 1.5);
   }
 
+  private tickAmbience(
+    kind: AmbienceKind | "off",
+    river: number,
+    hush: number,
+    fall: number,
+  ): void {
+    if (!this.ctx || !this.bedAir || !this.bedHum || !this.bedLeaves || !this.bedWater) return;
+    const t = this.ctx.currentTime;
+    if (kind !== this.ambience) {
+      this.ambience = kind;
+      this.nextCueAt = t + 0.8 + Math.random() * 0.7;
+      this.nextClackAt = t + 0.18;
+    }
+    const duck = 1 - clamp(hush, 0, 1) * 0.78;
+    const gust = 1 + 0.16 * Math.sin(t * 0.21) + 0.09 * Math.sin(t * 0.67);
+    const fallDuck = fall > 1.6 ? 0.45 : 1;
+    let air = 0;
+    let hum = 0;
+    let leaves = 0;
+    let water = 0;
+    let airHz = 420;
+    let humHz = 90;
+    if (kind === "park") {
+      air = 0.02;
+      hum = 0.011;
+      leaves = 0.026;
+      airHz = 380;
+      humHz = 70;
+    } else if (kind === "rooftop") {
+      air = 0.034;
+      hum = 0.024;
+      leaves = 0.008;
+      airHz = 520;
+      humHz = 58;
+    } else if (kind === "woods") {
+      air = 0.018;
+      hum = 0.008;
+      leaves = 0.032;
+      water = 0.012 + clamp(river, 0, 1) * 0.07;
+      airHz = 340;
+      humHz = 80;
+    } else if (kind === "train") {
+      air = 0.04;
+      hum = 0.05;
+      airHz = 640;
+      humHz = 48;
+    }
+    setParam(this.bedAir.gain.gain, air * gust * duck * fallDuck, t, 0.55);
+    setParam(this.bedAir.filter.frequency, airHz * (0.92 + 0.08 * gust), t, 0.4);
+    setParam(this.bedHum.gain.gain, hum * duck, t, 0.7);
+    setParam(this.bedHum.filter.frequency, humHz, t, 0.5);
+    setParam(this.bedLeaves.gain.gain, leaves * gust * duck, t, 0.45);
+    setParam(this.bedWater.gain.gain, water * duck, t, 0.6);
+
+    if (kind === "train" && t >= this.nextClackAt) {
+      this.trainClack();
+      this.nextClackAt = t + 0.34 + Math.random() * 0.05;
+    }
+    if (kind !== "off" && t >= this.nextCueAt) this.playCue(kind);
+  }
+
+  private playCue(kind: AmbienceKind): void {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const roll = Math.random();
+    if (kind === "park") {
+      if (roll < 0.72) this.birdChirp(0.026);
+      else this.carPass(0.03);
+      this.nextCueAt = t + 2.6 + Math.random() * 4.2;
+      return;
+    }
+    if (kind === "rooftop") {
+      if (roll < 0.42) this.gullCry(0.032);
+      else if (roll < 0.88) this.carPass(0.038);
+      else this.birdChirp(0.018);
+      this.nextCueAt = t + 3.4 + Math.random() * 6.5;
+      return;
+    }
+    if (kind === "woods") {
+      if (roll < 0.7) this.birdChirp(0.03);
+      else if (roll < 0.9) this.windGust();
+      else this.foxYip();
+      this.nextCueAt = t + 1.8 + Math.random() * 3.6;
+      return;
+    }
+    this.windGust();
+    this.nextCueAt = t + 4.2 + Math.random() * 6.5;
+  }
+
+  private birdChirp(peak: number): void {
+    const pan = (Math.random() - 0.5) * 1.5;
+    const base = 1680 + Math.random() * 920;
+    const hop = 0.055 + Math.random() * 0.04;
+    this.chirp(base, base * (1.08 + Math.random() * 0.12), 0.055, peak, pan, 2400);
+    this.chirp(base * 1.06, base * 0.92, 0.05, peak * 0.7, pan, 2200, hop);
+    if (Math.random() < 0.45) {
+      this.chirp(base * 0.94, base * 1.12, 0.045, peak * 0.55, pan, 2100, hop * 2);
+    }
+  }
+
+  private gullCry(peak: number): void {
+    const pan = (Math.random() - 0.5) * 1.3;
+    const base = 920 + Math.random() * 200;
+    this.chirp(base, base * 0.7, 0.18, peak, pan, 1500);
+    this.chirp(base * 0.88, base * 0.54, 0.22, peak * 0.65, pan, 1300, 0.1);
+  }
+
+  private foxYip(): void {
+    const pan = (Math.random() - 0.5) * 1.4;
+    this.chirp(640, 280, 0.16, 0.028, pan, 720);
+    this.chirp(520, 210, 0.12, 0.018, pan, 600, 0.12);
+  }
+
+  private windGust(): void {
+    this.noiseBurst(0.55, 0.048, 340, 0.55);
+    this.noiseBurst(0.85, 0.028, 980, 0.45);
+  }
+
+  private carPass(peak: number): void {
+    const ctx = this.ensure();
+    if (!ctx || !this.master || !this.noise) return;
+    const t0 = ctx.currentTime;
+    const dur = 1.15;
+    const from = Math.random() < 0.5 ? -0.92 : 0.92;
+    const src = ctx.createBufferSource();
+    const filter = ctx.createBiquadFilter();
+    const g = ctx.createGain();
+    const pan = ctx.createStereoPanner();
+    src.buffer = this.noise;
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(240, t0);
+    filter.frequency.exponentialRampToValueAtTime(620, t0 + dur * 0.45);
+    filter.frequency.exponentialRampToValueAtTime(180, t0 + dur);
+    filter.Q.value = 1.1;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(peak, t0 + 0.28);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    pan.pan.setValueAtTime(from, t0);
+    pan.pan.linearRampToValueAtTime(-from, t0 + dur);
+    src.connect(filter);
+    filter.connect(g);
+    g.connect(pan);
+    pan.connect(this.master);
+    src.start(t0);
+    src.stop(t0 + dur + 0.02);
+  }
+
+  private trainClack(): void {
+    this.thud(62 + Math.random() * 10, 0.045, 0.035);
+    this.noiseBurst(0.03, 0.04, 1280 + Math.random() * 400, 2.1);
+  }
+
+  private chirp(
+    from: number,
+    to: number,
+    dur: number,
+    peak: number,
+    panAmt: number,
+    formant: number,
+    delay = 0,
+  ): void {
+    const ctx = this.ensure();
+    if (!ctx || !this.master) return;
+    const t = ctx.currentTime + delay;
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = clamp(panAmt, -1, 1);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + Math.min(0.02, dur * 0.25));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const bp = ctx.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = formant;
+    bp.Q.value = 1.15;
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(from, t);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(80, to), t + dur);
+    const partial = ctx.createOscillator();
+    partial.type = "triangle";
+    partial.frequency.setValueAtTime(from * 1.5, t);
+    partial.frequency.exponentialRampToValueAtTime(Math.max(90, to * 1.5), t + dur);
+    const pg = ctx.createGain();
+    pg.gain.value = 0.14;
+    osc.connect(bp);
+    partial.connect(pg);
+    pg.connect(bp);
+    bp.connect(g);
+    g.connect(pan);
+    pan.connect(this.master);
+    osc.start(t);
+    partial.start(t);
+    osc.stop(t + dur + 0.03);
+    partial.stop(t + dur + 0.03);
+  }
+
   private ensureLoops(): void {
     if (!this.ctx || !this.master || !this.brown) return;
     if (!this.whoosh) this.whoosh = this.loopVoice(this.brown, "bandpass", 500, 0.9);
     if (!this.wind) this.wind = this.loopVoice(this.brown, "highpass", 700, 0.5);
     if (!this.scrape) this.scrape = this.loopVoice(this.noise ?? this.brown, "bandpass", 920, 1.2);
+    if (!this.bedAir) this.bedAir = this.loopVoice(this.brown, "highpass", 420, 0.55);
+    if (!this.bedHum) this.bedHum = this.loopVoice(this.brown, "lowpass", 80, 0.7);
+    if (!this.bedLeaves) this.bedLeaves = this.loopVoice(this.noise ?? this.brown, "bandpass", 2100, 0.55);
+    if (!this.bedWater) this.bedWater = this.loopVoice(this.noise ?? this.brown, "bandpass", 360, 0.65);
   }
 
   private loopVoice(

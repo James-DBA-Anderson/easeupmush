@@ -1,3 +1,4 @@
+import { lines } from "../dialogue";
 import { HIP_HEIGHT, TAU } from "./constants";
 import { drawCharShadow, spawnGround, worldToScreen, type Cam, type Level } from "./world";
 
@@ -66,13 +67,75 @@ function ease(u: number): number {
 
 let kidLevel = -1;
 let kidT0 = 0;
+let kidLine = 0;
+let kidCues: readonly string[] = lines("park-kid", "open");
+let kidPendingVoice: string | null = null;
+
+interface TossNote {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  rot: number;
+  omega: number;
+  w: number;
+  h: number;
+  tint: string;
+  settled: boolean;
+}
+
+let loseT = -1;
+let tossFromOffer = 1;
+let lastTossT = -1;
+let tossed: TossNote[] | null = null;
+
+function resetKidToss(): void {
+  loseT = -1;
+  tossFromOffer = 1;
+  lastTossT = -1;
+  tossed = null;
+}
+
+function openersFor(levelId: number): readonly string[] {
+  if (levelId <= 1) return lines("park-kid", "open");
+  return lines("park-kid", `open-${levelId}`);
+}
+
+/** Spoken opener Linebench can record; wrap for the bubble. */
+function twoLines(text: string): [string, string] {
+  const splitAt = (mark: string): [string, string] | null => {
+    const i = text.indexOf(mark);
+    if (i > 4 && i < text.length - 4) {
+      return [text.slice(0, i + mark.length - 1), text.slice(i + mark.length)];
+    }
+    return null;
+  };
+  const byMark = splitAt(". ") ?? splitAt("? ");
+  if (byMark) return byMark;
+  const mid = Math.max(8, Math.floor(text.length * 0.52));
+  let i = text.lastIndexOf(" ", mid);
+  if (i < 4) i = text.indexOf(" ", mid);
+  if (i < 0) return [text, ""];
+  return [text.slice(0, i), text.slice(i + 1)];
+}
 
 function kidTime(levelId: number, t: number): number {
-  if (levelId !== kidLevel) {
+  if (levelId !== kidLevel || t + 0.25 < kidT0) {
     kidLevel = levelId;
     kidT0 = t;
+    kidCues = openersFor(levelId);
+    kidLine = Math.floor(Math.random() * kidCues.length);
+    kidPendingVoice = kidCues[kidLine] ?? null;
+    resetKidToss();
   }
   return Math.max(0, t - kidT0);
+}
+
+/** Catalog text for the current L1 opener, once, so a Linebench take can play. */
+export function takeParkKidVoice(): string | null {
+  const text = kidPendingVoice;
+  kidPendingVoice = null;
+  return text;
 }
 
 /** 1 = cash held out and waving, 0 = arm down by his side. */
@@ -138,14 +201,27 @@ export function drawParkKid(
 
   const lt = kidTime(level.id, t);
   const sad = mood === "sad";
+  const chucking = sad && level.id === 1;
+  if (chucking) {
+    if (loseT < 0) {
+      loseT = t;
+      lastTossT = t;
+      tossFromOffer = offerAmt(lt, "smug");
+    }
+  } else if (!sad) {
+    resetKidToss();
+  }
+  const age = chucking && loseT >= 0 ? t - loseT : 0;
+  const snap = chucking ? ease(clamp01((age - 0.06) / 0.16)) : 0;
+  const recover = chucking ? ease(clamp01((age - 0.28) / 0.3)) : 0;
   const laugh = sad ? 0 : clamp01(howl);
-  const offer = laugh > 0.12 ? 0 : offerAmt(lt, mood);
-  const scratch = laugh ? 0 : scratchAmt(lt, offer);
+  const offer = laugh > 0.12 ? 0 : chucking ? tossFromOffer * (1 - snap) : offerAmt(lt, mood);
+  const scratch = laugh || chucking ? 0 : scratchAmt(lt, offer);
   const wag = offer * Math.sin(lt * 5.2);
   const breathe = Math.sin(t * 1.45);
   const jigHz = 6.4 + 16 * laugh;
   const jig = Math.abs(Math.sin(t * jigHz));
-  const slump = sad ? 0.16 : 0;
+  const slump = sad ? 0.16 * (chucking ? recover : 1) : 0;
   const hang = -Math.PI / 2;
   const lean = 0.03 + slump * 0.4 + 0.015 * breathe - laugh * laugh * 0.28;
 
@@ -180,8 +256,11 @@ export function drawParkKid(
 
   const lSh: Pt = { x: neck.x - 0.11, y: neck.y - 0.05 };
   const rSh: Pt = { x: neck.x + 0.07, y: neck.y - 0.03 };
-  const cashArm = mix(hang + 0.12, 0.18, offer) + 0.22 * wag;
-  const cashFore = mix(hang + 0.06, 0.4, offer) + 0.3 * wag;
+  const raisedArm = mix(hang + 0.12, 0.18, chucking ? tossFromOffer : offer) + 0.22 * wag;
+  const dumpArm = hang - 0.55;
+  const cashArm = mix(mix(raisedArm, dumpArm, snap), hang - 0.05, recover);
+  const raisedFore = mix(hang + 0.06, 0.4, chucking ? tossFromOffer : offer) + 0.3 * wag;
+  const cashFore = mix(mix(raisedFore, hang - 0.2, snap), hang + 0.1, recover);
   const cashElb = polar(lSh, cashArm, 0.28);
   const cashHand = polar(cashElb, cashFore, 0.24);
 
@@ -190,7 +269,7 @@ export function drawParkKid(
   const laughHand: Pt = { x: belly.x + 0.08, y: belly.y + 0.02 };
   const clutchBack = clamp01((laugh - 0.22) / 0.45);
   const lArm =
-    offer > 0.02
+    offer > 0.02 || (chucking && recover < 0.98)
       ? { elb: cashElb, hand: cashHand }
       : clutchBack > 0.02
         ? ikArm(
@@ -236,7 +315,7 @@ export function drawParkKid(
   ctx.beginPath();
   ctx.arc(lHand.x, lHand.y, 0.05, 0, TAU);
   ctx.fill();
-  if (laugh < 0.12) drawNotes(ctx, lHand, offer, wag);
+  if (laugh < 0.12 && !tossed) drawNotes(ctx, lHand, Math.max(offer, chucking ? 1 - snap : 0), wag);
 
   stroke(ctx, JOGGERS_DARK, 0.18, lHip, lKnee, lAnkle);
   stroke(ctx, JOGGERS, 0.17, rHip, rKnee, rAnkle);
@@ -256,28 +335,21 @@ export function drawParkKid(
   ctx.strokeStyle = JUMPER_DARK;
   ctx.lineWidth = 0.028;
   ctx.beginPath();
-  ctx.moveTo(lHip.x - 0.1, lHip.y + 0.02);
-  ctx.quadraticCurveTo(lSh.x - 0.14, (lHip.y + lSh.y) * 0.55, lSh.x - 0.1, lSh.y);
-  ctx.lineTo(rSh.x + 0.1, rSh.y + 0.01);
-  ctx.quadraticCurveTo(belly.x + 0.28, belly.y + 0.08, rHip.x + 0.16, rHip.y);
-  ctx.closePath();
+  kidJumperPath(ctx, lHip, rHip, lSh, rSh, belly, pelvis);
   ctx.fill();
   ctx.stroke();
-  const bellyShade = ctx.createRadialGradient(
-    belly.x + 0.1,
-    belly.y + 0.04,
-    0.02,
-    belly.x + 0.02,
-    belly.y - 0.02,
-    0.22,
-  );
-  bellyShade.addColorStop(0, JUMPER_LIT);
-  bellyShade.addColorStop(0.6, JUMPER);
-  bellyShade.addColorStop(1, "#3a1c1a");
-  ctx.fillStyle = bellyShade;
+  ctx.save();
   ctx.beginPath();
-  ctx.ellipse(belly.x + 0.04, belly.y, 0.2, 0.16, 0.12, 0, TAU);
-  ctx.fill();
+  kidJumperPath(ctx, lHip, rHip, lSh, rSh, belly, pelvis);
+  ctx.clip();
+  const sheen = ctx.createLinearGradient(chest.x - 0.02, chest.y, belly.x + 0.16, belly.y - 0.04);
+  sheen.addColorStop(0, "rgba(138, 82, 76, 0)");
+  sheen.addColorStop(0.4, JUMPER_LIT);
+  sheen.addColorStop(0.78, JUMPER);
+  sheen.addColorStop(1, "rgba(58, 28, 26, 0)");
+  ctx.fillStyle = sheen;
+  ctx.fillRect(lHip.x - 0.22, pelvis.y - 0.16, 0.62, 0.52);
+  ctx.restore();
 
   stroke(ctx, JUMPER, 0.17, rSh, rElb);
   stroke(ctx, SKIN, 0.09, rElb, rHand);
@@ -291,10 +363,44 @@ export function drawParkKid(
 
   ctx.restore();
 
-  if (mood === "smug" && level.id === 1) {
+  if (chucking) {
+    if (!tossed && snap > 0.42) {
+      tossed = spawnTossedNotes(x + lHand.x, y + lHand.y);
+      lastTossT = t;
+    }
+    if (tossed) {
+      stepTossedNotes(tossed, Math.max(0, t - lastTossT), ground);
+      lastTossT = t;
+    }
+  }
+  if (tossed) drawTossedNotes(ctx, cam, cssW, cssH, tossed);
+
+  if (mood === "smug") {
     const fade = 1 - ease((lt - 3) / 0.55);
     if (fade > 0.02) drawBetBubble(ctx, cam, cssW, cssH, x, y + 0.92, fade);
   }
+}
+
+/** Jumper silhouette — gut is the front hem, not a second oval. */
+function kidJumperPath(
+  ctx: CanvasRenderingContext2D,
+  lHip: Pt,
+  rHip: Pt,
+  lSh: Pt,
+  rSh: Pt,
+  belly: Pt,
+  pelvis: Pt,
+): void {
+  const back = { x: lHip.x - 0.12, y: lHip.y + 0.03 };
+  const gut = { x: belly.x + 0.2, y: belly.y - 0.02 };
+  const under = { x: belly.x + 0.02, y: pelvis.y - 0.04 };
+  ctx.moveTo(back.x, back.y);
+  ctx.quadraticCurveTo(lSh.x - 0.16, (back.y + lSh.y) * 0.55, lSh.x - 0.1, lSh.y);
+  ctx.lineTo(rSh.x + 0.1, rSh.y + 0.01);
+  ctx.quadraticCurveTo(belly.x + 0.2, (rSh.y + gut.y) * 0.52, gut.x, gut.y);
+  ctx.quadraticCurveTo(gut.x - 0.04, under.y + 0.02, rHip.x + 0.13, rHip.y + 0.02);
+  ctx.quadraticCurveTo(under.x, under.y, back.x, back.y);
+  ctx.closePath();
 }
 
 function drawShoe(ctx: CanvasRenderingContext2D, ankle: Pt): void {
@@ -302,6 +408,75 @@ function drawShoe(ctx: CanvasRenderingContext2D, ankle: Pt): void {
   ctx.beginPath();
   ctx.ellipse(ankle.x + 0.07, ankle.y - 0.01, 0.11, 0.045, 0.05, 0, TAU);
   ctx.fill();
+}
+
+function spawnTossedNotes(hx: number, hy: number): TossNote[] {
+  const notes: TossNote[] = [];
+  for (let i = 0; i < 4; i++) {
+    notes.push({
+      x: hx + 0.02 * i,
+      y: hy + 0.01 * i,
+      vx: 1.05 + i * 0.42,
+      vy: 1.85 - i * 0.22,
+      rot: -0.35 - 0.18 * i,
+      omega: -5.2 + i * 2.4,
+      w: 0.24,
+      h: 0.12,
+      tint: i % 2 === 0 ? "#7a9a5a" : "#c8d4b0",
+      settled: false,
+    });
+  }
+  return notes;
+}
+
+function stepTossedNotes(notes: TossNote[], dt: number, groundY: number): void {
+  if (dt <= 0) return;
+  const floor = groundY + 0.012;
+  for (const n of notes) {
+    if (n.settled) continue;
+    n.vy -= 16.5 * dt;
+    n.vx *= Math.exp(-0.55 * dt);
+    n.x += n.vx * dt;
+    n.y += n.vy * dt;
+    n.rot += n.omega * dt;
+    n.omega *= Math.exp(-0.8 * dt);
+    if (n.y <= floor) {
+      n.y = floor;
+      if (n.vy < -0.55) {
+        n.vy *= -0.28;
+        n.vx *= 0.55;
+        n.omega *= 0.45;
+      } else {
+        n.vy = 0;
+        n.vx = 0;
+        n.omega = 0;
+        n.settled = true;
+        n.rot = n.rot > 0 ? 0.12 + 0.08 * (n.x % 1) : -0.1 - 0.06 * (n.x % 1);
+      }
+    }
+  }
+}
+
+function drawTossedNotes(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  notes: TossNote[],
+): void {
+  for (const n of notes) {
+    const s = worldToScreen(cam, cssW, cssH, n.x, n.y);
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.scale(s.ppm, -s.ppm);
+    ctx.rotate(n.rot);
+    ctx.fillStyle = n.tint;
+    ctx.strokeStyle = "#2a3a1c";
+    ctx.lineWidth = 0.012;
+    ctx.fillRect(-n.w * 0.5, -n.h * 0.5, n.w, n.h);
+    ctx.strokeRect(-n.w * 0.5, -n.h * 0.5, n.w, n.h);
+    ctx.restore();
+  }
 }
 
 function drawNotes(
@@ -470,13 +645,17 @@ function drawBetBubble(
   alpha: number,
 ): void {
   const s = worldToScreen(cam, cssW, cssH, x, y);
-  const w = Math.min(220, Math.max(150, s.ppm * 2.15));
+  const [line1, line2] = twoLines(kidCues[kidLine] ?? kidCues[0]!);
+  const fontPx = Math.max(12, Math.min(16, s.ppm * 0.2));
+  ctx.save();
+  ctx.font = `600 ${fontPx}px "Source Sans 3", "Segoe UI", sans-serif`;
+  const textW = Math.max(ctx.measureText(line1).width, ctx.measureText(line2).width);
+  const w = Math.min(260, Math.max(150, textW + 28, s.ppm * 2.15));
   const h = Math.max(44, s.ppm * 0.72);
   const gap = Math.max(16, s.ppm * 0.34);
   const bx = Math.max(8, Math.min(cssW - w - 8, s.x - w * 0.5));
   const by = s.y - h - gap;
   const a = Math.max(0, Math.min(1, alpha));
-  ctx.save();
   ctx.globalAlpha = a;
   ctx.fillStyle = "rgba(232, 240, 244, 0.94)";
   ctx.strokeStyle = "rgba(7, 20, 26, 0.55)";
@@ -492,11 +671,10 @@ function drawBetBubble(
   ctx.fill();
   ctx.stroke();
   ctx.fillStyle = "#07141a";
-  ctx.font = `600 ${Math.max(12, Math.min(16, s.ppm * 0.2))}px "Source Sans 3", "Segoe UI", sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("Bet you can't", bx + w * 0.5, by + h * 0.34);
-  ctx.fillText("do a backflip.", bx + w * 0.5, by + h * 0.68);
+  ctx.fillText(line1, bx + w * 0.5, line2 ? by + h * 0.34 : by + h * 0.5);
+  if (line2) ctx.fillText(line2, bx + w * 0.5, by + h * 0.68);
   ctx.restore();
 }
 

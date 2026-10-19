@@ -46,10 +46,12 @@ class VoiceBank {
     if (!this.enabled || !text) return;
     void this.ready.then(() => {
       if (!this.enabled) return;
-      const clip = this.clips.find(
+      const pool = this.clips.filter(
         (c) => c.characterId === characterId && spokenMatches(c.text, text),
       );
-      if (clip) this.playClip(clip);
+      if (!pool.length) return;
+      const clip = pool[Math.floor(Math.random() * pool.length)]!;
+      this.playClip(clip);
     });
   }
 

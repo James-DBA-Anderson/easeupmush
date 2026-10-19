@@ -10,6 +10,12 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },
+  "exports": {
+    "./dialogue": "./src/dialogue/index.ts"
+  },
+  "dependencies": {
+    "@easeupmush/shared": "*"
+  },
   "devDependencies": {
     "typescript": "^5.8.2",
     "vite": "^6.2.2"

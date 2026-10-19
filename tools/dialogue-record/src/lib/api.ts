@@ -1,20 +1,31 @@
 import type { Take } from './types'
 
+function asLiveIds(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.filter((id): id is string => typeof id === 'string')
+  if (typeof raw === 'string' && raw) return [raw]
+  return []
+}
+
 export async function fetchTakes(
   game: string,
   character: string,
 ): Promise<{
   byLine: Record<string, Take[]>
-  liveByLine: Record<string, string>
+  liveByLine: Record<string, string[]>
 }> {
   const q = new URLSearchParams({ game, character })
   const res = await fetch(`/api/recordings?${q}`)
   if (!res.ok) throw new Error(`list failed (${res.status})`)
   const data = (await res.json()) as {
     byLine?: Record<string, Take[]>
-    liveByLine?: Record<string, string>
+    liveByLine?: Record<string, string | string[]>
   }
-  return { byLine: data.byLine ?? {}, liveByLine: data.liveByLine ?? {} }
+  const liveByLine: Record<string, string[]> = {}
+  for (const [lineId, value] of Object.entries(data.liveByLine ?? {})) {
+    const ids = asLiveIds(value)
+    if (ids.length) liveByLine[lineId] = ids
+  }
+  return { byLine: data.byLine ?? {}, liveByLine }
 }
 
 export async function saveTake(opts: {
@@ -95,7 +106,7 @@ export async function patchTake(
   return data.take
 }
 
-/** Mark a take as the one the game should play, or pass null to clear it. */
+/** Toggle a take in the live pool for a line, or pass null to clear the pool. */
 export async function setLiveTake(
   game: string,
   character: string,

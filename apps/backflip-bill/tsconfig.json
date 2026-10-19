@@ -17,7 +17,11 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@easeupmush/shared/dialogue": ["../../shared/dialogue.ts"]
+    }
   },
   "include": ["src"]
 }
