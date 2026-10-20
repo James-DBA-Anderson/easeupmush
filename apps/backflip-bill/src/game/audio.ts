@@ -180,16 +180,31 @@ export class Sfx {
 
   public foot(speed = 0.6): void {
     if (!this.gate("foot", 0.11)) return;
-    const k = 0.45 + 0.55 * clamp(speed, 0.2, 1);
+    const k = 0.75 + 0.55 * clamp(speed, 0.2, 1);
     const jitter = 1 + (Math.random() - 0.5) * 0.12;
-    this.thud(82 * jitter, 0.07, 0.14 * k);
-    this.noiseBurst(0.055, 0.07 * k, 640, 1.3);
+    this.thud(74 * jitter, 0.1, 0.34 * k);
+    this.thud(140 * jitter, 0.045, 0.14 * k);
+    this.noiseBurst(0.08, 0.18 * k, 480, 1.05);
   }
 
   public skid(): void {
     if (!this.gate("skid", 0.35)) return;
     this.noiseBurst(0.22, 0.08, 1100, 2.4);
     this.sweep(180, 70, 0.18, 0.05, "sawtooth");
+  }
+
+  public nestKnock(): void {
+    if (!this.gate("nest", 0.4)) return;
+    this.noiseBurst(0.1, 0.09, 720, 1.4);
+    this.sweep(340, 90, 0.14, 0.06, "triangle");
+    this.thud(70, 0.07, 0.07);
+  }
+
+  public eggSplat(): void {
+    if (!this.gate("splat", 0.08)) return;
+    this.noiseBurst(0.07, 0.09, 240, 0.7);
+    this.thud(52, 0.08, 0.06);
+    this.sweep(180, 70, 0.09, 0.04, "sine");
   }
 
   public grit(): void {

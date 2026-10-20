@@ -45,6 +45,16 @@ export function wouldMakeBoard(entries: ScoreRow[], score: number): boolean {
   return !!tenth && score >= tenth.score;
 }
 
+/** True if this run should be saved — on the board, and better than this name's current row. */
+export function wouldImproveBoard(entries: ScoreRow[], score: number, name: string): boolean {
+  if (!wouldMakeBoard(entries, score)) return false;
+  const who = name.trim().toLowerCase();
+  if (!who) return true;
+  const mine = ranked(entries).find((row) => row.name.toLowerCase() === who);
+  if (!mine) return true;
+  return score > mine.score;
+}
+
 export async function fetchBoard(): Promise<ScoreRow[]> {
   const res = await fetch(SCORES_API);
   if (!res.ok) return [];

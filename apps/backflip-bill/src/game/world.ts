@@ -94,10 +94,39 @@ export interface Level {
   hint?: string;
   /** Lawn / rec ground instead of terrace rooftops. */
   theme?: "park" | "woods";
+  /** Woods vehicle. Default on woods is the skateboard. */
+  ride?: "board" | "trolley";
   /** Land a no-run-up backflip. Default: reach the flag on your feet. */
   goal?: "standingFlip";
   /** Splash rings on the woods river. */
   slop?: WaterSlop[];
+  /** Nest in the far-bank tree. Knock it while jumping. */
+  nest?: WoodsNest;
+}
+
+export interface NestEgg {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  rot: number;
+  omega: number;
+  splat: boolean;
+  splatT: number;
+}
+
+export interface WoodsNest {
+  treeX: number;
+  restX: number;
+  restY: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  rot: number;
+  omega: number;
+  hanging: boolean;
+  eggs: NestEgg[];
 }
 
 export interface Hoop {
@@ -245,6 +274,33 @@ export const LEVELS: Level[] = [
   {
     id: 8,
     title: "Level 8",
+    spawnX: 4.15,
+    platforms: [
+      { x0: -2, x1: 5.15, y: 16.4 },
+      { x0: 5.15, x1: 16.6, y: 16.4, y1: 1.05, ease: true },
+      { x0: 16.6, x1: 18.2, y: 1.05 },
+      { x0: 18.2, x1: 19.55, y: 1.05, y1: 1.48 },
+      { x0: 28.85, x1: 58, y: -0.18 },
+    ],
+    gapX0: 19.55,
+    gapX1: 28.85,
+    pitY: -0.68,
+    flagX: 32.1,
+    killY: -8,
+    endX: 42,
+    theme: "woods",
+    ride: "trolley",
+    obstacles: [
+      { kind: "tyre", x: 20.7, y: -0.98, w: 0.82, h: 0.7, rot: -0.28 },
+      { kind: "bag", x: 22.85, y: -0.9, w: 0.52, h: 0.4, rot: 0.42 },
+      { kind: "tyre", x: 24.55, y: -1.0, w: 0.74, h: 0.62, rot: -0.46 },
+      { kind: "cone", x: 26.7, y: -0.96, w: 0.36, h: 0.7, rot: 0.31 },
+    ],
+    hint: "The kid shoves the trolley. Duck in, crab out, and let the ramp throw you the river.",
+  },
+  {
+    id: 9,
+    title: "Level 9",
     spawnX: 4.2,
     platforms: [{ x0: -4, x1: 42, y: 0 }],
     gapX0: 42,
@@ -262,8 +318,8 @@ export const LEVELS: Level[] = [
     hint: "You're on the 6:42 out of Fratton. Flip over three oncoming blocks — look right for the warning.",
   },
   {
-    id: 9,
-    title: "Level 9",
+    id: 10,
+    title: "Level 10",
     spawnX: 4.2,
     platforms: [
       { x0: -4, x1: 15.5, y: 0 },
@@ -290,7 +346,120 @@ export function cloneLevel(src: Level): Level {
     obstacles: src.obstacles?.map((o) => ({ ...o, cargo: undefined })),
     train: src.train ? { ...src.train, scroll: 0 } : undefined,
     slop: [],
+    nest: src.theme === "woods" && src.ride !== "trolley" ? makeWoodsNest() : undefined,
   };
+}
+
+const NEST_TREE_X = 27.62;
+const NEST_REST_X = 27.08;
+const NEST_REST_Y = 2.58;
+const NEST_R = 0.28;
+
+function makeWoodsNest(): WoodsNest {
+  return {
+    treeX: NEST_TREE_X,
+    restX: NEST_REST_X,
+    restY: NEST_REST_Y,
+    x: NEST_REST_X,
+    y: NEST_REST_Y,
+    vx: 0,
+    vy: 0,
+    rot: -0.22,
+    omega: 0,
+    hanging: true,
+    eggs: [
+      { x: NEST_REST_X - 0.05, y: NEST_REST_Y + 0.05, vx: 0, vy: 0, rot: 0.2, omega: 0, splat: false, splatT: 0 },
+      { x: NEST_REST_X + 0.07, y: NEST_REST_Y + 0.04, vx: 0, vy: 0, rot: -0.15, omega: 0, splat: false, splatT: 0 },
+    ],
+  };
+}
+
+/** Knock the hanging nest if a jumping body sample overlaps it. */
+export function strikeNest(
+  level: Level,
+  samples: { x: number; y: number; r: number; vx: number; vy: number }[],
+): boolean {
+  const nest = level.nest;
+  if (!nest?.hanging) return false;
+  for (const s of samples) {
+    const dx = s.x - nest.x;
+    const dy = s.y - nest.y;
+    if (Math.hypot(dx, dy) > NEST_R + s.r) continue;
+    nest.hanging = false;
+    nest.vx = s.vx * 0.55 + 1.1 + (Math.random() - 0.2) * 0.8;
+    nest.vy = Math.max(1.4, s.vy * 0.35 + 2.2);
+    nest.omega = -4.2 - Math.random() * 3.4;
+    for (let i = 0; i < nest.eggs.length; i++) {
+      const egg = nest.eggs[i]!;
+      const side = i === 0 ? -1 : 1;
+      egg.x = nest.x + side * 0.06;
+      egg.y = nest.y + 0.04;
+      egg.vx = nest.vx * 0.7 + side * (1.4 + Math.random() * 0.9);
+      egg.vy = nest.vy * 0.55 + 1.6 + Math.random() * 1.1;
+      egg.omega = side * (8 + Math.random() * 6);
+      egg.splat = false;
+      egg.splatT = 0;
+    }
+    return true;
+  }
+  return false;
+}
+
+function nestFloor(level: Level, x: number, y: number): number {
+  const pad = supportAt(level, x, y + 0.4, 1.6);
+  if (pad !== null) return pad;
+  if (x > level.gapX0 && x < level.gapX1) return riverSurfaceY(level, x);
+  return level.pitY;
+}
+
+/** Fall, bounce the twig bowl, splat eggs on the bank. */
+export function stepNest(level: Level, dt: number): { splats: { x: number; y: number }[] } {
+  const splats: { x: number; y: number }[] = [];
+  const nest = level.nest;
+  if (!nest || nest.hanging) return { splats };
+  nest.vy -= 18 * dt;
+  nest.vx *= Math.exp(-0.35 * dt);
+  nest.omega *= Math.exp(-0.55 * dt);
+  nest.x += nest.vx * dt;
+  nest.y += nest.vy * dt;
+  nest.rot += nest.omega * dt;
+  const nestFloorY = nestFloor(level, nest.x, nest.y);
+  if (nest.y < nestFloorY + 0.06 && nest.vy < 0) {
+    nest.y = nestFloorY + 0.06;
+    if (nest.vy < -1.2) {
+      nest.vy *= -0.22;
+      nest.omega *= 0.45;
+      nest.vx *= 0.55;
+    } else {
+      nest.vy = 0;
+      nest.vx *= Math.exp(-8 * dt);
+      nest.omega *= Math.exp(-10 * dt);
+      nest.rot += (0.4 - nest.rot) * Math.min(1, dt * 4);
+    }
+  }
+  for (const egg of nest.eggs) {
+    if (egg.splat) {
+      egg.splatT += dt;
+      continue;
+    }
+    egg.vy -= 19 * dt;
+    egg.vx *= Math.exp(-0.28 * dt);
+    egg.omega *= Math.exp(-0.4 * dt);
+    egg.x += egg.vx * dt;
+    egg.y += egg.vy * dt;
+    egg.rot += egg.omega * dt;
+    const floor = nestFloor(level, egg.x, egg.y);
+    if (egg.y <= floor + 0.03 && egg.vy < 0.4) {
+      egg.y = floor + 0.012;
+      egg.vx = 0;
+      egg.vy = 0;
+      egg.omega = 0;
+      egg.splat = true;
+      egg.splatT = 0;
+      splats.push({ x: egg.x, y: egg.y });
+    }
+  }
+  return { splats };
 }
 
 export function stepTrain(level: Level, dt: number): void {
@@ -679,6 +848,14 @@ export function platformNormal(p: Platform, x?: number): { nx: number; ny: numbe
   const s = platformSlope(p, x);
   const inv = 1 / Math.hypot(1, s);
   return { nx: -s * inv, ny: inv };
+}
+
+/** Unit tangent in the run direction, following the surface. */
+export function padAlong(p: Platform, x: number, dir: number): { dx: number; dy: number } {
+  const s = platformSlope(p, x);
+  const len = Math.hypot(1, s) || 1;
+  const sign = dir >= 0 ? 1 : -1;
+  return { dx: sign / len, dy: (s * sign) / len };
 }
 
 /** Unit tangent pointing downhill (the way world y falls). */
@@ -1496,6 +1673,7 @@ const WOODS_TREES: { x: number; s: number; fg: boolean }[] = [
   { x: 10.4, s: 1.08, fg: false },
   { x: 13.7, s: 1.0, fg: false },
   { x: 14.45, s: 1.14, fg: true },
+  { x: 27.62, s: 1.16, fg: false },
   { x: 31.1, s: 1.18, fg: true },
   { x: 32.6, s: 1.15, fg: false },
   { x: 34.2, s: 1.05, fg: false },
@@ -1597,6 +1775,110 @@ function drawWoodsTrees(
       foreground ? "near" : "woods",
     );
   }
+  if (!foreground) drawWoodsNest(ctx, cam, cssW, cssH, level, true);
+}
+
+/** Falling nest and yolks sit in front of Bill; the hanging nest sits in the tree. */
+export function drawWoodsNest(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  level: Level,
+  hanging: boolean,
+): void {
+  const nest = level.nest;
+  if (!nest || nest.hanging !== hanging) return;
+  const ppm = cssW / cam.w;
+  if (hanging) {
+    const tree = worldToScreen(cam, cssW, cssH, nest.treeX, routeAt(level, nest.treeX));
+    const ns = worldToScreen(cam, cssW, cssH, nest.x, nest.y);
+    ctx.strokeStyle = "#3a2a18";
+    ctx.lineWidth = Math.max(2, 0.03 * ppm);
+    ctx.beginPath();
+    ctx.moveTo(tree.x - 0.04 * ppm, tree.y - 1.55 * ppm);
+    ctx.quadraticCurveTo(tree.x - 0.28 * ppm, ns.y - 0.12 * ppm, ns.x, ns.y);
+    ctx.stroke();
+  }
+  paintNestBowl(ctx, cam, cssW, cssH, nest);
+  for (const egg of nest.eggs) paintEgg(ctx, cam, cssW, cssH, egg, nest.hanging);
+}
+
+function paintNestBowl(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  nest: WoodsNest,
+): void {
+  const s = worldToScreen(cam, cssW, cssH, nest.x, nest.y);
+  ctx.save();
+  ctx.translate(s.x, s.y);
+  ctx.scale(s.ppm, -s.ppm);
+  ctx.rotate(nest.rot);
+  ctx.fillStyle = "#4a3420";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 0.22, 0.11, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#2e2014";
+  ctx.beginPath();
+  ctx.ellipse(0, 0.02, 0.16, 0.07, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#6a4a30";
+  ctx.lineWidth = 0.018;
+  ctx.lineCap = "round";
+  for (const twig of [
+    [-0.2, 0.02, 0.18, 0.08],
+    [-0.16, -0.04, 0.2, 0.01],
+    [-0.12, 0.06, 0.14, -0.05],
+    [0.08, 0.07, -0.18, 0.0],
+  ] as const) {
+    ctx.beginPath();
+    ctx.moveTo(twig[0], twig[1]);
+    ctx.lineTo(twig[2], twig[3]);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function paintEgg(
+  ctx: CanvasRenderingContext2D,
+  cam: Cam,
+  cssW: number,
+  cssH: number,
+  egg: NestEgg,
+  inNest: boolean,
+): void {
+  const s = worldToScreen(cam, cssW, cssH, egg.x, egg.y);
+  ctx.save();
+  ctx.translate(s.x, s.y);
+  ctx.scale(s.ppm, -s.ppm);
+  ctx.rotate(egg.rot);
+  if (egg.splat) {
+    const u = Math.min(1, egg.splatT * 8);
+    ctx.fillStyle = "rgba(245, 242, 232, 0.92)";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 0.16 * (0.7 + 0.3 * u), 0.045 * (0.8 + 0.2 * u), 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#e0b43a";
+    ctx.beginPath();
+    ctx.ellipse(0.02, 0.004, 0.07 * (0.75 + 0.25 * u), 0.028, -0.08, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(232, 220, 196, 0.9)";
+    ctx.beginPath();
+    ctx.ellipse(-0.08, 0.01, 0.03, 0.012, 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.fillStyle = inNest ? "#efe6cc" : "#f3ead0";
+    ctx.beginPath();
+    ctx.ellipse(0, 0.01, 0.055, 0.07, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(196, 170, 120, 0.55)";
+    ctx.beginPath();
+    ctx.ellipse(-0.012, 0.018, 0.012, 0.016, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 type FoliageKind = "near" | "woods" | "park" | "far";

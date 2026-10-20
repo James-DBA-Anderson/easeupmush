@@ -543,6 +543,67 @@
         display: flex;
       }
 
+      #achievement-banner {
+        position: absolute;
+        top: max(3.4rem, calc(env(safe-area-inset-top) + 2.8rem));
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(22rem, calc(100% - 1.6rem));
+        text-align: center;
+        opacity: 0;
+        pointer-events: none;
+        z-index: 12;
+      }
+
+      #achievement-banner.show {
+        opacity: 1;
+        transition: opacity 0.2s ease;
+      }
+
+      #achievement-banner.show.out {
+        opacity: 0;
+        transition: opacity 0.45s ease;
+      }
+
+      #achievement-banner .achievement-banner-eyebrow {
+        font-family: var(--font-ui);
+        font-size: var(--type-micro);
+        font-weight: 700;
+        letter-spacing: var(--tracking-label);
+        text-transform: uppercase;
+        color: var(--sodium);
+        text-shadow: 0 1px 0 #07141a;
+        margin-bottom: 0.28rem;
+      }
+
+      #achievement-banner .achievement-banner-card {
+        background: rgba(7, 20, 26, 0.82);
+        border: 1px solid rgba(240, 162, 58, 0.45);
+        border-radius: 0.65rem;
+        padding: 0.55rem 0.75rem 0.65rem;
+        box-shadow: 0 8px 22px #07141a99;
+      }
+
+      #achievement-banner .achievement-banner-title {
+        font-family: var(--font-display);
+        font-size: var(--type-callout);
+        letter-spacing: var(--tracking-display);
+        text-transform: uppercase;
+        color: var(--chalk);
+      }
+
+      #achievement-banner .achievement-banner-detail {
+        margin-top: 0.2rem;
+        font-family: var(--font-ui);
+        font-size: var(--type-label);
+        font-weight: 600;
+        color: var(--foam);
+      }
+
+      body.results-open #achievement-banner {
+        display: none;
+      }
+
       body.results-open #hint,
       body.results-open #altimeter {
         opacity: 0;
@@ -848,6 +909,13 @@
         <span id="score-live">+£0</span>
       </div>
       <div id="callout"></div>
+      <div id="achievement-banner" aria-live="polite">
+        <div class="achievement-banner-eyebrow">Achievement unlocked</div>
+        <div class="achievement-banner-card">
+          <div class="achievement-banner-title"></div>
+          <div class="achievement-banner-detail"></div>
+        </div>
+      </div>
       <div id="hazard-warn" hidden>
         <div class="hazard-diamond"><span>!</span></div>
         <em>Look out</em>

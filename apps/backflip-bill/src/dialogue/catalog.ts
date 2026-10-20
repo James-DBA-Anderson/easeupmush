@@ -64,12 +64,18 @@ export const catalog: DialogueCatalog = {
           "Foxes Forest, geez. Drown it. Make us rich.",
         ]),
         ...pack("open-8", [
+          "Trolley AND the river? I'll hold this, mush.",
+          "Tenner says you cop it off that ramp.",
+          "Sit tight, geez. You'll still wet yourself.",
+          "Heavier than a board, mush. Drown it.",
+        ]),
+        ...pack("open-9", [
           "Train's moving, mush. You'll cop a block.",
           "6:42 out of Fratton. Deck it.",
           "Flip three of them? Beard.",
           "I'll be chuffed when you bounce off the roof.",
         ]),
-        ...pack("open-9", [
+        ...pack("open-10", [
           "Grab the bar then, geez. You won't.",
           "Stay open or you'll bounce, mush.",
           "Tenner says you miss it and eat the well.",

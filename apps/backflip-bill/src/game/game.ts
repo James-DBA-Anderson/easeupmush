@@ -3,6 +3,7 @@ import {
   Bill,
   burst,
   drawBill,
+  drawRideTrolley,
   drawSkateboard,
   puffDust,
   skidSpray,
@@ -12,6 +13,7 @@ import {
   type LandKind,
   type SnapKind,
 } from "./bill";
+import { Achievements } from "./achievements";
 import { drawParkKid, takeParkKidVoice } from "./spectator";
 import { voices } from "./voices";
 import { HIP_HEIGHT, STANDING_FLIP_MAX_VX, TAU } from "./constants";
@@ -42,6 +44,8 @@ import {
   screenToWorld,
   spawnGround,
   splashRiver,
+  drawWoodsNest,
+  stepNest,
   stepRiverJunk,
   stepRiverSlop,
   stepTrain,
@@ -67,7 +71,7 @@ import {
   loadSavedName,
   rememberName,
   submitScore,
-  wouldMakeBoard,
+  wouldImproveBoard,
   type ScoreRow,
   type ScoreStats,
 } from "./scores";
@@ -212,7 +216,7 @@ export class Game {
   private resultsBoardEl: HTMLElement;
   private scoreSaved = false;
   private viewingBoard = false;
-  private madeBoard = false;
+  private askName = false;
   private boardEntries: ScoreRow[] = [];
   private score = 0;
   private tries = 1;
@@ -263,6 +267,7 @@ export class Game {
   private kidLaughT = 0;
   /** Botched landings this level — he laughs harder each time. */
   private kidFalls = 0;
+  private achievements = new Achievements(document.getElementById("achievement-banner"));
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -576,7 +581,7 @@ export class Game {
   /** Sit on the flag, then pan back along the run so the player can read it. */
   private beginPreview(): void {
     const level = this.level();
-    if (this.sim || level.noFlag) {
+    if (this.sim || level.noFlag || level.ride === "trolley") {
       this.previewT = -1;
       this.cam.x = this.lookX(this.bill.x);
       this.cam.y = spawnGround(level) + this.cam.h * 0.26;
@@ -622,7 +627,7 @@ export class Game {
     this.resultsReadyT = 0;
     this.scoreSaved = false;
     this.viewingBoard = false;
-    this.madeBoard = false;
+    this.askName = false;
     this.boardEntries = [];
     this.hideResults();
     this.syncScoreHud(false);
@@ -660,6 +665,7 @@ export class Game {
     this.last = now;
     this.t += dt;
     this.kidLaughT = Math.max(0, this.kidLaughT - dt);
+    this.achievements.update(dt);
     stepWindowFolk(dt);
     this.step(dt);
     this.draw();
@@ -900,8 +906,17 @@ export class Game {
 
     const live = this.level();
     this.bill.knockJunk(live);
+    if (this.bill.knockNest(live)) {
+      this.sfx.nestKnock();
+      if (this.achievements.unlock("breakfast")) this.sfx.bonus("layout");
+    }
     stepRiverSlop(live, dt);
     const junkSettle = stepRiverJunk(live, dt);
+    for (const splat of stepNest(live, dt).splats) {
+      this.sfx.eggSplat();
+      burst(this.dust, splat.x, splat.y, 7, "rgba(245, 236, 210, 0.85)", 1.8, true);
+      burst(this.dust, splat.x, splat.y + 0.02, 4, "rgba(224, 180, 58, 0.8)", 1.4, true);
+    }
     for (const h of [...this.bill.junkHits, ...junkSettle]) {
       this.sfx.junkClatter(h.kind, h.mag);
       if (h.mag > 2.3) {
@@ -925,7 +940,7 @@ export class Game {
       const g = groundAt(level, this.bill.x) ?? spawnGround(level);
       burst(this.dust, this.bill.x, g, 1, "rgba(180,170,155,0.55)", 1.4);
     }
-    if (this.bill.state === "slide" && !this.bill.board?.on) {
+    if (this.bill.state === "slide" && !this.bill.board?.on && !this.bill.cart?.on) {
       const pad = pitchedAt(level, this.bill.x);
       if (pad) {
         const { dx, dy } = padDownhill(pad, this.bill.x);
@@ -1159,7 +1174,7 @@ export class Game {
     );
     this.resultsScoreEl.textContent = formatPts(this.score);
     this.scoreSaved = false;
-    this.madeBoard = true;
+    this.askName = false;
     this.boardEntries = [];
     this.resultsSaveEl.disabled = false;
     this.resultsNameEl.disabled = false;
@@ -1182,12 +1197,7 @@ export class Game {
     this.resultsRunEl.hidden = true;
     this.resultsBoardCard.hidden = false;
     this.paintBoard(this.boardEntries, this.resultsNameEl.value);
-    if (this.madeBoard) {
-      this.resultsNameForm.hidden = false;
-      this.resultsNameEl.focus();
-    } else {
-      this.resultsNameForm.hidden = true;
-    }
+    this.syncNameForm();
   }
 
   private hideResults(): void {
@@ -1257,15 +1267,28 @@ export class Game {
     };
   }
 
+  private syncNameForm(): void {
+    if (this.askName && !this.scoreSaved) {
+      this.resultsNameForm.hidden = false;
+      this.resultsNameEl.focus();
+    } else {
+      this.resultsNameForm.hidden = true;
+    }
+  }
+
   private async refreshBoard(): Promise<void> {
+    const name = this.resultsNameEl.value || loadSavedName();
     try {
       this.boardEntries = await fetchBoard();
-      this.madeBoard = wouldMakeBoard(this.boardEntries, this.score);
+      this.askName = wouldImproveBoard(this.boardEntries, this.score, name);
     } catch {
       this.boardEntries = [];
-      this.madeBoard = true;
+      this.askName = true;
     }
-    if (this.viewingBoard) this.paintBoard(this.boardEntries, this.resultsNameEl.value);
+    if (this.viewingBoard) {
+      this.paintBoard(this.boardEntries, this.resultsNameEl.value);
+      this.syncNameForm();
+    }
   }
 
   private async saveScore(): Promise<void> {
@@ -1283,7 +1306,7 @@ export class Game {
       this.resultsNameEl.focus();
       return;
     }
-    if (!this.madeBoard) return;
+    if (!this.askName) return;
     this.resultsSaveEl.disabled = true;
     try {
       const entries = await submitScore(name, this.score, this.runStats());
@@ -1334,7 +1357,7 @@ export class Game {
       air,
       fall: Math.max(0, -bill.vy),
       speed,
-      scrape: bill.state === "slide" && !bill.board?.on ? Math.min(1, speed / 8.5) : 0,
+      scrape: bill.state === "slide" && !bill.board?.on && !bill.cart?.on ? Math.min(1, speed / 8.5) : 0,
       ambience: this.sim ? "rooftop" : ambienceOf(level),
       river:
         level.theme === "woods"
@@ -1345,13 +1368,13 @@ export class Game {
 
     const standing =
       (bill.state === "ground" || bill.state === "stumble") && !bill.rag && !bill.held;
-    if (standing && Math.abs(bill.vx) > 1.15) {
+    if (standing && !bill.cart?.on && Math.abs(bill.vx) > 1.15) {
       const crossed = Math.floor(bill.runPhase / Math.PI) !== Math.floor(this.lastFoot / Math.PI);
       if (crossed) this.sfx.foot(Math.abs(bill.vx) / tuning.maxSpeed);
     }
     this.lastFoot = bill.runPhase;
 
-    if (bill.flipping) {
+    if (bill.flipping || bill.cart?.on) {
       const d = bill.tuck - this.lastTuck;
       if (d > 0.16) this.sfx.tuck();
       else if (d < -0.16) this.sfx.extend();
@@ -1384,7 +1407,7 @@ export class Game {
     if (bill.cleared && !this.wasCleared && Math.abs(bill.vx) > 2) this.sfx.skid();
     this.wasCleared = bill.cleared;
 
-    if (bill.state === "slide" && !bill.board?.on && speed > 3.2) this.sfx.grit();
+    if (bill.state === "slide" && !bill.board?.on && !bill.cart?.on && speed > 3.2) this.sfx.grit();
   }
 
   private draw(): void {
@@ -1416,6 +1439,7 @@ export class Game {
         this.bill.cleared ? "sad" : howl > 0.02 ? "laugh" : "smug",
         this.t,
         howl,
+        this.bill.time,
       );
       const cue = takeParkKidVoice();
       if (cue) voices.playText("park-kid", cue);
@@ -1441,6 +1465,11 @@ export class Game {
       const bs = worldToScreen(cam, cssW, cssH, board.x, board.y);
       drawSkateboard(ctx, board, bs.x, bs.y, bs.ppm);
     }
+    const cart = this.bill.cart;
+    if (cart) {
+      const cs = worldToScreen(cam, cssW, cssH, cart.x, cart.y);
+      drawRideTrolley(ctx, cart, cs.x, cs.y, cs.ppm);
+    }
     if (this.bill.state === "air" && this.bill.flipTravel > 0.15) {
       const saved = this.bill.rot;
       for (const trail of [0.55, 1.05]) {
@@ -1453,6 +1482,7 @@ export class Game {
       this.bill.rot = saved;
     }
     drawBill(ctx, this.bill, s.x, s.y, s.ppm, this.t);
+    if (!level.nest?.hanging) drawWoodsNest(ctx, cam, cssW, cssH, level, false);
 
     for (const p of this.dust) {
       const ds = worldToScreen(cam, cssW, cssH, p.x, p.y);
