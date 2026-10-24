@@ -1,4 +1,4 @@
-import { askJim, initialChat, type ChatState } from "./chat";
+import { askJim, greetJim, initialChat, peekJim, type ChatState } from "./chat";
 import { createJim, drawJim, SRC_H, SRC_W, type JimAnim } from "./jim";
 import { MAX_USER_CHARS } from "./prompt";
 
@@ -25,6 +25,7 @@ let state: ChatState = initialChat();
 let talkUntil = performance.now() / 1000 + 2.4;
 let busy = false;
 let start = performance.now();
+let pollTimer = 0;
 
 input.maxLength = MAX_USER_CHARS;
 paintText(state);
@@ -33,6 +34,11 @@ requestAnimationFrame(frame);
 window.addEventListener("resize", resize);
 window.visualViewport?.addEventListener("resize", resize);
 input.focus();
+void greetJim().then((next) => {
+  state = next;
+  paintText(state);
+  talkUntil = performance.now() / 1000 + 2.4;
+});
 
 form.addEventListener("submit", (ev) => {
   ev.preventDefault();
@@ -44,8 +50,8 @@ form.addEventListener("submit", (ev) => {
 async function send(text: string): Promise<void> {
   busy = true;
   input.value = "";
-  input.disabled = true;
-  state = { ...state, lastUser: text, mood: "think" };
+  if (!state.reading) input.disabled = true;
+  state = { ...state, lastUser: text, mood: state.reading ? "read" : "think" };
   paintText(state);
   try {
     state = await askJim(state, text);
@@ -54,6 +60,7 @@ async function send(text: string): Promise<void> {
       ...state,
       lastJim: "Hang on mush, line's gone. Say it again.",
       mood: "copped",
+      reading: false,
     };
   }
   talkUntil = performance.now() / 1000 + Math.min(4.5, 1.2 + state.lastJim.length / 28);
@@ -61,12 +68,45 @@ async function send(text: string): Promise<void> {
   busy = false;
   input.disabled = false;
   input.focus();
+  if (state.reading) watchRead();
+}
+
+function watchRead(): void {
+  window.clearTimeout(pollTimer);
+  pollTimer = window.setTimeout(() => {
+    void (async () => {
+      if (!state.reading) return;
+      try {
+        const peek = await peekJim();
+        if (peek.reading) {
+          watchRead();
+          return;
+        }
+        if (peek.reply) {
+          state = {
+            ...state,
+            lastJim: peek.reply,
+            mood: /beard|banned|aint working/i.test(peek.reply) ? "copped" : "talk",
+            reading: false,
+            history: [...state.history, { role: "assistant" as const, content: peek.reply }].slice(-16),
+          };
+          talkUntil = performance.now() / 1000 + Math.min(4.5, 1.2 + peek.reply.length / 28);
+          paintText(state);
+        } else {
+          state = { ...state, reading: false, mood: "talk" };
+          paintText(state);
+        }
+      } catch {
+        watchRead();
+      }
+    })();
+  }, 800);
 }
 
 function paintText(s: ChatState): void {
   you.textContent = s.lastUser ? `You: ${s.lastUser}` : "";
   you.hidden = !s.lastUser;
-  if (s.mood === "think" && busy) {
+  if (s.mood === "think" && busy && !s.reading) {
     line.textContent = "…";
   } else {
     line.textContent = s.lastJim;
@@ -76,11 +116,13 @@ function paintText(s: ChatState): void {
 
 function frame(now: number): void {
   const t = (now - start) / 1000;
-  const talking = t < talkUntil && !busy;
+  const reading = state.reading || state.mood === "read";
+  const talking = t < talkUntil && !busy && !reading;
   const anim: JimAnim = {
-    mood: busy ? "think" : state.mood,
+    mood: reading ? "read" : busy ? "think" : state.mood,
     talking,
-    thinking: busy,
+    thinking: busy && !reading,
+    reading,
   };
   drawJim(src, t, anim);
   blit();

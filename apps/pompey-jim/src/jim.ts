@@ -46,6 +46,7 @@ export type JimAnim = {
   mood: JimMood;
   talking: boolean;
   thinking: boolean;
+  reading: boolean;
 };
 
 export function createJim(): HTMLCanvasElement {
@@ -59,10 +60,18 @@ export function drawJim(src: HTMLCanvasElement, t: number, anim: JimAnim): void 
   const g = src.getContext("2d");
   if (!g) return;
   g.imageSmoothingEnabled = false;
-  const bob = anim.talking ? Math.round(Math.sin(t * 10) * 1) : Math.round(Math.sin(t * 1.4) * 0.49);
+  const bob = anim.talking && !anim.reading ? Math.round(Math.sin(t * 10) * 1) : Math.round(Math.sin(t * 1.4) * 0.49);
   const blink = blinkAt(t);
-  const look = anim.thinking ? -2 : anim.mood === "copped" ? 1 : Math.sin(t * 0.35) > 0.92 ? 1 : 0;
-  const mouth = mouthShape(t, anim);
+  const look = anim.reading
+    ? 2
+    : anim.thinking
+      ? -2
+      : anim.mood === "copped"
+        ? 1
+        : Math.sin(t * 0.35) > 0.92
+          ? 1
+          : 0;
+  const mouth = anim.reading ? 0 : mouthShape(t, anim);
   const scarf = Math.round(Math.sin(t * 2.1) * 1);
 
   g.fillStyle = C.night;
@@ -71,7 +80,8 @@ export function drawJim(src: HTMLCanvasElement, t: number, anim: JimAnim): void 
   g.save();
   g.translate(0, bob);
   drawTorso(g, scarf);
-  drawHead(g, blink, look, mouth, anim.mood);
+  drawHead(g, blink, look, mouth, anim.reading ? "read" : anim.mood, anim.reading);
+  if (anim.reading) drawPhone(g, t);
   g.restore();
   drawVignette(g);
 }
@@ -155,7 +165,14 @@ function stripeScarf(g: CanvasRenderingContext2D, x: number, y: number, w: numbe
   g.fillRect(x + w - 1, y, 1, h);
 }
 
-function drawHead(g: CanvasRenderingContext2D, blink: number, look: number, mouth: number, mood: JimMood): void {
+function drawHead(
+  g: CanvasRenderingContext2D,
+  blink: number,
+  look: number,
+  mouth: number,
+  mood: JimMood,
+  reading = false,
+): void {
   const cx = 40;
   const cy = 38;
   // neck
@@ -212,7 +229,7 @@ function drawHead(g: CanvasRenderingContext2D, blink: number, look: number, mout
     }
   }
   g.globalAlpha = 1;
-  drawEyes(g, cx, cy, blink, look, mood);
+  drawEyes(g, cx, cy, blink, look, mood, reading);
   // nose
   g.fillStyle = C.skinSh;
   g.fillRect(cx - 1, cy + 2, 4, 8);
@@ -224,8 +241,8 @@ function drawHead(g: CanvasRenderingContext2D, blink: number, look: number, mout
   drawMouth(g, cx, cy + 16, mouth, mood);
   // brows
   g.fillStyle = C.brow;
-  const browY = mood === "copped" ? cy - 9 : cy - 11;
-  const tilt = mood === "copped" ? 1 : 0;
+  const browY = mood === "copped" ? cy - 9 : reading ? cy - 10 : cy - 11;
+  const tilt = mood === "copped" ? 1 : reading ? 1 : 0;
   g.fillRect(cx - 12, browY + tilt, 9, 2);
   g.fillRect(cx + 3, browY, 9, 2);
   if (mood === "copped") g.fillRect(cx - 4, browY + 2, 3, 1);
@@ -238,8 +255,9 @@ function drawEyes(
   blink: number,
   look: number,
   mood: JimMood,
+  reading = false,
 ): void {
-  const ey = cy - 4;
+  const ey = cy - 4 + (reading ? 2 : 0);
   const lid = Math.round(6 * blink);
   const drawOne = (ex: number) => {
     g.fillStyle = C.outline;
@@ -261,6 +279,33 @@ function drawEyes(
   };
   drawOne(cx - 8);
   drawOne(cx + 8);
+}
+
+function drawPhone(g: CanvasRenderingContext2D, t: number): void {
+  const x = 52;
+  const y = 30 + Math.round(Math.sin(t * 6) * 0.49);
+  // arm
+  g.fillStyle = C.skinSh;
+  g.fillRect(48, 58, 5, 12);
+  g.fillStyle = C.skin;
+  g.fillRect(49, 50, 4, 14);
+  g.fillRect(50, 44, 5, 8);
+  // phone body
+  g.fillStyle = C.outline;
+  g.fillRect(x - 1, y - 1, 16, 26);
+  g.fillStyle = "#1a1a22";
+  g.fillRect(x, y, 14, 24);
+  const glow = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(t * 9));
+  g.fillStyle = C.pompeyLt;
+  g.globalAlpha = 0.35 + 0.25 * glow;
+  g.fillRect(x + 1, y + 2, 12, 18);
+  g.globalAlpha = 1;
+  g.fillStyle = C.white;
+  g.fillRect(x + 2, y + 4, 10, 3);
+  g.fillStyle = C.pompey;
+  g.fillRect(x + 2, y + 8, 10, 8);
+  g.fillStyle = C.sodium;
+  g.fillRect(x + 5, y + 21, 4, 1);
 }
 
 function drawMouth(g: CanvasRenderingContext2D, cx: number, cy: number, open: number, mood: JimMood): void {

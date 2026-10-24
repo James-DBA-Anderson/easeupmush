@@ -1,14 +1,55 @@
-import { resolve } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
-import type { Plugin } from "vite";
+import { defineConfig, type Plugin } from "vite";
+import type { JimJob, JimKnowledge } from "./src/knowledge";
+import { clampHistory, clampUserText } from "./src/prompt";
+import { clampUserId, JIM_MODEL, jimChat, jimHello, jimPeek, type AiRunner } from "./src/turn";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const base = process.env.GAME_BASE ?? "./";
 const underSite = base.includes("/games/");
+const knowledgeFile = resolve(root, ".local/jim-knowledge.json");
+const jobs = new Map<string, JimJob>();
 
-/** Dev-only chat: Workers AI REST if creds exist, else a phraseology-heavy Jim. */
+/** Dev-only chat: Workers AI REST if creds exist, else a phraseology-heavy Jim. Knowledge in `.local/`. */
 function chatPlugin(): Plugin {
+  const store = {
+    async load(): Promise<unknown> {
+      try {
+        return JSON.parse(await readFile(knowledgeFile, "utf8")) as unknown;
+      } catch {
+        return null;
+      }
+    },
+    async save(kb: JimKnowledge): Promise<void> {
+      await mkdir(dirname(knowledgeFile), { recursive: true });
+      await writeFile(knowledgeFile, `${JSON.stringify(kb, null, 2)}\n`, "utf8");
+    },
+  };
+
+  const jobStore = {
+    async get(userId: string): Promise<unknown> {
+      return jobs.get(userId) ?? null;
+    },
+    async set(job: JimJob): Promise<void> {
+      jobs.set(job.userId, job);
+    },
+    async clear(userId: string): Promise<void> {
+      jobs.delete(userId);
+    },
+  };
+
+  const send = (
+    res: { statusCode: number; setHeader: (k: string, v: string) => void; end: (s?: string) => void },
+    data: unknown,
+    status = 200,
+  ) => {
+    res.statusCode = status;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.end(JSON.stringify(data));
+  };
+
   return {
     name: "pompey-jim-chat",
     configureServer(server) {
@@ -23,6 +64,18 @@ function chatPlugin(): Plugin {
           res.end();
           return;
         }
+        if (req.method === "GET") {
+          const url = new URL(req.url ?? "/", "http://pompey-jim.local");
+          const userId = clampUserId(url.searchParams.get("user"));
+          if (url.searchParams.get("job") === "1") {
+            void jimPeek(jobStore, userId).then((body) => send(res, body));
+            return;
+          }
+          void jimHello(store, userId).then((reply) => {
+            send(res, { reply });
+          });
+          return;
+        }
         if (req.method !== "POST") {
           send(res, { error: "Method not allowed" }, 405);
           return;
@@ -34,28 +87,23 @@ function chatPlugin(): Plugin {
         req.on("end", () => {
           void (async () => {
             try {
-              const {
-                buildMessages,
-                clampHistory,
-                clampUserText,
-                JIM_MODEL,
-                localJimReply,
-                parseAiReply,
-              } = await import("./src/prompt.ts");
               const rec = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
               const message = clampUserText(rec.message);
               if (!message) {
                 send(res, { error: "Say something mush" }, 400);
                 return;
               }
-              const history = clampHistory(rec.history);
-              const reply =
-                (await workersAiReply(history, message, {
-                  buildMessages,
-                  JIM_MODEL,
-                  parseAiReply,
-                })) ?? localJimReply(message);
-              send(res, { reply });
+              const { reply, reading, remember, follow } = await jimChat({
+                message,
+                history: clampHistory(rec.history),
+                userId: clampUserId(rec.user),
+                store,
+                jobs: jobStore,
+                runAi: cloudflareAi(),
+              });
+              await remember();
+              if (follow) void follow();
+              send(res, { reply, reading });
             } catch (err) {
               send(res, { error: err instanceof Error ? err.message : String(err) }, 500);
             }
@@ -66,53 +114,28 @@ function chatPlugin(): Plugin {
   };
 }
 
-async function workersAiReply(
-  history: { role: "user" | "assistant"; content: string }[],
-  message: string,
-  ai: {
-    JIM_MODEL: string;
-    buildMessages: (
-      history: { role: "user" | "assistant"; content: string }[],
-      message: string,
-    ) => { role: string; content: string }[];
-    parseAiReply: (raw: unknown) => string | null;
-  },
-): Promise<string | null> {
+function cloudflareAi(): AiRunner | null {
   const token = process.env.CLOUDFLARE_API_TOKEN;
   const account = process.env.CLOUDFLARE_ACCOUNT_ID;
   if (!token || !account) return null;
-  const res = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/${ai.JIM_MODEL}`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+  return async (messages, opts) => {
+    const res = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/${JIM_MODEL}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ messages, ...opts }),
       },
-      body: JSON.stringify({
-        messages: ai.buildMessages(history, message),
-        max_tokens: 140,
-        temperature: 0.9,
-      }),
-    },
-  );
-  if (!res.ok) return null;
-  const body: unknown = await res.json();
-  const nested =
-    body && typeof body === "object" && "result" in body
+    );
+    if (!res.ok) throw new Error(`Workers AI ${res.status}`);
+    const body: unknown = await res.json();
+    return body && typeof body === "object" && "result" in body
       ? (body as { result: unknown }).result
       : body;
-  return ai.parseAiReply(nested) ?? ai.parseAiReply(body);
-}
-
-function send(
-  res: { statusCode: number; setHeader: (k: string, v: string) => void; end: (s?: string) => void },
-  data: unknown,
-  status = 200,
-): void {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.end(JSON.stringify(data));
+  };
 }
 
 export default defineConfig({

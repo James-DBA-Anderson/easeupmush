@@ -5,7 +5,7 @@ export const JIM_MODEL = "@cf/meta/llama-3.2-3b-instruct";
 
 export const OPENING_LINE = "Alright mush. You from Pompey or what?";
 
-export const MAX_USER_CHARS = 280;
+export const MAX_USER_CHARS = 500;
 export const MAX_HISTORY = 8;
 export const MAX_REPLY_CHARS = 280;
 
@@ -22,13 +22,19 @@ export function glossaryBlock(): string {
     .join("\n");
 }
 
-export function buildSystemPrompt(): string {
+export function buildSystemPrompt(notebook = ""): string {
+  const book = notebook.trim()
+    ? `
+NOTEBOOK — one book for every mush, every session. Use it. Don't read it out as a list. Don't mention notebooks, memory, or storing anything.
+${notebook}
+`
+    : "";
   return `You are Pompey Jim, a Portsmouth FC fan in his mid-forties, stood close to the camera in a blue-and-white scarf. You are talking face to face on a cold night near Fratton. You are proper Pompey.
 
 VOICE
 - Speak like a Portsmouth local. Short. One or two sentences. Rarely three.
 - Never narrate actions. No asterisks. Do not say you are an AI or a language model.
-- Address the player as mush or geez — mix them.
+- Address the player as mush or geez — mix them. Use their name if you know it.
 - You were young in the 80s so you can say lakes. You say dane tane for downtown.
 - Sprinkle slang naturally. Do not dump every slang word into every line.
 - dinlo only rarely.
@@ -43,6 +49,19 @@ WHO YOU ARE
 - Scummers are Southampton. You don't like them. Don't rant unless they start it; then cop the needle a bit and ease up mush.
 - You know Southsea, Canoe Lake, the seafront, Buckland, Cosham, dane tane.
 - If you don't know something, shrug it Pompey-style. Beard / beard on tash if they're talking rubbish.
+${book}
+PEOPLE LIE, AND THEY BRING YOU NEWS
+- Don't swallow everything. Wind-ups, scummer spin, too-neat stories: beard / beard on tash.
+- Pompey and Fratton stuff you'll often buy. Southampton glory, conspiracy, celebrity transfer gossip: nah.
+- When they tell you an event or a bit of news, keep YOUR take, not their word as gospel. You can mention it later ("Dave reckoned X. Beard, that ain't it.").
+- You can change your mind if another mush or a page backs it up.
+
+GETTING TO KNOW THEM
+- Ask about this mush. Name, where they're from, Pompey or not, what they do, Fratton or not.
+- One question per reply. Don't interrogate. Weave it in.
+- If you already know them, show it — don't ask their name again.
+- If another person in the notebook is relevant, you can mention them ("Had a geezer in from Cosham").
+- Never mention Cloudflare, Llama, KV, user ids, or that you're storing data.
 
 RULES
 - Reply as Jim only. No quotes around the whole line. No hashtags.
@@ -73,13 +92,23 @@ export function clampHistory(raw: unknown): ChatTurn[] {
   return out.slice(-MAX_HISTORY);
 }
 
-export function buildMessages(history: ChatTurn[], user: string): { role: ChatRole; content: string }[] {
+export function buildMessages(
+  history: ChatTurn[],
+  user: string,
+  notebook = "",
+): { role: ChatRole; content: string }[] {
   return [
-    { role: "system", content: buildSystemPrompt() },
+    { role: "system", content: buildSystemPrompt(notebook) },
     ...history,
     { role: "user", content: user },
   ];
 }
+
+export type JimReplyCtx = {
+  speakerName: string | null;
+  speakerNotes: string[];
+  others: { name: string | null; notes: string[] }[];
+};
 
 export function parseAiReply(raw: unknown): string | null {
   if (typeof raw === "string") return cleanReply(raw);
@@ -123,8 +152,39 @@ const FALLBACKS = [
   "Grub first. Chippy's calling.",
 ];
 
-export function localJimReply(user: string): string {
+export const PHONE_UP = [
+  "Hang on mush, I'll have a look on my phone.",
+  "Two secs geez, let me clock this.",
+  "Alright, phone's out. Don't start me till I've read it.",
+];
+
+export const DISTRACTED = [
+  "Yeah yeah mush, hang on, I'm on this page.",
+  "Ease up, I'm trying to read it.",
+  "Don't start, this page is hanging.",
+  "Two secs. Still on my phone.",
+];
+
+export function phoneUpLine(seed: string): string {
+  return PHONE_UP[hash(seed) % PHONE_UP.length] ?? PHONE_UP[0];
+}
+
+export function distractedLine(seed: string): string {
+  return DISTRACTED[hash(seed) % DISTRACTED.length] ?? DISTRACTED[0];
+}
+
+export function localJimReply(user: string, ctx?: JimReplyCtx): string {
   const t = user.toLowerCase();
+  const who = ctx?.speakerName;
+  if (who && /remember|know me|who am i|what's my name|whats my name/.test(t)) {
+    const note = ctx?.speakerNotes[0];
+    return note ? `Yeah ${who}. ${note}. Don't need to squinny about it.` : `Yeah ${who} mush. I ain't forgotten.`;
+  }
+  const named = ctx?.others.find((p) => p.name && t.includes(p.name.toLowerCase()));
+  if (named?.name) {
+    const note = named.notes[0];
+    return note ? `Yeah I know ${named.name}. ${note}.` : `Yeah, ${named.name}. Been in.`;
+  }
   if (/scumm|southampton|saints/.test(t)) {
     return "Don't start me on scummers mush. Bunch of dinlos. Ease up, I'm copping already.";
   }
@@ -133,7 +193,7 @@ export function localJimReply(user: string): string {
     /^(alright|ok|okay)( mush| geez)?[.!? ]*$/.test(t) ||
     /how are you|what's up|whats up/.test(t)
   ) {
-    return OPENING_LINE;
+    return who ? `Alright ${who} mush. You from Pompey or what?` : OPENING_LINE;
   }
   if (/hangover|hanging|rough|ill|poorly/.test(t)) {
     return "I'm hanging something chronic mush. Never again. Until Saturday. Shant on.";
@@ -174,9 +234,22 @@ export function localJimReply(user: string): string {
   if (/who are you|your name|what's your/.test(t)) {
     return "Pompey Jim. Scarf, stubble, Fratton. Don't need a chuffdy badge for it.";
   }
+  if (!who && !ctx?.speakerNotes.length) {
+    const ask = ASK[hash(t) % ASK.length] ?? ASK[0];
+    const base = FALLBACKS[hash(t) % FALLBACKS.length] ?? FALLBACKS[0];
+    return `${base} ${ask}`;
+  }
   const n = hash(t) % FALLBACKS.length;
-  return FALLBACKS[n] ?? FALLBACKS[0];
+  const line = FALLBACKS[n] ?? FALLBACKS[0];
+  return who ? line.replace(/\bmush\b/i, who) : line;
 }
+
+const ASK = [
+  "What's your name mush?",
+  "You from Pompey or what?",
+  "What you do when you're not stood here?",
+  "You get down Fratton?",
+];
 
 function hash(s: string): number {
   let h = 0;

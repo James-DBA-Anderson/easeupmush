@@ -1,12 +1,8 @@
 import { isFilthyName } from "../apps/backflip-bill/src/game/profanity.ts";
-import {
-  buildMessages,
-  clampHistory,
-  clampUserText,
-  JIM_MODEL,
-  localJimReply,
-  parseAiReply,
-} from "../apps/pompey-jim/src/prompt.ts";
+import { KNOWLEDGE_KEY, type JimKnowledge } from "../apps/pompey-jim/src/knowledge.ts";
+import { clampHistory, clampUserText } from "../apps/pompey-jim/src/prompt.ts";
+import { clampUserId, JIM_MODEL, jimChat, jimHello, jimPeek, jobKey } from "../apps/pompey-jim/src/turn.ts";
+import type { JimJob } from "../apps/pompey-jim/src/knowledge.ts";
 
 const BOARD_KEY = "backflip-bill:board";
 const MAX_NAME = 18;
@@ -38,21 +34,67 @@ interface ScoreEntry {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/api/backflip-bill/scores") {
       return handleScores(request, env);
     }
     if (url.pathname === "/api/pompey-jim/chat") {
-      return handleJimChat(request, env);
+      return handleJimChat(request, env, ctx);
     }
     return new Response("Not found", { status: 404 });
   },
 };
 
-async function handleJimChat(request: Request, env: Env): Promise<Response> {
+function jimStore(env: Env) {
+  return {
+    async load(): Promise<unknown> {
+      return env.SCORES.get(KNOWLEDGE_KEY, "json");
+    },
+    async save(kb: JimKnowledge): Promise<void> {
+      await env.SCORES.put(KNOWLEDGE_KEY, JSON.stringify(kb));
+    },
+  };
+}
+
+function jimJobs(env: Env) {
+  return {
+    async get(userId: string): Promise<unknown> {
+      return env.SCORES.get(jobKey(userId), "json");
+    },
+    async set(job: JimJob): Promise<void> {
+      await env.SCORES.put(jobKey(job.userId), JSON.stringify(job));
+    },
+    async clear(userId: string): Promise<void> {
+      await env.SCORES.delete(jobKey(userId));
+    },
+  };
+}
+
+function jimAi(env: Env) {
+  return (
+    messages: { role: string; content: string }[],
+    opts: { max_tokens: number; temperature: number },
+  ) => env.AI.run(JIM_MODEL, { messages, ...opts });
+}
+
+async function handleJimChat(
+  request: Request,
+  env: Env,
+  ctx: { waitUntil(p: Promise<unknown>): void },
+): Promise<Response> {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
+  }
+  const store = jimStore(env);
+  const jobs = jimJobs(env);
+  if (request.method === "GET") {
+    const url = new URL(request.url);
+    const userId = clampUserId(url.searchParams.get("user"));
+    if (url.searchParams.get("job") === "1") {
+      return json(await jimPeek(jobs, userId));
+    }
+    return json({ reply: await jimHello(store, userId) });
   }
   if (request.method !== "POST") {
     return json({ error: "Method not allowed" }, 405);
@@ -68,18 +110,17 @@ async function handleJimChat(request: Request, env: Env): Promise<Response> {
   if (!message) {
     return json({ error: "Say something mush" }, 400);
   }
-  const history = clampHistory(rec.history);
-  try {
-    const out = await env.AI.run(JIM_MODEL, {
-      messages: buildMessages(history, message),
-      max_tokens: 140,
-      temperature: 0.9,
-    });
-    const reply = parseAiReply(out) ?? localJimReply(message);
-    return json({ reply });
-  } catch {
-    return json({ reply: localJimReply(message) });
-  }
+  const { reply, reading, remember, follow } = await jimChat({
+    message,
+    history: clampHistory(rec.history),
+    userId: clampUserId(rec.user),
+    store,
+    jobs,
+    runAi: jimAi(env),
+  });
+  ctx.waitUntil(remember());
+  if (follow) ctx.waitUntil(follow());
+  return json({ reply, reading });
 }
 
 async function handleScores(request: Request, env: Env): Promise<Response> {

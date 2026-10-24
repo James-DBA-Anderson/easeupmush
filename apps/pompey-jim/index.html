@@ -115,6 +115,10 @@
         border-color: var(--sodium);
       }
 
+      #bubble[data-mood="read"] {
+        border-color: #4a6ad4;
+      }
+
       #talk {
         display: flex;
         gap: 0.55rem;
@@ -177,8 +181,8 @@
           id="say"
           name="say"
           type="text"
-          maxlength="280"
-          placeholder="Say something mush"
+          maxlength="500"
+          placeholder="Say something mush — or paste a link"
           aria-label="Talk to Pompey Jim"
           enterkeyhint="send"
         />
