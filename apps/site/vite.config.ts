@@ -42,6 +42,15 @@ export default defineConfig({
         target: "http://127.0.0.1:5306",
         changeOrigin: true,
       },
+      "/games/pompey-jim": {
+        target: "http://127.0.0.1:5307",
+        changeOrigin: true,
+        ws: true,
+      },
+      "/api/pompey-jim": {
+        target: "http://127.0.0.1:5307",
+        changeOrigin: true,
+      },
     },
   },
   preview: {

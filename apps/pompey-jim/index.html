@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#001489" />
+    <meta
+      name="description"
+      content="Pompey Jim — talk to a proper Portsmouth fan. 16-bit close-up."
+    />
+    <title>Pompey Jim</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Source+Sans+3:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --ink: #071018;
+        --pompey: #001489;
+        --pompey-hot: #1c3ab0;
+        --white: #f2f4f8;
+        --foam: #c8dde6;
+        --sodium: #f0a23a;
+        --font-ui: "Source Sans 3", "Segoe UI", sans-serif;
+        --font-display: "Anton", Impact, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
+        overflow: hidden;
+        background: var(--ink);
+        font-family: var(--font-ui);
+        color: var(--white);
+      }
+
+      #app {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        height: 100dvh;
+      }
+
+      #stage {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        background: #071018;
+      }
+
+      #jim {
+        display: block;
+        width: 100%;
+        height: 100%;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
+
+      .plate {
+        position: absolute;
+        top: 0.7rem;
+        left: 0.7rem;
+        z-index: 2;
+        padding: 0.2rem 0.55rem 0.12rem;
+        background: var(--pompey);
+        border: 3px solid var(--white);
+        font-family: var(--font-display);
+        font-size: 0.95rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        line-height: 1;
+        pointer-events: none;
+      }
+
+      #bubble {
+        position: absolute;
+        left: 4%;
+        right: 4%;
+        bottom: 4%;
+        z-index: 2;
+        padding: 0.7rem 0.85rem 0.8rem;
+        background: rgba(7, 16, 24, 0.82);
+        border: 3px solid var(--white);
+        box-shadow: 4px 4px 0 #000;
+      }
+
+      #you {
+        margin: 0 0 0.35rem;
+        color: var(--foam);
+        font-size: 0.82rem;
+      }
+
+      #line {
+        margin: 0;
+        font-size: 1.05rem;
+        line-height: 1.35;
+        font-weight: 600;
+      }
+
+      #bubble[data-mood="copped"] {
+        border-color: var(--sodium);
+      }
+
+      #talk {
+        display: flex;
+        gap: 0.55rem;
+        padding: 0.7rem 0.75rem calc(0.7rem + env(safe-area-inset-bottom));
+        background: #0a1420;
+        border-top: 4px solid var(--pompey);
+      }
+
+      #say {
+        flex: 1;
+        min-width: 0;
+        padding: 0.7rem 0.8rem;
+        border: 3px solid var(--white);
+        background: #0e1c28;
+        color: var(--white);
+        font: inherit;
+        font-size: 1rem;
+      }
+
+      #say:focus {
+        outline: none;
+        border-color: var(--sodium);
+      }
+
+      #talk button {
+        padding: 0.7rem 1rem;
+        border: 3px solid var(--white);
+        background: var(--pompey);
+        color: var(--white);
+        font-family: var(--font-display);
+        font-size: 0.95rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+
+      #talk button:hover {
+        background: var(--pompey-hot);
+      }
+
+      #say:disabled,
+      #talk button:disabled {
+        opacity: 0.55;
+        cursor: wait;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="stage">
+        <p class="plate">Pompey Jim</p>
+        <canvas id="jim" width="80" height="96" aria-label="Pompey Jim, a Portsmouth fan in a blue and white scarf"></canvas>
+        <div id="bubble">
+          <p id="you" hidden></p>
+          <p id="line">Alright mush. You from Pompey or what?</p>
+        </div>
+      </div>
+      <form id="talk" autocomplete="off">
+        <input
+          id="say"
+          name="say"
+          type="text"
+          maxlength="280"
+          placeholder="Say something mush"
+          aria-label="Talk to Pompey Jim"
+          enterkeyhint="send"
+        />
+        <button type="submit">Say</button>
+      </form>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

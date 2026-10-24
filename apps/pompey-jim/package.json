@@ -1,0 +1,23 @@
+{
+  "name": "@easeupmush/pompey-jim",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Talk to a proper Pompey fan. 16-bit close-up, Cloudflare Workers AI.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "exports": {
+    "./prompt": "./src/prompt.ts"
+  },
+  "dependencies": {
+    "@easeupmush/shared": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "vite": "^6.2.2"
+  }
+}

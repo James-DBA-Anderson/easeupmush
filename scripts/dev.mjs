@@ -62,6 +62,16 @@ const kids = [
     },
     shell: true,
   }),
+  spawn("npm run dev -w @easeupmush/pompey-jim", {
+    cwd: root,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      GAME_BASE: "/games/pompey-jim/",
+      BROWSER: "none",
+    },
+    shell: true,
+  }),
 ];
 
 function shutDown(code = 0) {

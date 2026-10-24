@@ -9,6 +9,7 @@ apps/
   site/                 # easeupmush.com homepage
   pompey-punch-up/      # Southsea brawler
   backflip-bill/        # portrait backflip platformer PoC
+  pompey-jim/           # 16-bit Pompey fan chat (Workers AI)
 shared/
   phraseology.json      # Pompey slang — all games + /mush/phraseology/
 tools/
@@ -39,6 +40,7 @@ Production URLs after deploy:
 | `/mush/phraseology/` | Pompey phraseology reference (generated from `shared/phraseology.json`) |
 | `/games/pompeymon/` | Pompeymon (unlisted, linked from the back room only) |
 | `/games/backflip-bill/` | Backflip Bill (unlisted, linked from the back room only) |
+| `/games/pompey-jim/` | Pompey Jim (unlisted, linked from the back room only) |
 
 To try the full assembled site locally (homepage + Play link):
 
@@ -78,6 +80,10 @@ Hungover on Southsea beach. Mean lads pile out of a car. Phaser 3 + TypeScript d
 ### [Backflip Bill](apps/backflip-bill/)
 
 Portrait 2D platformer PoC. Bill can only backflip — run up, take off, tuck in the air, land on your feet. Unlisted; play from the back room at `/games/backflip-bill/`.
+
+### [Pompey Jim](apps/pompey-jim/)
+
+Close-up 16-bit Portsmouth fan. Type below the sprite and talk to him. Phraseology-heavy; Cloudflare Workers AI on the free tier. Unlisted; play from the back room at `/games/pompey-jim/`.
 
 To add another game later: create `apps/<slug>/`, build it with `GAME_BASE=/games/<slug>/`, and copy into `dist/games/<slug>/` from `scripts/assemble-dist.mjs`.
 

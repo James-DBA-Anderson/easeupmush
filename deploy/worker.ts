@@ -1,4 +1,12 @@
 import { isFilthyName } from "../apps/backflip-bill/src/game/profanity.ts";
+import {
+  buildMessages,
+  clampHistory,
+  clampUserText,
+  JIM_MODEL,
+  localJimReply,
+  parseAiReply,
+} from "../apps/pompey-jim/src/prompt.ts";
 
 const BOARD_KEY = "backflip-bill:board";
 const MAX_NAME = 18;
@@ -7,6 +15,16 @@ const MAX_ROWS = 50;
 
 interface Env {
   SCORES: KVNamespace;
+  AI: {
+    run(
+      model: string,
+      inputs: {
+        messages: { role: string; content: string }[];
+        max_tokens?: number;
+        temperature?: number;
+      },
+    ): Promise<unknown>;
+  };
 }
 
 interface ScoreEntry {
@@ -25,9 +43,44 @@ export default {
     if (url.pathname === "/api/backflip-bill/scores") {
       return handleScores(request, env);
     }
+    if (url.pathname === "/api/pompey-jim/chat") {
+      return handleJimChat(request, env);
+    }
     return new Response("Not found", { status: 404 });
   },
 };
+
+async function handleJimChat(request: Request, env: Env): Promise<Response> {
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
+  }
+  if (request.method !== "POST") {
+    return json({ error: "Method not allowed" }, 405);
+  }
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "Expected JSON" }, 400);
+  }
+  const rec = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const message = clampUserText(rec.message);
+  if (!message) {
+    return json({ error: "Say something mush" }, 400);
+  }
+  const history = clampHistory(rec.history);
+  try {
+    const out = await env.AI.run(JIM_MODEL, {
+      messages: buildMessages(history, message),
+      max_tokens: 140,
+      temperature: 0.9,
+    });
+    const reply = parseAiReply(out) ?? localJimReply(message);
+    return json({ reply });
+  } catch {
+    return json({ reply: localJimReply(message) });
+  }
+}
 
 async function handleScores(request: Request, env: Env): Promise<Response> {
   if (request.method === "GET") {

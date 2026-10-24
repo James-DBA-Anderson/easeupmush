@@ -10,6 +10,7 @@ export default defineConfig({
 		},
 		env: {
 			SCORES: bindings.kv(),
+			AI: bindings.ai(),
 		},
 	},
 });
