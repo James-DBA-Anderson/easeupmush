@@ -10,6 +10,7 @@
       "default": "./phraseology.json"
     },
     "./dialogue": "./dialogue.ts",
-    "./tool-switch": "./toolSwitch.ts"
+    "./tool-switch": "./toolSwitch.ts",
+    "./ai": "./ai.ts"
   }
 }

@@ -6,7 +6,8 @@ export const KNOWLEDGE_KEY = "pompey-jim:knowledge";
 const MAX_PEOPLE = 80;
 const MAX_NOTES = 12;
 const MAX_SHARED = 80;
-const MAX_TAKES = 60;
+const MAX_TAKES = 80;
+const MAX_SOURCES = 40;
 const MAX_NOTE_CHARS = 160;
 const MAX_CLAIM = 180;
 const MAX_TAKE = 220;
@@ -30,12 +31,27 @@ export type JimTake = {
   stance: JimStance;
   source: string;
   kind: JimTakeKind;
+  date: string;
   at: number;
+};
+
+export type JimSourceKind = "pfc" | "pompey" | "nation" | "page";
+
+export type JimSource = {
+  host: string;
+  url: string;
+  kind: JimSourceKind;
+  decent: boolean;
+  blocked: boolean;
+  lastOk: number;
+  lastFail: number;
+  hits: number;
 };
 
 export type JimJob = {
   userId: string;
   url: string;
+  query?: string;
   startedAt: number;
   status: "fetching" | "done" | "fail";
   fail?: "dead" | "banned";
@@ -46,6 +62,7 @@ export type JimKnowledge = {
   people: Record<string, JimPerson>;
   shared: string[];
   takes: JimTake[];
+  sources: JimSource[];
   updatedAt: number;
 };
 
@@ -57,7 +74,7 @@ export type JimExtract = {
 };
 
 export function emptyKnowledge(): JimKnowledge {
-  return { people: {}, shared: [], takes: [], updatedAt: 0 };
+  return { people: {}, shared: [], takes: [], sources: [], updatedAt: 0 };
 }
 
 export function clampUserId(raw: unknown): string | null {
@@ -86,6 +103,12 @@ export function parseKnowledge(raw: unknown): JimKnowledge {
       if (take) out.takes.push(take);
     }
   }
+  if (Array.isArray(rec.sources)) {
+    for (const row of rec.sources) {
+      const src = cleanSource(row);
+      if (src) out.sources.push(src);
+    }
+  }
   if (rec.people && typeof rec.people === "object" && !Array.isArray(rec.people)) {
     for (const [id, row] of Object.entries(rec.people as Record<string, unknown>)) {
       if (!clampUserId(id) || !row || typeof row !== "object") continue;
@@ -111,37 +134,69 @@ export function parseKnowledge(raw: unknown): JimKnowledge {
 
 export function applyExtract(kb: JimKnowledge, userId: string, extract: JimExtract, at = Date.now()): JimKnowledge {
   const people = { ...kb.people };
-  const prev = people[userId];
+  const name = cleanName(extract.name);
+  const matchId = name
+    ? Object.values(people).find((p) => p.id !== userId && p.name?.toLowerCase() === name.toLowerCase())?.id
+    : undefined;
+  const match = matchId ? people[matchId] : undefined;
+  if (matchId) delete people[matchId];
+  const prev = people[userId] ?? match;
   const person: JimPerson = prev
-    ? { ...prev, notes: [...prev.notes] }
+    ? { ...prev, id: userId, notes: [...prev.notes] }
     : { id: userId, name: null, notes: [], seen: 0, updatedAt: at };
+  if (match && prev !== match) {
+    person.seen += match.seen;
+    for (const note of match.notes) pushUnique(person.notes, note, MAX_NOTES);
+  }
   person.seen += 1;
   person.updatedAt = at;
-  const name = cleanName(extract.name);
-  if (name && !person.name) person.name = name;
+  if (name) person.name = name;
   for (const note of extract.notes) pushUnique(person.notes, note, MAX_NOTES);
   people[userId] = person;
   const shared = [...kb.shared];
   for (const note of extract.shared) pushUnique(shared, note, MAX_SHARED);
   const takes = [...kb.takes];
   for (const take of extract.takes) pushTake(takes, take);
-  return trimKnowledge({ people, shared, takes, updatedAt: at });
+  return trimKnowledge({ people, shared, takes, sources: kb.sources, updatedAt: at });
+}
+
+export function applyNews(kb: JimKnowledge, takes: JimTake[], at = Date.now()): JimKnowledge {
+  const next = [...kb.takes];
+  for (const take of takes) pushTake(next, take);
+  return trimKnowledge({ ...kb, takes: next, updatedAt: at });
+}
+
+export function resolveSpeaker(kb: JimKnowledge, userId: string, hintName?: string | null): JimPerson | null {
+  const direct = kb.people[userId];
+  if (direct && (direct.name || direct.notes.length)) return direct;
+  const name = cleanName(hintName);
+  if (name) {
+    const match = Object.values(kb.people).find((p) => p.name?.toLowerCase() === name.toLowerCase());
+    if (match) return match;
+  }
+  return direct ?? null;
+}
+
+export function clampHintName(raw: unknown): string | null {
+  return cleanName(raw);
 }
 
 export function touchSpeaker(kb: JimKnowledge, userId: string, at = Date.now()): JimKnowledge {
   return applyExtract(kb, userId, { name: null, notes: [], shared: [], takes: [] }, at);
 }
 
-export function formatNotebook(kb: JimKnowledge, userId: string): string {
-  const speaker = kb.people[userId];
+export function formatNotebook(kb: JimKnowledge, userId: string, hintName?: string | null): string {
+  const speaker = resolveSpeaker(kb, userId, hintName);
   const lines: string[] = [];
   if (!speaker || (!speaker.name && speaker.notes.length === 0 && speaker.seen === 0)) {
-    lines.push("This mush: new face. You do not know their name. Ask.");
+    const name = cleanName(hintName);
+    lines.push(name ? `This mush: ${name} — no notes yet.` : "This mush: new face. You do not know their name. Ask.");
   } else {
     lines.push(`This mush: ${formatPerson(speaker)}`);
   }
+  const speakerId = speaker?.id ?? userId;
   const others = Object.values(kb.people)
-    .filter((p) => p.id !== userId && (p.name || p.notes.length))
+    .filter((p) => p.id !== speakerId && p.id !== userId && (p.name || p.notes.length))
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 24);
   if (others.length) {
@@ -154,10 +209,15 @@ export function formatNotebook(kb: JimKnowledge, userId: string): string {
     lines.push("Shared:");
     for (const fact of kb.shared.slice(-24)) lines.push(`- ${fact}`);
   }
-  if (kb.takes.length) {
-    lines.push("News, events, pages — Jim's takes, not gospel:");
-    for (const take of kb.takes.slice(-18)) {
-      lines.push(`- [${take.stance}] ${take.claim} — ${take.take}`);
+  const decent = kb.sources.filter((s) => s.decent && !s.blocked);
+  if (decent.length) {
+    lines.push(`Decent sources (prefer these): ${decent.map((s) => s.host).join(", ")}`);
+  }
+  const newsBits = pickNewsBits(kb.takes, 14);
+  if (newsBits.length) {
+    lines.push("News with dates and sources — weave ONE if it fits (prefer Pompey/PFC over national). Don't dump a bulletin.");
+    for (const take of newsBits) {
+      lines.push(`- ${take.date} [${take.kind}/${take.stance}] ${take.claim} (${take.source}) — ${take.take}`);
     }
   }
   let text = lines.join("\n");
@@ -165,13 +225,14 @@ export function formatNotebook(kb: JimKnowledge, userId: string): string {
   return text;
 }
 
-export function openingFor(kb: JimKnowledge, userId: string): string {
-  const p = kb.people[userId];
-  if (p?.name && p.notes[0]) {
-    return `Alright ${p.name} mush. Still ${shortHook(p.notes[0])}?`;
+export function openingFor(kb: JimKnowledge, userId: string, hintName?: string | null): string {
+  const p = resolveSpeaker(kb, userId, hintName);
+  const name = p?.name ?? cleanName(hintName);
+  if (name && p?.notes[0]) {
+    return `Alright ${name} mush. Still ${shortHook(p.notes[0])}?`;
   }
-  if (p?.name) {
-    return `Alright ${p.name} mush. You from Pompey or what?`;
+  if (name) {
+    return `Alright ${name} mush. You from Pompey or what?`;
   }
   if (p?.notes[0]) {
     return `Alright mush. I remember — ${shortHook(p.notes[0])}. What's your name?`;
@@ -235,7 +296,7 @@ export function heuristicExtract(user: string, source = "a mush"): JimExtract {
   const shared: string[] = [];
   const takes: JimTake[] = [];
   const name =
-    match(user, /\b(?:i(?:['’]?m| am)|name['’]?s|call me)\s+([A-Za-z][A-Za-z'-]{1,20})\b/i) ??
+    match(user, /\b(?:i(?:['’]?m| am)|name['’]?s|call me|it\s+is)\s+([A-Za-z][A-Za-z'-]{1,20})\b/i) ??
     match(user, /\bit['’]?s\s+([A-Z][a-z]{1,20})\b/);
   const from = match(user, /\b(?:from|in)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b/);
   if (from && !/pompey|portsmouth|fratton|here/i.test(from)) {
@@ -247,7 +308,7 @@ export function heuristicExtract(user: string, source = "a mush"): JimExtract {
   if (/\bscumm/i.test(user)) shared.push("Someone brought up scummers");
   if (/\bfratton\b/i.test(user)) notes.push("Talks about Fratton");
   if (/\bshant\b|\bpint\b|\bpub\b/i.test(user)) notes.push("Likes a shant");
-  if (looksLikeNews(user)) {
+  if (looksLikeNews(user) && !askingForNews(user)) {
     const stance = stanceFor(user);
     takes.push({
       claim: user.slice(0, MAX_CLAIM),
@@ -255,6 +316,7 @@ export function heuristicExtract(user: string, source = "a mush"): JimExtract {
       stance,
       source: cleanName(source) ?? source,
       kind: /\b(match|kick\s*off|tonight|saturday|event|gig)\b/i.test(user) ? "event" : "news",
+      date: new Date().toISOString().slice(0, 10),
       at: Date.now(),
     });
   }
@@ -267,6 +329,13 @@ export function looksLikeNews(user: string): boolean {
   );
 }
 
+/** Questions / prompts — don't file these as claims in the notebook. */
+export function askingForNews(user: string): boolean {
+  return /\b(any|got|what(?:'s|s)?|tell me|got any|heard any)\b.*\b(news|paper|headline|rumour|match)\b/i.test(
+    user,
+  ) || /\b(news|paper|headline)\s*\?/i.test(user);
+}
+
 export function stanceFor(text: string): JimStance {
   const t = text.toLowerCase();
   if (/scumm|southampton|saints|messi|ronaldo|premier league champions|won the league/.test(t)) return "beard";
@@ -276,9 +345,10 @@ export function stanceFor(text: string): JimStance {
 }
 
 export function takeLine(stance: JimStance, claim: string): string {
-  if (stance === "beard") return "Beard. Beard on tash. That ain't it mush.";
-  if (stance === "buy") return "Yeah that tracks. Fratton noise, that.";
-  return `Maybe. I'll clock it. ${claim.slice(0, 60)}`.trim();
+  const hook = claim.replace(/\s+/g, " ").trim().slice(0, 72);
+  if (stance === "beard") return hook ? `Beard. ${hook}? That ain't it mush.` : "Beard. Beard on tash. That ain't it mush.";
+  if (stance === "buy") return hook ? `Yeah that tracks — ${hook}.` : "Yeah that tracks. Fratton noise, that.";
+  return hook ? `Maybe. I'll clock it. ${hook}` : "Maybe. I'll clock it.";
 }
 
 export function failReply(fail: "dead" | "banned"): string {
@@ -319,7 +389,13 @@ function cleanName(raw: unknown): string | null {
   const name = raw.replace(/\s+/g, " ").trim();
   if (name.length < 2 || name.length > MAX_NAME) return null;
   if (!/^[\p{L}][\p{L} .'\-]*$/u.test(name)) return null;
-  if (/^(mush|geez|mate|jim|pompey|portsmouth)$/i.test(name)) return null;
+  if (
+    /^(mush|geez|mate|jim|pompey|portsmouth|from|here|back|again|hanging|fine|good|alright|okay|well|skint|broke|tired|ready|going|down|out)$/i.test(
+      name,
+    )
+  ) {
+    return null;
+  }
   if (isFilthyName(name)) return null;
   return name.replace(/^\w/, (c) => c.toUpperCase());
 }
@@ -352,15 +428,79 @@ function cleanTake(raw: unknown): JimTake | null {
   const kind: JimTakeKind =
     rec.kind === "news" || rec.kind === "event" || rec.kind === "page" ? rec.kind : "claim";
   const source =
-    typeof rec.source === "string" && rec.source.trim() ? rec.source.replace(/\s+/g, " ").trim().slice(0, 40) : "a mush";
+    typeof rec.source === "string" && rec.source.trim()
+      ? rec.source
+          .replace(/\s+/g, " ")
+          .trim()
+          .replace(/^bbci\.co\.uk$/i, "bbc.co.uk")
+          .slice(0, 40)
+      : "a mush";
   return {
     claim,
     take,
     stance,
     source,
     kind,
+    date:
+      typeof rec.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(rec.date)
+        ? rec.date
+        : new Date(typeof rec.at === "number" && Number.isFinite(rec.at) ? rec.at : Date.now())
+            .toISOString()
+            .slice(0, 10),
     at: typeof rec.at === "number" && Number.isFinite(rec.at) ? rec.at : Date.now(),
   };
+}
+
+function cleanSource(raw: unknown): JimSource | null {
+  if (!raw || typeof raw !== "object") return null;
+  const rec = raw as Record<string, unknown>;
+  const host =
+    typeof rec.host === "string"
+      ? rec.host
+          .replace(/^www\./, "")
+          .replace(/^feeds\./, "")
+          .replace(/^bbci\.co\.uk$/i, "bbc.co.uk")
+          .trim()
+          .slice(0, 80)
+      : "";
+  const url = typeof rec.url === "string" ? rec.url.trim().slice(0, 240) : "";
+  if (!host || !url) return null;
+  const kind: JimSourceKind =
+    rec.kind === "pfc" || rec.kind === "pompey" || rec.kind === "nation" || rec.kind === "page" ? rec.kind : "page";
+  return {
+    host,
+    url,
+    kind,
+    decent: rec.decent === true,
+    blocked: rec.blocked === true,
+    lastOk: typeof rec.lastOk === "number" && Number.isFinite(rec.lastOk) ? rec.lastOk : 0,
+    lastFail: typeof rec.lastFail === "number" && Number.isFinite(rec.lastFail) ? rec.lastFail : 0,
+    hits: typeof rec.hits === "number" && Number.isFinite(rec.hits) ? Math.max(0, Math.floor(rec.hits)) : 0,
+  };
+}
+
+export function upsertSource(kb: JimKnowledge, next: JimSource): JimKnowledge {
+  const sources = kb.sources.map((s) => ({ ...s }));
+  const idx = sources.findIndex((s) => s.url === next.url);
+  if (idx >= 0) sources[idx] = { ...sources[idx], ...next };
+  else sources.push(next);
+  if (sources.length > MAX_SOURCES) {
+    sources.sort((a, b) => Number(b.decent) - Number(a.decent) || b.hits - a.hits || b.lastOk - a.lastOk);
+    sources.length = MAX_SOURCES;
+  }
+  return { ...kb, sources, updatedAt: Date.now() };
+}
+
+/** Site-sourced takes, Pompey/PFC first then a little national. */
+export function pickNewsBits(takes: JimTake[], limit = 12): JimTake[] {
+  const site = takes.filter((t) => (t.kind === "news" || t.kind === "event" || t.kind === "page") && /\./.test(t.source));
+  const pompey = (t: JimTake) =>
+    /portsmouth|pompey|fratton|millwall|mousinho|blues|gosport|havant|southsea|hampshire/i.test(t.claim + t.source);
+  const local = site.filter(pompey);
+  const nation = site.filter((t) => !pompey(t));
+  return [...local.slice(-Math.max(8, Math.ceil(limit * 0.7))), ...nation.slice(-Math.max(3, Math.floor(limit * 0.3)))]
+    .slice(-limit)
+    .reverse();
 }
 
 function pushTake(list: JimTake[], raw: JimTake): void {
@@ -389,7 +529,7 @@ function trimKnowledge(kb: JimKnowledge): JimKnowledge {
     });
     for (const id of ranked.slice(0, ids.length - MAX_PEOPLE)) delete people[id];
   }
-  return { people, shared, takes, updatedAt: kb.updatedAt };
+  return { people, shared, takes, sources: kb.sources.slice(0, MAX_SOURCES), updatedAt: kb.updatedAt };
 }
 
 function match(text: string, re: RegExp): string | null {

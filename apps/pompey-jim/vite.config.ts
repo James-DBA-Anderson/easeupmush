@@ -4,7 +4,14 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import type { JimJob, JimKnowledge } from "./src/knowledge";
 import { clampHistory, clampUserText } from "./src/prompt";
-import { clampUserId, JIM_MODEL, jimChat, jimHello, jimPeek, type AiRunner } from "./src/turn";
+import { makeAiRunner } from "@easeupmush/shared/ai";
+import {
+  clampHintName,
+  clampUserId,
+  jimChat,
+  jimHello,
+  jimPeek,
+} from "./src/turn";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const base = process.env.GAME_BASE ?? "./";
@@ -12,7 +19,7 @@ const underSite = base.includes("/games/");
 const knowledgeFile = resolve(root, ".local/jim-knowledge.json");
 const jobs = new Map<string, JimJob>();
 
-/** Dev-only chat: Workers AI REST if creds exist, else a phraseology-heavy Jim. Knowledge in `.local/`. */
+/** Dev-only chat: Workers AI / OpenRouter REST if creds exist, else a phraseology-heavy Jim. Knowledge in `.local/`. */
 function chatPlugin(): Plugin {
   const store = {
     async load(): Promise<unknown> {
@@ -71,8 +78,10 @@ function chatPlugin(): Plugin {
             void jimPeek(jobStore, userId).then((body) => send(res, body));
             return;
           }
-          void jimHello(store, userId).then((reply) => {
-            send(res, { reply });
+          const hint = clampHintName(url.searchParams.get("name"));
+          void jimHello(store, userId, hint).then((body) => {
+            if (body.browse) void body.browse();
+            send(res, { reply: body.reply, name: body.name });
           });
           return;
         }
@@ -93,17 +102,19 @@ function chatPlugin(): Plugin {
                 send(res, { error: "Say something mush" }, 400);
                 return;
               }
-              const { reply, reading, remember, follow } = await jimChat({
+              const { reply, reading, name, remember, follow, browse } = await jimChat({
                 message,
                 history: clampHistory(rec.history),
                 userId: clampUserId(rec.user),
+                hintName: clampHintName(rec.name),
                 store,
                 jobs: jobStore,
-                runAi: cloudflareAi(),
+                runAi: makeAiRunner(),
               });
               await remember();
               if (follow) void follow();
-              send(res, { reply, reading });
+              if (browse) void browse();
+              send(res, { reply, reading, name });
             } catch (err) {
               send(res, { error: err instanceof Error ? err.message : String(err) }, 500);
             }
@@ -114,35 +125,12 @@ function chatPlugin(): Plugin {
   };
 }
 
-function cloudflareAi(): AiRunner | null {
-  const token = process.env.CLOUDFLARE_API_TOKEN;
-  const account = process.env.CLOUDFLARE_ACCOUNT_ID;
-  if (!token || !account) return null;
-  return async (messages, opts) => {
-    const res = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/${JIM_MODEL}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ messages, ...opts }),
-      },
-    );
-    if (!res.ok) throw new Error(`Workers AI ${res.status}`);
-    const body: unknown = await res.json();
-    return body && typeof body === "object" && "result" in body
-      ? (body as { result: unknown }).result
-      : body;
-  };
-}
-
 export default defineConfig({
   base,
   plugins: [chatPlugin()],
   resolve: {
     alias: {
+      "@easeupmush/shared": resolve(root, "../../shared"),
       "@easeupmush/shared/phraseology": resolve(root, "../../shared/phraseology.json"),
     },
   },

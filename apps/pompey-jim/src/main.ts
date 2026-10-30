@@ -1,4 +1,4 @@
-import { askJim, greetJim, initialChat, peekJim, type ChatState } from "./chat";
+import { askJim, greetJim, initialChat, peekJim, saveCard, type ChatState } from "./chat";
 import { createJim, drawJim, SRC_H, SRC_W, type JimAnim } from "./jim";
 import { MAX_USER_CHARS } from "./prompt";
 
@@ -83,13 +83,15 @@ function watchRead(): void {
           return;
         }
         if (peek.reply) {
+          const history = [...state.history, { role: "assistant" as const, content: peek.reply }].slice(-16);
           state = {
             ...state,
             lastJim: peek.reply,
             mood: /beard|banned|aint working/i.test(peek.reply) ? "copped" : "talk",
             reading: false,
-            history: [...state.history, { role: "assistant" as const, content: peek.reply }].slice(-16),
+            history,
           };
+          saveCard({ history, lastUser: state.lastUser, lastJim: peek.reply });
           talkUntil = performance.now() / 1000 + Math.min(4.5, 1.2 + peek.reply.length / 28);
           paintText(state);
         } else {

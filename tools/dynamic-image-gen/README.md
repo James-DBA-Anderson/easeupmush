@@ -18,6 +18,8 @@ npm run dev
 - API: http://localhost:8787
 - Diffusers worker: http://localhost:8790 (optional)
 
+If those ports are already taken, `npm run dev` prints the URLs and exits — a previous Spritebench is still running. Stop it (or kill whatever is on 5173 / 8787) before starting a second copy.
+
 PNGs land in `generated/` (gitignored). Download from the UI, then drop them into a game’s `public/` or `src/` assets.
 
 ## Game sprite editor
@@ -35,7 +37,7 @@ PNGs land in `generated/` (gitignored). Download from the UI, then drop them int
 | Apple Silicon Mac | [Ollama](https://ollama.com) image gen | `x/flux2-klein:4b` (FLUX.2 Klein, Apache 2.0) |
 | Intel Mac / CPU | Hugging Face Diffusers | `Lykon/dreamshaper-8` (SD 1.5, ~22 steps) |
 
-Ollama’s image generation is currently **Apple Silicon only**. On Intel Macs the app uses Diffusers. If the Python venv is missing, the UI still starts and uses Ollama when it is available.
+Ollama’s image generation is currently **Apple Silicon only**. On Intel Macs and Linux the app uses Diffusers. If the Python venv is missing, the UI still starts and uses Ollama when it is available.
 
 ### Ollama (Apple Silicon)
 

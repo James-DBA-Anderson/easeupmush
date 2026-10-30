@@ -20,6 +20,7 @@ import {
   pushOutOfBar,
   pushOutOfHoop,
   pushOutOfSolid,
+  riverBedY,
   supportAt,
   spawnGround,
   START_WALL_X,
@@ -83,13 +84,23 @@ export interface Board {
   omega: number;
   on: boolean;
   wet: number;
+  /** Basket chatter while rolling, metres / radians. */
+  shakeX?: number;
+  shakeY?: number;
+  shakeRot?: number;
 }
 
 const SKATE_CAP = 15.6;
-const CART_CAP = 19.2;
+const CART_CAP = 22.6;
+/** Trolley backflip is jump-shaped, just slower. */
+const CART_FLIP_SPIN = 0.55;
+const CART_FLIP_TIME = 1.7;
 /** Hip-to-deck length while riding — keeps the board under the shoes. */
 const BOARD_RIDE = 0.05;
 const CART_WHEEL = 0.04;
+const CART_AXLE = 0.072;
+const CART_FLOOR = 0.34;
+const CART_RIM = 0.72;
 const JUMP_TO_BOARD = 0.4;
 const BAR_SWING_MAX = 20;
 /** How far ahead he will look for the rail and start aiming his hands. */
@@ -115,7 +126,81 @@ function skateLeanBack(slope: number): number {
 }
 
 function cartHipLift(tuck: number): number {
-  return 0.28 + (1 - tuck) * 0.16;
+  return CART_FLOOR + CART_WHEEL + 0.1 + (1 - tuck) * 0.1;
+}
+
+/** Hip height above the cart origin, along the basket up-axis. */
+function cartSeatUp(tuck: number): number {
+  return cartHipLift(tuck) - CART_WHEEL;
+}
+
+function cartOriginFromHips(x: number, y: number, rot: number, tuck: number): { x: number; y: number } {
+  const up = cartSeatUp(tuck);
+  return { x: x + up * Math.sin(rot), y: y - up * Math.cos(rot) };
+}
+
+/** Basket, wheels, and handle in cart-local metres (along, up). */
+const CART_SHAPE: [number, number][] = [
+  [-0.3, 0],
+  [0.32, 0],
+  [-0.4, CART_FLOOR],
+  [0.42, CART_FLOOR],
+  [-0.4, CART_RIM],
+  [0.42, CART_RIM],
+  [-0.56, CART_RIM + 0.2],
+  [-0.48, CART_RIM + 0.26],
+];
+
+function cartWorldX(c: Board, along: number, up: number): number {
+  return c.x + along * Math.cos(c.rot) - up * Math.sin(c.rot);
+}
+
+function cartWorldY(c: Board, along: number, up: number): number {
+  return c.y + along * Math.sin(c.rot) + up * Math.cos(c.rot);
+}
+
+function cartLowestY(c: Board): number {
+  let y = Infinity;
+  for (const [along, up] of CART_SHAPE) {
+    const py = cartWorldY(c, along, up);
+    if (py < y) y = py;
+  }
+  return y;
+}
+
+function cartSpanX(c: Board): { left: number; right: number } {
+  let left = Infinity;
+  let right = -Infinity;
+  for (const [along, up] of CART_SHAPE) {
+    const px = cartWorldX(c, along, up);
+    if (px < left) left = px;
+    if (px > right) right = px;
+  }
+  return { left, right };
+}
+
+function cartOverRiver(level: Level, x: number): boolean {
+  return x > level.gapX0 - 0.9 && x < level.gapX1 + 0.9;
+}
+
+/** 0–1 rolling chatter. Stays off in the air. */
+export function cartRattleAmt(bill: Bill): number {
+  if (!bill.cart?.on || bill.rag || bill.state === "air" || bill.state === "dead") return 0;
+  return Math.max(0, Math.min(1, (Math.hypot(bill.vx, bill.vy) - 0.28) / 15));
+}
+
+function cartShake(speed: number, t: number): { x: number; y: number; rot: number } {
+  const u = Math.max(0, Math.min(1, (Math.abs(speed) - 0.28) / 15));
+  const amp = 0.004 + u * 0.022;
+  const clunk = amp * 1.35 * Math.max(0, Math.sin(t * 17.6)) ** 10;
+  return {
+    x: Math.sin(t * 61.4) * amp * 0.42 + Math.sin(t * 97.2) * amp * 0.2,
+    y: Math.sin(t * 72.8) * amp + Math.sin(t * 119.3) * amp * 0.46 + clunk,
+    rot:
+      Math.sin(t * 54.1) * (0.01 + u * 0.046) +
+      Math.sin(t * 88.7) * (0.006 + u * 0.022) +
+      clunk * 2.2,
+  };
 }
 
 function cartSitPose(tuck: number): Pose {
@@ -123,19 +208,19 @@ function cartSitPose(tuck: number): Pose {
   const duck = Math.max(0, Math.min(1, tuck));
   const crab = 1 - duck;
   return {
-    lean: 0.12 * duck - 0.48 * crab,
-    arch: -0.12 * duck + 0.78 * crab,
-    spineLumbar: -0.28 * duck + 0.62 * crab,
-    spineThoracic: -0.16 * duck + 0.48 * crab,
-    spineCervical: 0.22 * duck - 0.22 * crab,
-    lThigh: hang + 1.18 * duck + 1.42 * crab,
-    rThigh: hang + 1.08 * duck + 1.34 * crab,
-    lShin: hang - 0.72 * duck - 0.08 * crab,
-    rShin: hang - 0.64 * duck - 0.04 * crab,
-    lArm: hang + 0.72,
-    rArm: hang - 0.72,
-    lFore: hang + 0.18,
-    rFore: hang - 0.12,
+    lean: 0.1 * duck - 0.14 * crab,
+    arch: -0.1 * duck + 0.58 * crab,
+    spineLumbar: -0.2 * duck + 0.42 * crab,
+    spineThoracic: -0.12 * duck + 0.36 * crab,
+    spineCervical: 0.18 * duck - 0.08 * crab,
+    lThigh: hang + 1.22 * duck + 1.18 * crab,
+    rThigh: hang + 1.12 * duck + 1.1 * crab,
+    lShin: hang - 0.78 * duck - 0.12 * crab,
+    rShin: hang - 0.7 * duck - 0.08 * crab,
+    lArm: hang + 0.62,
+    rArm: hang - 0.62,
+    lFore: hang + 0.14,
+    rFore: hang - 0.08,
   };
 }
 
@@ -464,7 +549,7 @@ export class Bill {
     if (jump && (onPad || onBoard || onCart) && !this.cleared) this.jumpBuf = 0.16;
     this.jumpBuf = Math.max(0, this.jumpBuf - dt);
     if (this.cart?.on && !this.rag && this.state !== "done" && this.state !== "dead") {
-      const target = 0.5 + 0.5 * Math.max(-1, Math.min(1, tuckAxis));
+      const target = 0.5 + 0.5 * this.cartLean(run);
       this.tuck += (target - this.tuck) * (1 - Math.exp(-tuning.tuckLerp * dt));
     }
     this.barLockT = Math.max(0, this.barLockT - dt);
@@ -548,19 +633,21 @@ export class Bill {
     }
 
     // Air: horizontal trajectory locked. Stick / hold-jump only tucks the flip.
-    this.vy -= tuning.gravity * (this.cart?.on ? 1.45 : 1) * dt;
+    this.vy -= tuning.gravity * (this.cart?.on ? 0.88 : 1) * dt;
     this.x += this.vx * dt;
     this.y += this.vy * dt;
     this.airTime += dt;
 
     if (this.flipping) {
-      const targetTuck = 0.5 + 0.5 * Math.max(-1, Math.min(1, tuckAxis));
+      const lean = this.cart?.on ? this.cartLean(run) : tuckAxis;
+      const targetTuck = 0.5 + 0.5 * Math.max(-1, Math.min(1, lean));
       const k = 1 - Math.exp(-tuning.tuckLerp * dt);
       this.tuck += (targetTuck - this.tuck) * k;
-      const rate =
-        tuning.tuckRateStraight +
-        (tuning.tuckRateCrouch - tuning.tuckRateStraight) * this.tuck;
-      const omega = (TAU / this.flipDuration) * rate * (this.cart?.on ? 0.78 : 1);
+      const boost = tuning.tuckRateCrouch - tuning.tuckRateStraight;
+      const rate = this.cart?.on
+        ? tuning.tuckRateStraight + boost * 0.36 * this.tuck
+        : tuning.tuckRateStraight + boost * this.tuck;
+      const omega = (TAU / this.flipDuration) * rate * (this.cart?.on ? CART_FLIP_SPIN : 1);
       this.flipTravel += omega * dt;
       this.rot = this.flipTravel;
       this.spinRate = omega;
@@ -631,7 +718,10 @@ export class Bill {
       } else {
         this.resolveBody(level, false);
       }
-    } else if (this.touchingSolid(level, false, this.brace < 0.28)) {
+    } else if (
+      !(this.cart?.on && this.airTime < 0.4 && this.vy > 0) &&
+      this.touchingSolid(level, false, this.brace < 0.28)
+    ) {
       this.beginRagdoll("crash", null);
       this.landEvent = this.makeLand("fall", this.x, this.y);
       this.resolveBody(level, true);
@@ -790,14 +880,18 @@ export class Bill {
     const n = pitch ? platformNormal(pitch, this.x) : { nx: 0, ny: 1 };
     const kick = tuning.jumpVy;
     if (riding) this.kickBoard(n.nx, n.ny, kick * JUMP_TO_BOARD);
+    if (carting) {
+      this.beginCartFlip(true);
+      return;
+    }
     this.state = "air";
     this.flipping = true;
-    this.vy = carting ? this.vy + kick * 0.34 : kick * (riding ? 0.82 : 1);
+    this.vy = kick * (riding ? 0.82 : 1);
     this.takeoffSpeed = Math.abs(this.vx);
-    this.flipTravel = carting ? wrapPi(this.rot) : 0;
-    this.rot = this.flipTravel;
+    this.flipTravel = 0;
+    this.rot = 0;
     this.airTime = 0;
-    if (!carting) this.tuck = 0.5;
+    this.tuck = 0.5;
     this.layoutHold = 0;
     this.cushion = 0;
     this.spinRate = 0;
@@ -811,9 +905,47 @@ export class Bill {
     this.takeoffEvent = true;
     const speed = Math.min(1, Math.abs(this.vx) / tuning.maxSpeed);
     this.flipDuration =
+      tuning.flipDurationSlow +
+      (tuning.flipDurationFast - tuning.flipDurationSlow) * speed;
+  }
+
+  /** Pull back (against facing) to lean; same idea as a crouch, milder spin. */
+  private cartLean(run: number): number {
+    return Math.max(-1, Math.min(1, -run * (this.facing || 1)));
+  }
+
+  /** Ramp throw or jump: same tuck control as a flip, slower spin. */
+  private beginCartFlip(kicked: boolean): void {
+    const c = this.cart;
+    if (!c?.on) return;
+    this.state = "air";
+    this.flipping = true;
+    this.slideDrop = false;
+    if (kicked) this.vy += tuning.jumpVy * 0.34;
+    this.takeoffSpeed = Math.abs(this.vx);
+    this.flipTravel = wrapPi(this.rot);
+    this.rot = this.flipTravel;
+    this.airTime = 0;
+    this.layoutHold = 0;
+    this.cushion = 0;
+    this.spinRate = 0;
+    this.rag = null;
+    this.landPrep = 0;
+    this.gapArmTuck = 0;
+    this.panic = 0;
+    this.barGrab = 0;
+    this.lockTimer = 0;
+    this.jumpBuf = 0;
+    this.takeoffEvent = true;
+    c.rot = this.rot;
+    const o = cartOriginFromHips(this.x, this.y, this.rot, this.tuck);
+    c.x = o.x;
+    c.y = o.y;
+    const speed = Math.min(1, Math.abs(this.vx) / tuning.maxSpeed);
+    this.flipDuration =
       (tuning.flipDurationSlow +
         (tuning.flipDurationFast - tuning.flipDurationSlow) * speed) *
-      (carting ? 1.55 : 1);
+      CART_FLIP_TIME;
   }
 
   private land(g: number, level: Level): void {
@@ -1049,15 +1181,14 @@ export class Bill {
         if (this.jumpBuf > 0 && !this.cleared) this.takeOff(level);
         return;
       }
-      this.state = "air";
-      this.flipping = false;
-      this.slideDrop = this.jumpBuf <= 0;
-      this.airTime = 0;
-      this.landPrep = 0;
-      this.gapArmTuck = 0;
-      this.panic = 0;
-      this.barGrab = 0;
-      if (this.jumpBuf > 0 && !this.cleared) this.takeOff(level);
+      if (pitch && (pitch.y1 ?? pitch.y) > pitch.y + 0.15) {
+        const { dx, dy } = padAlong(pitch, pitch.x1 - 0.02, 1);
+        const speed = Math.max(Math.hypot(this.vx, this.vy), 6);
+        const loft = 2.8 + Math.min(3.6, speed * 0.08);
+        this.vx = speed * dx;
+        this.vy = speed * dy + loft;
+      }
+      this.beginCartFlip(this.jumpBuf > 0 && !this.cleared);
       return;
     }
     if (this.board?.on) {
@@ -1222,9 +1353,13 @@ export class Bill {
 
   private cartShove(dt: number): number {
     if (!this.cart?.on) return 0;
-    const u = 1 - this.time / 0.95;
-    if (u <= 0) return 0;
-    return 12.4 * u * dt;
+    const walkEnd = 0.92;
+    if (this.time < walkEnd) {
+      const want = 0.95 * (1 - Math.cos((this.time / walkEnd) * Math.PI)) * 0.5;
+      return (want - this.vx) * 7.2 * dt;
+    }
+    if (this.time < walkEnd + 0.26) return 46 * dt;
+    return 0;
   }
 
   private stepCartSlide(dt: number, level: Level): void {
@@ -1244,15 +1379,15 @@ export class Bill {
     const { dx, dy } = padAlong(pitch, this.x, this.vx >= 0 ? 1 : -1);
     let speed = this.vx * dx + this.vy * dy;
     speed += this.cartShove(dt);
-    speed += tuning.gravity * -dy * 1.42 * dt;
-    speed += Math.max(0, -dy) * 8.8 * dt;
-    speed *= Math.exp(-(this.cleared ? 2.8 : 0.045) * dt);
+    speed += tuning.gravity * -dy * 1.72 * dt;
+    speed += Math.max(0, -dy) * 11.4 * dt;
+    speed *= Math.exp(-(this.cleared ? 2.8 : 0.03) * dt);
     if (speed > CART_CAP) speed = CART_CAP;
     this.vx = speed * dx;
     this.vy = speed * dy;
     this.x += this.vx * dt;
     const want = plantAngle(pitch, this.x);
-    this.rot += (want * 0.18 - this.rot) * (1 - Math.exp(-12 * dt));
+    this.rot += (want - this.rot) * (1 - Math.exp(-12 * dt));
     const next = pitchedAt(level, this.x);
     if (!next || this.x >= next.x1) {
       this.leaveSlide(next ?? pitch, level);
@@ -1264,9 +1399,15 @@ export class Bill {
   private dumpCart(): void {
     const c = this.cart;
     if (!c?.on) return;
+    const upx = -Math.sin(c.rot);
+    const upy = Math.cos(c.rot);
     c.on = false;
-    c.vx = this.vx * 1.06;
-    c.vy = this.vy * 0.82 + 1.15;
+    this.x += upx * 0.1;
+    this.y += upy * 0.16;
+    this.vx += upx * 1.5;
+    this.vy += upy * 2.6;
+    c.vx = this.vx * 0.92 - upx * 0.45;
+    c.vy = this.vy * 0.62 - upy * 1.05;
     c.omega = wrapPi(this.rot) * 1.1 - 1.4;
   }
 
@@ -1274,25 +1415,37 @@ export class Bill {
     const c = this.cart;
     if (!c?.on) return;
     if (this.state === "air" || this.rag) {
-      c.x = this.x;
-      c.y = this.y - cartHipLift(this.tuck);
+      if (this.flipping) c.rot = this.rot;
+      else this.rot += ((c.rot ?? 0) - this.rot) * 0.55;
+      const o = cartOriginFromHips(this.x, this.y, c.rot, this.tuck);
+      c.x = o.x;
+      c.y = o.y;
       c.vx = this.vx;
       c.vy = this.vy;
-      c.rot = this.flipping ? this.rot : c.rot;
       c.omega = this.spinRate;
+      c.shakeX = 0;
+      c.shakeY = 0;
+      c.shakeRot = 0;
       return;
     }
     const lift = cartHipLift(this.tuck);
     const surf = supportAt(level, this.x, this.y - lift + 0.2, 0.55) ?? this.y - lift;
     const pitch = pitchedAt(level, this.x);
     const ang = pitch ? plantAngle(pitch, this.x) : 0;
-    c.x = this.x;
-    c.y = surf + CART_WHEEL;
-    c.rot += (ang - c.rot) * 0.55;
+    const shake = cartShake(Math.hypot(this.vx, this.vy), this.time);
+    const baseRot = c.rot - (c.shakeRot ?? 0);
+    c.shakeX = shake.x;
+    c.shakeY = shake.y;
+    c.shakeRot = shake.rot;
+    c.rot = baseRot + (ang - baseRot) * 0.55 + shake.rot;
+    const seat = cartSeatUp(this.tuck);
+    c.x = this.x + seat * Math.sin(c.rot) + shake.x;
+    c.y = surf + CART_WHEEL + shake.y;
+    this.y = c.y + seat * Math.cos(c.rot);
+    this.rot = c.rot - (c.shakeRot ?? 0);
     c.vx = this.vx;
     c.vy = this.vy;
     c.omega = 0;
-    this.y = surf + lift;
   }
 
   private stepCart(dt: number, level: Level): void {
@@ -1300,6 +1453,8 @@ export class Bill {
     if (!c) return;
     if (c.on) {
       this.syncCartRide(level);
+      this.collideCartBank(level);
+      this.restCartOnRiverBed(level, dt);
       return;
     }
     c.vy -= tuning.gravity * 1.15 * dt;
@@ -1307,27 +1462,87 @@ export class Bill {
     c.y += c.vy * dt;
     c.rot += c.omega * dt;
     c.omega *= Math.exp(-0.38 * dt);
+    this.collideCartBank(level);
     const water = level.theme === "woods" ? level.pitY : null;
-    const inRiver =
-      water !== null && c.x > level.gapX0 - 0.3 && c.x < level.gapX1 + 0.4 && c.y < water + 0.35;
-    if (inRiver && water !== null) {
+    const inWater =
+      water !== null && cartOverRiver(level, c.x) && cartLowestY(c) < water + 0.28;
+    if (inWater && water !== null) {
       if (c.wet <= 0 && c.vy < -1) this.splashEvent = true;
       c.wet = Math.min(1, c.wet + dt * 0.7);
       c.vy *= Math.exp(-3.6 * dt);
       c.vx *= Math.exp(-1.2 * dt);
       c.omega *= Math.exp(-1.8 * dt);
-      const sink = water - 0.08 - c.wet * 0.42;
-      c.y += (sink - c.y) * Math.min(1, dt * 2.1);
-      return;
     }
+    if (this.restCartOnRiverBed(level, dt)) return;
     const floor = supportAt(level, c.x, c.y + 0.25, 0.55);
-    if (floor !== null && c.y < floor + CART_WHEEL + 0.02) {
+    if (floor !== null && c.vy <= 0.4 && c.y < floor + CART_WHEEL + 0.02 && c.y > floor - 0.32) {
       c.y = floor + CART_WHEEL;
       if (c.vy < 0) c.vy *= -0.22;
       c.vx *= Math.exp(-1.15 * dt);
       c.omega *= 0.64;
       c.rot += (0 - wrapPi(c.rot)) * (1 - Math.exp(-6 * dt));
     }
+  }
+
+  /** Sit every corner of the cage on the mud, even if the origin has left the gap. */
+  private restCartOnRiverBed(level: Level, dt: number): boolean {
+    const c = this.cart;
+    if (!c || level.theme !== "woods") return false;
+    if (!cartOverRiver(level, c.x)) return false;
+    const bed = riverBedY(level);
+    const low = cartLowestY(c);
+    if (low >= bed) return false;
+    c.y += bed - low;
+    if (c.on) this.dumpCart();
+    if (c.vy < 0) c.vy *= -0.08;
+    c.vx *= Math.exp(-3.4 * dt);
+    c.omega *= Math.exp(-5.2 * dt);
+    c.rot += (0 - wrapPi(c.rot)) * (1 - Math.exp(-4.2 * dt));
+    const again = cartLowestY(c);
+    if (again < bed) c.y += bed - again;
+    return true;
+  }
+
+  /** Basket hangs below the hips, so the cart needs its own bank wall. */
+  private collideCartBank(level: Level): void {
+    const c = this.cart;
+    if (!c || level.theme !== "woods") return;
+    const span = cartSpanX(c);
+    const bot = cartLowestY(c);
+    const far = level.gapX1;
+    const near = level.gapX0;
+    const farSurf = groundAt(level, far) ?? level.pitY;
+    const nearSurf = groundAt(level, near) ?? level.pitY;
+    let nx = 0;
+    let depth = 0;
+    if (span.right > far && bot < farSurf - 0.05) {
+      nx = -1;
+      depth = span.right - far;
+    } else if (c.x > near && span.left < near && bot < nearSurf - 0.28) {
+      nx = 1;
+      depth = near - span.left;
+    }
+    if (depth <= 0.004) return;
+    depth = Math.min(0.7, depth);
+    c.x += nx * depth;
+    if (c.on) {
+      this.x += nx * depth;
+      if (this.vx * nx < 0) {
+        this.vx = nx * Math.abs(this.vx) * 0.22;
+        this.vy = Math.min(this.vy, 1.8);
+      }
+      const leavingLip = nx > 0 && (this.vy > 0.35 || this.airTime < 0.28);
+      if ((this.state === "air" || this.rag) && !leavingLip) {
+        this.dumpCart();
+        if (!this.rag) this.beginRagdoll("crash", null);
+        this.gapFail = true;
+        this.landEvent = this.makeLand("fall", this.x, Math.min(this.y, farSurf), Math.max(0.5, Math.hypot(this.vx, this.vy)));
+      }
+      return;
+    }
+    if (c.vx * nx < 0) c.vx = nx * Math.abs(c.vx) * 0.16;
+    c.vy *= 0.72;
+    c.omega += -nx * 5.2;
   }
 
   public knockJunk(level: Level): void {
@@ -2063,9 +2278,26 @@ export class Bill {
       let barNy = 0;
       let barDepth = 0;
       const bar = this.state === "swing" ? null : level.bar;
+      const soaking =
+        level.theme === "woods" &&
+        this.gapFail &&
+        this.x > level.gapX0 &&
+        this.x < level.gapX1 &&
+        this.y < level.pitY + 0.75;
       for (const pt of pts) {
         let hit = pushOutOfSolid(level, pt.x, pt.y, pt.r);
         if (hit && !floorToo && hit.ny > 0.5) hit = null;
+        if (soaking) {
+          const far = level.gapX1 - pt.r;
+          const near = level.gapX0 + pt.r;
+          if (pt.x > far) {
+            const wall = { nx: -1, ny: 0, depth: pt.x - far };
+            if (!hit || hit.ny > 0.5 || wall.depth >= hit.depth) hit = wall;
+          } else if (pt.x < near) {
+            const wall = { nx: 1, ny: 0, depth: near - pt.x };
+            if (!hit || hit.ny > 0.5 || wall.depth >= hit.depth) hit = wall;
+          }
+        }
         const hoop = this.hoopHit(level, pt.x, pt.y, pt.r);
         if (hoop && (!hit || hoop.depth > hit.depth)) {
           hit = hoop;
@@ -2266,8 +2498,12 @@ export class Bill {
       this.sitInTrolley();
       return;
     }
+    const water = level.pitY;
+    const bed = riverBedY(level) + 0.18;
     const inRiver = this.x > level.gapX0 && this.x < level.gapX1;
-    if (!inRiver) {
+    const pad = groundAt(level, this.x);
+    const underPad = pad !== null && this.y < pad - 0.42;
+    if (!inRiver && !underPad) {
       if (this.y < level.killY && !this.cleared) {
         this.gapFail = true;
         this.y = Math.max(this.y, level.killY + 0.2);
@@ -2275,8 +2511,25 @@ export class Bill {
       }
       return;
     }
-    const water = level.pitY;
+    const keepInWater = () => {
+      const margin = 1.18;
+      if (this.x < level.gapX0 + margin) {
+        this.x = level.gapX0 + margin;
+        if (this.vx < 0) this.vx *= -0.18;
+      }
+      if (this.x > level.gapX1 - margin) {
+        this.x = level.gapX1 - margin;
+        if (this.vx > 0) this.vx *= -0.18;
+      }
+    };
+    if (underPad) {
+      keepInWater();
+      this.y = Math.max(this.y, bed);
+      this.vy = Math.max(this.vy, -1);
+    }
+    if (!inRiver) return;
     if (this.y - 0.18 > water + 0.08) return;
+    keepInWater();
     if (this.cleared) {
       this.state = "done";
       this.vx = 0;
@@ -2287,6 +2540,7 @@ export class Bill {
       this.gapFail = true;
       this.splashEvent = true;
       this.landEvent = this.makeLand("fall", this.x, water, Math.max(0.4, -this.vy));
+      if (this.cart?.on) this.dumpCart();
       if (!this.rag) this.beginRagdoll("crash", null);
       this.vy = Math.min(-0.35, this.vy * 0.32);
       this.vx *= 0.55;
@@ -2294,12 +2548,52 @@ export class Bill {
     this.vx *= Math.exp(-1.8 * dt);
     this.vy *= Math.exp(-3.2 * dt);
     this.vy -= 2.2 * dt;
-    const settle = water - 0.4;
-    if (this.y < settle) {
-      this.y += (settle - this.y) * Math.min(1, dt * 4.5);
+    keepInWater();
+    if (this.y < bed) {
+      this.y += (bed - this.y) * Math.min(1, dt * 5.2);
       this.vy = Math.max(this.vy, 0);
     }
-    this.y = Math.max(this.y, level.killY + 0.2);
+    this.y = Math.max(this.y, bed, level.killY + 0.2);
+    this.tuckRiverLimbs(level);
+    if (this.rag) this.resolveBody(level, true);
+  }
+
+  /** Pull feet and hands back into the drink so they don't drape over the bank. */
+  private tuckRiverLimbs(level: Level): void {
+    const rag = this.rag;
+    if (!rag || level.theme !== "woods") return;
+    const bed = riverBedY(level);
+    const airFeet = true;
+    for (let i = 0; i < 10; i++) {
+      let moved = false;
+      for (const pt of bodyWorldPoints(this)) {
+        if (pt.kind !== "limb" || !pt.joints) continue;
+        let nx = 0;
+        let ny = 0;
+        let depth = 0;
+        const far = level.gapX1 - pt.r - 0.04;
+        const near = level.gapX0 + pt.r + 0.04;
+        if (pt.x > far) {
+          nx = -1;
+          depth = pt.x - far;
+        } else if (pt.x < near) {
+          nx = 1;
+          depth = near - pt.x;
+        }
+        if (pt.y < bed) {
+          const d = bed - pt.y;
+          if (d > depth) {
+            nx = 0;
+            ny = 1;
+            depth = d;
+          }
+        }
+        if (depth < 0.012) continue;
+        foldLimb(this, rag.pose, rag.vel, pt.rig, airFeet, nx, ny, depth, pt.joints, 0.32);
+        moved = true;
+      }
+      if (!moved) break;
+    }
   }
 }
 
@@ -2523,50 +2817,107 @@ export function drawRideTrolley(
   sx: number,
   sy: number,
   ppm: number,
+  layer: "back" | "front" | "all" = "all",
 ): void {
   ctx.save();
   ctx.translate(sx, sy);
   ctx.scale(ppm, -ppm);
   ctx.rotate(cart.rot);
   ctx.globalAlpha *= 1 - cart.wet * 0.38;
-  const wr = 0.072;
-  ctx.fillStyle = "#1a1614";
-  ctx.beginPath();
-  ctx.arc(-0.3, wr, wr, 0, TAU);
-  ctx.arc(0.32, wr, wr, 0, TAU);
-  ctx.fill();
-  ctx.strokeStyle = "#4a4e52";
-  ctx.lineWidth = 0.018;
-  ctx.beginPath();
-  ctx.arc(-0.3, wr, wr * 0.45, 0, TAU);
-  ctx.arc(0.32, wr, wr * 0.45, 0, TAU);
-  ctx.stroke();
+  const wr = CART_AXLE;
   const l = -0.4;
   const r = 0.42;
-  const floor = 0.12;
-  const rim = 0.5;
-  ctx.strokeStyle = "#6a6e72";
-  ctx.lineWidth = 0.03;
-  ctx.strokeRect(l, floor, r - l, rim - floor);
-  ctx.beginPath();
-  ctx.moveTo(l + 0.04, floor);
-  ctx.lineTo(l + 0.04, rim);
-  ctx.moveTo(r - 0.04, floor);
-  ctx.lineTo(r - 0.04, rim);
-  ctx.moveTo(l, floor + (rim - floor) * 0.45);
-  ctx.lineTo(r, floor + (rim - floor) * 0.45);
-  ctx.moveTo(l + (r - l) * 0.33, floor);
-  ctx.lineTo(l + (r - l) * 0.33, rim);
-  ctx.moveTo(l + (r - l) * 0.66, floor);
-  ctx.lineTo(l + (r - l) * 0.66, rim);
-  ctx.stroke();
-  ctx.strokeStyle = "#8a8e92";
-  ctx.lineWidth = 0.034;
-  ctx.beginPath();
-  ctx.moveTo(l, rim);
-  ctx.lineTo(l - 0.14, rim + 0.16);
-  ctx.lineTo(l + 0.1, rim + 0.2);
-  ctx.stroke();
+  const floor = CART_FLOOR;
+  const rim = CART_RIM;
+  const mid = floor + (rim - floor) * 0.45;
+  const rearAxle = -0.3;
+  const frontAxle = 0.32;
+  const plantX = -(cart.shakeX ?? 0);
+  const plantY = -(cart.shakeY ?? 0);
+  const rearHub = rearAxle + plantX;
+  const frontHub = frontAxle + plantX;
+  const hubY = wr + plantY;
+  if (layer !== "front") {
+    ctx.fillStyle = "#1a1614";
+    ctx.beginPath();
+    ctx.arc(rearHub, hubY, wr, 0, TAU);
+    ctx.arc(frontHub, hubY, wr, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = "#4a4e52";
+    ctx.lineWidth = 0.018;
+    ctx.beginPath();
+    ctx.arc(rearHub, hubY, wr * 0.45, 0, TAU);
+    ctx.arc(frontHub, hubY, wr * 0.45, 0, TAU);
+    ctx.stroke();
+    ctx.strokeStyle = "#6a6e72";
+    ctx.lineWidth = 0.032;
+    ctx.beginPath();
+    ctx.moveTo(rearAxle - 0.04, floor);
+    ctx.lineTo(rearHub - 0.02, hubY);
+    ctx.moveTo(rearAxle + 0.05, floor);
+    ctx.lineTo(rearHub + 0.02, hubY);
+    ctx.moveTo(frontAxle - 0.05, floor);
+    ctx.lineTo(frontHub - 0.02, hubY);
+    ctx.moveTo(frontAxle + 0.04, floor);
+    ctx.lineTo(frontHub + 0.02, hubY);
+    ctx.moveTo(rearHub, hubY);
+    ctx.lineTo(frontHub, hubY);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(58, 62, 66, 0.55)";
+    ctx.fillRect(l + 0.02, floor, r - l - 0.04, rim - floor);
+    ctx.strokeStyle = "#5a5e62";
+    ctx.lineWidth = 0.028;
+    ctx.strokeRect(l, floor, r - l, rim - floor);
+    ctx.beginPath();
+    ctx.moveTo(l + 0.04, floor);
+    ctx.lineTo(l + 0.04, rim);
+    ctx.moveTo(l + (r - l) * 0.33, floor);
+    ctx.lineTo(l + (r - l) * 0.33, rim);
+    ctx.moveTo(l, mid);
+    ctx.lineTo(r, mid);
+    ctx.stroke();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#8a8e92";
+    ctx.lineWidth = 0.038;
+    ctx.beginPath();
+    ctx.moveTo(l, rim);
+    ctx.lineTo(l - 0.16, rim + 0.2);
+    ctx.lineTo(l - 0.08, rim + 0.26);
+    ctx.stroke();
+  }
+  if (layer !== "back") {
+    ctx.strokeStyle = "rgba(106, 110, 114, 0.95)";
+    ctx.lineWidth = 0.03;
+    ctx.beginPath();
+    ctx.moveTo(frontAxle - 0.03, floor);
+    ctx.lineTo(frontHub - 0.01, hubY);
+    ctx.moveTo(frontAxle + 0.05, floor);
+    ctx.lineTo(frontHub + 0.02, hubY);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(138, 142, 146, 0.92)";
+    ctx.lineWidth = 0.026;
+    ctx.beginPath();
+    ctx.moveTo(r - 0.03, floor);
+    ctx.lineTo(r - 0.03, rim);
+    ctx.moveTo(l + (r - l) * 0.66, floor);
+    ctx.lineTo(l + (r - l) * 0.66, rim);
+    ctx.moveTo(l, floor);
+    ctx.lineTo(l, rim);
+    ctx.moveTo(l + 0.06, rim);
+    ctx.lineTo(r - 0.04, rim);
+    ctx.moveTo(l + 0.08, mid);
+    ctx.lineTo(r - 0.04, mid);
+    ctx.stroke();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(168, 172, 176, 0.96)";
+    ctx.lineWidth = 0.04;
+    ctx.beginPath();
+    ctx.moveTo(l + 0.05, rim);
+    ctx.lineTo(l - 0.08, rim + 0.26);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -2656,31 +3007,46 @@ function cartArmIk(
   return { elb: pick, hand };
 }
 
-/** Sitting in the trolley: duck tucks him in, opening arches a crab pose, hands on the rims. */
+/** Sitting in the trolley: lean back to spin, open forward to stretch, hands on the rims. */
 function drawBillCart(ctx: CanvasRenderingContext2D, bill: Bill, pose: Pose, t: number): void {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   const duck = Math.max(0, Math.min(1, bill.tuck));
   const crab = 1 - duck;
-  const back = -pose.lean;
-  const sink = duck * 0.16;
-  const lHip: Pt = { x: -0.08 + back * 0.05, y: -sink };
-  const rHip: Pt = { x: 0.08 + back * 0.05, y: -sink };
-  const chest: Pt = { x: -back * 0.16 - crab * 0.12, y: 0.34 - sink + crab * 0.08 };
-  const collar: Pt = { x: chest.x, y: chest.y + 0.16 };
-  const head: Pt = { x: 0.04 + chest.x * 0.4, y: collar.y + 0.18 - duck * 0.06 };
-  const lSh: Pt = { x: -0.18 + chest.x * 0.35, y: chest.y + 0.08 };
-  const rSh: Pt = { x: 0.18 + chest.x * 0.35, y: chest.y + 0.08 };
-  const lRim = cartAnchor(bill, -0.34, 0.48);
-  const rRim = cartAnchor(bill, 0.34, 0.48);
-  const lArm = cartArmIk(lSh, lRim, 0.3, 0.28, true);
-  const rArm = cartArmIk(rSh, rRim, 0.3, 0.28, false);
-  const floor = cartAnchor(bill, 0.02, 0.16);
-  const front = cartAnchor(bill, 0.3, 0.22);
-  const lAnkle = { x: mix(floor.x - 0.1, front.x - 0.05, crab), y: mix(floor.y, front.y, crab) };
-  const rAnkle = { x: mix(floor.x + 0.1, front.x + 0.06, crab), y: mix(floor.y, front.y, crab) };
-  const lKnee = skateKnee(lHip, lAnkle, 0.35 + duck * 0.5);
-  const rKnee = skateKnee(rHip, rAnkle, 0.32 + duck * 0.48);
+  const floorY = cartAnchor(bill, 0, CART_FLOOR + 0.02).y;
+  const backX = cartAnchor(bill, -0.36, CART_FLOOR + 0.18).x;
+  const frontX = cartAnchor(bill, 0.38, CART_FLOOR + 0.04).x;
+  const nest = -0.14 - duck * 0.1;
+  const sink = 0.01 + duck * 0.02;
+  const keepIn = (p: Pt, padBack: number, padFloor: number): Pt => ({
+    x: Math.max(p.x, backX + padBack),
+    y: Math.max(p.y, floorY + padFloor),
+  });
+  const lHip = keepIn({ x: nest - 0.05, y: -sink }, 0.08, 0.06);
+  const rHip = keepIn({ x: nest + 0.05, y: -sink }, 0.08, 0.06);
+  let chest = keepIn({ x: nest - duck * 0.14 + crab * 0.04, y: 0.26 - duck * 0.05 + crab * 0.08 }, 0.08, 0.16);
+  let collar = keepIn({ x: chest.x - duck * 0.04, y: chest.y + 0.14 }, 0.06, 0.16);
+  let head = keepIn({ x: nest - duck * 0.12 + crab * 0.06, y: collar.y + 0.16 - duck * 0.04 }, 0.04, 0.16);
+  const lSh = keepIn({ x: chest.x - 0.15, y: chest.y + 0.06 }, 0.06, 0.14);
+  const rSh: Pt = { x: Math.max(chest.x + 0.15, backX + 0.16), y: chest.y + 0.06 };
+  const lRim = cartAnchor(bill, -0.28, CART_RIM - 0.04);
+  const rRim = cartAnchor(bill, 0.3, CART_RIM - 0.04);
+  const lArm = cartArmIk(lSh, lRim, 0.28, 0.24, true);
+  const rArm = cartArmIk(rSh, rRim, 0.28, 0.24, false);
+  const footY = floorY + 0.04;
+  const reach = 0.6;
+  const lAnkle = keepIn(
+    clampReach(lHip, { x: Math.min(frontX - 0.04, nest + 0.36 + crab * 0.16), y: footY }, reach),
+    0.18,
+    0.02,
+  );
+  const rAnkle = keepIn(
+    clampReach(rHip, { x: Math.min(frontX + 0.02, nest + 0.42 + crab * 0.16), y: footY }, reach),
+    0.22,
+    0.02,
+  );
+  const lKnee = cartKnee(lHip, lAnkle, duck);
+  const rKnee = cartKnee(rHip, rAnkle, duck);
   const lHem = toward(lKnee, lAnkle, 0.78);
   const rHem = toward(rKnee, rAnkle, 0.78);
   const arch =
@@ -2700,15 +3066,39 @@ function drawBillCart(ctx: CanvasRenderingContext2D, bill: Bill, pose: Pose, t: 
   strokeColored(ctx, SHIRT, 0.125, rSh, rArm.elb);
   strokeColored(ctx, SKIN, 0.082, rArm.elb, rArm.hand);
   fillDot(ctx, rArm.hand, 0.045, SKIN);
-  drawTrainerFront(ctx, rAnkle, 0.35 * crab, false);
+  drawTrainerFront(ctx, rAnkle, 0.28 * crab, false);
 }
 
 function toward(a: Pt, b: Pt, t: number): Pt {
   return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
 }
 
-function mix(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
+function clampReach(hip: Pt, ankle: Pt, maxLen: number): Pt {
+  const dx = ankle.x - hip.x;
+  const dy = ankle.y - hip.y;
+  const d = Math.hypot(dx, dy) || 1;
+  if (d <= maxLen) return ankle;
+  const s = maxLen / d;
+  return { x: hip.x + dx * s, y: hip.y + dy * s };
+}
+
+function cartKnee(hip: Pt, ankle: Pt, duck: number): Pt {
+  const thigh = 0.34;
+  const shin = 0.28;
+  let dx = ankle.x - hip.x;
+  let dy = ankle.y - hip.y;
+  let d = Math.hypot(dx, dy) || 1;
+  const maxD = thigh + shin - 0.012;
+  if (d > maxD) {
+    dx *= maxD / d;
+    dy *= maxD / d;
+    d = maxD;
+  }
+  const a = (thigh * thigh - shin * shin + d * d) / (2 * d);
+  const h = Math.sqrt(Math.max(0, thigh * thigh - a * a)) * (0.05 + 0.16 * duck);
+  const ux = dx / d;
+  const uy = dy / d;
+  return { x: hip.x + ux * a - uy * h, y: hip.y + uy * a + ux * h };
 }
 
 function skateDeckFoot(bill: Bill, along: number, lift: number): Pt {
@@ -4116,6 +4506,7 @@ function foldLimb(
   ny: number,
   depth: number,
   joints: JointName[],
+  probe = 0.08,
 ): void {
   fillSpine(pose);
   let left = depth;
@@ -4126,8 +4517,8 @@ function foldLimb(
     const w0 = worldOf(bill, p0.x, p0.y);
     let bestGain = 0;
     let bestStep = 0;
-    for (const probe of [0.08, -0.08]) {
-      pose[joint] = orig + probe;
+    for (const step of [probe, -probe]) {
+      pose[joint] = orig + step;
       clampLimbPose(pose);
       const actual = pose[joint] - orig;
       const p1 = makeRig(pose, airFeet)[rigKey];
@@ -4150,7 +4541,7 @@ function foldLimb(
     const w = worldOf(bill, now.x, now.y);
     left -= (w.x - w0.x) * nx + (w.y - w0.y) * ny;
   }
-  if (left > 0.08 && joints[0] && bill.barProtectT <= 0) {
+  if (left > 0.08 && joints[0] && bill.barProtectT <= 0 && probe <= 0.09) {
     noteSnap(bill, joints[0], 0, Math.abs(vel[joints[0]] ?? 0), left);
   }
 }

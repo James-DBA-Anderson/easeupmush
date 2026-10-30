@@ -278,11 +278,11 @@ export const LEVELS: Level[] = [
     platforms: [
       { x0: -2, x1: 5.15, y: 16.4 },
       { x0: 5.15, x1: 16.6, y: 16.4, y1: 1.05, ease: true },
-      { x0: 16.6, x1: 18.2, y: 1.05 },
-      { x0: 18.2, x1: 19.55, y: 1.05, y1: 1.48 },
+      { x0: 16.6, x1: 17.7, y: 1.05 },
+      { x0: 17.7, x1: 19.6, y: 1.05, y1: 2.72 },
       { x0: 28.85, x1: 58, y: -0.18 },
     ],
-    gapX0: 19.55,
+    gapX0: 19.6,
     gapX1: 28.85,
     pitY: -0.68,
     flagX: 32.1,
@@ -296,7 +296,7 @@ export const LEVELS: Level[] = [
       { kind: "tyre", x: 24.55, y: -1.0, w: 0.74, h: 0.62, rot: -0.46 },
       { kind: "cone", x: 26.7, y: -0.96, w: 0.36, h: 0.7, rot: 0.31 },
     ],
-    hint: "The kid shoves the trolley. Duck in, crab out, and let the ramp throw you the river.",
+    hint: "The kid shoves the trolley. Lean back to spin, forward to stretch, and let the ramp throw you the river.",
   },
   {
     id: 9,
@@ -715,6 +715,13 @@ export function stepRiverSlop(level: Level, dt: number): void {
   level.slop = waves.filter((w) => w.amp > 0.01 && w.t < 2.6);
 }
 
+/** Shallow mud under the woods river, metres below the water surface. */
+const WOODS_RIVER_DEPTH = 0.36;
+
+export function riverBedY(level: Level): number {
+  return level.pitY - WOODS_RIVER_DEPTH;
+}
+
 export function riverSurfaceY(level: Level, x: number, t = 0): number {
   let y = level.pitY + Math.sin(x * 2.2 + t * 1.7) * 0.01;
   for (const w of level.slop ?? []) {
@@ -732,7 +739,7 @@ export function stepRiverJunk(level: Level, dt: number): JunkHit[] {
   const list = (level.obstacles ?? []).filter(isRiverJunk);
   if (!list.length) return hits;
   const water = level.pitY;
-  const bed = water - 0.55;
+  const bed = riverBedY(level);
   for (const o of list) {
     ensureJunkMotion(o);
     const m = junkMass(o);
@@ -1136,6 +1143,59 @@ export function pushOutOfHoop(
   return { nx: 0, ny, depth: Math.max(0.001, hoop.outer + r - ady) };
 }
 
+function keepHit(
+  best: { nx: number; ny: number; depth: number } | null,
+  hit: { nx: number; ny: number; depth: number } | null,
+): { nx: number; ny: number; depth: number } | null {
+  if (!hit) return best;
+  if (!best || hit.depth > best.depth) return hit;
+  return best;
+}
+
+/** Vertical mud face at the river lips — never the underside, so jumpers still clear. */
+function woodsBankHit(
+  level: Level,
+  p: Platform,
+  x: number,
+  y: number,
+  r: number,
+): { nx: number; ny: number; depth: number } | null {
+  const near = Math.abs(p.x1 - level.gapX0) < 0.12;
+  const far = Math.abs(p.x0 - level.gapX1) < 0.12;
+  if (!near && !far) return null;
+  const cx = Math.max(p.x0, Math.min(p.x1, x));
+  const surf = platformY(p, cx);
+  if (y >= surf) return null;
+  if (near) {
+    const face = p.x1 + r;
+    if (x >= p.x0 - r && x < face) {
+      const depth = Math.min(0.55, face - x);
+      if (depth > 0) return { nx: 1, ny: 0, depth };
+    }
+  }
+  if (far) {
+    const face = p.x0 - r;
+    if (x > face && x <= p.x1 + r) {
+      const depth = Math.min(0.55, x - face);
+      if (depth > 0) return { nx: -1, ny: 0, depth };
+    }
+  }
+  return null;
+}
+
+function woodsBedHit(
+  level: Level,
+  x: number,
+  y: number,
+  r: number,
+): { nx: number; ny: number; depth: number } | null {
+  if (x <= level.gapX0 - r || x >= level.gapX1 + r) return null;
+  const bed = riverBedY(level);
+  const depth = bed + r - y;
+  if (depth <= 0) return null;
+  return { nx: 0, ny: 1, depth };
+}
+
 export function pushOutOfSolid(
   level: Level,
   x: number,
@@ -1146,16 +1206,19 @@ export function pushOutOfSolid(
   for (const p of solids(level)) {
     if (isPitched(p)) {
       const pad = level.theme === "woods" ? 0 : r;
+      if (level.theme === "woods") best = keepHit(best, woodsBankHit(level, p, x, y, r));
       if (x < p.x0 - pad || x > p.x1 + pad) continue;
       const cx = Math.max(p.x0, Math.min(p.x1, x));
       const surf = platformY(p, cx);
       const n = platformNormal(p, cx);
       const signed = (x - cx) * n.nx + (y - surf) * n.ny;
+      if (level.theme === "woods" && signed < -0.38) continue;
       const depth = r - signed;
       if (depth > 0 && (!best || depth > best.depth)) best = { nx: n.nx, ny: n.ny, depth };
       continue;
     }
     if (level.theme === "woods") {
+      best = keepHit(best, woodsBankHit(level, p, x, y, r));
       if (x < p.x0 || x > p.x1) continue;
       const surf = p.y;
       if (y > surf + r || y < surf - 0.38) continue;
@@ -1194,6 +1257,7 @@ export function pushOutOfSolid(
     const hit = aabbHit(obstacleBox(level, o), x, y, r);
     if (hit && (!best || hit.depth > best.depth)) best = hit;
   }
+  if (level.theme === "woods") best = keepHit(best, woodsBedHit(level, x, y, r));
   return best;
 }
 
@@ -1430,42 +1494,77 @@ function drawWoodsRiver(
   const x0 = worldToScreenX(cam, cssW, level.gapX0);
   const x1 = worldToScreenX(cam, cssW, level.gapX1);
   const waterY = worldToScreenY(cam, cssH, level.pitY);
-  const leftLip = worldToScreenY(cam, cssH, platformY(level.platforms[2] ?? level.platforms[0]!, level.gapX0));
-  const rightLip = worldToScreenY(
-    cam,
-    cssH,
-    platformY(level.platforms[3] ?? level.platforms[0]!, level.gapX1),
-  );
+  const leftLip = worldToScreenY(cam, cssH, groundAt(level, level.gapX0) ?? level.pitY);
+  const rightLip = worldToScreenY(cam, cssH, groundAt(level, level.gapX1) ?? level.pitY);
   const w = Math.max(4, x1 - x0);
   if (x1 < -20 || x0 > cssW + 20) return;
+  const ppm = cssW / cam.w;
+
+  const bedY = worldToScreenY(cam, cssH, riverBedY(level));
+  ctx.fillStyle = "#2a2218";
+  ctx.beginPath();
+  ctx.moveTo(x0, bedY);
+  ctx.lineTo(x1, bedY);
+  ctx.lineTo(x1, cssH + 16);
+  ctx.lineTo(x0, cssH + 16);
+  ctx.closePath();
+  ctx.fill();
+  const mud = ctx.createLinearGradient(0, bedY - 6, 0, bedY + Math.max(18, 0.42 * ppm));
+  mud.addColorStop(0, "#5a4630");
+  mud.addColorStop(0.45, "#3e3224");
+  mud.addColorStop(1, "#2a2218");
+  ctx.fillStyle = mud;
+  ctx.beginPath();
+  ctx.moveTo(x0, bedY - 3);
+  ctx.lineTo(x1, bedY - 3);
+  ctx.lineTo(x1, bedY + Math.max(22, 0.5 * ppm));
+  ctx.lineTo(x0, bedY + Math.max(22, 0.5 * ppm));
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "#6a5640";
+  ctx.lineWidth = Math.max(2, 0.045 * ppm);
+  ctx.beginPath();
+  ctx.moveTo(x0, bedY);
+  ctx.lineTo(x1, bedY);
+  ctx.stroke();
+  ctx.fillStyle = "#4a3a28";
+  for (let i = 0; i < 9; i++) {
+    const u = (i + 0.35) / 9;
+    const px = x0 + w * u + ((i % 3) - 1) * 6;
+    const py = bedY - 1 + (i % 2) * 3;
+    ctx.beginPath();
+    ctx.ellipse(px, py, 3 + (i % 3), 1.6, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   ctx.fillStyle = "#3a2c1c";
   ctx.beginPath();
   ctx.moveTo(x0 - 10, leftLip);
   ctx.lineTo(x0 + 18, waterY);
-  ctx.lineTo(x0 - 10, waterY + 40);
+  ctx.lineTo(x0 + 8, bedY);
+  ctx.lineTo(x0 - 10, bedY + 12);
   ctx.closePath();
   ctx.fill();
   ctx.beginPath();
   ctx.moveTo(x1 + 10, rightLip);
   ctx.lineTo(x1 - 18, waterY);
-  ctx.lineTo(x1 + 10, waterY + 40);
+  ctx.lineTo(x1 - 8, bedY);
+  ctx.lineTo(x1 + 10, bedY + 12);
   ctx.closePath();
   ctx.fill();
 
-  const water = ctx.createLinearGradient(0, waterY - 8, 0, cssH);
-  water.addColorStop(0, "#2a4a48");
-  water.addColorStop(0.18, "#1c3a3c");
-  water.addColorStop(0.55, "#163032");
-  water.addColorStop(1, "#0c1c1e");
+  const water = ctx.createLinearGradient(0, waterY - 8, 0, bedY);
+  water.addColorStop(0, "rgba(42, 74, 72, 0.72)");
+  water.addColorStop(0.4, "rgba(28, 58, 58, 0.58)");
+  water.addColorStop(1, "rgba(36, 42, 32, 0.42)");
   ctx.fillStyle = water;
-  fillRiverBody(ctx, cam, cssW, cssH, level, t);
+  fillRiverBody(ctx, cam, cssW, cssH, level, t, riverBedY(level));
   strokeRiverSurface(ctx, cam, cssW, cssH, level, t, "rgba(70, 110, 96, 0.55)", Math.max(3, 0.08 * (cssW / cam.w)));
   ctx.strokeStyle = "rgba(180, 210, 196, 0.22)";
   ctx.lineWidth = 1.4;
-  const ppm = cssW / cam.w;
   for (let i = 0; i < 7; i++) {
     const y = waterY + 6 + i * 9;
+    if (y > bedY - 2) continue;
     const wobble = Math.sin(t * 1.7 + i * 1.3) * 10;
     ctx.globalAlpha = 0.18 + (i % 2) * 0.08;
     ctx.beginPath();
@@ -1592,17 +1691,19 @@ function drawRiverSurface(
   const waterY = worldToScreenY(cam, cssH, level.pitY);
   const w = Math.max(4, x1 - x0);
   if (x1 < -20 || x0 > cssW + 20) return;
-  const film = ctx.createLinearGradient(0, waterY, 0, cssH);
+  const bedY = worldToScreenY(cam, cssH, riverBedY(level));
+  const film = ctx.createLinearGradient(0, waterY, 0, bedY);
   film.addColorStop(0, "rgba(42, 74, 72, 0.38)");
-  film.addColorStop(0.22, "rgba(22, 48, 50, 0.5)");
-  film.addColorStop(1, "rgba(12, 28, 30, 0.28)");
+  film.addColorStop(0.55, "rgba(22, 48, 50, 0.42)");
+  film.addColorStop(1, "rgba(40, 48, 36, 0.22)");
   ctx.fillStyle = film;
-  fillRiverBody(ctx, cam, cssW, cssH, level, t);
+  fillRiverBody(ctx, cam, cssW, cssH, level, t, riverBedY(level));
   strokeRiverSurface(ctx, cam, cssW, cssH, level, t, "rgba(70, 110, 96, 0.4)", Math.max(3, 0.06 * (cssW / cam.w)));
   ctx.strokeStyle = "rgba(180, 210, 196, 0.2)";
   ctx.lineWidth = 1.4;
   for (let i = 0; i < 5; i++) {
     const y = waterY + 5 + i * 10;
+    if (y > bedY - 2) continue;
     const wobble = Math.sin(t * 1.7 + i * 1.3) * 10;
     ctx.globalAlpha = 0.16 + (i % 2) * 0.07;
     ctx.beginPath();
@@ -1620,10 +1721,12 @@ function fillRiverBody(
   cssH: number,
   level: Level,
   t: number,
+  floorY?: number,
 ): void {
   const x0 = level.gapX0;
   const x1 = level.gapX1;
   const n = 28;
+  const bot = floorY !== undefined ? worldToScreenY(cam, cssH, floorY) : cssH + 12;
   ctx.beginPath();
   for (let i = 0; i <= n; i++) {
     const x = x0 + (x1 - x0) * (i / n);
@@ -1632,8 +1735,8 @@ function fillRiverBody(
     if (i === 0) ctx.moveTo(sx, sy);
     else ctx.lineTo(sx, sy);
   }
-  ctx.lineTo(worldToScreenX(cam, cssW, x1), cssH + 12);
-  ctx.lineTo(worldToScreenX(cam, cssW, x0), cssH + 12);
+  ctx.lineTo(worldToScreenX(cam, cssW, x1), bot);
+  ctx.lineTo(worldToScreenX(cam, cssW, x0), bot);
   ctx.closePath();
   ctx.fill();
 }
@@ -1751,6 +1854,7 @@ function drawWoodsTrees(
   const ppm = cssW / cam.w;
   if (!foreground) {
     for (const bush of WOODS_BUSHES) {
+      if (bush.x > level.gapX0 && bush.x < level.gapX1) continue;
       const gy = routeAt(level, bush.x);
       const sx = worldToScreenX(cam, cssW, bush.x);
       const sy = worldToScreenY(cam, cssH, gy);
@@ -1760,6 +1864,7 @@ function drawWoodsTrees(
   }
   for (const tree of WOODS_TREES) {
     if (tree.fg !== foreground) continue;
+    if (tree.x > level.gapX0 && tree.x < level.gapX1) continue;
     const gy = routeAt(level, tree.x);
     const sx = worldToScreenX(cam, cssW, tree.x);
     const sy = worldToScreenY(cam, cssH, gy);

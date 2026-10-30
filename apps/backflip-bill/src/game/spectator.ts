@@ -5,6 +5,23 @@ import { drawCharShadow, spawnGround, worldToScreen, type Cam, type Level } from
 /** Left of spawn, just in from the start wall. */
 export const KID_START_X = 2.85;
 const KID_HIP = HIP_HEIGHT * 0.86;
+const TROLLEY_WALK = 0.92;
+const TROLLEY_KID_X0 = 3.18;
+const TROLLEY_KID_X1 = 3.92;
+
+export function trolleyShoveLaugh(spawnAge: number): number {
+  if (spawnAge < TROLLEY_WALK - 0.05) return 0;
+  const on = ease(clamp01((spawnAge - (TROLLEY_WALK - 0.05)) / 0.1));
+  const fade = spawnAge < 1.85 ? 1 : clamp01((2.7 - spawnAge) / 0.85);
+  return on * fade;
+}
+
+function trolleyShoveAmt(spawnAge: number): number {
+  if (spawnAge < TROLLEY_WALK - 0.1) return 0;
+  const hit = ease(clamp01((spawnAge - (TROLLEY_WALK - 0.1)) / 0.16));
+  const fade = clamp01((1.48 - spawnAge) / 0.28);
+  return hit * fade;
+}
 
 const SKIN = "#e8c4a4";
 const SKIN_LIT = "#f3d4b6";
@@ -195,13 +212,17 @@ export function drawParkKid(
 ): void {
   if (level.train) return;
   const ground = spawnGround(level);
-  const x = level.ride === "trolley" ? 3.18 : KID_START_X;
+  const trolley = level.ride === "trolley";
+  const sad = mood === "sad";
+  const walkU = trolley ? ease(clamp01(spawnAge / TROLLEY_WALK)) : 0;
+  const walking = trolley && spawnAge < TROLLEY_WALK && !sad;
+  const shove = !sad && trolley ? trolleyShoveAmt(spawnAge) : 0;
+  const x = trolley ? mix(TROLLEY_KID_X0, TROLLEY_KID_X1, walkU) : KID_START_X;
   const y = ground + KID_HIP;
   const s = worldToScreen(cam, cssW, cssH, x, y);
   if (s.x < -80 || s.x > cssW + 80) return;
 
   const lt = kidTime(level.id, t);
-  const sad = mood === "sad";
   const chucking = sad && level.id === 1;
   if (chucking) {
     if (loseT < 0) {
@@ -216,16 +237,28 @@ export function drawParkKid(
   const snap = chucking ? ease(clamp01((age - 0.06) / 0.16)) : 0;
   const recover = chucking ? ease(clamp01((age - 0.28) / 0.3)) : 0;
   const laugh = sad ? 0 : clamp01(howl);
-  const shove = !sad && level.ride === "trolley" ? clamp01((1.55 - spawnAge) / 1.2) : 0;
-  const offer = shove > 0.1 ? 0 : laugh > 0.12 ? 0 : chucking ? tossFromOffer * (1 - snap) : offerAmt(lt, mood);
-  const scratch = laugh || chucking || shove > 0.08 ? 0 : scratchAmt(lt, offer);
+  const offer =
+    walking || shove > 0.08
+      ? 0
+      : laugh > 0.12
+        ? 0
+        : chucking
+          ? tossFromOffer * (1 - snap)
+          : offerAmt(lt, mood);
+  const scratch = laugh || chucking || walking || shove > 0.08 ? 0 : scratchAmt(lt, offer);
   const wag = offer * Math.sin(lt * 5.2);
   const breathe = Math.sin(t * 1.45);
   const jigHz = 6.4 + 16 * laugh;
   const jig = Math.abs(Math.sin(t * jigHz));
   const slump = sad ? 0.16 * (chucking ? recover : 1) : 0;
   const hang = -Math.PI / 2;
-  const lean = 0.03 + slump * 0.4 + 0.015 * breathe - laugh * laugh * 0.28 + shove * 0.42;
+  const lean =
+    0.03 +
+    slump * 0.4 +
+    0.015 * breathe -
+    laugh * laugh * 0.22 +
+    walkU * 0.16 +
+    shove * 0.55;
 
   drawCharShadow(ctx, cam, cssW, cssH, x, ground, {
     width: 1.18 + offer * 0.08,
@@ -251,10 +284,11 @@ export function drawParkKid(
 
   const lHip: Pt = { x: -0.05, y: 0 };
   const rHip: Pt = { x: 0.07, y: 0 };
-  const lKnee = polar(lHip, hang + 0.05, 0.4);
-  const rKnee = polar(rHip, hang + 0.02, 0.4);
-  const lAnkle = polar(lKnee, hang - 0.02, 0.34);
-  const rAnkle = polar(rKnee, hang - 0.03, 0.34);
+  const stride = walking ? Math.sin(spawnAge * 8.6) : 0;
+  const lKnee = polar(lHip, hang + 0.05 + 0.52 * Math.max(0, stride), 0.4);
+  const rKnee = polar(rHip, hang + 0.02 + 0.52 * Math.max(0, -stride), 0.4);
+  const lAnkle = polar(lKnee, hang - 0.02 + 0.32 * Math.max(0, stride), 0.34);
+  const rAnkle = polar(rKnee, hang - 0.03 + 0.32 * Math.max(0, -stride), 0.34);
 
   const lSh: Pt = { x: neck.x - 0.11, y: neck.y - 0.05 };
   const rSh: Pt = { x: neck.x + 0.07, y: neck.y - 0.03 };
@@ -310,13 +344,32 @@ export function drawParkKid(
       : { elb: rHangElb, hand: rHangHand };
   const rElb = rArm.elb;
   const rHand = rArm.hand;
+  const pushing = Math.max(walking ? 0.7 : 0, shove);
   const lPush =
-    shove > 0.08
-      ? ikArm(lSh, { x: 0.54 + shove * 0.08, y: 0.3 + Math.sin(lt * 16) * 0.03 }, 0.28, 0.24, false)
+    pushing > 0.08
+      ? ikArm(
+          lSh,
+          {
+            x: 0.42 + pushing * 0.22,
+            y: 0.36 - shove * 0.1 + (walking ? Math.sin(spawnAge * 8.6) * 0.03 : Math.sin(lt * 16) * 0.03 * shove),
+          },
+          0.28,
+          0.24,
+          false,
+        )
       : { elb: lElb, hand: lHand };
   const rPush =
-    shove > 0.08
-      ? ikArm(rSh, { x: 0.48 + shove * 0.06, y: 0.22 + Math.sin(lt * 16 + 0.6) * 0.025 }, 0.27, 0.23, false)
+    pushing > 0.08
+      ? ikArm(
+          rSh,
+          {
+            x: 0.38 + pushing * 0.2,
+            y: 0.3 - shove * 0.08 + (walking ? Math.sin(spawnAge * 8.6 + 0.6) * 0.025 : Math.sin(lt * 16 + 0.6) * 0.025 * shove),
+          },
+          0.27,
+          0.23,
+          false,
+        )
       : { elb: rElb, hand: rHand };
 
   stroke(ctx, JUMPER_DARK, 0.16, lSh, lPush.elb);
@@ -325,7 +378,9 @@ export function drawParkKid(
   ctx.beginPath();
   ctx.arc(lPush.hand.x, lPush.hand.y, 0.05, 0, TAU);
   ctx.fill();
-  if (laugh < 0.12 && !tossed) drawNotes(ctx, lPush.hand, Math.max(offer, chucking ? 1 - snap : 0), wag);
+  if (laugh < 0.12 && !tossed && (offer > 0.02 || chucking)) {
+    drawNotes(ctx, lPush.hand, Math.max(offer, chucking ? 1 - snap : 0), wag);
+  }
 
   stroke(ctx, JOGGERS_DARK, 0.18, lHip, lKnee, lAnkle);
   stroke(ctx, JOGGERS, 0.17, rHip, rKnee, rAnkle);

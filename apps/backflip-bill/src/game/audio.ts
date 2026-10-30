@@ -23,6 +23,8 @@ export class Sfx {
   private whoosh: LoopVoice | null = null;
   private wind: LoopVoice | null = null;
   private scrape: LoopVoice | null = null;
+  private rattle: LoopVoice | null = null;
+  private nextRattleAt = 0;
   private bedAir: LoopVoice | null = null;
   private bedHum: LoopVoice | null = null;
   private bedLeaves: LoopVoice | null = null;
@@ -62,12 +64,13 @@ export class Sfx {
     fall: number;
     speed: number;
     scrape?: number;
+    rattle?: number;
     ambience?: AmbienceKind | "off";
     river?: number;
     hush?: number;
   }): void {
     const ctx = this.ensure();
-    if (!ctx || !this.whoosh || !this.wind || !this.scrape) return;
+    if (!ctx || !this.whoosh || !this.wind || !this.scrape || !this.rattle) return;
     const t = ctx.currentTime;
     const spin = info.flipping ? Math.max(0, info.omega) : 0;
     const whooshGain = info.air && spin > 0.4 ? Math.min(0.11, 0.018 + spin * 0.014) : 0.0001;
@@ -89,6 +92,21 @@ export class Sfx {
     const scrapeHz = 620 + scrape * 780 + Math.sin(t * 31) * 90;
     setParam(this.scrape.gain.gain, scrapeGain, t, 0.07);
     setParam(this.scrape.filter.frequency, scrapeHz, t, 0.09);
+
+    const rattle = Math.max(0, info.rattle ?? 0);
+    const rattleGain = rattle > 0.03 ? Math.min(0.078, 0.01 + rattle * 0.052) : 0.0001;
+    const rattleHz = 1480 + rattle * 980 + Math.sin(t * 46) * 220;
+    setParam(this.rattle.gain.gain, rattleGain, t, 0.05);
+    setParam(this.rattle.filter.frequency, rattleHz, t, 0.06);
+    if (rattle > 0.05 && t >= this.nextRattleAt) {
+      const gap = 0.13 - rattle * 0.07;
+      this.nextRattleAt = t + gap * (0.65 + Math.random() * 0.55);
+      this.thud(58 + Math.random() * 28, 0.028, 0.01 + rattle * 0.018);
+      this.noiseBurst(0.028, 0.016 + rattle * 0.028, 1550 + Math.random() * 700, 2.3);
+      if (Math.random() < 0.35 + rattle * 0.3) {
+        this.sweep(920 + Math.random() * 280, 240, 0.05, 0.012 + rattle * 0.02, "square");
+      }
+    }
 
     this.tickAmbience(info.ambience ?? "off", info.river ?? 0, info.hush ?? 0, fall);
   }
@@ -504,6 +522,7 @@ export class Sfx {
     if (!this.whoosh) this.whoosh = this.loopVoice(this.brown, "bandpass", 500, 0.9);
     if (!this.wind) this.wind = this.loopVoice(this.brown, "highpass", 700, 0.5);
     if (!this.scrape) this.scrape = this.loopVoice(this.noise ?? this.brown, "bandpass", 920, 1.2);
+    if (!this.rattle) this.rattle = this.loopVoice(this.noise ?? this.brown, "bandpass", 1700, 2.35);
     if (!this.bedAir) this.bedAir = this.loopVoice(this.brown, "highpass", 420, 0.55);
     if (!this.bedHum) this.bedHum = this.loopVoice(this.brown, "lowpass", 80, 0.7);
     if (!this.bedLeaves) this.bedLeaves = this.loopVoice(this.noise ?? this.brown, "bandpass", 2100, 0.55);

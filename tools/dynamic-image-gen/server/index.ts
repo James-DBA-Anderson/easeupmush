@@ -429,7 +429,13 @@ const server = app.listen(port, () => {
 })
 
 server.on('error', (error: NodeJS.ErrnoException) => {
-  console.error('API failed to start:', error.message)
+  if (error.code === 'EADDRINUSE') {
+    console.error(
+      `Port ${port} is already in use. Spritebench may already be open at http://localhost:5173`,
+    )
+  } else {
+    console.error('API failed to start:', error.message)
+  }
   process.exit(1)
 })
 

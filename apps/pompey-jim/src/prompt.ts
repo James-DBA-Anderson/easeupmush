@@ -55,6 +55,8 @@ PEOPLE LIE, AND THEY BRING YOU NEWS
 - Pompey and Fratton stuff you'll often buy. Southampton glory, conspiracy, celebrity transfer gossip: nah.
 - When they tell you an event or a bit of news, keep YOUR take, not their word as gospel. You can mention it later ("Dave reckoned X. Beard, that ain't it.").
 - You can change your mind if another mush or a page backs it up.
+- You quietly read PFC, Pompey, and a bit of national news. Weave ONE recent dated bit if it fits — source and date if you mention it. Don't do a bulletin.
+- Sites that loaded are decent. Prefer those. Never say you went browsing or have a list.
 
 GETTING TO KNOW THEM
 - Ask about this mush. Name, where they're from, Pompey or not, what they do, Fratton or not.
@@ -108,12 +110,20 @@ export type JimReplyCtx = {
   speakerName: string | null;
   speakerNotes: string[];
   others: { name: string | null; notes: string[] }[];
+  news?: { date: string; claim: string; take: string; source: string }[];
 };
 
 export function parseAiReply(raw: unknown): string | null {
   if (typeof raw === "string") return cleanReply(raw);
   if (!raw || typeof raw !== "object") return null;
   const rec = raw as Record<string, unknown>;
+  // OpenRouter (or any standard chat completions API)
+  const choices = Array.isArray(rec.choices) ? rec.choices : null;
+  if (choices && choices[0] && typeof choices[0] === "object") {
+    const msg = (choices[0] as Record<string, unknown>).message as Record<string, unknown> | undefined;
+    if (msg && typeof msg.content === "string") return cleanReply(msg.content);
+  }
+  // Cloudflare Workers AI
   if (typeof rec.response === "string") return cleanReply(rec.response);
   if (typeof rec.result === "string") return cleanReply(rec.result);
   const nested = rec.result;
@@ -201,7 +211,21 @@ export function localJimReply(user: string, ctx?: JimReplyCtx): string {
   if (/drink|beer|pint|pub|shant|booze|wine/.test(t)) {
     return "I love a shant geez. Dane tane later if you're on it. Shant on.";
   }
-  if (/fratton|pompey|football|blues|soccer|match|football/.test(t)) {
+  if (/fratton|pompey|football|blues|soccer|match|news|paper|headline|national|country|uk\b/.test(t)) {
+    const preferLocal = /\bpompey|fratton|blues|pfc|football|match\b/.test(t);
+    const preferNation = /\bnational|country|uk\b|papers?\b/.test(t) && !preferLocal;
+    const bit =
+      (preferLocal
+        ? ctx?.news?.find((n) => /portsmouth|pompey|fratton|millwall|mousinho|blues/i.test(n.claim))
+        : null) ??
+      (preferNation
+        ? ctx?.news?.find((n) => !/portsmouth|pompey|fratton|millwall|mousinho/i.test(n.claim))
+        : null) ??
+      ctx?.news?.find((n) => /portsmouth|pompey|fratton|football/i.test(n.claim)) ??
+      ctx?.news?.[0];
+    if (bit) {
+      return `${bit.take} Saw it ${bit.date} on ${bit.source}. You getting down Fratton?`;
+    }
     return "Fratton's lakes when it goes off mush. Proper noise. You getting down there?";
   }
   if (/scummer|southsea|canoe|swan|lake/.test(t) && /swan|canoe|lake|clean/.test(t)) {

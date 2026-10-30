@@ -2,6 +2,7 @@ import { ambienceOf, Sfx } from "./audio";
 import {
   Bill,
   burst,
+  cartRattleAmt,
   drawBill,
   drawRideTrolley,
   drawSkateboard,
@@ -14,7 +15,7 @@ import {
   type SnapKind,
 } from "./bill";
 import { Achievements } from "./achievements";
-import { drawParkKid, takeParkKidVoice } from "./spectator";
+import { drawParkKid, takeParkKidVoice, trolleyShoveLaugh } from "./spectator";
 import { voices } from "./voices";
 import { HIP_HEIGHT, STANDING_FLIP_MAX_VX, TAU } from "./constants";
 import { isDebugTyping, Input, wantsTouchUi } from "./input";
@@ -1358,6 +1359,7 @@ export class Game {
       fall: Math.max(0, -bill.vy),
       speed,
       scrape: bill.state === "slide" && !bill.board?.on && !bill.cart?.on ? Math.min(1, speed / 8.5) : 0,
+      rattle: cartRattleAmt(bill),
       ambience: this.sim ? "rooftop" : ambienceOf(level),
       river:
         level.theme === "woods"
@@ -1429,7 +1431,9 @@ export class Game {
     }
     drawFolkDrops(ctx, (x, y) => worldToScreen(cam, cssW, cssH, x, y));
     if (!this.sim) {
-      const howl = this.kidLaughHowl();
+      const shoveLaugh =
+        level.ride === "trolley" && !this.bill.cleared ? trolleyShoveLaugh(this.bill.time) : 0;
+      const howl = Math.max(this.kidLaughHowl(), shoveLaugh);
       drawParkKid(
         ctx,
         cam,
@@ -1468,7 +1472,7 @@ export class Game {
     const cart = this.bill.cart;
     if (cart) {
       const cs = worldToScreen(cam, cssW, cssH, cart.x, cart.y);
-      drawRideTrolley(ctx, cart, cs.x, cs.y, cs.ppm);
+      drawRideTrolley(ctx, cart, cs.x, cs.y, cs.ppm, "back");
     }
     if (this.bill.state === "air" && this.bill.flipTravel > 0.15) {
       const saved = this.bill.rot;
@@ -1482,6 +1486,10 @@ export class Game {
       this.bill.rot = saved;
     }
     drawBill(ctx, this.bill, s.x, s.y, s.ppm, this.t);
+    if (cart) {
+      const cs = worldToScreen(cam, cssW, cssH, cart.x, cart.y);
+      drawRideTrolley(ctx, cart, cs.x, cs.y, cs.ppm, "front");
+    }
     if (!level.nest?.hanging) drawWoodsNest(ctx, cam, cssW, cssH, level, false);
 
     for (const p of this.dust) {

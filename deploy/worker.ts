@@ -1,7 +1,15 @@
 import { isFilthyName } from "../apps/backflip-bill/src/game/profanity.ts";
 import { KNOWLEDGE_KEY, type JimKnowledge } from "../apps/pompey-jim/src/knowledge.ts";
 import { clampHistory, clampUserText } from "../apps/pompey-jim/src/prompt.ts";
-import { clampUserId, JIM_MODEL, jimChat, jimHello, jimPeek, jobKey } from "../apps/pompey-jim/src/turn.ts";
+import {
+  clampHintName,
+  clampUserId,
+  JIM_MODEL,
+  jimChat,
+  jimHello,
+  jimPeek,
+  jobKey,
+} from "../apps/pompey-jim/src/turn.ts";
 import type { JimJob } from "../apps/pompey-jim/src/knowledge.ts";
 
 const BOARD_KEY = "backflip-bill:board";
@@ -94,7 +102,10 @@ async function handleJimChat(
     if (url.searchParams.get("job") === "1") {
       return json(await jimPeek(jobs, userId));
     }
-    return json({ reply: await jimHello(store, userId) });
+    const hint = clampHintName(url.searchParams.get("name"));
+    const hello = await jimHello(store, userId, hint);
+    if (hello.browse) ctx.waitUntil(hello.browse());
+    return json({ reply: hello.reply, name: hello.name });
   }
   if (request.method !== "POST") {
     return json({ error: "Method not allowed" }, 405);
@@ -110,17 +121,19 @@ async function handleJimChat(
   if (!message) {
     return json({ error: "Say something mush" }, 400);
   }
-  const { reply, reading, remember, follow } = await jimChat({
+  const { reply, reading, name, remember, follow, browse } = await jimChat({
     message,
     history: clampHistory(rec.history),
     userId: clampUserId(rec.user),
+    hintName: clampHintName(rec.name),
     store,
     jobs,
     runAi: jimAi(env),
   });
   ctx.waitUntil(remember());
   if (follow) ctx.waitUntil(follow());
-  return json({ reply, reading });
+  if (browse) ctx.waitUntil(browse());
+  return json({ reply, reading, name });
 }
 
 async function handleScores(request: Request, env: Env): Promise<Response> {
