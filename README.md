@@ -61,9 +61,11 @@ npm run preview      # local production preview on :4299
 Domain DNS stays on Cloudflare. Automated deployment via GitHub Actions using the new **cf CLI**.
 
 Deployment is triggered automatically on every push to `main`. The GitHub Actions workflow:
-1. Installs dependencies
-2. Builds the site (`npm run build`)
-3. Deploys to Cloudflare using `cf deploy`, run from `deploy/` because `cf` won't run at a workspace root
+1. Checks out the repo **with Git LFS** (SimPompey’s 264 MB terrain mesh)
+2. Installs dependencies
+3. Builds the site (`npm run build`)
+4. Uploads the terrain mesh to R2 (`easeupmush-maps`) — Worker static assets cap files at 25 MB
+5. Deploys to Cloudflare using `cf deploy`, run from `deploy/` because `cf` won't run at a workspace root
 
 Configuration is in `deploy/`:
 - `cloudflare.config.ts`: Worker name `easeupmush`, compatibility date `2026-08-15`

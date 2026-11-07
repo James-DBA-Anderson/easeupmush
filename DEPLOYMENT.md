@@ -10,11 +10,12 @@ Every push to `main` triggers an automated deployment via GitHub Actions.
 
 The deployment workflow (`.github/workflows/deploy.yml`) performs:
 
-1. **Checkout**: Fetches the repository code
+1. **Checkout**: Fetches the repository code, including Git LFS for SimPompey’s terrain mesh
 2. **Setup**: Installs Node.js 22 and npm dependencies
 3. **Build**: Runs `npm run build` to compile all apps into `dist/`
-4. **Deploy**: Runs `npm ci` and then `cf deploy` inside `deploy/` to publish to Cloudflare
-5. **Output**: Displays deployment URL
+4. **Map mesh**: Uploads `portsmouth-terrain.bin` to R2 if it changed, then strips it from `dist/`
+5. **Deploy**: Runs `npm ci` and then `cf deploy` inside `deploy/` to publish to Cloudflare
+6. **Output**: Displays deployment URL
 
 `cf deploy` refuses to run at the root of an npm workspace, so the deploy config lives in `deploy/`. That folder is a standalone package (not one of the workspaces) with its own lockfile for `cf` and `wrangler`, and it deploys the pre-built `../dist` directory.
 
@@ -33,6 +34,7 @@ A Cloudflare API token with permissions to deploy to Pages.
    - **Permissions:**
      - Account → Cloudflare Pages → Edit
      - Account → Workers KV Storage → Edit
+     - Account → Workers R2 Storage → Edit
      - Account → Account Settings → Read
    - **Account Resources:** Include your account
 4. Copy the token and add it to GitHub:
@@ -110,7 +112,11 @@ To check a deploy without uploading, run `npm run build && npm ci --prefix deplo
 
 This is the error you get if `cf deploy` is run from the repo root. Run it from `deploy/` instead.
 
-The Worker entrypoint is `deploy/worker.ts`. API routes run first (`assets.runWorkerFirst`); everything else is the static `dist/` site. Backflip Bill high scores live in a Workers KV binding named `SCORES`. KV is not rebuilt with the site, so names and scores survive deploys on the free tier. Local game dev writes the same JSON shape to `apps/backflip-bill/.local/scores.json` (gitignored).
+The Worker entrypoint is `deploy/worker.ts`. API routes and the SimPompey terrain mesh run first (`assets.runWorkerFirst`); everything else is the static `dist/` site. Backflip Bill high scores live in a Workers KV binding named `SCORES`. KV is not rebuilt with the site, so names and scores survive deploys on the free tier. Local game dev writes the same JSON shape to `apps/backflip-bill/.local/scores.json` (gitignored).
+
+SimPompey’s `portsmouth-terrain.bin` is 264 MB, which is over the 25 MiB Worker static-asset cap, so deploy puts it in an R2 bucket named `easeupmush-maps` and the Worker streams it at `/games/simpompey/models/portsmouth-terrain.bin`. The game loader still uses that same path; Vite serves the local file in development. `scripts/publish-map-assets.mjs` creates the bucket if needed, uploads only when the mesh hash changes, then removes the bin from `dist/` before `cf deploy`. The GitHub Actions checkout must fetch Git LFS or the upload will fail on a pointer file. Wrangler’s R2 put cap is 300 MiB, so this mesh still fits as one object.
+
+If deploy fails on R2, add **Account → Workers R2 Storage → Edit** to `CLOUDFLARE_API_TOKEN` and re-run.
 
 ## Cloudflare Free Tier
 

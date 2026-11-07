@@ -19,6 +19,25 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          lfs: true
+
+      - name: Fetch Git LFS map mesh
+        run: git lfs pull --include="apps/simpompey/public/models/portsmouth-terrain.bin"
+
+      - name: Verify map mesh
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("apps/simpompey/public/models/portsmouth-terrain.bin")
+          with p.open("rb") as f:
+              data = f.read(80)
+          if data.startswith(b"version https://git-lfs.github.com/spec/v1"):
+              raise SystemExit("terrain.bin is still a Git LFS pointer")
+          size = p.stat().st_size
+          print(f"terrain.bin {size} bytes")
+          if size < 1_000_000:
+              raise SystemExit("Git LFS did not fetch portsmouth-terrain.bin")
+          PY
 
       - uses: actions/setup-node@v4
         with:
@@ -39,6 +58,14 @@ jobs:
       - name: Install deploy tooling
         working-directory: deploy
         run: npm ci
+
+      # 264 MB terrain.bin cannot be a Worker static asset (25 MiB/file).
+      # Put it on R2, then strip it from dist/ before cf deploy.
+      - name: Publish map mesh to R2
+        run: node scripts/publish-map-assets.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       # `cf deploy` does not accept --json. Generated API commands print JSON
       # on stdout by default, so capture the Worker record after deploy.

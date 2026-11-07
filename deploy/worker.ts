@@ -17,8 +17,12 @@ const MAX_NAME = 18;
 const MAX_SCORE = 1_000_000;
 const MAX_ROWS = 50;
 
+const TERRAIN_PATH = "/games/simpompey/models/portsmouth-terrain.bin";
+const TERRAIN_KEY = "simpompey/portsmouth-terrain.bin";
+
 interface Env {
   SCORES: KVNamespace;
+  MAPS: R2Bucket;
   AI: {
     run(
       model: string,
@@ -44,6 +48,9 @@ interface ScoreEntry {
 export default {
   async fetch(request: Request, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === TERRAIN_PATH) {
+      return handleTerrain(request, env);
+    }
     if (url.pathname === "/api/backflip-bill/scores") {
       return handleScores(request, env);
     }
@@ -53,6 +60,22 @@ export default {
     return new Response("Not found", { status: 404 });
   },
 };
+
+async function handleTerrain(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response("Method not allowed", { status: 405 });
+  }
+  const object = await env.MAPS.get(TERRAIN_KEY);
+  if (!object) return new Response("Map mesh missing", { status: 503 });
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("etag", object.httpEtag);
+  headers.set("Content-Type", "application/octet-stream");
+  headers.set("Content-Length", String(object.size));
+  headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  if (request.method === "HEAD") return new Response(null, { headers });
+  return new Response(object.body, { headers });
+}
 
 function jimStore(env: Env) {
   return {
