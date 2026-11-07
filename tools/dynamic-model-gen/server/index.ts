@@ -3,7 +3,7 @@ import express from 'express'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { assembleKit, looksLikeCat, paintFromPrompt, reviseKit } from '../src/lib/kit.ts'
+import { assembleKit, looksLikeCat, looksLikeSpinnaker, paintFromPrompt, reviseKit } from '../src/lib/kit.ts'
 import {
   breakParentCycles,
   dropBadParents,
@@ -23,6 +23,7 @@ import {
   type PromptOptions,
 } from '../src/lib/prompts.ts'
 import type { ModelPart, ModelSpec, PartShape } from '../src/lib/spec.ts'
+import { openrouterAvailable, openrouterChat, openrouterModel } from './openrouter.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
@@ -34,6 +35,7 @@ const FORCE_BACKEND = process.env.MODEL_BACKEND as
   | 'shap-e'
   | 'ollama'
   | 'kit'
+  | 'router'
   | undefined
 
 const app = express()
@@ -56,7 +58,7 @@ type GenerateBody = PromptOptions & {
   change?: string
 }
 
-type Backend = 'shap-e' | 'ollama' | 'kit'
+type Backend = 'shap-e' | 'ollama' | 'router' | 'kit'
 
 const SHAPES: PartShape[] = ['sphere', 'box', 'capsule', 'cylinder', 'cone', 'torus']
 
@@ -107,7 +109,7 @@ async function probeShapE() {
 }
 
 function preferredBackend(): Backend {
-  if (FORCE_BACKEND === 'shap-e' || FORCE_BACKEND === 'ollama' || FORCE_BACKEND === 'kit') {
+  if (FORCE_BACKEND === 'shap-e' || FORCE_BACKEND === 'ollama' || FORCE_BACKEND === 'kit' || FORCE_BACKEND === 'router') {
     return FORCE_BACKEND
   }
   return 'ollama'
@@ -119,18 +121,22 @@ function pickBackend(
   ollama: { ok?: boolean; model?: string },
 ): Backend {
   if (preferred === 'kit') return 'kit'
+  if (preferred === 'router') return openrouterAvailable() ? 'router' : 'kit'
   if (preferred === 'ollama') {
     if (ollama.ok && ollama.model) return 'ollama'
     if (shapE.ok) return 'shap-e'
+    if (openrouterAvailable()) return 'router'
     return 'kit'
   }
   if (preferred === 'shap-e') {
     if (shapE.ok) return 'shap-e'
     if (ollama.ok && ollama.model) return 'ollama'
+    if (openrouterAvailable()) return 'router'
     return 'kit'
   }
   if (ollama.ok && ollama.model) return 'ollama'
   if (shapE.ok) return 'shap-e'
+  if (openrouterAvailable()) return 'router'
   return 'kit'
 }
 
@@ -140,6 +146,7 @@ function healthNote(
   ollama: { ok?: boolean; model?: string; error?: string },
 ): string | undefined {
   if (backend === 'ollama') return undefined
+  if (backend === 'router') return undefined
   if (backend === 'shap-e' && !shapE.ready) {
     return 'Shap-E is warming up. First mesh downloads the model.'
   }
@@ -167,7 +174,9 @@ app.get('/api/health', async (_req, res) => {
         ? 'openai/shap-e'
         : backend === 'ollama'
           ? ollama.model
-          : 'option kit',
+          : backend === 'router'
+            ? openrouterModel()
+            : 'option kit',
     shapE,
     ollama,
     note: healthNote(backend, shapE, ollama),
@@ -264,7 +273,7 @@ app.post('/api/generate', async (req, res) => {
       return
     }
 
-    if (backend === 'shap-e' && !looksLikeCat(description)) {
+    if (backend === 'shap-e' && !looksLikeCat(description) && !looksLikeSpinnaker(description)) {
       send({ type: 'progress', message: 'Sculpting with Shap-E…' })
       const upstream = await fetch(`${SHAPE_E_URL}/generate`, {
         method: 'POST',
@@ -302,6 +311,8 @@ app.post('/api/generate', async (req, res) => {
       type: 'progress',
       message: looksLikeCat(description)
         ? 'Building a kit cat from primitives…'
+        : looksLikeSpinnaker(description)
+          ? 'Building the Spinnaker Tower from primitives…'
         : backend === 'ollama'
           ? 'Asking Ollama for a layout (CPU, first call can take a few minutes)…'
           : 'Building mesh from options…',
@@ -309,7 +320,7 @@ app.post('/api/generate', async (req, res) => {
 
     let spec = assembleKit(opts, seed)
     let used: Backend = 'kit'
-    if (backend === 'ollama' && ollama.model && !looksLikeCat(description)) {
+    if (backend === 'ollama' && ollama.model && !looksLikeCat(description) && !looksLikeSpinnaker(description)) {
       try {
         spec = await ollamaSpec(ollama.model, opts, spec, null)
         used = 'ollama'

@@ -1,0 +1,26 @@
+{
+  "name": "@easeupmush/simpompey",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Life sim set in Portsmouth — build a Pompey existence.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "exports": {
+    "./dialogue": "./src/dialogue/index.ts"
+  },
+  "dependencies": {
+    "@easeupmush/shared": "*",
+    "three": "^0.170.0",
+    "three-mesh-bvh": "^0.9.18"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.2"
+  }
+}

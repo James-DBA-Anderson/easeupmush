@@ -15,4 +15,11 @@ __pycache__/
 .huggingface
 tools/**/generated/
 tools/dialogue-record/recordings/
+tools/osm-terrain-build/data/vom/
+tools/osm-terrain-build/data/ais/
+tools/osm-terrain-build/data/darwin/
+tools/osm-terrain-build/data/os/
+tools/osm-terrain-build/data/portsmouth-os-buildings.json
+tools/osm-terrain-build/data/*.osm
+tools/osm-terrain-build/data/*.bin
 apps/*/public/voices/

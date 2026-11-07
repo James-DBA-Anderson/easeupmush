@@ -72,6 +72,16 @@ const kids = [
     },
     shell: true,
   }),
+  spawn("npm run dev -w @easeupmush/simpompey", {
+    cwd: root,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      GAME_BASE: "/games/simpompey/",
+      BROWSER: "none",
+    },
+    shell: true,
+  }),
 ];
 
 function shutDown(code = 0) {

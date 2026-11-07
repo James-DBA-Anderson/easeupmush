@@ -11,6 +11,7 @@ const canoeDist = resolve(root, "apps/canoe-lake-cleanup/dist");
 const bunDist = resolve(root, "apps/bunsterstons/dist");
 const billDist = resolve(root, "apps/backflip-bill/dist");
 const jimDist = resolve(root, "apps/pompey-jim/dist");
+const simpDist = resolve(root, "apps/simpompey/dist");
 
 if (!existsSync(siteDist)) {
   console.error("Missing apps/site/dist — run site build first.");
@@ -38,6 +39,10 @@ if (!existsSync(billDist)) {
 }
 if (!existsSync(jimDist)) {
   console.error("Missing apps/pompey-jim/dist — run game build first.");
+  process.exit(1);
+}
+if (!existsSync(simpDist)) {
+  console.error("Missing apps/simpompey/dist — run game build first.");
   process.exit(1);
 }
 
@@ -74,8 +79,13 @@ const jimOut = resolve(dist, "games/pompey-jim");
 mkdirSync(jimOut, { recursive: true });
 cpSync(jimDist, jimOut, { recursive: true });
 
+// SimPompey ships unlisted — only the back room links to it.
+const simpOut = resolve(dist, "games/simpompey");
+mkdirSync(simpOut, { recursive: true });
+cpSync(simpDist, simpOut, { recursive: true });
+
 writeFileSync(resolve(dist, "CNAME"), "easeupmush.com\n");
 
 console.log(
-  "Assembled dist/ (site + games/pompey-punch-up + games/pompeymon + games/canoe-lake-cleanup + games/bunsterstons + games/backflip-bill + games/pompey-jim)",
+  "Assembled dist/ (site + games/pompey-punch-up + games/pompeymon + games/canoe-lake-cleanup + games/bunsterstons + games/backflip-bill + games/pompey-jim + games/simpompey)",
 );

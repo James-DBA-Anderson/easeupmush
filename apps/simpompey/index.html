@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0b1c24" />
+    <meta
+      name="description"
+      content="SimPompey — build a life in Portsmouth. Work, graft, and try not to cop it."
+    />
+    <title>SimPompey</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Source+Sans+3:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --ink: #07141a;
+        --foam: #c8dde6;
+        --sodium: #f0a23a;
+        --chalk: #e8f0f4;
+        --font-ui: "Source Sans 3", "Segoe UI", sans-serif;
+        --font-display: "Anton", Impact, sans-serif;
+        --type-micro: 0.68rem;
+        --type-label: 0.78rem;
+        --type-body: 0.92rem;
+        --type-callout: 1.15rem;
+        --type-display: 1.15rem;
+        --type-title: 1.65rem;
+        --tracking-label: 0.1em;
+        --tracking-display: 0.04em;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
+        overflow: hidden;
+        background: #0b1c24;
+        font-family: var(--font-ui);
+        color: var(--chalk);
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: none;
+      }
+
+      #game {
+        display: block;
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
+        touch-action: none;
+      }
+
+      #labels {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+      }
+
+      .map-label {
+        position: absolute;
+        left: 0;
+        top: 0;
+        color: #f4fbff;
+        font-family: var(--font-ui);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        text-shadow: 0 1px 2px #07141a, 0 0 8px #07141a;
+        white-space: nowrap;
+        pointer-events: none;
+      }
+
+      .map-label--road {
+        color: #ffe7b0;
+        text-transform: uppercase;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+      }
+
+      .map-label--building {
+        color: #e8f0f4;
+      }
+
+      .map-label--area {
+        color: #9fe7d8;
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .map-filters {
+        position: fixed;
+        top: 16px;
+        left: 16px;
+        z-index: 20;
+        width: 220px;
+        padding: 14px 16px 12px;
+        background: rgba(7, 20, 26, 0.86);
+        border: 1px solid rgba(200, 221, 230, 0.18);
+        border-radius: 12px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+        backdrop-filter: blur(10px);
+        pointer-events: auto;
+        touch-action: manipulation;
+      }
+
+      .map-filters__title {
+        font-family: var(--font-display);
+        font-size: var(--type-display);
+        letter-spacing: var(--tracking-display);
+        color: var(--sodium);
+        margin-bottom: 10px;
+      }
+
+      .map-filters label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 7px 0;
+        font-size: var(--type-label);
+        color: var(--foam);
+        cursor: pointer;
+      }
+
+      .map-filters input {
+        accent-color: var(--sodium);
+        width: 14px;
+        height: 14px;
+      }
+
+      .map-filters__hint {
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(200, 221, 230, 0.14);
+        font-size: 0.68rem;
+        line-height: 1.35;
+        color: rgba(200, 221, 230, 0.72);
+      }
+
+      .map-credit {
+        position: fixed;
+        right: 12px;
+        bottom: 10px;
+        z-index: 20;
+        margin: 0;
+        padding: 5px 9px;
+        border-radius: 8px;
+        background: rgba(7, 20, 26, 0.72);
+        color: rgba(200, 221, 230, 0.78);
+        font-family: var(--font-ui);
+        font-size: 0.68rem;
+        letter-spacing: 0.02em;
+        pointer-events: none;
+      }
+
+      .map-credit a {
+        color: var(--foam);
+        text-decoration: none;
+        pointer-events: auto;
+      }
+
+      .map-credit a:hover {
+        color: var(--sodium);
+        text-decoration: underline;
+      }
+
+      .map-filters__goto {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        margin-top: 12px;
+        font-size: var(--type-label);
+        color: var(--foam);
+      }
+
+      .map-filters__goto select {
+        width: 100%;
+        padding: 7px 8px;
+        border-radius: 8px;
+        border: 1px solid rgba(200, 221, 230, 0.28);
+        background: rgba(7, 20, 26, 0.55);
+        color: var(--chalk);
+        font-family: var(--font-ui);
+        font-size: var(--type-label);
+        cursor: pointer;
+      }
+
+      .map-filters__goto select:hover,
+      .map-filters__goto select:focus {
+        border-color: var(--sodium);
+        outline: none;
+      }
+
+      .map-filters__aerial,
+      .map-filters__drive {
+        display: block;
+        width: 100%;
+        margin-top: 8px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        font-family: var(--font-display);
+        font-size: 1.05rem;
+        letter-spacing: var(--tracking-display);
+        cursor: pointer;
+      }
+
+      .map-filters__hint + .map-filters__aerial {
+        margin-top: 12px;
+      }
+
+      .map-filters__aerial {
+        border: 1px solid rgba(200, 221, 230, 0.28);
+        background: transparent;
+        color: var(--foam);
+      }
+
+      .map-filters__aerial:hover {
+        border-color: var(--sodium);
+        color: var(--sodium);
+      }
+
+      .map-filters__drive {
+        border: 0;
+        background: var(--sodium);
+        color: var(--ink);
+      }
+
+      .map-filters__drive:hover {
+        filter: brightness(1.06);
+      }
+
+      #speedo {
+        position: fixed;
+        left: 16px;
+        bottom: 12px;
+        z-index: 20;
+        min-width: 88px;
+        padding: 8px 12px;
+        border-radius: 10px;
+        background: rgba(7, 20, 26, 0.78);
+        color: var(--sodium);
+        font-family: var(--font-display);
+        font-size: 1.35rem;
+        letter-spacing: 0.04em;
+        pointer-events: none;
+      }
+
+      #minimap {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        z-index: 21;
+        width: 168px;
+        height: 168px;
+        border-radius: 14px;
+        border: 2px solid rgba(240, 162, 58, 0.9);
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(7, 20, 26, 0.35);
+        overflow: hidden;
+        pointer-events: none;
+      }
+
+      body.is-driving #labels {
+        display: none;
+      }
+
+      .minimap__n {
+        position: absolute;
+        top: 6px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: var(--sodium);
+        font-family: var(--font-display);
+        font-size: 0.95rem;
+        letter-spacing: 0.08em;
+        text-shadow: 0 1px 2px #07141a;
+      }
+
+      .minimap__marker {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 0;
+        height: 0;
+        transform: rotate(var(--heading, 180deg));
+      }
+
+      .minimap__dot {
+        position: absolute;
+        left: -5.5px;
+        top: -5.5px;
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: #f0a23a;
+        box-shadow: 0 0 0 2px #07141a, 0 0 10px rgba(240, 162, 58, 0.7);
+      }
+
+      .minimap__needle {
+        position: absolute;
+        left: -7px;
+        top: -20px;
+        width: 0;
+        height: 0;
+        border-left: 7px solid transparent;
+        border-right: 7px solid transparent;
+        border-bottom: 16px solid #f0a23a;
+        filter: drop-shadow(0 1px 1px #07141a);
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="labels"></div>
+    <aside class="map-filters" id="map-filters">
+      <div class="map-filters__title">Map filters</div>
+      <label><input type="checkbox" data-filter="buildings" checked /> 3D buildings</label>
+      <label><input type="checkbox" data-filter="roads" checked /> Roads</label>
+      <label><input type="checkbox" data-filter="rails" checked /> Railway</label>
+      <label><input type="checkbox" data-filter="trains" checked /> Trains</label>
+      <label><input type="checkbox" data-filter="vegetation" checked /> Trees &amp; parks</label>
+      <label><input type="checkbox" data-filter="ships" checked /> Ships</label>
+      <label><input type="checkbox" data-filter="power" checked /> Power</label>
+      <label><input type="checkbox" data-filter="roadLabels" /> Road labels</label>
+      <label><input type="checkbox" data-filter="buildingLabels" /> Building labels</label>
+      <label><input type="checkbox" data-filter="areaLabels" /> Area labels</label>
+      <p class="map-filters__hint">Drag to pan · scroll zooms to cursor · right-drag to tilt · double-click to close in · T aerial · [ ] viewpoints · WASD to move · Q/E height</p>
+      <label class="map-filters__goto">
+        Snap to
+        <select id="view-select"></select>
+      </label>
+      <button type="button" class="map-filters__aerial" id="aerial-toggle">Aerial view</button>
+      <button type="button" class="map-filters__drive" id="drive-toggle">Take the motor</button>
+    </aside>
+    <div id="speedo" hidden>0 mph</div>
+    <div id="minimap" hidden>
+      <span class="minimap__n">N</span>
+      <div class="minimap__marker">
+        <div class="minimap__needle"></div>
+        <div class="minimap__dot"></div>
+      </div>
+    </div>
+    <p class="map-credit">
+      Map data
+      <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap</a>
+      contributors
+      · buildings
+      <a href="https://github.com/microsoft/GlobalMLBuildingFootprints" target="_blank" rel="noreferrer">© Microsoft</a>
+      · canopy
+      <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/" target="_blank" rel="noreferrer">© Environment Agency</a>
+      · AIS
+      <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/" target="_blank" rel="noreferrer">© MCA</a>
+      (OGL)
+      · trains
+      <a href="https://www.nationalrail.co.uk/developers/darwin-data-feeds/" target="_blank" rel="noreferrer">© National Rail Enquiries</a>
+      Darwin
+    </p>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

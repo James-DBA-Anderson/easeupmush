@@ -921,7 +921,7 @@ export class Bill {
     this.state = "air";
     this.flipping = true;
     this.slideDrop = false;
-    if (kicked) this.vy += tuning.jumpVy * 0.34;
+    if (kicked) this.vy += tuning.jumpVy * 0.48;
     this.takeoffSpeed = Math.abs(this.vx);
     this.flipTravel = wrapPi(this.rot);
     this.rot = this.flipTravel;
@@ -3016,6 +3016,7 @@ function drawBillCart(ctx: CanvasRenderingContext2D, bill: Bill, pose: Pose, t: 
   const floorY = cartAnchor(bill, 0, CART_FLOOR + 0.02).y;
   const backX = cartAnchor(bill, -0.36, CART_FLOOR + 0.18).x;
   const frontX = cartAnchor(bill, 0.38, CART_FLOOR + 0.04).x;
+  const rimY = cartAnchor(bill, 0, CART_RIM - 0.06).y;
   const nest = -0.14 - duck * 0.1;
   const sink = 0.01 + duck * 0.02;
   const keepIn = (p: Pt, padBack: number, padFloor: number): Pt => ({
@@ -3035,16 +3036,20 @@ function drawBillCart(ctx: CanvasRenderingContext2D, bill: Bill, pose: Pose, t: 
   const rArm = cartArmIk(rSh, rRim, 0.28, 0.24, false);
   const footY = floorY + 0.04;
   const reach = 0.6;
-  const lAnkle = keepIn(
+
+  // Clamp ankles inside the basket so they don't flash out during rotation
+  const clampAnkle = (a: Pt): Pt => ({
+    x: Math.max(backX + 0.14, Math.min(frontX - 0.14, a.x)),
+    y: Math.max(floorY + 0.04, Math.min(rimY - 0.06, a.y)),
+  });
+
+  const lAnkle = clampAnkle(
     clampReach(lHip, { x: Math.min(frontX - 0.04, nest + 0.36 + crab * 0.16), y: footY }, reach),
-    0.18,
-    0.02,
   );
-  const rAnkle = keepIn(
+  const rAnkle = clampAnkle(
     clampReach(rHip, { x: Math.min(frontX + 0.02, nest + 0.42 + crab * 0.16), y: footY }, reach),
-    0.22,
-    0.02,
   );
+
   const lKnee = cartKnee(lHip, lAnkle, duck);
   const rKnee = cartKnee(rHip, rAnkle, duck);
   const lHem = toward(lKnee, lAnkle, 0.78);
