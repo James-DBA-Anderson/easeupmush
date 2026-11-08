@@ -1,5 +1,6 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { collectCarriageways } from "./carriageway.ts";
 
 const DATA_DIR = "./data";
 const OSM_PATH = `${DATA_DIR}/portsmouth.osm`;
@@ -148,8 +149,30 @@ while ((wayMatch = wayStartRe.exec(buf)) !== null) {
   kits.push({ x, z, kind, heading: headingOf(x, z) });
 }
 
-const kept: Kit[] = [];
+const roads = collectCarriageways(buf, nodeMap, localM);
+const placed: Kit[] = [];
+let nudged = 0;
+let dropped = 0;
 for (const kit of kits) {
+  const extra = kit.kind === "signal" ? 1.55 : kit.kind === "bus" ? 1.7 : 1.1;
+  if (!roads.covers(kit.x, kit.z, 0.15)) {
+    placed.push(kit);
+    continue;
+  }
+  const off = roads.nudge(kit.x, kit.z, extra);
+  if (!off) {
+    dropped++;
+    continue;
+  }
+  kit.x = off.x;
+  kit.z = off.y;
+  if (kit.kind === "signal" || kit.kind === "bus") kit.heading = off.heading;
+  nudged++;
+  placed.push(kit);
+}
+
+const kept: Kit[] = [];
+for (const kit of placed) {
   const gap = kit.kind === "pub" || kit.kind === "memorial" ? 10 : 1.6;
   if (kept.some((k) => k.kind === kit.kind && Math.hypot(k.x - kit.x, k.z - kit.z) < gap)) continue;
   kept.push(kit);
@@ -160,4 +183,4 @@ for (const k of kept) counts[k.kind] = (counts[k.kind] ?? 0) + 1;
 writeFileSync(OUT, JSON.stringify({ kits: kept }));
 mkdirSync(path.dirname(GAME_OUT), { recursive: true });
 copyFileSync(OUT, GAME_OUT);
-console.log(`Wrote ${OUT} (${kept.length} kits)`, counts);
+console.log(`Wrote ${OUT} (${kept.length} kits)`, counts, `(nudged ${nudged} off-road, dropped ${dropped})`);

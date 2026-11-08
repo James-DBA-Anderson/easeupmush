@@ -8,6 +8,7 @@
     "fetch": "tsx scripts/fetch.ts",
     "build": "tsx stream.ts && cp data/portsmouth-terrain.gltf data/portsmouth-terrain.bin data/portsmouth-labels.json data/portsmouth-harbour.json data/portsmouth-power.json data/portsmouth-barriers.json ../../apps/simpompey/public/models/",
     "trees": "tsx trees.ts",
+    "trees:off-road": "tsx trees.ts --off-road",
     "ships": "tsx ships.ts",
     "trains": "tsx trains.ts",
     "os-buildings": "tsx os-buildings.ts",
@@ -15,6 +16,14 @@
     "coast": "tsx coast.ts",
     "furniture": "tsx furniture.ts",
     "places": "tsx places.ts",
+    "zones": "tsx zones.ts",
+    "land-value": "tsx land-value.ts",
+    "traffic": "tsx traffic.ts",
+    "crime": "tsx crime.ts",
+    "pollution": "tsx pollution.ts",
+    "flood": "tsx flood.ts",
+    "imd": "tsx deprivation.ts",
+    "broadband": "tsx broadband.ts",
     "terrain": "npm run fetch && npm run build"
   },
   "dependencies": {

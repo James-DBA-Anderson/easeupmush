@@ -54,11 +54,13 @@ function drape(
   x: number,
   z: number,
   lift = 0,
+  onCarriage?: (x: number, z: number) => boolean,
 ): THREE.Vector3 | null {
   const probe = new THREE.Vector3(x, 40, z);
   mapScene.localToWorld(probe);
   const ground = sampleGround(probe.x, probe.z);
   if (ground === null) return null;
+  if (onCarriage?.(probe.x, probe.z)) return null;
   const at = new THREE.Vector3(probe.x, ground + lift, probe.z);
   mapScene.worldToLocal(at);
   return at;
@@ -164,12 +166,13 @@ function instanceTrees(
   points: TreePoint[],
   mapScene: THREE.Object3D,
   sampleGround: (x: number, z: number) => number | null,
+  onCarriage?: (x: number, z: number) => boolean,
 ): THREE.InstancedMesh | null {
   if (points.length === 0) return null;
   const dummy = new THREE.Object3D();
   const placed: Array<{ at: THREE.Vector3; h: number; rot: number }> = [];
   for (const t of points) {
-    const at = drape(mapScene, sampleGround, t.x, t.z);
+    const at = drape(mapScene, sampleGround, t.x, t.z, 0, onCarriage);
     if (!at) continue;
     placed.push({ at, h: t.h, rot: hash01(t.x, t.z) * Math.PI * 2 });
   }
@@ -205,13 +208,14 @@ export async function addVegetation(
   loader: GLTFLoader,
   mapScene: THREE.Object3D,
   sampleGround: (x: number, z: number) => number | null,
+  onCarriage?: (x: number, z: number) => boolean,
 ): Promise<{ trees: THREE.Group; cover: THREE.Group }> {
   const trees = new THREE.Group();
   trees.name = "vegetation";
   const cover = new THREE.Group();
   cover.name = "ground-cover";
   const [data, broadleafGltf, pineGltf] = await Promise.all([
-    fetch("./models/portsmouth-trees.json?v=rail1").then((r) => {
+    fetch("./models/portsmouth-trees.json?v=noroad1").then((r) => {
       if (!r.ok) throw new Error(`trees json ${r.status}`);
       return r.json() as Promise<VegetationData>;
     }),
@@ -227,11 +231,11 @@ export async function addVegetation(
   const pine = firstMesh(pineGltf.scene);
   const byKind = { broadleaf: data.trees.filter((t) => t.kind !== "pine"), pine: data.trees.filter((t) => t.kind === "pine") };
   if (broadleaf) {
-    const mesh = instanceTrees("broadleaf", broadleaf, byKind.broadleaf, mapScene, sampleGround);
+    const mesh = instanceTrees("broadleaf", broadleaf, byKind.broadleaf, mapScene, sampleGround, onCarriage);
     if (mesh) trees.add(mesh);
   }
   if (pine) {
-    const mesh = instanceTrees("pine", pine, byKind.pine, mapScene, sampleGround);
+    const mesh = instanceTrees("pine", pine, byKind.pine, mapScene, sampleGround, onCarriage);
     if (mesh) trees.add(mesh);
   }
   mapScene.add(cover);

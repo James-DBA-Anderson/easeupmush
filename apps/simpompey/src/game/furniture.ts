@@ -56,15 +56,45 @@ function instanceCell(
   return mesh;
 }
 
+function drapeOffRoad(
+  mapScene: THREE.Object3D,
+  sampleGround: (x: number, z: number) => number | null,
+  onCarriage: (x: number, z: number) => boolean,
+  x: number,
+  z: number,
+): THREE.Vector3 | null {
+  const tryAt = (lx: number, lz: number) => {
+    const probe = new THREE.Vector3(lx, 40, lz);
+    mapScene.localToWorld(probe);
+    const ground = sampleGround(probe.x, probe.z);
+    if (ground === null || onCarriage(probe.x, probe.z)) return null;
+    const at = new THREE.Vector3(probe.x, ground, probe.z);
+    mapScene.worldToLocal(at);
+    return at;
+  };
+  const here = tryAt(x, z);
+  if (here) return here;
+  const dirs = 12;
+  for (const dist of [2.4, 4, 5.5, 7.5, 10]) {
+    for (let i = 0; i < dirs; i++) {
+      const a = (i / dirs) * Math.PI * 2;
+      const at = tryAt(x + Math.cos(a) * dist, z + Math.sin(a) * dist);
+      if (at) return at;
+    }
+  }
+  return null;
+}
+
 export async function addFurnitureKit(
   loader: GLTFLoader,
   mapScene: THREE.Object3D,
   sampleGround: (x: number, z: number) => number | null,
+  onCarriage: (x: number, z: number) => boolean,
 ): Promise<THREE.Group> {
   const group = new THREE.Group();
   group.name = "furniture-kit";
   const [data, ...gltfs] = await Promise.all([
-    fetch("./models/portsmouth-furniture.json?v=2").then((r) => {
+    fetch("./models/portsmouth-furniture.json?v=noroad1").then((r) => {
       if (!r.ok) throw new Error(`furniture json ${r.status}`);
       return r.json() as Promise<FurnitureData>;
     }),
@@ -80,14 +110,8 @@ export async function addFurnitureKit(
   const bins = new Map<string, Record<FurnitureKind, Array<{ at: THREE.Vector3; heading: number }>>>();
   for (const kit of data.kits ?? []) {
     if (!proto[kit.kind]) continue;
-    const probe = new THREE.Vector3(kit.x, 40, kit.z);
-    mapScene.localToWorld(probe);
-    const ground = sampleGround(probe.x, probe.z);
-    const at = new THREE.Vector3(kit.x, kit.y ?? 0, kit.z);
-    if (ground !== null) {
-      at.set(probe.x, ground, probe.z);
-      mapScene.worldToLocal(at);
-    }
+    const at = drapeOffRoad(mapScene, sampleGround, onCarriage, kit.x, kit.z);
+    if (!at) continue;
     const key = `${Math.floor(kit.x / CELL)},${Math.floor(kit.z / CELL)}`;
     let bin = bins.get(key);
     if (!bin) {

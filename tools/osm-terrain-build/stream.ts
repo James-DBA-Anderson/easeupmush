@@ -1043,6 +1043,8 @@ function sampleAtLocal(sample: (lat: number, lon: number) => number, x: number, 
 }
 
 const ROAD_LIFT = 0.12;
+/** OSM E-W centerlines sit a bit north of the building corridor. */
+const ROAD_SOUTH_NUDGE = 0.25;
 const RAIL_LIFT = 0.28;
 const WATER_LIFT = 0.16;
 
@@ -2434,6 +2436,7 @@ function layoutRoad(
   name: string | undefined,
   tags: Record<string, string> | undefined,
   mesh: "roads" | "rails",
+  southNudge = 0,
 ): LaidRoad | null {
   if (nodes.length < 2) return null;
   const deck = roadDeckHeight(tags);
@@ -2445,6 +2448,9 @@ function layoutRoad(
   ({ pts, heights } = chaikin(pts, heights, 2));
   ({ pts, heights } = dedupePolyline(pts, heights, 0.35));
   if (pts.length < 2) return null;
+  if (southNudge) {
+    for (const p of pts) p.y -= southNudge;
+  }
   return {
     pts,
     norms: roadNormals(pts),
@@ -3652,10 +3658,10 @@ function roadWidth(kind: string, tags?: Record<string, string>): number {
     case "tertiary":
       return 6.8;
     case "unclassified":
-      return 6.2;
+      return 5.7;
     case "residential":
     case "living_street":
-      return 6.0;
+      return 5.5;
     case "service":
     case "alley":
       return 3.4;
@@ -3737,7 +3743,14 @@ async function main() {
   console.log(`Draping ${pendingRoads.length} roads/rails…`);
   const laid: LaidRoad[] = [];
   for (const road of pendingRoads) {
-    const built = layoutRoad(road.nodes, road.width, road.name, road.tags, road.mesh);
+    const built = layoutRoad(
+      road.nodes,
+      road.width,
+      road.name,
+      road.tags,
+      road.mesh,
+      road.mesh === "roads" ? ROAD_SOUTH_NUDGE : 0,
+    );
     if (built) laid.push(built);
   }
   const carriages = new CarriageIndex();
@@ -3747,7 +3760,7 @@ async function main() {
   const sidewalks = new CarriageIndex();
   const laidWalks: LaidRoad[] = [];
   for (const walk of pendingWalks) {
-    const built = layoutRoad(walk.nodes, walk.width, walk.name, walk.tags, "roads");
+    const built = layoutRoad(walk.nodes, walk.width, walk.name, walk.tags, "roads", ROAD_SOUTH_NUDGE);
     if (!built) continue;
     laidWalks.push(built);
     if (walk.tags.footway === "sidewalk" && !built.bridge) {

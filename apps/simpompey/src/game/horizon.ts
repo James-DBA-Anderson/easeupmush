@@ -160,19 +160,25 @@ function buildIsleOfWight(): THREE.Group {
   return group;
 }
 
+const SOLENT_COLOR = 0x3a6570;
+const SOLENT_SPECULAR = 0x8eb8c4;
+const SOLENT_SHININESS = 22;
+
+export function solentMaterial(extra?: THREE.MeshPhongMaterialParameters) {
+  return new THREE.MeshPhongMaterial({
+    color: SOLENT_COLOR,
+    specular: SOLENT_SPECULAR,
+    shininess: SOLENT_SHININESS,
+    side: THREE.DoubleSide,
+    ...extra,
+  });
+}
+
 export function addHorizon(scene: THREE.Scene, mapScene: THREE.Object3D) {
   scene.fog = new THREE.Fog(0x8aa4ae, 16000, 56000);
   scene.background = new THREE.Color(0x87a8b4);
 
-  const sea = new THREE.Mesh(
-    new THREE.CircleGeometry(52000, 96),
-    new THREE.MeshPhongMaterial({
-      color: 0x3a6570,
-      specular: 0x8eb8c4,
-      shininess: 22,
-      side: THREE.DoubleSide,
-    }),
-  );
+  const sea = new THREE.Mesh(new THREE.CircleGeometry(52000, 96), solentMaterial());
   sea.geometry.rotateX(-Math.PI / 2);
   const harbour = osmLocal(50.795, -1.09);
   sea.position.set(harbour.x, 0.03, harbour.y);

@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import path from "node:path";
 import earcut from "earcut";
 import { extractVomPeaks } from "./vom.ts";
+import { collectCarriageways } from "./carriageway.ts";
 
 const DATA_DIR = "./data";
 const OSM_PATH = `${DATA_DIR}/portsmouth.osm`;
@@ -342,6 +343,29 @@ async function main() {
     }
   }
   console.log(`  nodes in bbox: ${nodeMap.size}`);
+  const roads = collectCarriageways(buf, nodeMap, localM);
+
+  if (process.argv.includes("--off-road") && existsSync(OUT_TREES)) {
+    const prev = JSON.parse(readFileSync(OUT_TREES, "utf8")) as {
+      trees?: Tree[];
+      cover?: Partial<Record<CoverKind, number[]>>;
+      fences?: number[][];
+    };
+    const before = prev.trees?.length ?? 0;
+    const next = (prev.trees ?? []).filter((t) => !roads.covers(t.x, t.z, 0.35));
+    writeFileSync(
+      OUT_TREES,
+      JSON.stringify({
+        ...prev,
+        trees: next,
+        meta: { total: next.length, droppedOnRoad: before - next.length, note: "Filtered existing trees off carriageways" },
+      }),
+    );
+    mkdirSync(path.dirname(GAME_TREES), { recursive: true });
+    copyFileSync(OUT_TREES, GAME_TREES);
+    console.log(`Dropped ${before - next.length} trees on roads (${next.length} left) → ${OUT_TREES}`);
+    return;
+  }
 
   const trees: Tree[] = [];
   const osmExtras: Tree[] = [];
@@ -559,6 +583,7 @@ async function main() {
     if (!opts?.skipTaken && taken(x, z)) return false;
     if (buildings.has(x, z, opts?.pad ?? 2)) return false;
     if (blocked.has(x, z)) return false;
+    if (roads.covers(x, z, 0.35)) return false;
     trees.push({ x, z, h, kind });
     occupy(x, z);
     return true;

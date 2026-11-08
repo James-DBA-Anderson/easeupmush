@@ -21,9 +21,10 @@ const WET = [
   [0.62, 0.61, 0.58],
 ];
 const FOAM = [0.90, 0.86, 0.80];
-const MUD = [0.86, 0.82, 0.74];
+const MUD = [0.94, 0.91, 0.86];
 const MARSH = [0.46, 0.50, 0.38];
 const SHALLOW = [0.38, 0.55, 0.58];
+const TIDE = 0xb9cdd0;
 
 function unpack(flat: number[]): Pt[] {
   const pts: Pt[] = [];
@@ -202,31 +203,6 @@ function addFills(
   }
 }
 
-function waterNormalTex() {
-  const size = 96;
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  const img = ctx.createImageData(size, size);
-  const d = img.data;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const n1 = Math.sin(x * 0.21) + 0.55 * Math.sin(y * 0.37 + x * 0.08) + 0.3 * Math.sin((x + y) * 0.61);
-      const n2 = Math.cos(y * 0.19) + 0.55 * Math.cos(x * 0.33 - y * 0.11) + 0.3 * Math.cos((x - y) * 0.57);
-      const i = (y * size + x) * 4;
-      d[i] = Math.min(255, Math.max(0, (0.5 + n1 * 0.2) * 255));
-      d[i + 1] = Math.min(255, Math.max(0, (0.5 + n2 * 0.2) * 255));
-      d[i + 2] = 255;
-      d[i + 3] = 255;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  return tex;
-}
-
 function meshOf(pos: number[], col: number[], idx: number[], name: string, extra?: THREE.MeshLambertMaterialParameters) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
@@ -284,10 +260,10 @@ export async function addShore(mapScene: THREE.Object3D) {
   const tideIdx: number[] = [];
 
   addFills(mudPos, mudCol, mudIdx, muds, 0.04, (x, z) => {
-    const n = (hash01(x, z, 5) - 0.5) * 0.05;
+    const n = (hash01(x, z, 5) - 0.5) * 0.035;
     return [MUD[0] + n, MUD[1] + n, MUD[2] + n * 0.6];
   });
-  addFills(tidePos, tideCol, tideIdx, muds, 0.10, () => [0.23, 0.4, 0.44]);
+  addFills(tidePos, tideCol, tideIdx, muds, 0.09, () => [0.72, 0.80, 0.81]);
   addFills(marshPos, marshCol, marshIdx, marsh, 0.06, (x, z) => {
     const n = (hash01(x, z, 7) - 0.5) * 0.05;
     return [MARSH[0] + n, MARSH[1] + n, MARSH[2] + n];
@@ -317,42 +293,28 @@ export async function addShore(mapScene: THREE.Object3D) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute(tidePos, 3));
     geo.setIndex(tideIdx);
-    const nVert = tidePos.length / 3;
-    const uv = new Float32Array(nVert * 2);
-    for (let i = 0; i < nVert; i++) {
-      uv[i * 2] = tidePos[i * 3] * 0.02;
-      uv[i * 2 + 1] = tidePos[i * 3 + 2] * 0.02;
-    }
-    geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
-    geo.computeVertexNormals();
-    const ripple = waterNormalTex();
-    const mat = new THREE.MeshPhongMaterial({
-      color: 0x3a6570,
-      specular: 0xc5e4ee,
-      shininess: 58,
-      transparent: true,
-      opacity: 0.46,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      polygonOffset: true,
-      polygonOffsetFactor: -20,
-      polygonOffsetUnits: -20,
-    });
-    if (ripple) {
-      mat.normalMap = ripple;
-      mat.normalScale = new THREE.Vector2(0.55, 0.55);
-    }
-    const tide = new THREE.Mesh(geo, mat);
+    const norms = new Float32Array(tidePos.length);
+    for (let i = 1; i < norms.length; i += 3) norms[i] = 1;
+    geo.setAttribute("normal", new THREE.Float32BufferAttribute(norms, 3));
+    const tide = new THREE.Mesh(
+      geo,
+      new THREE.MeshPhongMaterial({
+        color: TIDE,
+        specular: 0xd4e4e8,
+        shininess: 10,
+        transparent: true,
+        opacity: 0.22,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -20,
+        polygonOffsetUnits: -20,
+      }),
+    );
     tide.name = "shore-tide";
     tide.receiveShadow = false;
     tide.castShadow = false;
     tide.renderOrder = 4;
-    if (ripple) {
-      tide.onBeforeRender = () => {
-        const t = performance.now() * 0.00007;
-        ripple.offset.set(t, t * 0.62);
-      };
-    }
     group.add(tide);
   }
   if (marshIdx.length) group.add(meshOf(marshPos, marshCol, marshIdx, "shore-marsh"));

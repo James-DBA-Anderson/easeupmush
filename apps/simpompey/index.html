@@ -35,6 +35,7 @@
         --type-title: 1.65rem;
         --tracking-label: 0.1em;
         --tracking-display: 0.04em;
+        --hud-h: 44px;
       }
 
       * {
@@ -57,6 +58,13 @@
         touch-action: none;
       }
 
+      body.is-booting .hud,
+      body.is-booting .dock,
+      body.is-booting .map-chrome {
+        opacity: 0;
+        pointer-events: none;
+      }
+
       #game {
         display: block;
         width: 100%;
@@ -65,9 +73,127 @@
         touch-action: none;
       }
 
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background:
+          radial-gradient(ellipse at 50% 42%, #14323c 0%, #0b1c24 62%, #07141a 100%);
+        pointer-events: auto;
+        transition: opacity 0.55s ease, visibility 0.55s ease;
+      }
+
+      #boot.is-done {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .boot__map {
+        width: min(280px, 72vw);
+        height: auto;
+        overflow: visible;
+      }
+
+      .boot__water {
+        fill: #0e2a33;
+      }
+
+      .boot__land {
+        fill: #1c4048;
+      }
+
+      .boot__fill {
+        fill: #2f7a6e;
+        clip-path: inset(calc(100% - var(--boot-pct, 6%)) 0 0 0);
+        transition: clip-path 0.28s ease;
+      }
+
+      .boot__trace {
+        fill: none;
+        stroke: #f0a23a;
+        stroke-width: 1.7;
+        stroke-linejoin: round;
+        stroke-linecap: round;
+        stroke-dasharray: 7 11;
+        animation: boot-dash 16s linear infinite;
+      }
+
+      .boot__ping {
+        fill: none;
+        stroke: rgba(240, 162, 58, 0.5);
+        stroke-width: 1.2;
+        transform-box: fill-box;
+        transform-origin: center;
+        animation: boot-ping 2.5s ease-out infinite;
+      }
+
+      .boot__ping--late {
+        animation-delay: 1.25s;
+      }
+
+      .boot__title {
+        font-family: var(--font-display);
+        font-size: clamp(1.8rem, 6vw, 2.6rem);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--chalk);
+        line-height: 1;
+      }
+
+      .boot__status {
+        font-size: 0.92rem;
+        color: var(--foam);
+        min-height: 1.2em;
+      }
+
+      .boot__bar {
+        width: min(240px, 64vw);
+        height: 6px;
+        border-radius: 999px;
+        background: rgba(200, 221, 230, 0.14);
+        overflow: hidden;
+      }
+
+      .boot__bar-fill {
+        display: block;
+        width: 6%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #2a8070, #f0a23a);
+        transform-origin: left;
+        transition: width 0.28s ease;
+      }
+
+      @keyframes boot-dash {
+        to { stroke-dashoffset: -360; }
+      }
+
+      @keyframes boot-ping {
+        0% { transform: scale(0.35); opacity: 0.65; }
+        100% { transform: scale(5.4); opacity: 0; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .boot__trace,
+        .boot__ping,
+        .boot__fill,
+        .boot__bar-fill {
+          animation: none;
+          transition: none;
+        }
+      }
+
       #labels {
         position: fixed;
         inset: 0;
+        top: calc(var(--hud-h) + env(safe-area-inset-top, 0px));
+        z-index: 15;
         pointer-events: none;
         overflow: hidden;
       }
@@ -104,35 +230,236 @@
         text-transform: uppercase;
       }
 
-      .map-filters {
+      .hud {
         position: fixed;
-        top: 16px;
-        left: 16px;
-        z-index: 20;
-        width: 220px;
-        padding: 14px 16px 12px;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 28;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: var(--hud-h);
+        padding: 5px 10px;
+        padding-top: max(5px, env(safe-area-inset-top));
+        padding-left: max(10px, env(safe-area-inset-left));
+        padding-right: max(10px, env(safe-area-inset-right));
         background: rgba(7, 20, 26, 0.86);
+        border-bottom: 1px solid rgba(200, 221, 230, 0.16);
+        backdrop-filter: blur(10px);
+        pointer-events: auto;
+        touch-action: manipulation;
+      }
+
+      .hud__tabs {
+        display: flex;
+        gap: 4px;
+        padding: 3px;
+        border-radius: 9px;
+        background: rgba(7, 20, 26, 0.55);
+      }
+
+      .hud__tab {
+        appearance: none;
+        border: 0;
+        border-radius: 7px;
+        padding: 6px 14px;
+        background: transparent;
+        color: var(--foam);
+        font-family: var(--font-display);
+        font-size: 0.82rem;
+        letter-spacing: var(--tracking-display);
+        white-space: nowrap;
+        cursor: pointer;
+      }
+
+      .hud__tab:hover {
+        color: var(--sodium);
+      }
+
+      .hud__tab.is-on {
+        background: var(--sodium);
+        color: var(--ink);
+      }
+
+      .hud__nav {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 1;
+        min-width: 0;
+      }
+
+      .hud__nav-btn {
+        appearance: none;
+        flex: 0 0 auto;
+        border: 1px solid rgba(200, 221, 230, 0.22);
+        border-radius: 8px;
+        padding: 6px 12px;
+        background: rgba(7, 20, 26, 0.45);
+        color: var(--foam);
+        font-family: var(--font-display);
+        font-size: 0.82rem;
+        letter-spacing: var(--tracking-display);
+        white-space: nowrap;
+        cursor: pointer;
+      }
+
+      .hud__nav-btn:hover {
+        border-color: var(--sodium);
+        color: var(--sodium);
+      }
+
+      .hud__nav-btn.is-on {
+        border-color: var(--sodium);
+        background: var(--sodium);
+        color: var(--ink);
+      }
+
+      .hud__goto {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        flex: 1 1 10rem;
+        max-width: 18rem;
+        font-size: var(--type-micro);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgba(200, 221, 230, 0.72);
+        white-space: nowrap;
+      }
+
+      .hud__goto select {
+        flex: 1;
+        min-width: 0;
+        height: 32px;
+        padding: 0 8px;
+        border-radius: 8px;
+        border: 1px solid rgba(200, 221, 230, 0.28);
+        background: rgba(7, 20, 26, 0.55);
+        color: var(--chalk);
+        font-family: var(--font-ui);
+        font-size: var(--type-label);
+        text-transform: none;
+        letter-spacing: 0;
+        cursor: pointer;
+      }
+
+      .hud__goto select:hover,
+      .hud__goto select:focus {
+        border-color: var(--sodium);
+        outline: none;
+      }
+
+      .hud__tools {
+        display: flex;
+        gap: 6px;
+        margin-left: auto;
+      }
+
+      .hud__icon,
+      .dock__icon {
+        appearance: none;
+        display: grid;
+        place-items: center;
+        flex: 0 0 auto;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border-radius: 9px;
+        border: 1px solid rgba(200, 221, 230, 0.22);
+        background: rgba(7, 20, 26, 0.45);
+        color: var(--foam);
+        cursor: pointer;
+      }
+
+      .hud__icon svg,
+      .dock__icon svg {
+        display: block;
+        width: 22px;
+        height: 22px;
+      }
+
+      .hud__icon:hover,
+      .dock__icon:hover {
+        border-color: var(--sodium);
+        color: var(--sodium);
+      }
+
+      .hud__icon.is-on {
+        border-color: var(--sodium);
+        background: var(--sodium);
+        color: var(--ink);
+      }
+
+      #demolish-toggle.is-on {
+        border-color: #e24a3a;
+        background: #e24a3a;
+        color: #fff;
+      }
+
+      .dock {
+        position: fixed;
+        top: calc(var(--hud-h) + env(safe-area-inset-top, 0px) + 8px);
+        z-index: 24;
+        display: flex;
+        flex-direction: column;
+        width: 300px;
+        max-width: calc(100vw - 24px);
+        max-height: calc(100dvh - var(--hud-h) - env(safe-area-inset-top, 0px) - 16px);
+        background: rgba(7, 20, 26, 0.88);
         border: 1px solid rgba(200, 221, 230, 0.18);
-        border-radius: 12px;
+        border-radius: 14px;
         box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
         backdrop-filter: blur(10px);
         pointer-events: auto;
         touch-action: manipulation;
       }
 
-      .map-filters__title {
+      .dock--map {
+        left: max(12px, env(safe-area-inset-left));
+      }
+
+      .dock--layers {
+        right: max(12px, env(safe-area-inset-right));
+      }
+
+      .dock.is-away {
+        display: none;
+      }
+
+      .dock__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 8px 0 14px;
+      }
+
+      .dock__head h2 {
+        margin: 0;
         font-family: var(--font-display);
-        font-size: var(--type-display);
+        font-size: 0.95rem;
+        font-weight: 400;
         letter-spacing: var(--tracking-display);
-        color: var(--sodium);
-        margin-bottom: 10px;
+      }
+
+      .dock__pane {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-height: 0;
+        overflow: auto;
+        overscroll-behavior: contain;
+        padding: 10px 14px 14px;
       }
 
       .map-filters label {
         display: flex;
         align-items: center;
         gap: 8px;
-        margin: 7px 0;
+        margin: 2px 0;
         font-size: var(--type-label);
         color: var(--foam);
         cursor: pointer;
@@ -144,8 +471,9 @@
         height: 14px;
       }
 
-      .map-filters__hint {
-        margin-top: 10px;
+      .map-filters__hint,
+      .planner__hint {
+        margin-top: 4px;
         padding-top: 8px;
         border-top: 1px solid rgba(200, 221, 230, 0.14);
         font-size: 0.68rem;
@@ -153,11 +481,25 @@
         color: rgba(200, 221, 230, 0.72);
       }
 
-      .map-credit {
+      .map-chrome {
         position: fixed;
-        right: 12px;
-        bottom: 10px;
-        z-index: 20;
+        left: max(12px, env(safe-area-inset-left));
+        right: max(12px, env(safe-area-inset-right));
+        bottom: max(10px, env(safe-area-inset-bottom));
+        z-index: 22;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 8px;
+        pointer-events: none;
+      }
+
+      body.is-layers .map-chrome {
+        right: calc(max(12px, env(safe-area-inset-right)) + 312px);
+      }
+
+      .map-credit {
+        align-self: stretch;
         margin: 0;
         padding: 5px 9px;
         border-radius: 8px;
@@ -167,6 +509,93 @@
         font-size: 0.68rem;
         letter-spacing: 0.02em;
         pointer-events: none;
+      }
+
+      .cam-pad {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+        pointer-events: auto;
+        touch-action: manipulation;
+        user-select: none;
+      }
+
+      .cam-pad__compass {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+      }
+
+      .cam-pad__rose {
+        display: grid;
+        place-items: center;
+        width: 100%;
+        height: 100%;
+        transform: rotate(var(--heading, 0deg));
+      }
+
+      .cam-pad__n {
+        font-family: var(--font-display);
+        font-size: 0.95rem;
+        letter-spacing: 0.04em;
+        color: var(--sodium);
+        line-height: 1;
+      }
+
+      .cam-pad__grid {
+        display: grid;
+        grid-template-columns: repeat(3, 36px);
+        grid-template-rows: repeat(2, 36px);
+        gap: 4px;
+        padding: 4px;
+        border-radius: 12px;
+        border: 1px solid rgba(200, 221, 230, 0.16);
+        background: rgba(7, 20, 26, 0.82);
+        backdrop-filter: blur(10px);
+      }
+
+      .cam-pad button {
+        appearance: none;
+        display: grid;
+        place-items: center;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border-radius: 9px;
+        border: 1px solid rgba(200, 221, 230, 0.22);
+        background: rgba(7, 20, 26, 0.45);
+        color: var(--foam);
+        cursor: pointer;
+      }
+
+      .cam-pad button:hover {
+        border-color: var(--sodium);
+        color: var(--sodium);
+      }
+
+      .cam-pad button:active {
+        background: var(--sodium);
+        border-color: var(--sodium);
+        color: var(--ink);
+      }
+
+      .cam-pad button svg {
+        display: block;
+        width: 20px;
+        height: 20px;
+      }
+
+      .cam-pad button.cam-pad__compass {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: rgba(7, 20, 26, 0.82);
+        backdrop-filter: blur(10px);
+      }
+
+      body.is-driving .cam-pad {
+        display: none;
       }
 
       .map-credit a {
@@ -180,75 +609,108 @@
         text-decoration: underline;
       }
 
-      .map-filters__goto {
+      .planner__layer {
         display: flex;
         flex-direction: column;
-        gap: 5px;
-        margin-top: 12px;
-        font-size: var(--type-label);
-        color: var(--foam);
+        gap: 6px;
       }
 
-      .map-filters__goto select {
+      .planner__layer > [data-view] {
         width: 100%;
-        padding: 7px 8px;
-        border-radius: 8px;
-        border: 1px solid rgba(200, 221, 230, 0.28);
-        background: rgba(7, 20, 26, 0.55);
+      }
+
+      .planner button {
+        appearance: none;
+        border: 1px solid rgba(200, 221, 230, 0.22);
+        background: rgba(7, 20, 26, 0.45);
         color: var(--chalk);
-        font-family: var(--font-ui);
-        font-size: var(--type-label);
-        cursor: pointer;
-      }
-
-      .map-filters__goto select:hover,
-      .map-filters__goto select:focus {
-        border-color: var(--sodium);
-        outline: none;
-      }
-
-      .map-filters__aerial,
-      .map-filters__drive {
-        display: block;
-        width: 100%;
-        margin-top: 8px;
-        padding: 8px 10px;
         border-radius: 8px;
-        font-family: var(--font-display);
-        font-size: 1.05rem;
-        letter-spacing: var(--tracking-display);
+        padding: 7px 10px;
+        font-family: var(--font-ui);
+        font-size: 0.78rem;
+        font-weight: 600;
         cursor: pointer;
       }
 
-      .map-filters__hint + .map-filters__aerial {
-        margin-top: 12px;
-      }
-
-      .map-filters__aerial {
-        border: 1px solid rgba(200, 221, 230, 0.28);
-        background: transparent;
-        color: var(--foam);
-      }
-
-      .map-filters__aerial:hover {
+      .planner button.is-on {
         border-color: var(--sodium);
-        color: var(--sodium);
-      }
-
-      .map-filters__drive {
-        border: 0;
-        background: var(--sodium);
         color: var(--ink);
+        background: var(--sodium);
       }
 
-      .map-filters__drive:hover {
-        filter: brightness(1.06);
+      .planner__zone-tools {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .planner__zone-tools[hidden] {
+        display: none;
+      }
+
+      .planner__zones {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+
+      .planner__zone {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        justify-content: flex-start;
+      }
+
+      .planner__swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        box-shadow: 0 0 0 1px rgba(7, 20, 26, 0.45);
+      }
+
+      .planner__info {
+        font-size: var(--type-label);
+        color: var(--foam);
+        white-space: pre-line;
+        line-height: 1.35;
+      }
+
+      .planner__brush {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      .planner__brush-label {
+        font-size: 0.68rem;
+        color: rgba(200, 221, 230, 0.72);
+        margin-right: 2px;
+      }
+
+      .planner__legend {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.68rem;
+        color: rgba(200, 221, 230, 0.78);
+      }
+
+      .planner__legend[hidden] {
+        display: none;
+      }
+
+      .planner__ramp {
+        flex: 1;
+        height: 8px;
+        border-radius: 4px;
+        background: linear-gradient(90deg, #123048, #2a8070, #e8c440, #e24a3a);
       }
 
       #speedo {
         position: fixed;
         left: 16px;
-        bottom: 12px;
+        bottom: 42px;
         z-index: 20;
         min-width: 88px;
         padding: 8px 12px;
@@ -263,8 +725,8 @@
 
       #minimap {
         position: fixed;
-        top: 16px;
-        right: 16px;
+        top: calc(var(--hud-h) + env(safe-area-inset-top, 0px) + 10px);
+        left: 16px;
         z-index: 21;
         width: 168px;
         height: 168px;
@@ -273,6 +735,123 @@
         box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(7, 20, 26, 0.35);
         overflow: hidden;
         pointer-events: none;
+      }
+
+      body.is-map #minimap {
+        left: calc(max(12px, env(safe-area-inset-left)) + 312px);
+      }
+
+      @media (max-width: 720px) {
+        :root {
+          --hud-h: 50px;
+        }
+
+        .hud {
+          gap: 6px;
+        }
+
+        .hud__tab {
+          padding: 8px 12px;
+          min-height: 38px;
+          font-size: 0.9rem;
+        }
+
+        .hud__nav-btn {
+          padding: 8px 10px;
+          min-height: 38px;
+          font-size: 0.9rem;
+        }
+
+        .hud__goto-label {
+          display: none;
+        }
+
+        .hud__goto select {
+          height: 38px;
+          font-size: 0.88rem;
+        }
+
+        .hud__icon,
+        .dock__icon {
+          width: 42px;
+          height: 42px;
+        }
+
+        .hud__icon svg,
+        .dock__icon svg {
+          width: 24px;
+          height: 24px;
+        }
+
+        .dock {
+          width: min(300px, calc(100vw - 16px));
+        }
+
+        .planner button,
+        .map-filters label {
+          min-height: 40px;
+          font-size: 0.88rem;
+        }
+
+        .map-credit {
+          font-size: 0.58rem;
+        }
+
+        .cam-pad__grid {
+          grid-template-columns: repeat(3, 42px);
+          grid-template-rows: repeat(2, 42px);
+        }
+
+        .cam-pad button,
+        .cam-pad__compass {
+          width: 42px;
+          height: 42px;
+        }
+
+        .cam-pad button svg {
+          width: 22px;
+          height: 22px;
+        }
+
+        body.is-layers .map-chrome {
+          right: max(12px, env(safe-area-inset-right));
+        }
+
+        body.is-layers .cam-pad {
+          display: none;
+        }
+
+        #minimap {
+          top: auto;
+          left: auto;
+          right: max(12px, env(safe-area-inset-right));
+          bottom: max(52px, env(safe-area-inset-bottom));
+        }
+
+        body.is-map #minimap {
+          left: auto;
+        }
+
+        body.is-layers #minimap {
+          right: auto;
+          left: max(12px, env(safe-area-inset-left));
+        }
+      }
+
+      @media (max-width: 640px) {
+        body.is-map.is-layers .dock {
+          width: calc(50vw - 10px);
+          max-width: none;
+        }
+
+        body.is-map.is-layers .planner__zones {
+          grid-template-columns: 1fr;
+        }
+
+        .hud__tab,
+        .hud__nav-btn {
+          padding: 8px 10px;
+        }
       }
 
       body.is-driving #labels {
@@ -324,28 +903,209 @@
       }
     </style>
   </head>
-  <body>
+  <body class="is-booting">
+    <div id="boot" role="status" aria-live="polite" aria-busy="true">
+      <svg class="boot__map" viewBox="0 0 200 168" aria-hidden="true">
+        <rect class="boot__water" x="0" y="0" width="200" height="168" rx="18"/>
+        <g class="boot__land">
+          <path d="M38 46c8-10 22-16 34-12 8 3 12 12 14 22 3 16 2 34-2 50-3 12-10 24-20 30-12 8-26 6-34-4-8-10-10-28-8-44 2-14 8-32 16-42z"/>
+          <path d="M96 22c10-6 22-6 32 2 12 10 18 28 22 46 5 22 8 44 2 62-4 14-16 22-30 22-14 0-24-8-30-20-6-12-10-28-10-44 0-18 4-36 8-50 2-8 4-14 6-18z"/>
+          <path d="M142 28c14-4 28 2 36 14 8 12 10 28 8 44-2 18-10 34-22 42-12 8-26 6-34-6-6-10-6-26-2-40 4-16 10-30 14-54z"/>
+        </g>
+        <g class="boot__fill">
+          <path d="M38 46c8-10 22-16 34-12 8 3 12 12 14 22 3 16 2 34-2 50-3 12-10 24-20 30-12 8-26 6-34-4-8-10-10-28-8-44 2-14 8-32 16-42z"/>
+          <path d="M96 22c10-6 22-6 32 2 12 10 18 28 22 46 5 22 8 44 2 62-4 14-16 22-30 22-14 0-24-8-30-20-6-12-10-28-10-44 0-18 4-36 8-50 2-8 4-14 6-18z"/>
+          <path d="M142 28c14-4 28 2 36 14 8 12 10 28 8 44-2 18-10 34-22 42-12 8-26 6-34-6-6-10-6-26-2-40 4-16 10-30 14-54z"/>
+        </g>
+        <circle class="boot__ping" cx="84" cy="88" r="8"/>
+        <circle class="boot__ping boot__ping--late" cx="84" cy="88" r="8"/>
+        <g class="boot__trace">
+          <path d="M38 46c8-10 22-16 34-12 8 3 12 12 14 22 3 16 2 34-2 50-3 12-10 24-20 30-12 8-26 6-34-4-8-10-10-28-8-44 2-14 8-32 16-42z"/>
+          <path d="M96 22c10-6 22-6 32 2 12 10 18 28 22 46 5 22 8 44 2 62-4 14-16 22-30 22-14 0-24-8-30-20-6-12-10-28-10-44 0-18 4-36 8-50 2-8 4-14 6-18z"/>
+          <path d="M142 28c14-4 28 2 36 14 8 12 10 28 8 44-2 18-10 34-22 42-12 8-26 6-34-6-6-10-6-26-2-40 4-16 10-30 14-54z"/>
+        </g>
+      </svg>
+      <h1 class="boot__title">SIMPOMPEY</h1>
+      <p class="boot__status" id="boot-status">Hang on mush…</p>
+      <div class="boot__bar" id="boot-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="4" aria-labelledby="boot-status">
+        <span class="boot__bar-fill" id="boot-bar-fill"></span>
+      </div>
+    </div>
     <canvas id="game"></canvas>
     <div id="labels"></div>
-    <aside class="map-filters" id="map-filters">
-      <div class="map-filters__title">Map filters</div>
-      <label><input type="checkbox" data-filter="buildings" checked /> 3D buildings</label>
-      <label><input type="checkbox" data-filter="roads" checked /> Roads</label>
-      <label><input type="checkbox" data-filter="rails" checked /> Railway</label>
-      <label><input type="checkbox" data-filter="trains" checked /> Trains</label>
-      <label><input type="checkbox" data-filter="vegetation" checked /> Trees &amp; parks</label>
-      <label><input type="checkbox" data-filter="ships" checked /> Ships</label>
-      <label><input type="checkbox" data-filter="power" checked /> Power</label>
-      <label><input type="checkbox" data-filter="roadLabels" /> Road labels</label>
-      <label><input type="checkbox" data-filter="buildingLabels" /> Building labels</label>
-      <label><input type="checkbox" data-filter="areaLabels" /> Area labels</label>
-      <p class="map-filters__hint">Drag to pan · scroll zooms to cursor · right-drag to tilt · double-click to close in · T aerial · [ ] viewpoints · WASD to move · Q/E height</p>
-      <label class="map-filters__goto">
-        Snap to
-        <select id="view-select"></select>
-      </label>
-      <button type="button" class="map-filters__aerial" id="aerial-toggle">Aerial view</button>
-      <button type="button" class="map-filters__drive" id="drive-toggle">Take the motor</button>
+    <header class="hud" id="hud">
+      <div class="hud__tabs">
+        <button type="button" class="hud__tab" id="tab-map" data-panel="map" aria-pressed="false" aria-controls="dock-map">Map</button>
+        <button type="button" class="hud__tab" id="tab-layers" data-panel="layers" aria-pressed="false" aria-controls="dock-layers">Layers</button>
+      </div>
+      <nav class="hud__nav" aria-label="Viewpoints">
+        <button type="button" class="hud__nav-btn" id="aerial-toggle">Aerial</button>
+        <label class="hud__goto">
+          <span class="hud__goto-label">Snap to</span>
+          <select id="view-select" aria-label="Snap to"></select>
+        </label>
+      </nav>
+      <div class="hud__tools">
+        <button type="button" class="hud__icon" id="demolish-toggle" title="Knock down" aria-label="Knock down" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M5 11.2 12 5.4 19 11.2V19.6H5z"/>
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="m9 13.4 6 6M15 13.4l-6 6"/>
+          </svg>
+        </button>
+        <button type="button" class="hud__icon" id="drive-toggle" title="Take the motor" aria-label="Take the motor" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M5 14.2 7.1 10h2.2L11 7.8h5.6L18.2 10H20l1.2 4.2H5zm.8 1.5h12.4v1.15H5.8z"/>
+            <circle cx="7.6" cy="18.6" r="1.55" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <circle cx="16.4" cy="18.6" r="1.55" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+    <aside class="dock dock--map is-away" id="dock-map">
+      <div class="dock__head">
+        <h2>Map</h2>
+        <button type="button" class="dock__icon" data-close="map" title="Hide map" aria-label="Hide map">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="m8 8 8 8M16 8l-8 8"/>
+          </svg>
+        </button>
+      </div>
+      <div class="map-filters dock__pane" id="map-filters">
+        <label><input type="checkbox" data-filter="buildings" checked /> 3D buildings</label>
+        <label><input type="checkbox" data-filter="roads" checked /> Roads</label>
+        <label><input type="checkbox" data-filter="rails" checked /> Railway</label>
+        <label><input type="checkbox" data-filter="trains" checked /> Trains</label>
+        <label><input type="checkbox" data-filter="vegetation" checked /> Trees &amp; parks</label>
+        <label><input type="checkbox" data-filter="ships" checked /> Ships</label>
+        <label><input type="checkbox" data-filter="power" checked /> Power</label>
+        <label><input type="checkbox" data-filter="roadLabels" /> Road labels</label>
+        <label><input type="checkbox" data-filter="buildingLabels" /> Building labels</label>
+        <label><input type="checkbox" data-filter="areaLabels" /> Area labels</label>
+        <p class="map-filters__hint">Drag to pan · scroll zooms to cursor · right-drag to tilt · double-click to close in · T aerial · [ ] viewpoints · M map · B layers · WASD to move · Q/E height</p>
+      </div>
+    </aside>
+    <aside class="dock dock--layers is-away" id="dock-layers">
+      <div class="dock__head">
+        <h2>Layers</h2>
+        <button type="button" class="dock__icon" data-close="layers" title="Hide layers" aria-label="Hide layers">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="m8 8 8 8M16 8l-8 8"/>
+          </svg>
+        </button>
+      </div>
+      <div class="planner dock__pane" id="planner">
+        <div class="planner__layer">
+          <button type="button" data-view="zones">Land use</button>
+          <div class="planner__zone-tools" id="zone-tools" hidden>
+            <div class="planner__zones">
+              <button type="button" class="planner__zone" data-tool="residential"><span class="planner__swatch" style="background:#2ee86a"></span> Houses</button>
+              <button type="button" class="planner__zone" data-tool="commercial"><span class="planner__swatch" style="background:#3d9bff"></span> Shops</button>
+              <button type="button" class="planner__zone" data-tool="industrial"><span class="planner__swatch" style="background:#ffd000"></span> Works</button>
+              <button type="button" class="planner__zone" data-tool="defence"><span class="planner__swatch" style="background:#c8e000"></span> Defence</button>
+              <button type="button" class="planner__zone" data-tool="park"><span class="planner__swatch" style="background:#1ee87a"></span> Park</button>
+              <button type="button" class="planner__zone" data-tool="nature"><span class="planner__swatch" style="background:#00d45a"></span> Nature</button>
+              <button type="button" class="planner__zone" data-tool="civic"><span class="planner__swatch" style="background:#8ec8ff"></span> Civic</button>
+              <button type="button" class="planner__zone" data-tool="church"><span class="planner__swatch" style="background:#ffd400"></span> Churches</button>
+              <button type="button" class="planner__zone" data-tool="health"><span class="planner__swatch" style="background:#ff3d7a"></span> Health</button>
+              <button type="button" class="planner__zone" data-tool="police"><span class="planner__swatch" style="background:#4d6bff"></span> Police</button>
+              <button type="button" class="planner__zone" data-tool="fire"><span class="planner__swatch" style="background:#ff2a2a"></span> Fire</button>
+              <button type="button" class="planner__zone" data-tool="coastguard"><span class="planner__swatch" style="background:#ff9a00"></span> Coastguard</button>
+              <button type="button" class="planner__zone" data-tool="harbour"><span class="planner__swatch" style="background:#00e0f0"></span> Harbour</button>
+              <button type="button" class="planner__zone" data-tool="utilities"><span class="planner__swatch" style="background:#ff4ef0"></span> Utilities</button>
+              <button type="button" class="planner__zone" data-tool="cultural"><span class="planner__swatch" style="background:#c070ff"></span> Culture</button>
+              <button type="button" class="planner__zone" data-tool="sports"><span class="planner__swatch" style="background:#ff6a14"></span> Sport</button>
+              <button type="button" class="planner__zone" data-tool="education"><span class="planner__swatch" style="background:#22e0ff"></span> Education</button>
+              <button type="button" class="planner__zone" data-tool="parking"><span class="planner__swatch" style="background:#a8b4ff"></span> Parking</button>
+            </div>
+            <button type="button" data-tool="dezone">Wipe zone</button>
+            <div class="planner__brush">
+              <span class="planner__brush-label">Brush</span>
+              <button type="button" data-brush="1">1</button>
+              <button type="button" data-brush="2">2</button>
+              <button type="button" data-brush="4">4</button>
+            </div>
+          </div>
+        </div>
+        <div class="planner__layer">
+          <button type="button" data-view="value">Land value</button>
+        </div>
+        <div class="planner__layer">
+          <button type="button" data-view="traffic">Traffic</button>
+        </div>
+        <div class="planner__layer">
+          <button type="button" data-view="crime">Crime</button>
+          <div class="planner__zone-tools" id="crime-tools" hidden>
+            <div class="planner__zones">
+              <button type="button" data-crime="all">All</button>
+              <button type="button" data-crime="violence">Violence</button>
+              <button type="button" data-crime="asb">ASB</button>
+              <button type="button" data-crime="burglary">Burglary</button>
+              <button type="button" data-crime="drugs">Drugs</button>
+              <button type="button" data-crime="theft">Theft</button>
+            </div>
+          </div>
+        </div>
+        <div class="planner__layer">
+          <button type="button" data-view="pollution">Pollution</button>
+          <div class="planner__zone-tools" id="pollution-tools" hidden>
+            <div class="planner__zones">
+              <button type="button" data-pollution="no2">NO₂</button>
+              <button type="button" data-pollution="pm25">PM₂.₅</button>
+              <button type="button" data-pollution="noise">Noise</button>
+            </div>
+          </div>
+        </div>
+        <div class="planner__layer">
+          <button type="button" data-view="flood">Flood</button>
+          <div class="planner__zone-tools" id="flood-tools" hidden>
+            <div class="planner__zones">
+              <button type="button" data-flood="all">All</button>
+              <button type="button" data-flood="sea">Sea</button>
+              <button type="button" data-flood="surface">Surface</button>
+            </div>
+          </div>
+        </div>
+        <div class="planner__layer">
+          <button type="button" data-view="imd">Deprivation</button>
+          <div class="planner__zone-tools" id="imd-tools" hidden>
+            <div class="planner__zones">
+              <button type="button" data-imd="all">All</button>
+              <button type="button" data-imd="income">Income</button>
+              <button type="button" data-imd="health">Health</button>
+              <button type="button" data-imd="living">Living</button>
+            </div>
+          </div>
+        </div>
+        <div class="planner__layer">
+          <button type="button" data-view="broadband">Broadband</button>
+          <div class="planner__zone-tools" id="broadband-tools" hidden>
+            <div class="planner__zones">
+              <button type="button" data-broadband="gigabit">Gigabit</button>
+              <button type="button" data-broadband="superfast">Superfast</button>
+              <button type="button" data-broadband="slow">Slow</button>
+            </div>
+          </div>
+        </div>
+        <div class="planner__layer">
+          <button type="button" data-view="speeds">Speeds</button>
+          <div class="planner__zone-tools" id="speeds-tools" hidden>
+            <div class="planner__zones">
+              <button type="button" data-speeds="down">Down</button>
+              <button type="button" data-speeds="up">Up</button>
+            </div>
+          </div>
+        </div>
+        <div class="planner__layer">
+          <button type="button" data-view="masts">Masts</button>
+        </div>
+        <div class="planner__legend" id="value-legend" hidden>
+          <span data-legend-lo>Low</span>
+          <span class="planner__ramp"></span>
+          <span data-legend-hi>High</span>
+        </div>
+        <span class="planner__info" id="planner-info">Pick a layer, then paint the island</span>
+        <p class="planner__hint">Paint to rezone · 1–9 layers · Esc all zones · X knock down · -/= brush</p>
+      </div>
     </aside>
     <div id="speedo" hidden>0 mph</div>
     <div id="minimap" hidden>
@@ -353,6 +1113,48 @@
       <div class="minimap__marker">
         <div class="minimap__needle"></div>
         <div class="minimap__dot"></div>
+      </div>
+    </div>
+    <div class="map-chrome">
+    <div class="cam-pad" id="cam-pad">
+      <button type="button" class="cam-pad__compass" data-cam="north" title="North up" aria-label="North up">
+        <span class="cam-pad__rose" id="cam-compass">
+          <span class="cam-pad__n">N</span>
+        </span>
+      </button>
+      <div class="cam-pad__grid">
+        <button type="button" data-cam="rot-ccw" title="Rotate left" aria-label="Rotate left">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M8.2 7.2 6 9.4l2.2 2.2"/>
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M6.4 9.4h7.2a4.4 4.4 0 1 1-1.2 8.6"/>
+          </svg>
+        </button>
+        <button type="button" data-cam="tilt-up" title="Tilt up" aria-label="Tilt up">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m7 14 5-5 5 5"/>
+          </svg>
+        </button>
+        <button type="button" data-cam="zoom-in" title="Zoom in" aria-label="Zoom in">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M7 12h10M12 7v10"/>
+          </svg>
+        </button>
+        <button type="button" data-cam="rot-cw" title="Rotate right" aria-label="Rotate right">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m15.8 7.2 2.2 2.2-2.2 2.2"/>
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M17.6 9.4H10.4a4.4 4.4 0 1 0 1.2 8.6"/>
+          </svg>
+        </button>
+        <button type="button" data-cam="tilt-down" title="Tilt down" aria-label="Tilt down">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m7 10 5 5 5-5"/>
+          </svg>
+        </button>
+        <button type="button" data-cam="zoom-out" title="Zoom out" aria-label="Zoom out">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M7 12h10"/>
+          </svg>
+        </button>
       </div>
     </div>
     <p class="map-credit">
@@ -369,7 +1171,35 @@
       · trains
       <a href="https://www.nationalrail.co.uk/developers/darwin-data-feeds/" target="_blank" rel="noreferrer">© National Rail Enquiries</a>
       Darwin
+      · prices
+      <a href="https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads" target="_blank" rel="noreferrer">© HM Land Registry</a>
+      · land values
+      <a href="https://www.gov.uk/government/publications/land-value-estimates-for-policy-appraisal-2023" target="_blank" rel="noreferrer">© MHCLG</a>
+      · traffic
+      <a href="https://roadtraffic.dft.gov.uk/local-authorities/E06000044" target="_blank" rel="noreferrer">© DfT</a>
+      · congestion
+      <a href="https://www.gov.uk/government/statistical-data-sets/average-speed-delay-and-reliability-of-travel-times-cgn" target="_blank" rel="noreferrer">© DfT CGN</a>
+      · crime
+      <a href="https://data.police.uk/" target="_blank" rel="noreferrer">© police.uk</a>
+      · air
+      <a href="https://uk-air.defra.gov.uk/data/pcm-data" target="_blank" rel="noreferrer">© Defra UK-AIR</a>
+      · noise
+      <a href="https://www.data.gov.uk/dataset/38b1444f-47a0-42ca-a358-0d145fcf7d5c/road-noise-all-metrics-england-round-4" target="_blank" rel="noreferrer">© Defra</a>
+      · flood
+      <a href="https://www.data.gov.uk/dataset/bad1991f-6ac9-41aa-b0fd-26b7266f511d/risk-of-flooding-from-rivers-and-sea" target="_blank" rel="noreferrer">© Environment Agency</a>
+      · deprivation
+      <a href="https://www.gov.uk/government/statistics/english-indices-of-deprivation-2025" target="_blank" rel="noreferrer">© MHCLG</a>
+      · broadband
+      <a href="https://www.ofcom.org.uk/phones-and-broadband/coverage-and-speeds/connected-nations-20252/data-downloads-2025" target="_blank" rel="noreferrer">© Ofcom</a>
+      · speeds
+      <a href="https://www.ofcom.org.uk/phones-and-broadband/coverage-and-speeds/connected-nations-2023/data-downloads" target="_blank" rel="noreferrer">© Ofcom</a>
+      · masts
+      <a href="https://www.ofcom.org.uk/spectrum/frequencies/wtr" target="_blank" rel="noreferrer">© Ofcom WTR</a>
+      · cells
+      <a href="https://opencellid.org/" target="_blank" rel="noreferrer">© OpenCelliD</a>
+      (OGL / CC-BY-SA)
     </p>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

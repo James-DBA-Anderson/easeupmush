@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from "three-mesh-bvh";
 import { Motor } from "./car";
@@ -15,9 +15,13 @@ import { addBarrierKit } from "./barriers";
 import { addFurnitureKit } from "./furniture";
 import { addPlaces } from "./places";
 import { TOWN_VIEWS, type TownView } from "./views";
+import { CityBuilder, type BuilderTool } from "./builder";
 
 const BARRIER_VIEW = 340;
 const BARRIER_REACH = 170;
+const SHADOW_MAP = 2048;
+const SHADOW_EXTENT_MIN = 320;
+const SHADOW_EXTENT_MAX = 720;
 const MINIMAP_CSS = 168;
 const MINIMAP_PAD = 16;
 const MINIMAP_RADIUS = 150;
@@ -84,13 +88,20 @@ export class Game {
   private miniCam: THREE.OrthographicCamera;
   private miniSize = new THREE.Vector2();
   private driveBtn = document.getElementById("drive-toggle") as HTMLButtonElement | null;
+  private demolishBtn = document.getElementById("demolish-toggle") as HTMLButtonElement | null;
   private aerialBtn = document.getElementById("aerial-toggle") as HTMLButtonElement | null;
   private viewSelect = document.getElementById("view-select") as HTMLSelectElement | null;
   private viewIndex = 0;
+  private mapOpen = false;
+  private layersOpen = false;
   private hintEl = document.querySelector(".map-filters__hint");
+  private bootEl = document.getElementById("boot");
+  private bootStatus = document.getElementById("boot-status");
+  private bootBar = document.getElementById("boot-bar");
+  private bootFill = document.getElementById("boot-bar-fill");
   private mapHint =
-    "Drag to pan · scroll zooms to cursor · right-drag to tilt · double-click to close in · T aerial · [ ] viewpoints · WASD to move · Q/E height";
-  private aerialHeight = 1200;
+    "Drag to pan · scroll zooms to cursor · right-drag to tilt · double-click to close in · T aerial · [ ] viewpoints · M map · B layers · WASD to move · Q/E height";
+  private aerialHeight = 4200;
   private driveHint = "WASD to drive · Space brake · Shift boot it · Esc back to the map";
   private mapRoot = new THREE.Group();
   private mapScene: THREE.Object3D | null = null;
@@ -110,6 +121,14 @@ export class Game {
   private camForward = new THREE.Vector3();
   private camRight = new THREE.Vector3();
   private camMove = new THREE.Vector3();
+  private camOffset = new THREE.Vector3();
+  private camSpherical = new THREE.Spherical();
+  private camYUp = new THREE.Vector3(0, 1, 0);
+  private camQuat = new THREE.Quaternion();
+  private camQuatInv = new THREE.Quaternion();
+  private camHold: string | null = null;
+  private camHoldAt = 0;
+  private compassRose = document.getElementById("cam-compass");
   private camBoom = 9.6;
   private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private pickRay = new THREE.Raycaster();
@@ -132,6 +151,7 @@ export class Game {
   private furnitureKit: THREE.Object3D | null = null;
   private landmarks: THREE.Object3D | null = null;
   private trains: RailTraffic | null = null;
+  private builder: CityBuilder | null = null;
   private filters: MapFilters = {
     buildings: true,
     roads: true,
@@ -205,7 +225,7 @@ export class Game {
     this.scene.add(new THREE.HemisphereLight(0xd4e7f7, 0x9a8b6a, 0.9));
     this.sun = new THREE.DirectionalLight(0xfff1c8, 1.45);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(1024, 1024);
+    this.sun.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP);
     this.sun.shadow.intensity = 0.55;
     this.sun.shadow.bias = -0.0008;
     this.sun.shadow.normalBias = 1.1;
@@ -239,11 +259,13 @@ export class Game {
 
     // Load terrain + buildings
     const loader = new GLTFLoader();
+    this.setBoot("Hang on mush…", 0.04);
     try {
-      const [gltf, labels] = await Promise.all([
-        loader.loadAsync("./models/portsmouth-terrain.gltf?v=ships1"),
-        fetch("./models/portsmouth-labels.json").then((r) => r.json()) as Promise<MapLabel[]>,
-      ]);
+      const labelsP = fetch("./models/portsmouth-labels.json").then((r) => r.json()) as Promise<MapLabel[]>;
+      const gltf = await this.loadGltf(loader, "./models/portsmouth-terrain.gltf?v=roads1", (t) => {
+        this.setBoot("Laying out Pompey…", 0.06 + 0.7 * t);
+      });
+      const labels = await labelsP;
       gltf.scene.updateMatrixWorld(true);
 
       const box = new THREE.Box3().setFromObject(gltf.scene);
@@ -327,6 +349,7 @@ export class Game {
         }
       });
 
+      this.setBoot("Chopping up the island…", 0.78);
       const buildings = this.layerMeshes.get("buildings");
       if (buildings instanceof THREE.Mesh && buildings.parent) {
         const chunks = chunkBuildings(buildings, 380);
@@ -367,38 +390,84 @@ export class Game {
 
       this.mapRoot.updateMatrixWorld(true);
       addHorizon(this.scene, gltf.scene);
+      this.setBoot("Shoreline…", 0.82);
       try {
         await addShore(gltf.scene);
       } catch (err) {
         console.warn("Shore failed to load:", err);
       }
+      this.setBoot("Landmarks…", 0.85);
       await this.placeSpinnaker(loader, labels);
       await this.placeForts(loader, labels);
+      this.setBoot("Trees and parks…", 0.88);
       await this.placeVegetation(loader);
       await this.placePlaces(loader, labels);
+      this.setBoot("Harbour traffic…", 0.91);
       await this.placeShips(loader, labels);
       await this.placeHarbourKit(loader, labels);
       await this.placePowerKit(loader, labels);
       await this.placeBarrierKit(loader);
+      this.setBoot("Street kit…", 0.94);
       await this.placeFurnitureKit(loader);
       await this.placeTrains(loader, labels);
 
       this.buildLabels(labels);
       this.applyFilters();
+      this.setBoot("Planning office…", 0.97);
+      await this.placeBuilder();
+      this.setBoot("Sweet as nut", 1);
 
       const span = Math.max(size.x, size.z);
-      this.aerialHeight = span * 0.9;
+      this.aerialHeight = TOWN_VIEWS[0].height || 4200;
       this.snapAerial();
       this.controls.maxDistance = Math.max(8000, span * 1.6);
       this.controls.update();
+      this.hideBoot();
     } catch (e) {
       console.error("Failed to load terrain:", e);
+      this.setBoot("Couldn't load the map, mush. Refresh.", 0);
+      if (this.bootEl) this.bootEl.setAttribute("aria-busy", "false");
+      this.clock.start();
+      window.addEventListener("resize", this.resize);
+      this.resize();
+      this.loop();
+      return;
     }
 
     this.clock.start();
     window.addEventListener("resize", this.resize);
     this.resize();
     this.loop();
+  }
+
+  private loadGltf(loader: GLTFLoader, url: string, onPct: (t: number) => void): Promise<GLTF> {
+    return new Promise((resolve, reject) => {
+      loader.load(
+        url,
+        resolve,
+        (e) => {
+          if (e.lengthComputable && e.total > 0) onPct(e.loaded / e.total);
+        },
+        reject,
+      );
+    });
+  }
+
+  private setBoot(label: string, amount: number) {
+    const pct = Math.max(0, Math.min(1, amount));
+    if (this.bootStatus) this.bootStatus.textContent = label;
+    if (this.bootFill) this.bootFill.style.width = `${Math.round(pct * 100)}%`;
+    if (this.bootBar) this.bootBar.setAttribute("aria-valuenow", String(Math.round(pct * 100)));
+    this.bootEl?.style.setProperty("--boot-pct", `${Math.round(pct * 100)}%`);
+  }
+
+  private hideBoot() {
+    document.body.classList.remove("is-booting");
+    const el = this.bootEl;
+    if (!el) return;
+    el.classList.add("is-done");
+    el.setAttribute("aria-busy", "false");
+    window.setTimeout(() => el.remove(), 700);
   }
 
   stop() {
@@ -421,7 +490,11 @@ export class Game {
     const dt = Math.min(this.clock.getDelta(), 0.1);
 
     if (this.driving) this.updateDrive(dt);
-    else this.updateFly(dt);
+    else {
+      this.updateFly(dt);
+      this.tickCamPad(dt);
+    }
+    this.syncCompass();
     this.harbour?.update(dt);
     this.trains?.update(dt);
     if (!this.driving) this.controls.update();
@@ -451,7 +524,7 @@ export class Game {
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
     const size = MINIMAP_CSS;
-    const x = w - MINIMAP_PAD - MINIMAP_CSS;
+    const x = MINIMAP_PAD;
     const y = h - MINIMAP_PAD - MINIMAP_CSS;
 
     const p = motor.position;
@@ -551,8 +624,45 @@ export class Game {
         e.preventDefault();
         return;
       }
+      if (e.code === "Escape" && this.builder?.active) {
+        if (this.builder.tool !== "query") {
+          this.builder.setTool("query");
+          if (!this.layersOpen) this.setPlanning(false);
+        } else if (this.layersOpen) {
+          this.setLayersOpen(false);
+        } else if (this.mapOpen) {
+          this.setMapOpen(false);
+        }
+        e.preventDefault();
+        return;
+      }
+      if (e.code === "Escape" && (this.layersOpen || this.mapOpen) && !this.driving) {
+        if (this.layersOpen) this.setLayersOpen(false);
+        else this.setMapOpen(false);
+        e.preventDefault();
+        return;
+      }
+      if (e.code === "KeyM" && !e.repeat) {
+        this.setMapOpen(!this.mapOpen);
+        e.preventDefault();
+        return;
+      }
+      if (e.code === "KeyB" && !e.repeat) {
+        this.setLayersOpen(!this.layersOpen);
+        e.preventDefault();
+        return;
+      }
+      if (e.code === "KeyX" && !e.repeat) {
+        this.toggleDemolish();
+        e.preventDefault();
+        return;
+      }
       if (e.code === "KeyC" && !e.repeat) {
         this.setDriving(!this.driving);
+        e.preventDefault();
+        return;
+      }
+      if (this.handlePlanKey(e)) {
         e.preventDefault();
         return;
       }
@@ -589,9 +699,149 @@ export class Game {
     this.canvas.addEventListener("click", () => this.canvas.focus());
     this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     this.canvas.addEventListener("dblclick", this.zoomToPoint);
+    this.canvas.addEventListener("pointerdown", this.onPlanPointer);
+    this.canvas.addEventListener("pointermove", this.onPlanPointer);
+    this.canvas.addEventListener("pointerup", this.onPlanPointer);
+    this.canvas.addEventListener("pointerleave", this.onPlanPointer);
     this.driveBtn?.addEventListener("click", () => this.setDriving(!this.driving));
+    this.demolishBtn?.addEventListener("click", () => this.toggleDemolish());
     this.aerialBtn?.addEventListener("click", () => this.snapView(TOWN_VIEWS[0]));
+    document.getElementById("hud")?.addEventListener("click", (e) => {
+      const tab = (e.target as HTMLElement | null)?.closest("[data-panel]") as HTMLElement | null;
+      if (tab?.dataset.panel === "map") this.setMapOpen(!this.mapOpen);
+      if (tab?.dataset.panel === "layers") this.setLayersOpen(!this.layersOpen);
+    });
+    document.getElementById("dock-map")?.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement | null)?.closest("[data-close='map']")) this.setMapOpen(false);
+    });
+    document.getElementById("dock-layers")?.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement | null)?.closest("[data-close='layers']")) this.setLayersOpen(false);
+    });
     this.bindViews();
+    this.bindCamPad();
+  }
+
+  private bindCamPad() {
+    const pad = document.getElementById("cam-pad");
+    if (!pad) return;
+    const actionOf = (e: Event) =>
+      ((e.target as HTMLElement | null)?.closest("[data-cam]") as HTMLElement | null)?.dataset.cam ?? null;
+    pad.addEventListener("pointerdown", (e) => {
+      const action = actionOf(e);
+      if (!action || this.driving) return;
+      e.preventDefault();
+      try {
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      } catch {
+        /* pointer capture is optional; hold-to-repeat still stops on pointerup */
+      }
+      this.nudgeCam(action);
+      if (action !== "north") {
+        this.camHold = action;
+        this.camHoldAt = performance.now();
+      }
+    });
+    const stop = () => {
+      this.camHold = null;
+    };
+    pad.addEventListener("pointerup", stop);
+    pad.addEventListener("pointercancel", stop);
+    pad.addEventListener("lostpointercapture", stop);
+    pad.addEventListener("click", (e) => {
+      if (actionOf(e) === "north") this.nudgeCam("north");
+    });
+  }
+
+  private tickCamPad(dt: number) {
+    if (!this.camHold || this.driving) return;
+    if (performance.now() - this.camHoldAt < 280) return;
+    const turn = 0.95 * dt;
+    const tilt = 0.7 * dt;
+    switch (this.camHold) {
+      case "rot-ccw":
+        this.orbitBy(-turn, 0, 1);
+        break;
+      case "rot-cw":
+        this.orbitBy(turn, 0, 1);
+        break;
+      case "tilt-up":
+        this.orbitBy(0, -tilt, 1);
+        break;
+      case "tilt-down":
+        this.orbitBy(0, tilt, 1);
+        break;
+      case "zoom-in":
+        this.orbitBy(0, 0, Math.pow(0.22, dt));
+        break;
+      case "zoom-out":
+        this.orbitBy(0, 0, Math.pow(4.6, dt));
+        break;
+      default:
+        break;
+    }
+  }
+
+  private nudgeCam(action: string) {
+    if (this.driving) return;
+    if (action === "north") {
+      this.orbitBy(-this.controls.getAzimuthalAngle(), 0, 1);
+      this.canvas.focus();
+      return;
+    }
+    switch (action) {
+      case "rot-ccw":
+        this.orbitBy(-0.14, 0, 1);
+        break;
+      case "rot-cw":
+        this.orbitBy(0.14, 0, 1);
+        break;
+      case "tilt-up":
+        this.orbitBy(0, -0.1, 1);
+        break;
+      case "tilt-down":
+        this.orbitBy(0, 0.1, 1);
+        break;
+      case "zoom-in":
+        this.orbitBy(0, 0, 0.72);
+        break;
+      case "zoom-out":
+        this.orbitBy(0, 0, 1.38);
+        break;
+      default:
+        break;
+    }
+    this.canvas.focus();
+  }
+
+  private orbitBy(dTheta: number, dPhi: number, dolly: number) {
+    this.camQuat.setFromUnitVectors(this.camera.up, this.camYUp);
+    this.camQuatInv.copy(this.camQuat).invert();
+    this.camOffset.copy(this.camera.position).sub(this.controls.target).applyQuaternion(this.camQuat);
+    this.camSpherical.setFromVector3(this.camOffset);
+    this.camSpherical.theta += dTheta;
+    this.camSpherical.phi = THREE.MathUtils.clamp(
+      this.camSpherical.phi + dPhi,
+      this.controls.minPolarAngle + 0.02,
+      this.controls.maxPolarAngle,
+    );
+    if (dolly !== 1) {
+      this.camSpherical.radius = THREE.MathUtils.clamp(
+        this.camSpherical.radius * dolly,
+        this.controls.minDistance,
+        this.controls.maxDistance,
+      );
+    }
+    this.camOffset.setFromSpherical(this.camSpherical).applyQuaternion(this.camQuatInv);
+    this.camera.position.copy(this.controls.target).add(this.camOffset);
+    this.camera.up.copy(this.camYUp);
+    this.camera.lookAt(this.controls.target);
+    this.controls.update();
+  }
+
+  private syncCompass() {
+    if (!this.compassRose) return;
+    const deg = THREE.MathUtils.radToDeg(this.controls.getAzimuthalAngle());
+    this.compassRose.style.setProperty("--heading", `${-deg}deg`);
   }
 
   private bindViews() {
@@ -625,9 +875,15 @@ export class Game {
     if (this.driving) this.setDriving(false);
     this.viewIndex = Math.max(0, TOWN_VIEWS.findIndex((v) => v.id === view.id));
     if (this.viewSelect) this.viewSelect.value = view.id;
+    this.aerialBtn?.classList.toggle("is-on", !!view.aerial);
     if (view.aerial) {
-      this.controls.target.set(0, 0, 0);
-      this.camera.position.set(0, this.aerialHeight, 1);
+      const { x, y: z } = osmLocal(view.lat, view.lon);
+      const target = new THREE.Vector3(x, 0, z);
+      this.mapScene?.localToWorld(target);
+      target.y = this.sampleGround(target.x, target.z) ?? 0;
+      const height = view.height || this.aerialHeight;
+      this.controls.target.copy(target);
+      this.camera.position.set(target.x, height, target.z + 1);
       this.camera.up.set(0, 1, 0);
       this.camera.near = 2;
       this.camera.updateProjectionMatrix();
@@ -660,7 +916,7 @@ export class Game {
   }
 
   private zoomToPoint = (e: MouseEvent) => {
-    if (this.driving) return;
+    if (this.driving || this.builder?.ownsLeftClick()) return;
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return;
     this.pickNdc.set(
@@ -688,36 +944,180 @@ export class Game {
     });
   }
 
+  private hidingGround() {
+    return Boolean(this.builder?.active && this.builder.overlay !== "none");
+  }
+
   private applyFilters() {
+    const strip = this.hidingGround();
+    const showBuildings = this.filters.buildings && !strip;
+    const showRoads = this.filters.roads;
+    const showRails = this.filters.rails;
+    const showVeg = this.filters.vegetation && !strip;
+    const showPower = this.filters.power && !strip;
+    const showTrains = this.filters.trains;
     const buildings = this.layerMeshes.get("buildings");
     const roads = this.layerMeshes.get("roads");
     const rails = this.layerMeshes.get("rails");
-    if (buildings) buildings.visible = this.filters.buildings;
-    if (roads) roads.visible = this.filters.roads;
-    for (const extra of this.roadDecor) extra.visible = this.filters.roads;
-    if (rails) rails.visible = this.filters.rails;
-    for (const extra of this.railDecor) extra.visible = this.filters.rails;
-    if (this.spinnaker) this.spinnaker.visible = this.filters.buildings;
-    if (this.forts) this.forts.visible = this.filters.buildings;
-    if (this.vegetation) this.vegetation.visible = this.filters.vegetation;
-    if (this.groundCover) this.groundCover.visible = this.filters.vegetation;
-    if (this.landmarks) this.landmarks.visible = this.filters.buildings;
+    if (buildings) buildings.visible = showBuildings;
+    if (roads) roads.visible = showRoads;
+    for (const extra of this.roadDecor) extra.visible = showRoads;
+    if (rails) rails.visible = showRails;
+    for (const extra of this.railDecor) extra.visible = showRails;
+    if (this.spinnaker) this.spinnaker.visible = showBuildings;
+    if (this.forts) this.forts.visible = showBuildings;
+    if (this.vegetation) this.vegetation.visible = showVeg;
+    if (this.groundCover) this.groundCover.visible = showVeg;
+    if (this.landmarks) this.landmarks.visible = showBuildings;
     if (this.harbour) this.harbour.group.visible = this.filters.ships;
     if (this.harbourKit) this.harbourKit.visible = this.filters.ships;
-    if (this.powerKit) this.powerKit.visible = this.filters.power;
-    for (const extra of this.powerDecor) extra.visible = this.filters.power;
-    if (this.trains) this.trains.group.visible = this.filters.trains;
+    if (this.powerKit) this.powerKit.visible = showPower;
+    for (const extra of this.powerDecor) extra.visible = showPower;
+    if (this.trains) this.trains.group.visible = showTrains;
+    if (this.furnitureKit) this.furnitureKit.visible = !strip;
+    if (this.barrierKit) this.barrierKit.visible = !strip;
     this.updateSun();
     this.updateLabels();
   }
 
+  private async placeBuilder() {
+    const terrain = this.layerMeshes.get("terrain");
+    const buildings = this.layerMeshes.get("buildings");
+    const chunks = buildings instanceof THREE.Group ? (buildings.children as THREE.Mesh[]) : this.buildingChunks;
+    if (!this.mapScene || !(terrain instanceof THREE.Mesh)) return;
+    try {
+      const builder = new CityBuilder(this.mapScene, terrain, chunks, this.camera, this.canvas);
+      builder.onChange = () => {
+        this.syncPlanControls();
+        this.applyFilters();
+      };
+      await builder.load();
+      this.builder = builder;
+      if (this.layersOpen) this.setPlanning(true);
+    } catch (err) {
+      console.warn("Planning office failed to load:", err);
+    }
+  }
+
+  private syncHudChrome() {
+    const mapDock = document.getElementById("dock-map");
+    const layerDock = document.getElementById("dock-layers");
+    const mapTab = document.getElementById("tab-map");
+    const layerTab = document.getElementById("tab-layers");
+    mapDock?.classList.toggle("is-away", !this.mapOpen);
+    layerDock?.classList.toggle("is-away", !this.layersOpen);
+    document.body.classList.toggle("is-map", this.mapOpen);
+    document.body.classList.toggle("is-layers", this.layersOpen);
+    mapTab?.classList.toggle("is-on", this.mapOpen);
+    layerTab?.classList.toggle("is-on", this.layersOpen);
+    mapTab?.setAttribute("aria-pressed", String(this.mapOpen));
+    layerTab?.setAttribute("aria-pressed", String(this.layersOpen));
+  }
+
+  private setMapOpen(on: boolean) {
+    this.mapOpen = on;
+    this.syncHudChrome();
+    this.canvas.focus();
+  }
+
+  private setLayersOpen(on: boolean) {
+    if (on && this.driving) this.setDriving(false);
+    this.layersOpen = on;
+    this.syncHudChrome();
+    if (on) this.setPlanning(true);
+    else if (this.builder?.tool !== "demolish") this.setPlanning(false);
+    this.canvas.focus();
+  }
+
+  private toggleDemolish() {
+    if (!this.builder) return;
+    if (this.driving) this.setDriving(false);
+    if (this.builder.active && this.builder.tool === "demolish") {
+      this.builder.setTool("query");
+      if (!this.layersOpen) this.setPlanning(false);
+    } else {
+      this.setPlanning(true);
+      this.builder.setTool("demolish");
+    }
+  }
+
+  private setPlanning(on: boolean) {
+    if (!this.builder) return;
+    if (on && this.driving) this.setDriving(false);
+    this.builder.setActive(on);
+    this.syncPlanControls();
+    this.canvas.focus();
+  }
+
+  private syncPlanControls() {
+    const paint = Boolean(this.builder?.ownsLeftClick());
+    this.controls.mouseButtons.LEFT = paint ? (-1 as THREE.MOUSE) : THREE.MOUSE.PAN;
+  }
+
+  private handlePlanKey(e: KeyboardEvent): boolean {
+    const builder = this.builder;
+    if (!builder || e.repeat || this.driving) return false;
+    const tools: Record<string, BuilderTool> = {
+      Digit1: "residential",
+      Digit2: "commercial",
+      Digit3: "industrial",
+      Digit4: "defence",
+      Digit5: "park",
+      Digit6: "civic",
+      Digit7: "harbour",
+      Digit8: "utilities",
+      Digit9: "cultural",
+      Digit0: "query",
+      KeyZ: "dezone",
+    };
+    const tool = tools[e.code];
+    if (tool) {
+      if (tool !== "query") this.setLayersOpen(true);
+      this.setPlanning(true);
+      builder.setTool(tool);
+      return true;
+    }
+    if (e.code === "Minus") {
+      builder.setBrush(builder.brush - 1);
+      return true;
+    }
+    if (e.code === "Equal") {
+      builder.setBrush(builder.brush + 1);
+      return true;
+    }
+    return false;
+  }
+
+  private onPlanPointer = (e: PointerEvent) => {
+    const builder = this.builder;
+    if (!builder?.active) return;
+    if (e.type === "pointerdown" && e.button !== 0) return;
+    const phase =
+      e.type === "pointerdown" ? "down"
+      : e.type === "pointerup" || e.type === "pointerleave" ? "up"
+      : builder.ownsLeftClick() && e.buttons & 1 ? "move"
+      : "hover";
+    if (phase === "down" && builder.ownsLeftClick()) {
+      this.canvas.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    }
+    builder.pointer(e, phase);
+  };
+
   private setDriving(on: boolean) {
     if (!this.motor || !this.mapScene) return;
+    if (on) this.setPlanning(false);
     this.driving = on;
     this.motor.group.visible = on;
     this.controls.enabled = !on;
     document.body.classList.toggle("is-driving", on);
-    if (this.driveBtn) this.driveBtn.textContent = on ? "Back to the map" : "Take the motor";
+    if (this.driveBtn) {
+      const label = on ? "Back to the map" : "Take the motor";
+      this.driveBtn.classList.toggle("is-on", on);
+      this.driveBtn.title = label;
+      this.driveBtn.setAttribute("aria-label", label);
+      this.driveBtn.setAttribute("aria-pressed", String(on));
+    }
     if (this.hintEl) this.hintEl.textContent = on ? this.driveHint : this.mapHint;
     if (this.speedo) this.speedo.hidden = !on;
     if (this.minimapEl) this.minimapEl.hidden = !on;
@@ -788,7 +1188,12 @@ export class Game {
   private async placeVegetation(loader: GLTFLoader) {
     if (!this.mapScene) return;
     try {
-      const planted = await addVegetation(loader, this.mapScene, (x, z) => this.sampleGround(x, z));
+      const planted = await addVegetation(
+        loader,
+        this.mapScene,
+        (x, z) => this.sampleGround(x, z),
+        (x, z) => this.onCarriage(x, z),
+      );
       this.vegetation = planted.trees;
       this.groundCover = planted.cover;
     } catch (err) {
@@ -845,7 +1250,12 @@ export class Game {
   private async placeFurnitureKit(loader: GLTFLoader) {
     if (!this.mapScene) return;
     try {
-      this.furnitureKit = await addFurnitureKit(loader, this.mapScene, (x, z) => this.sampleGround(x, z));
+      this.furnitureKit = await addFurnitureKit(
+        loader,
+        this.mapScene,
+        (x, z) => this.sampleGround(x, z),
+        (x, z) => this.onCarriage(x, z),
+      );
       this.furnitureKit.traverse((o) => {
         const mesh = o as THREE.Mesh;
         if (mesh.isMesh) this.barrierChunks.push(mesh);
@@ -856,6 +1266,10 @@ export class Game {
   }
 
   private updateBarriers() {
+    if (this.hidingGround()) {
+      for (const chunk of this.barrierChunks) chunk.visible = false;
+      return;
+    }
     const near = this.camera.position.distanceTo(this.controls.target) < BARRIER_VIEW;
     const tx = this.controls.target.x;
     const tz = this.controls.target.z;
@@ -937,14 +1351,33 @@ export class Game {
     return out;
   }
 
-  private sampleGround(x: number, z: number): number | null {
+  private groundHit = { x: Number.NaN, z: Number.NaN, y: 0, road: false, ok: false };
+
+  private sampleHit(x: number, z: number): { y: number; road: boolean } | null {
+    if (this.groundHit.ok && this.groundHit.x === x && this.groundHit.z === z) {
+      return this.groundHit;
+    }
     if (this.groundMeshes.length === 0) return null;
     this.driveOrigin.set(x, 80, z);
     this.driveRay.set(this.driveOrigin, this.driveDown);
     this.driveRay.near = 0;
     this.driveRay.far = 120;
     const hit = this.driveRay.intersectObjects(this.groundMeshes, false)[0];
-    return hit ? hit.point.y : null;
+    if (!hit) {
+      this.groundHit.ok = false;
+      return null;
+    }
+    const road = hit.object.name === "roads";
+    this.groundHit = { x, z, y: hit.point.y, road, ok: true };
+    return this.groundHit;
+  }
+
+  private sampleGround(x: number, z: number): number | null {
+    return this.sampleHit(x, z)?.y ?? null;
+  }
+
+  private onCarriage(x: number, z: number): boolean {
+    return this.sampleHit(x, z)?.road ?? false;
   }
 
   private bumperBlocked(origin: THREE.Vector3, dir: THREE.Vector3, chunks: THREE.Mesh[]): number {
@@ -1087,9 +1520,11 @@ export class Game {
       return;
     }
 
-    const extent = THREE.MathUtils.clamp(dist * 1.05, 140, 680);
-    this.sun.target.position.copy(target);
-    this.sun.position.copy(target).addScaledVector(this.sunDir, extent * 3.4);
+    const extent = THREE.MathUtils.clamp(dist * 1.05, SHADOW_EXTENT_MIN, SHADOW_EXTENT_MAX);
+    this.camMove.copy(target);
+    if (this.driving) this.camMove.addScaledVector(this.driveFwd, extent * 0.45);
+    this.sun.target.position.copy(this.camMove);
+    this.sun.position.copy(this.camMove).addScaledVector(this.sunDir, extent * 3.4);
     this.sun.target.updateMatrixWorld();
     this.sun.updateMatrixWorld();
 
@@ -1102,7 +1537,9 @@ export class Game {
     cam.far = extent * 6.2;
     cam.updateProjectionMatrix();
 
-    const reach = extent * 1.2;
+    const reach = extent * 1.35;
+    const focusX = this.camMove.x;
+    const focusZ = this.camMove.z;
     for (const chunk of this.buildingChunks) {
       const sphere = chunk.geometry.boundingSphere;
       if (!sphere) {
@@ -1111,8 +1548,8 @@ export class Game {
       }
       this.chunkCenter.copy(sphere.center);
       chunk.localToWorld(this.chunkCenter);
-      const dx = this.chunkCenter.x - target.x;
-      const dz = this.chunkCenter.z - target.z;
+      const dx = this.chunkCenter.x - focusX;
+      const dz = this.chunkCenter.z - focusZ;
       chunk.castShadow = Math.hypot(dx, dz) < reach + sphere.radius;
     }
     this.renderer.shadowMap.needsUpdate = true;
@@ -1138,6 +1575,7 @@ export class Game {
   }
 
   private labelKindOn(kind: MapLabel["kind"]) {
+    if (this.hidingGround() && kind === "building") return false;
     if (kind === "road") return this.filters.roadLabels;
     if (kind === "building") return this.filters.buildingLabels;
     return this.filters.areaLabels;
@@ -1151,9 +1589,15 @@ export class Game {
     const w = rect.width;
     const h = rect.height;
     const viewDist = this.camera.position.distanceTo(this.controls.target);
-    const maxDist = Math.max(160, viewDist * 0.72);
-    const maxRank = viewDist > 2800 ? 1 : viewDist > 900 ? 2 : 3;
-    const maxCount = viewDist > 2200 ? 16 : viewDist > 900 ? 40 : 72;
+    const far = viewDist > 4000;
+    const mid = viewDist > 1500;
+    const roadRankCap = far ? 0 : mid ? 1 : 2;
+    const budget: Record<MapLabel["kind"], number> = {
+      area: far ? 22 : mid ? 18 : 26,
+      road: far ? 18 : mid ? 28 : 52,
+      building: far ? 18 : mid ? 24 : 64,
+    };
+    const cell = far ? 150 : mid ? 118 : 86;
 
     type Candidate = {
       label: {
@@ -1166,10 +1610,10 @@ export class Game {
       y: number;
       dist: number;
     };
-    const candidates: Candidate[] = [];
+    const byKind: Record<MapLabel["kind"], Candidate[]> = { area: [], road: [], building: [] };
 
     for (const label of this.labelObjects) {
-      if (!this.labelKindOn(label.kind) || label.rank > maxRank) {
+      if (!this.labelKindOn(label.kind) || (label.kind === "road" && label.rank > roadRankCap)) {
         label.el.style.display = "none";
         continue;
       }
@@ -1177,40 +1621,71 @@ export class Game {
       const dx = this.labelScratch.x - this.controls.target.x;
       const dz = this.labelScratch.z - this.controls.target.z;
       const dist = Math.hypot(dx, dz);
-      if (dist > maxDist) {
-        label.el.style.display = "none";
-        continue;
-      }
       this.labelScratch.project(this.camera);
       if (this.labelScratch.z < -1 || this.labelScratch.z > 1) {
         label.el.style.display = "none";
         continue;
       }
-      const x = (this.labelScratch.x * 0.5 + 0.5) * w + rect.left;
-      const y = (-this.labelScratch.y * 0.5 + 0.5) * h + rect.top;
+      const x = (this.labelScratch.x * 0.5 + 0.5) * w;
+      const y = (-this.labelScratch.y * 0.5 + 0.5) * h;
       if (x < -60 || x > w + 60 || y < -30 || y > h + 30) {
         label.el.style.display = "none";
         continue;
       }
-      candidates.push({ label, x, y, dist });
+      byKind[label.kind].push({ label, x, y, dist });
     }
 
-    candidates.sort((a, b) => a.label.rank - b.label.rank || a.dist - b.dist);
+    for (const list of Object.values(byKind)) {
+      list.sort((a, b) => a.label.rank - b.label.rank || a.dist - b.dist);
+    }
+
     this.placedLabels.length = 0;
-    let shown = 0;
-    for (const { label, x, y } of candidates) {
-      const text = label.el.textContent ?? "";
-      const lw = Math.max(36, text.length * 6.4);
-      const lh = label.kind === "area" ? 16 : 13;
-      const box = { x: x - lw * 0.5, y: y - lh, w: lw, h: lh };
-      if (shown >= maxCount || boxesOverlap(box, this.placedLabels)) {
-        label.el.style.display = "none";
-        continue;
+    const usedCells = new Set<string>();
+    const shown: Record<MapLabel["kind"], number> = { area: 0, road: 0, building: 0 };
+    const kinds = (["area", "road", "building"] as const).filter((k) => this.labelKindOn(k));
+    const cursor = { area: 0, road: 0, building: 0 };
+
+    const tryPlace = (kind: MapLabel["kind"]): boolean => {
+      if (shown[kind] >= budget[kind]) return false;
+      const list = byKind[kind];
+      while (cursor[kind] < list.length) {
+        const { label, x, y } = list[cursor[kind]++];
+        const gx = Math.round(x / cell);
+        const gy = Math.round(y / cell);
+        const key = `${gx},${gy}`;
+        if (usedCells.has(key)) {
+          label.el.style.display = "none";
+          continue;
+        }
+        const text = label.el.textContent ?? "";
+        const lw = Math.max(36, text.length * 6.4);
+        const lh = kind === "area" ? 16 : 13;
+        const box = { x: x - lw * 0.5, y: y - lh, w: lw, h: lh };
+        if (boxesOverlap(box, this.placedLabels)) {
+          label.el.style.display = "none";
+          continue;
+        }
+        usedCells.add(key);
+        this.placedLabels.push(box);
+        shown[kind]++;
+        label.el.style.display = "block";
+        label.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
+        return true;
       }
-      this.placedLabels.push(box);
-      shown++;
-      label.el.style.display = "block";
-      label.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
+      return false;
+    };
+
+    let added = true;
+    while (added) {
+      added = false;
+      for (const kind of kinds) {
+        if (tryPlace(kind)) added = true;
+      }
+    }
+
+    for (const kind of kinds) {
+      const list = byKind[kind];
+      for (let i = cursor[kind]; i < list.length; i++) list[i].label.el.style.display = "none";
     }
   }
 }

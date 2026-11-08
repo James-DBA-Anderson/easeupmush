@@ -2,7 +2,7 @@
   "name": "@easeupmush/simpompey",
   "version": "0.1.0",
   "private": true,
-  "description": "Life sim set in Portsmouth — build a Pompey existence.",
+  "description": "SimPompey — life sim set in Portsmouth. Build a Pompey existence.",
   "type": "module",
   "scripts": {
     "dev": "vite",
