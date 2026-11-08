@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import path from "node:path";
 import earcut from "earcut";
 import { fromArrayBuffer } from "geotiff";
+import { SOUTH, WEST, NORTH, EAST, SCALE_X, SCALE_Y, localM, inBox, isHayling } from "./bbox.ts";
 
 /* ------------------------------------------------------------------ */
 /*  Streaming OSM → glTF pipeline — constant memory                   */
@@ -19,20 +20,6 @@ const OUT_BARRIERS = `${DATA_DIR}/portsmouth-barriers.json`;
 const OS_BUILDINGS = `${DATA_DIR}/portsmouth-os-buildings.json`;
 const GAME_MODELS = path.resolve("../../apps/simpompey/public/models");
 
-/** Bounding box for full Portsea Island (WGS84) */
-const SOUTH = 50.76;
-const WEST = -1.17;
-const NORTH = 50.835;
-const EAST = -1.02;
-
-const R_EARTH = 6_371_000;
-const MID_LAT = (SOUTH + NORTH) / 2;
-const SCALE_X = (Math.PI / 180) * R_EARTH * Math.cos((MID_LAT * Math.PI) / 180);
-const SCALE_Y = (Math.PI / 180) * R_EARTH;
-
-function localM(lat: number, lon: number) {
-  return { x: (lon - WEST) * SCALE_X, y: (lat - NORTH) * SCALE_Y };
-}
 
 const TERRAIN_COLOUR = [0.353, 0.541, 0.353, 1]; // #5a8a5a
 const WATER_COLOUR = [0.22, 0.47, 0.54, 1];        // inland lakes, opaque over terrain
@@ -1038,7 +1025,7 @@ function sampleAtLocal(sample: (lat: number, lon: number) => number, x: number, 
   const lat = NORTH + z / SCALE_Y;
   let ele = sample(lat, lon);
   if (!Number.isFinite(ele) || ele < 0.15) ele = 0.15;
-  if (ele > 12) ele = 12;
+  if (ele > 160) ele = 160;
   return ele;
 }
 
@@ -1331,7 +1318,7 @@ function buildTerrain(
       const { x, y: z } = localM(lat, lon);
       let ele = sample(lat, lon);
       if (!Number.isFinite(ele) || ele < 0) ele = 0;
-      if (ele > 12) ele = 12;
+      if (ele > 160) ele = 160;
       elev[r * cols + c] = ele;
       verts[vi++] = x; verts[vi++] = ele; verts[vi++] = z;
     }
@@ -3255,9 +3242,8 @@ async function streamOsm(
     const id = Number(m[1]);
     const lat = Number(m[2]);
     const lon = Number(m[3]);
-    const inBox = lat >= SOUTH && lat <= NORTH && lon >= WEST && lon <= EAST;
-    if (inBox) nodeMap.set(id, [lat, lon]);
-    if (!labelsOnly && inBox && (pendingMarks || pendingPower || pendingBarriers)) {
+    if (inBox(lat, lon)) nodeMap.set(id, [lat, lon]);
+    if (!labelsOnly && inBox(lat, lon) && (pendingMarks || pendingPower || pendingBarriers)) {
       const gt = buf.indexOf(">", m.index);
       if (gt !== -1 && buf[gt - 1] !== "/") {
         const end = buf.indexOf("</node>", gt);
@@ -3301,7 +3287,7 @@ async function streamOsm(
     members: { ref: number; role: string; pts: { x: number; y: number }[] }[];
   };
   const pendingRels: PendingRel[] = [];
-  const relStartRe = /<relation\s+id="(\d+)">/g;
+  const relStartRe = /<relation\s+id="(\d+)"[^>]*>/g;
   let relMatch: RegExpExecArray | null;
   while ((relMatch = relStartRe.exec(buf)) !== null) {
     const relStart = relMatch.index;
@@ -3343,7 +3329,7 @@ async function streamOsm(
   }
 
   // Way pass — scan ways, resolve nodes, and emit immediately
-  const wayStartRe = /<way\s+id="(\d+)">/g;
+  const wayStartRe = /<way\s+id="(\d+)"[^>]*>/g;
   let wayMatch: RegExpExecArray | null;
   while ((wayMatch = wayStartRe.exec(buf)) !== null) {
     const wayStart = wayMatch.index;
@@ -3370,8 +3356,12 @@ async function streamOsm(
     const name = tags["name"];
 
     if (!labelsOnly && tags["natural"] === "coastline" && nodes.length >= 2) {
-      coasts.push(nodes.map(([lat, lon]) => localM(lat, lon)));
-      coastways++;
+      const haylingName = /hayling/i.test(name ?? tags["name"] ?? "");
+      const pts = nodes.filter(([lat, lon]) => !isHayling(lat, lon)).map(([lat, lon]) => localM(lat, lon));
+      if (!haylingName && pts.length >= 2) {
+        coasts.push(pts);
+        coastways++;
+      }
     }
 
     // Skip ways that leave the bbox — missing nodes collapse geometry toward origin

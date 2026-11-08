@@ -1,25 +1,13 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { localM, inBox } from "./bbox.ts";
 
 const DATA_DIR = "./data";
 const OSM_PATH = `${DATA_DIR}/portsmouth.osm`;
 const OUT = `${DATA_DIR}/portsmouth-coast.json`;
 const GAME_OUT = path.resolve("../../apps/simpompey/public/models/portsmouth-coast.json");
 
-const SOUTH = 50.76;
-const WEST = -1.17;
-const NORTH = 50.835;
-const EAST = -1.02;
-const R_EARTH = 6_371_000;
-const MID_LAT = (SOUTH + NORTH) / 2;
-const SCALE_X = (Math.PI / 180) * R_EARTH * Math.cos((MID_LAT * Math.PI) / 180);
-const SCALE_Y = (Math.PI / 180) * R_EARTH;
-
 type Pt = { x: number; y: number };
-
-function localM(lat: number, lon: number): Pt {
-  return { x: (lon - WEST) * SCALE_X, y: (lat - NORTH) * SCALE_Y };
-}
 
 function parseTags(block: string): Record<string, string> {
   const tags: Record<string, string> = {};
@@ -136,7 +124,7 @@ function main() {
   while ((m = nodeRe.exec(buf)) !== null) {
     const lat = Number(m[2]);
     const lon = Number(m[3]);
-    if (lat >= SOUTH && lat <= NORTH && lon >= WEST && lon <= EAST) {
+    if (inBox(lat, lon)) {
       nodeMap.set(Number(m[1]), [lat, lon]);
     }
   }
@@ -145,7 +133,7 @@ function main() {
   const beaches: Pt[][] = [];
   const muds: Pt[][] = [];
   const marsh: Pt[][] = [];
-  const wayStartRe = /<way\s+id="(\d+)">/g;
+  const wayStartRe = /<way\s+id="(\d+)"[^>]*>/g;
   let wayMatch: RegExpExecArray | null;
   while ((wayMatch = wayStartRe.exec(buf)) !== null) {
     const wayStart = wayMatch.index;
@@ -166,7 +154,7 @@ function main() {
     const closed = ndCount >= 4 && nodes[0][0] === nodes[ndCount - 1][0] && nodes[0][1] === nodes[ndCount - 1][1];
     const pts = uniqueRing(nodes).map(([lat, lon]) => localM(lat, lon));
     if (tags.natural === "coastline" && pts.length >= 2) {
-      coastLines.push(pts);
+      if (!/hayling/i.test(tags.name ?? "")) coastLines.push(pts);
       continue;
     }
     if (pts.length < 3 || !closed) continue;

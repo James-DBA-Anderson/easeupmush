@@ -2,6 +2,7 @@ import { createReadStream, existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { createGunzip } from "node:zlib";
 import { createInterface } from "node:readline";
 import { execSync } from "node:child_process";
+import { inBox } from "./bbox.ts";
 
 const DATA_DIR = "./data";
 const OS_DIR = `${DATA_DIR}/os`;
@@ -9,11 +10,6 @@ const GZ = `${OS_DIR}/ms-uk-031313132.csv.gz`;
 const OUT = `${DATA_DIR}/portsmouth-os-buildings.json`;
 const URL =
   "https://bfppub.z5.web.core.windows.net/2026-08-13/global-buildings.geojsonl/RegionName=UnitedKingdom/quadkey=031313132/part-00169-110f5303-ff85-4c71-a2bf-c6070024fec8.c000.csv.gz";
-
-const SOUTH = 50.76;
-const WEST = -1.17;
-const NORTH = 50.835;
-const EAST = -1.02;
 
 export type ExtraBuilding = { nodes: [number, number][]; h?: number };
 
@@ -67,7 +63,7 @@ async function main() {
     if (!nodes) continue;
     const lat = nodes.reduce((s, p) => s + p[0], 0) / nodes.length;
     const lon = nodes.reduce((s, p) => s + p[1], 0) / nodes.length;
-    if (lat < SOUTH || lat > NORTH || lon < WEST || lon > EAST) continue;
+    if (!inBox(lat, lon)) continue;
     const h = feat.properties?.height;
     kept.push(Number.isFinite(h) && (h as number) >= 2.5 ? { nodes, h: Math.round((h as number) * 10) / 10 } : { nodes });
   }
@@ -78,7 +74,7 @@ async function main() {
     const lon = b.nodes.reduce((s, p) => s + p[1], 0) / b.nodes.length;
     return lat >= 50.7947 && lat <= 50.7963 && lon >= -1.0668 && lon <= -1.0608;
   });
-  console.log(`Read ${total} footprints, kept ${kept.length} on Portsea → ${OUT}`);
+  console.log(`Read ${total} footprints, kept ${kept.length} in bbox → ${OUT}`);
   console.log(`  Carisbrooke block: ${caris.length}`);
 }
 

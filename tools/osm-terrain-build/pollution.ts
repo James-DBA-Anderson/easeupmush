@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fromArrayBuffer } from "geotiff";
 import proj4 from "proj4";
+import { SOUTH, WEST, NORTH, EAST, SCALE_X, SCALE_Y, localM } from "./bbox.ts";
 
 proj4.defs(
   "EPSG:27700",
@@ -19,14 +20,6 @@ const OUT = `${DATA_DIR}/portsmouth-pollution.json`;
 const GAME_MODELS = path.resolve("../../apps/simpompey/public/models");
 const GAME_PUBLIC = path.resolve("../../apps/simpompey/public");
 
-const SOUTH = 50.76;
-const WEST = -1.17;
-const NORTH = 50.835;
-const EAST = -1.02;
-const R_EARTH = 6_371_000;
-const MID_LAT = (SOUTH + NORTH) / 2;
-const SCALE_X = (Math.PI / 180) * R_EARTH * Math.cos((MID_LAT * Math.PI) / 180);
-const SCALE_Y = (Math.PI / 180) * R_EARTH;
 const UA = "easeupmush/simpompey (pollution)";
 const NO2_URL = "https://uk-air.defra.gov.uk/datastore/pcm/mapno22024.csv";
 const PM25_URL = "https://uk-air.defra.gov.uk/datastore/pcm/mappm252024g.csv";
@@ -50,10 +43,6 @@ type NoiseRaster = { data: Float32Array; w: number; h: number; minX: number; min
 type ZoneFile = { cell: number; originX: number; originZ: number; cols: number; rows: number; zones: string };
 type Pt = { x: number; y: number };
 type Road = { road: string; no2: number; pts: Pt[] };
-
-function localM(lat: number, lon: number): Pt {
-  return { x: (lon - WEST) * SCALE_X, y: (lat - NORTH) * SCALE_Y };
-}
 
 function localToWgs(x: number, z: number) {
   return { lon: WEST + x / SCALE_X, lat: NORTH + z / SCALE_Y };

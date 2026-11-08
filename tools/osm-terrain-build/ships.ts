@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { WEST, NORTH, SCALE_X, SCALE_Y, localM, inBox } from "./bbox.ts";
 
 const DATA_DIR = "./data";
 const OSM_PATH = `${DATA_DIR}/portsmouth.osm`;
@@ -11,18 +12,6 @@ const AIS_CANDIDATES = [
   `${DATA_DIR}/ais/SolentAIS_20160111_083249.csv`,
 ];
 
-const SOUTH = 50.76;
-const WEST = -1.17;
-const NORTH = 50.835;
-const EAST = -1.02;
-const R_EARTH = 6_371_000;
-const MID_LAT = (SOUTH + NORTH) / 2;
-const SCALE_X = (Math.PI / 180) * R_EARTH * Math.cos((MID_LAT * Math.PI) / 180);
-const SCALE_Y = (Math.PI / 180) * R_EARTH;
-
-function localM(lat: number, lon: number) {
-  return { x: (lon - WEST) * SCALE_X, y: (lat - NORTH) * SCALE_Y };
-}
 
 type Hull = "boat" | "ferry" | "cargo" | "hovercraft" | "warship";
 type Pt = { x: number; z: number };
@@ -169,7 +158,7 @@ function extendToward(pts: Pt[], lat: number, lon: number): Pt[] {
     z = last.z + (dz / len) * d;
     const lon2 = WEST + x / SCALE_X;
     const lat2 = NORTH + z / SCALE_Y;
-    if (lat2 < SOUTH || lat2 > NORTH || lon2 < WEST || lon2 > EAST) break;
+    if (!inBox(lat2, lon2)) break;
     out.push({ x, z });
   }
   return out;
@@ -284,7 +273,7 @@ function extractAis(csvPath: string) {
     if (parts.length < 6) continue;
     const lat = Number(parts[2]);
     const lon = Number(parts[3]);
-    if (!Number.isFinite(lat) || lat < SOUTH || lat > NORTH || lon < WEST || lon > EAST) continue;
+    if (!Number.isFinite(lat) || !inBox(lat, lon)) continue;
     const t = Date.parse(parts[0]);
     if (!Number.isFinite(t)) continue;
     if (!t0) t0 = t;

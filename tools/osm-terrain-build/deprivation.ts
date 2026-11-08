@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { SOUTH, WEST, NORTH, EAST, localM } from "./bbox.ts";
 
 const DATA_DIR = "./data";
 const ZONES = `${DATA_DIR}/portsmouth-zones.json`;
@@ -9,14 +10,6 @@ const OUT = `${DATA_DIR}/portsmouth-deprivation.json`;
 const GAME_MODELS = path.resolve("../../apps/simpompey/public/models");
 const GAME_PUBLIC = path.resolve("../../apps/simpompey/public");
 
-const SOUTH = 50.76;
-const WEST = -1.17;
-const NORTH = 50.835;
-const EAST = -1.02;
-const R_EARTH = 6_371_000;
-const MID_LAT = (SOUTH + NORTH) / 2;
-const SCALE_X = (Math.PI / 180) * R_EARTH * Math.cos((MID_LAT * Math.PI) / 180);
-const SCALE_Y = (Math.PI / 180) * R_EARTH;
 const UA = "easeupmush/simpompey (imd)";
 const CSV_URL =
   "https://assets.publishing.service.gov.uk/media/691ded56d140bbbaa59a2a7d/File_7_IoD2025_All_Ranks_Scores_Deciles_Population_Denominators.csv";
@@ -34,10 +27,6 @@ type Area = {
   rank: Record<Domain, number>;
   decile: Record<Domain, number>;
 };
-
-function localM(lat: number, lon: number) {
-  return { x: (lon - WEST) * SCALE_X, y: (lat - NORTH) * SCALE_Y };
-}
 
 function b64(bytes: Uint8Array): string {
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");

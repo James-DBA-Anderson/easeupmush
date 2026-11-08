@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { localM, inBox } from "./bbox.ts";
 
 const DATA_DIR = "./data";
 const ZONES = `${DATA_DIR}/portsmouth-zones.json`;
@@ -9,14 +10,6 @@ const OUT = `${DATA_DIR}/portsmouth-land-value.json`;
 const GAME_MODELS = path.resolve("../../apps/simpompey/public/models");
 const GAME_PUBLIC = path.resolve("../../apps/simpompey/public");
 
-const SOUTH = 50.76;
-const WEST = -1.17;
-const NORTH = 50.835;
-const EAST = -1.02;
-const R_EARTH = 6_371_000;
-const MID_LAT = (SOUTH + NORTH) / 2;
-const SCALE_X = (Math.PI / 180) * R_EARTH * Math.cos((MID_LAT * Math.PI) / 180);
-const SCALE_Y = (Math.PI / 180) * R_EARTH;
 
 const DISTRICTS = ["PORTSMOUTH", "GOSPORT"];
 const SINCE = "2022-01-01";
@@ -78,9 +71,6 @@ type ZoneFile = {
   zones: string;
 };
 
-function localM(lat: number, lon: number) {
-  return { x: (lon - WEST) * SCALE_X, y: (lat - NORTH) * SCALE_Y };
-}
 
 function b64(bytes: Uint8Array): string {
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
@@ -182,7 +172,7 @@ function main() {
     for (const sale of sales) {
       const g = geo[sale.postcode];
       if (!g) continue;
-      if (g.lat < SOUTH || g.lat > NORTH || g.lon < WEST || g.lon > EAST) continue;
+      if (!inBox(g.lat, g.lon)) continue;
       const { x, y } = localM(g.lat, g.lon);
       const col = Math.floor((x - originX) / cell);
       const row = Math.floor((y - originZ) / cell);

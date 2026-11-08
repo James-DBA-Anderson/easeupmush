@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { SOUTH, WEST, NORTH, EAST, localM, inBox } from "./bbox.ts";
 
 const DATA_DIR = "./data";
 const ZONES = `${DATA_DIR}/portsmouth-zones.json`;
@@ -8,14 +9,6 @@ const OUT = `${DATA_DIR}/portsmouth-crime.json`;
 const GAME_MODELS = path.resolve("../../apps/simpompey/public/models");
 const GAME_PUBLIC = path.resolve("../../apps/simpompey/public");
 
-const SOUTH = 50.76;
-const WEST = -1.17;
-const NORTH = 50.835;
-const EAST = -1.02;
-const R_EARTH = 6_371_000;
-const MID_LAT = (SOUTH + NORTH) / 2;
-const SCALE_X = (Math.PI / 180) * R_EARTH * Math.cos((MID_LAT * Math.PI) / 180);
-const SCALE_Y = (Math.PI / 180) * R_EARTH;
 const POLY = `${SOUTH},${WEST}:${SOUTH},${EAST}:${NORTH},${EAST}:${NORTH},${WEST}`;
 const MONTHS = 12;
 const SPLAT_M = 90;
@@ -27,10 +20,6 @@ export type CrimeLayer = (typeof CRIME_LAYERS)[number];
 type ZoneFile = { cell: number; originX: number; originZ: number; cols: number; rows: number };
 type RawCrime = { category: string; lat: number; lon: number; streetId: number; street: string; month: string };
 type StreetAgg = { name: string; x: number; z: number; n: number; cats: Record<CrimeLayer, number> };
-
-function localM(lat: number, lon: number) {
-  return { x: (lon - WEST) * SCALE_X, y: (lat - NORTH) * SCALE_Y };
-}
 
 function b64(bytes: Uint8Array): string {
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
@@ -139,7 +128,7 @@ async function fetchCrimes(): Promise<RawCrime[]> {
       const lon = Number(row.location?.longitude);
       const id = Number(row.id);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-      if (lat < SOUTH || lat > NORTH || lon < WEST || lon > EAST) continue;
+      if (!inBox(lat, lon)) continue;
       if (Number.isFinite(id) && seen.has(id)) continue;
       if (Number.isFinite(id)) seen.add(id);
       out.push({

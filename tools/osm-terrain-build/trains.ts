@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { localM as localXY } from "./bbox.ts";
 
 const DATA_DIR = "./data";
 const OSM_PATH = `${DATA_DIR}/portsmouth.osm`;
@@ -7,21 +8,13 @@ const OUT = `${DATA_DIR}/portsmouth-trains.json`;
 const GAME_OUT = path.resolve("../../apps/simpompey/public/models/portsmouth-trains.json");
 const HUXLEY = "https://huxley2.azurewebsites.net";
 
-const SOUTH = 50.76;
-const WEST = -1.17;
-const NORTH = 50.835;
-const EAST = -1.02;
-const R_EARTH = 6_371_000;
-const MID_LAT = (SOUTH + NORTH) / 2;
-const SCALE_X = (Math.PI / 180) * R_EARTH * Math.cos((MID_LAT * Math.PI) / 180);
-const SCALE_Y = (Math.PI / 180) * R_EARTH;
-
-const PORTSEA = ["PMH", "PMS", "FTN", "HLS"] as const;
+const PORTSEA = ["PMH", "PMS", "FTN", "HLS", "CSH"] as const;
 const FALLBACK_CRS: Record<string, [number, number]> = {
   PMH: [50.79672, -1.10882],
   PMS: [50.7982, -1.09068],
   FTN: [50.79645, -1.07326],
   HLS: [50.82839, -1.05864],
+  CSH: [50.8349, -1.0673],
 };
 
 type Pt = { x: number; z: number };
@@ -29,7 +22,8 @@ type Kind = "swr" | "southern" | "gwr";
 type Call = { crs: string; t: number; name: string };
 
 function localM(lat: number, lon: number): Pt {
-  return { x: (lon - WEST) * SCALE_X, z: (lat - NORTH) * SCALE_Y };
+  const p = localXY(lat, lon);
+  return { x: p.x, z: p.y };
 }
 
 function parseTags(block: string): Record<string, string> {
@@ -183,6 +177,12 @@ function extractStations(buf: string): Record<string, Pt> {
 }
 
 function extractRails(buf: string): Pt[][] {
+  const nodeMap = new Map<number, Pt>();
+  const nodeRe = /<node\s+id="(\d+)"\s+lat="([\d.\-]+)"\s+lon="([\d.\-]+)"/g;
+  let nm: RegExpExecArray | null;
+  while ((nm = nodeRe.exec(buf)) !== null) {
+    nodeMap.set(Number(nm[1]), localM(Number(nm[2]), Number(nm[3])));
+  }
   const rails: Pt[][] = [];
   const wayRe = /<way\s+id="\d+"[^>]*>([\s\S]*?)<\/way>/g;
   let m: RegExpExecArray | null;
@@ -192,11 +192,11 @@ function extractRails(buf: string): Pt[][] {
     if (tags.service && /siding|yard|crossover|spur/.test(tags.service)) continue;
     if (tags.railway === "abandoned" || tags.railway === "dismantled") continue;
     const pts: Pt[] = [];
-    const ndRe = /<nd\s+ref="\d+"(?:\s+lat="([^"]+)"\s+lon="([^"]+)")?/g;
+    const ndRe = /<nd\s+ref="(\d+)"/g;
     let nd: RegExpExecArray | null;
     while ((nd = ndRe.exec(m[1])) !== null) {
-      if (!nd[1] || !nd[2]) continue;
-      pts.push(localM(Number(nd[1]), Number(nd[2])));
+      const p = nodeMap.get(Number(nd[1]));
+      if (p) pts.push(p);
     }
     if (pts.length >= 2) rails.push(pts);
   }
@@ -332,7 +332,7 @@ async function main() {
   console.log(`  stations ${Object.keys(stations).join(",")}  rail verts ${graph.nodes.length}`);
 
   const corridor: Record<string, Pt[]> = {};
-  const keys = ["PMH", "PMS", "FTN", "HLS"];
+  const keys = ["PMH", "PMS", "FTN", "HLS", "CSH"];
   for (let i = 0; i < keys.length - 1; i++) {
     const a = stations[keys[i]];
     const b = stations[keys[i + 1]];

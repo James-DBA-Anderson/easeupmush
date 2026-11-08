@@ -3,6 +3,7 @@ import path from "node:path";
 import earcut from "earcut";
 import { extractVomPeaks } from "./vom.ts";
 import { collectCarriageways } from "./carriageway.ts";
+import { SOUTH, WEST, NORTH, EAST, localM, inBox } from "./bbox.ts";
 
 const DATA_DIR = "./data";
 const OSM_PATH = `${DATA_DIR}/portsmouth.osm`;
@@ -10,19 +11,6 @@ const OS_BUILDINGS = `${DATA_DIR}/portsmouth-os-buildings.json`;
 const OUT_TREES = `${DATA_DIR}/portsmouth-trees.json`;
 const GAME_TREES = path.resolve("../../apps/simpompey/public/models/portsmouth-trees.json");
 
-const SOUTH = 50.76;
-const WEST = -1.17;
-const NORTH = 50.835;
-const EAST = -1.02;
-
-const R_EARTH = 6_371_000;
-const MID_LAT = (SOUTH + NORTH) / 2;
-const SCALE_X = (Math.PI / 180) * R_EARTH * Math.cos((MID_LAT * Math.PI) / 180);
-const SCALE_Y = (Math.PI / 180) * R_EARTH;
-
-function localM(lat: number, lon: number) {
-  return { x: (lon - WEST) * SCALE_X, y: (lat - NORTH) * SCALE_Y };
-}
 
 type Pt = { x: number; y: number };
 type Ring = { pts: Pt[]; minX: number; maxX: number; minY: number; maxY: number };
@@ -338,7 +326,7 @@ async function main() {
   while ((m = nodeRe.exec(buf)) !== null) {
     const lat = Number(m[2]);
     const lon = Number(m[3]);
-    if (lat >= SOUTH && lat <= NORTH && lon >= WEST && lon <= EAST) {
+    if (inBox(lat, lon)) {
       nodeMap.set(Number(m[1]), [lat, lon]);
     }
   }
@@ -438,7 +426,7 @@ async function main() {
   type CoverRel = { kind: CoverKind; members: { ref: number; role: string; pts: Pt[] }[] };
   const pendingRels: CoverRel[] = [];
   const relNeedWays = new Set<number>();
-  const relStartRe = /<relation\s+id="(\d+)">/g;
+  const relStartRe = /<relation\s+id="(\d+)"[^>]*>/g;
   let relMatch: RegExpExecArray | null;
   while ((relMatch = relStartRe.exec(buf)) !== null) {
     const relStart = relMatch.index;
@@ -460,7 +448,7 @@ async function main() {
     if (members.length) pendingRels.push({ kind, members });
   }
 
-  const wayStartRe = /<way\s+id="(\d+)">/g;
+  const wayStartRe = /<way\s+id="(\d+)"[^>]*>/g;
   let wayMatch: RegExpExecArray | null;
   while ((wayMatch = wayStartRe.exec(buf)) !== null) {
     const wayStart = wayMatch.index;

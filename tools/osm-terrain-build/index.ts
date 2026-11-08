@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fromArrayBuffer } from "geotiff";
 import { DOMParser } from "@xmldom/xmldom";
 import * as THREE from "three";
+import { SOUTH, WEST, NORTH, EAST, SCALE_X, SCALE_Y, localM } from "./bbox.ts";
 
 // Shared materials — reused across meshes so GLTF export deduplicates them
   const TERRAIN_MAT = new THREE.MeshStandardMaterial({ color: 0x5a8a5a });
@@ -9,9 +10,9 @@ const BUILDING_MAT = new THREE.MeshStandardMaterial({ color: 0x8899aa, flatShadi
   const WATER_MAT = new THREE.MeshStandardMaterial({ color: 0x336677, transparent: true, opacity: 0.8 });
   const ROAD_MAT = new THREE.MeshStandardMaterial({ color: 0x555555, flatShading: true, side: THREE.DoubleSide });
 
-/** Portsmouth is essentially flat; clamp DEM to a realistic 0–12 m range. */
+/** Portsea is flat; Portsdown in PO6 rises to ~130 m. */
 const MIN_ELE = 0;
-const MAX_ELE = 12;
+const MAX_ELE = 160;
 const VERT_SCALE = 1.0; // 1:1 metres
 
 /** Road width by highway kind (metres). */
@@ -45,11 +46,6 @@ const DEM_PATH = `${DATA_DIR}/N50W002.tif`;
 const OSM_PATH = `${DATA_DIR}/portsmouth.osm`;
 const OUT_PATH = `${DATA_DIR}/portsmouth-terrain.gltf`;
 
-/** Bounding box for full Portsea Island (WGS84) */
-const SOUTH = 50.76;
-const WEST = -1.17;
-const NORTH = 50.835;
-const EAST = -1.02;
 
 /* ------------------------------------------------------------------ */
 /*  1. Read SRTM DEM GeoTIFF                                          */
@@ -207,17 +203,6 @@ function parseOsm(xml: string) {
 /*  3. Convert lat/lon to local metres (equirectangular approx)       */
 /* ------------------------------------------------------------------ */
 
-const R_EARTH = 6_371_000;
-const MID_LAT = (SOUTH + NORTH) / 2;
-const SCALE_X = (Math.PI / 180) * R_EARTH * Math.cos((MID_LAT * Math.PI) / 180);
-const SCALE_Y = (Math.PI / 180) * R_EARTH;
-
-function localM(lat: number, lon: number) {
-  return {
-    x: (lon - WEST) * SCALE_X,
-    y: (lat - NORTH) * SCALE_Y,
-  };
-}
 
 /* ------------------------------------------------------------------ */
 /*  4. Build flat terrain mesh (Portsmouth is ~flat)                */

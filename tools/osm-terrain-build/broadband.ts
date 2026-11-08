@@ -4,6 +4,7 @@ import path from "node:path";
 import { createReadStream } from "node:fs";
 import { createGunzip } from "node:zlib";
 import { createInterface } from "node:readline";
+import { localM, inBox } from "./bbox.ts";
 
 const DATA_DIR = "./data";
 const ZONES = `${DATA_DIR}/portsmouth-zones.json`;
@@ -22,14 +23,6 @@ const WTR_CACHE = `${DATA_DIR}/wtr-portsmouth.json`;
 const GAME_MODELS = path.resolve("../../apps/simpompey/public/models");
 const GAME_PUBLIC = path.resolve("../../apps/simpompey/public");
 
-const SOUTH = 50.76;
-const WEST = -1.17;
-const NORTH = 50.835;
-const EAST = -1.02;
-const R_EARTH = 6_371_000;
-const MID_LAT = (SOUTH + NORTH) / 2;
-const SCALE_X = (Math.PI / 180) * R_EARTH * Math.cos((MID_LAT * Math.PI) / 180);
-const SCALE_Y = (Math.PI / 180) * R_EARTH;
 const UA = "easeupmush/simpompey (broadband)";
 const WANT_OUT = new Set(["PO1", "PO2", "PO3", "PO4", "PO5", "PO6", "PO12", "PO13"]);
 const COVER_URL =
@@ -57,10 +50,6 @@ type Geo = Record<string, { lat: number; lon: number }>;
 type CoverRow = { postcode: string; gigabit: number; superfast: number; slow: number };
 type SpeedRow = { postcode: string; down: number; up: number };
 type Site = { lat: number; lon: number; name: string; kind: "osm" | "cell" | "licence"; detail: string };
-
-function localM(lat: number, lon: number) {
-  return { x: (lon - WEST) * SCALE_X, y: (lat - NORTH) * SCALE_Y };
-}
 
 function b64(bytes: Uint8Array): string {
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
@@ -126,15 +115,24 @@ async function geocode(postcodes: string[]): Promise<Geo> {
   console.log(`  postcodes ${postcodes.length}, cached ${postcodes.length - missing.length}, lookup ${missing.length}`);
   for (let i = 0; i < missing.length; i += 100) {
     const batch = missing.slice(i, i + 100);
-    const res = await fetch("https://api.postcodes.io/postcodes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "User-Agent": UA },
-      body: JSON.stringify({ postcodes: batch }),
-    });
-    if (!res.ok) throw new Error(`postcodes.io ${res.status}`);
-    const data = (await res.json()) as { result: Array<{ query: string; result: { latitude: number; longitude: number } | null }> };
-    for (const row of data.result ?? []) {
-      if (row.result) out[row.query] = { lat: row.result.latitude, lon: row.result.longitude };
+    let ok = false;
+    for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+      try {
+        const res = await fetch("https://api.postcodes.io/postcodes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "User-Agent": UA },
+          body: JSON.stringify({ postcodes: batch }),
+        });
+        if (!res.ok) throw new Error(`postcodes.io ${res.status}`);
+        const data = (await res.json()) as { result: Array<{ query: string; result: { latitude: number; longitude: number } | null }> };
+        for (const row of data.result ?? []) {
+          if (row.result) out[row.query] = { lat: row.result.latitude, lon: row.result.longitude };
+        }
+        ok = true;
+      } catch (err) {
+        if (attempt === 2) console.warn(`  geocode skip ${batch.length} postcodes: ${err}`);
+        else await new Promise((r) => setTimeout(r, 750 * (attempt + 1)));
+      }
     }
     if ((i / 100) % 5 === 0) console.log(`  geocoded ${Math.min(i + 100, missing.length)}/${missing.length}`);
   }
@@ -329,7 +327,7 @@ function parseOsmMasts(): Site[] {
     const lonM = /lon="([^"]+)"/.exec(head);
     const lat = Number(latM?.[1]);
     const lon = Number(lonM?.[1]);
-    if (!Number.isFinite(lat) || lat < SOUTH || lat > NORTH || lon < WEST || lon > EAST) continue;
+    if (!Number.isFinite(lat) || !inBox(lat, lon)) continue;
     out.push({
       lat,
       lon,
@@ -369,7 +367,7 @@ async function readCells(): Promise<Site[]> {
     const mcc = Number(parts[1]);
     const lon = Number(parts[6]);
     const lat = Number(parts[7]);
-    if (mcc !== 234 || lat < SOUTH || lat > NORTH || lon < WEST || lon > EAST) continue;
+    if (mcc !== 234 || !inBox(lat, lon)) continue;
     const net = Number(parts[2]);
     const radio = parts[0];
     const samples = Number(parts[9] || 1);
@@ -479,7 +477,7 @@ function loadWtrCache() {
     let lon = Number(row[iLon]);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
     if (row[iEw] === "W" && lon > 0) lon = -lon;
-    if (lat < SOUTH || lat > NORTH || lon < WEST || lon > EAST) continue;
+    if (!inBox(lat, lon)) continue;
     rows.push({
       lat,
       lon,
@@ -512,7 +510,7 @@ function main() {
       const out: Array<{ x: number; y: number; v: number }> = [];
       for (const row of rows) {
         const g = geo[row.postcode];
-        if (!g || g.lat < SOUTH || g.lat > NORTH || g.lon < WEST || g.lon > EAST) continue;
+        if (!g || !inBox(g.lat, g.lon)) continue;
         const { x, y } = localM(g.lat, g.lon);
         out.push({ x, y, v: row[key] });
       }

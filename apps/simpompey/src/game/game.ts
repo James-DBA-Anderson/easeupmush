@@ -16,6 +16,7 @@ import { addFurnitureKit } from "./furniture";
 import { addPlaces } from "./places";
 import { TOWN_VIEWS, type TownView } from "./views";
 import { CityBuilder, type BuilderTool } from "./builder";
+import { osmLocal } from "./geo";
 
 const BARRIER_VIEW = 340;
 const BARRIER_REACH = 170;
@@ -1688,17 +1689,6 @@ export class Game {
       for (let i = cursor[kind]; i < list.length; i++) list[i].label.el.style.display = "none";
     }
   }
-}
-
-function osmLocal(lat: number, lon: number) {
-  const south = 50.76;
-  const west = -1.17;
-  const north = 50.835;
-  const r = 6_371_000;
-  const midLat = (south + north) / 2;
-  const scaleX = (Math.PI / 180) * r * Math.cos((midLat * Math.PI) / 180);
-  const scaleY = (Math.PI / 180) * r;
-  return { x: (lon - west) * scaleX, y: (lat - north) * scaleY };
 }
 
 function labelRank(kind: MapLabel["kind"], name: string): number {

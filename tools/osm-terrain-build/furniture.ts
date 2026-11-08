@@ -1,24 +1,13 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { collectCarriageways } from "./carriageway.ts";
+import { localM, inBox } from "./bbox.ts";
 
 const DATA_DIR = "./data";
 const OSM_PATH = `${DATA_DIR}/portsmouth.osm`;
 const OUT = `${DATA_DIR}/portsmouth-furniture.json`;
 const GAME_OUT = path.resolve("../../apps/simpompey/public/models/portsmouth-furniture.json");
 
-const SOUTH = 50.76;
-const WEST = -1.17;
-const NORTH = 50.835;
-const EAST = -1.02;
-const R_EARTH = 6_371_000;
-const MID_LAT = (SOUTH + NORTH) / 2;
-const SCALE_X = (Math.PI / 180) * R_EARTH * Math.cos((MID_LAT * Math.PI) / 180);
-const SCALE_Y = (Math.PI / 180) * R_EARTH;
-
-function localM(lat: number, lon: number) {
-  return { x: (lon - WEST) * SCALE_X, y: (lat - NORTH) * SCALE_Y };
-}
 
 type Kind = "bench" | "bin" | "postbox" | "phone" | "rack" | "bus" | "signal" | "table" | "pub" | "memorial";
 type Kit = { x: number; z: number; kind: Kind; heading: number };
@@ -100,9 +89,8 @@ while ((m = nodeRe.exec(buf)) !== null) {
   const id = Number(m[1]);
   const lat = Number(m[2]);
   const lon = Number(m[3]);
-  const inBox = lat >= SOUTH && lat <= NORTH && lon >= WEST && lon <= EAST;
-  if (inBox) nodeMap.set(id, [lat, lon]);
-  if (!inBox) continue;
+  if (!inBox(lat, lon)) continue;
+  nodeMap.set(id, [lat, lon]);
   const gt = buf.indexOf(">", m.index);
   if (gt === -1 || buf[gt - 1] === "/") continue;
   const end = buf.indexOf("</node>", gt);
@@ -113,7 +101,7 @@ while ((m = nodeRe.exec(buf)) !== null) {
   kits.push({ x: p.x, z: p.y, kind, heading: headingOf(p.x, p.y) });
 }
 
-const wayStartRe = /<way\s+id="(\d+)">/g;
+const wayStartRe = /<way\s+id="(\d+)"[^>]*>/g;
 let wayMatch: RegExpExecArray | null;
 while ((wayMatch = wayStartRe.exec(buf)) !== null) {
   const wayStart = wayMatch.index;

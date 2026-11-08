@@ -147,7 +147,7 @@ export function collectCarriageways(
   localM: (lat: number, lon: number) => Pt,
 ): Carriageways {
   const roads = new Carriageways();
-  const wayStartRe = /<way\s+id="(\d+)">/g;
+  const wayStartRe = /<way\s+id="(\d+)"[^>]*>/g;
   let wayMatch: RegExpExecArray | null;
   while ((wayMatch = wayStartRe.exec(buf)) !== null) {
     const wayStart = wayMatch.index;

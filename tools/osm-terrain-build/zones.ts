@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { SOUTH, WEST, NORTH, EAST, localM, inBox } from "./bbox.ts";
 
 const DATA_DIR = "./data";
 const OSM_PATH = `${DATA_DIR}/portsmouth.osm`;
@@ -7,16 +8,6 @@ const OS_BUILDINGS = `${DATA_DIR}/portsmouth-os-buildings.json`;
 const OUT = `${DATA_DIR}/portsmouth-zones.json`;
 const GAME_MODELS = path.resolve("../../apps/simpompey/public/models");
 const GAME_PUBLIC = path.resolve("../../apps/simpompey/public");
-
-const SOUTH = 50.76;
-const WEST = -1.17;
-const NORTH = 50.835;
-const EAST = -1.02;
-
-const R_EARTH = 6_371_000;
-const MID_LAT = (SOUTH + NORTH) / 2;
-const SCALE_X = (Math.PI / 180) * R_EARTH * Math.cos((MID_LAT * Math.PI) / 180);
-const SCALE_Y = (Math.PI / 180) * R_EARTH;
 
 const CELL = 16;
 const ZONE = {
@@ -81,9 +72,6 @@ function buildingFacts(tags: Record<string, string> | undefined): Record<string,
   return Object.keys(out).length ? out : null;
 }
 
-function localM(lat: number, lon: number) {
-  return { x: (lon - WEST) * SCALE_X, y: (lat - NORTH) * SCALE_Y };
-}
 
 function uniqueRing(nodes: [number, number][]): [number, number][] {
   const out: [number, number][] = [];
@@ -572,7 +560,7 @@ function main() {
   while ((m = nodeRe.exec(buf)) !== null) {
     const lat = Number(m[2]);
     const lon = Number(m[3]);
-    if (lat >= SOUTH && lat <= NORTH && lon >= WEST && lon <= EAST) {
+    if (inBox(lat, lon)) {
       nodeMap.set(Number(m[1]), [lat, lon]);
     }
   }
@@ -580,7 +568,7 @@ function main() {
 
   const pendingRels: Rel[] = [];
   const relNeedWays = new Set<number>();
-  const relStartRe = /<relation\s+id="(\d+)">/g;
+  const relStartRe = /<relation\s+id="(\d+)"[^>]*>/g;
   let relMatch: RegExpExecArray | null;
   while ((relMatch = relStartRe.exec(buf)) !== null) {
     const relStart = relMatch.index;
@@ -637,7 +625,7 @@ function main() {
     fills[layer].push({ pts, zone });
   };
 
-  const wayStartRe = /<way\s+id="(\d+)">/g;
+  const wayStartRe = /<way\s+id="(\d+)"[^>]*>/g;
   let wayMatch: RegExpExecArray | null;
   let ways = 0;
   while ((wayMatch = wayStartRe.exec(buf)) !== null) {

@@ -5,7 +5,8 @@
   "description": "Pipeline: SRTM DEM + OSM → GLB terrain for SimPompey",
   "type": "module",
   "scripts": {
-    "fetch": "tsx scripts/fetch.ts",
+    "fetch": "tsx fetch-osm.ts",
+    "fetch-osm": "tsx fetch-osm.ts",
     "build": "tsx stream.ts && cp data/portsmouth-terrain.gltf data/portsmouth-terrain.bin data/portsmouth-labels.json data/portsmouth-harbour.json data/portsmouth-power.json data/portsmouth-barriers.json ../../apps/simpompey/public/models/",
     "trees": "tsx trees.ts",
     "trees:off-road": "tsx trees.ts --off-road",

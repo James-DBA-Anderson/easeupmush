@@ -1,15 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-
-function osmLocal(lat: number, lon: number) {
-  const west = -1.17;
-  const north = 50.835;
-  const r = 6_371_000;
-  const midLat = (50.76 + 50.835) / 2;
-  const scaleX = (Math.PI / 180) * r * Math.cos((midLat * Math.PI) / 180);
-  const scaleY = (Math.PI / 180) * r;
-  return { x: (lon - west) * scaleX, y: (lat - north) * scaleY };
-}
+import { osmLocal } from "./geo";
 
 const WATER_Y = 0.06;
 

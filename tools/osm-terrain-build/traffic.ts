@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
+import { SOUTH, WEST, NORTH, EAST, localM, inBox } from "./bbox.ts";
 
 const DATA_DIR = "./data";
 const OSM_PATH = `${DATA_DIR}/portsmouth.osm`;
@@ -12,14 +13,6 @@ const OUT = `${DATA_DIR}/portsmouth-traffic.json`;
 const GAME_MODELS = path.resolve("../../apps/simpompey/public/models");
 const GAME_PUBLIC = path.resolve("../../apps/simpompey/public");
 
-const SOUTH = 50.76;
-const WEST = -1.17;
-const NORTH = 50.835;
-const EAST = -1.02;
-const R_EARTH = 6_371_000;
-const MID_LAT = (SOUTH + NORTH) / 2;
-const SCALE_X = (Math.PI / 180) * R_EARTH * Math.cos((MID_LAT * Math.PI) / 180);
-const SCALE_Y = (Math.PI / 180) * R_EARTH;
 
 const LA = { portsmouth: 82, hampshire: 65 } as const;
 const UA = "easeupmush/simpompey (traffic)";
@@ -54,9 +47,6 @@ type Way = {
   local: boolean;
 };
 
-function localM(lat: number, lon: number): Pt {
-  return { x: (lon - WEST) * SCALE_X, y: (lat - NORTH) * SCALE_Y };
-}
 
 function b64(bytes: Uint8Array): string {
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
@@ -152,7 +142,7 @@ async function paged(url: string): Promise<any[]> {
 }
 
 function inBbox(lat: number, lon: number) {
-  return lat >= SOUTH && lat <= NORTH && lon >= WEST && lon <= EAST;
+  return inBox(lat, lon);
 }
 
 async function fetchAadf(): Promise<Count[]> {
@@ -283,7 +273,7 @@ function parseRoads(): Way[] {
     }
   }
   const ways: Way[] = [];
-  const wayStartRe = /<way\s+id="(\d+)">/g;
+  const wayStartRe = /<way\s+id="(\d+)"[^>]*>/g;
   let wayMatch: RegExpExecArray | null;
   while ((wayMatch = wayStartRe.exec(buf)) !== null) {
     const wayStart = wayMatch.index;
