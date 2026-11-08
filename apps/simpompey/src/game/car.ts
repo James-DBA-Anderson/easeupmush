@@ -2,18 +2,20 @@ import * as THREE from "three";
 
 const WHEEL_R = 0.32;
 const BODY_LEN = 3.55;
-const MAX_SPEED = 26;
-const BOOST_SPEED = 38;
-const ACCEL = 16;
-const BRAKE = 32;
-const DRAG = 1.15;
-const STEER = 2.05;
+const WHEELBASE = 2.45;
+const MAX_SPEED = 24;
+const BOOST_SPEED = 34;
+const ACCEL = 15;
+const BRAKE = 30;
+const STEER_RESP = 11;
 
 export type DriveInput = {
   throttle: number;
   steer: number;
   brake: boolean;
   boost: boolean;
+  onRoad: boolean;
+  wall: THREE.Vector3 | null;
 };
 
 export function createMotor(): THREE.Group {
@@ -90,9 +92,15 @@ export class Motor {
   private wheels: THREE.Mesh[];
   private frontWheels: THREE.Mesh[];
   private spin = 0;
+  private steer = 0;
+  private vx = 0;
+  private vz = 0;
+  private roll = 0;
+  private pitch = 0;
 
   constructor() {
     this.group = createMotor();
+    this.group.rotation.order = "YXZ";
     this.wheels = this.group.userData.wheels as THREE.Mesh[];
     this.frontWheels = this.group.userData.frontWheels as THREE.Mesh[];
   }
@@ -108,35 +116,71 @@ export class Motor {
   place(x: number, y: number, z: number, heading: number) {
     this.heading = heading;
     this.speed = 0;
+    this.steer = 0;
+    this.vx = 0;
+    this.vz = 0;
+    this.roll = 0;
+    this.pitch = 0;
     this.group.position.set(x, y, z);
-    this.group.rotation.y = heading;
+    this.group.rotation.set(0, heading, 0);
   }
 
-  integrate(dt: number, input: DriveInput, blocked: number) {
-    const max = input.boost ? BOOST_SPEED : MAX_SPEED;
+  integrate(dt: number, input: DriveInput) {
     const throttle = THREE.MathUtils.clamp(input.throttle, -1, 1);
+    const onRoad = input.onRoad;
+    const top = (input.boost && onRoad ? BOOST_SPEED : MAX_SPEED) * (onRoad ? 1 : 0.72);
+    const reverseTop = top * 0.42;
+
     if (input.brake) {
       this.speed += -Math.sign(this.speed) * Math.min(Math.abs(this.speed), BRAKE * dt);
     } else {
-      this.speed += throttle * ACCEL * dt;
+      const t = Math.abs(this.speed) / Math.max(1, throttle < 0 ? reverseTop : top);
+      const punch = throttle >= 0 ? 1 - t * t * 0.7 : 0.58;
+      this.speed += throttle * ACCEL * punch * (onRoad ? 1 : 0.72) * dt;
     }
-    const drag = DRAG + (input.boost ? 0 : 0.35);
-    this.speed *= Math.exp(-drag * dt);
-    this.speed = THREE.MathUtils.clamp(this.speed, -max * 0.45, max);
-    if (blocked > 0 && this.speed > 0) this.speed = Math.min(this.speed, 0.4);
-    if (blocked < 0 && this.speed < 0) this.speed = Math.max(this.speed, -0.4);
 
-    const grip = THREE.MathUtils.clamp(Math.abs(this.speed) / 5, 0.15, 1);
-    const reverse = this.speed < -0.4 ? -1 : 1;
-    this.heading += input.steer * reverse * STEER * grip * dt;
+    const coast = input.brake ? 0.2 : input.boost && onRoad ? 0.35 : onRoad ? 0.72 : 1.35;
+    this.speed *= Math.exp(-coast * dt);
+    this.speed = THREE.MathUtils.clamp(this.speed, -reverseTop, top);
+
+    const wantSteer = THREE.MathUtils.clamp(input.steer, -1, 1);
+    this.steer += (wantSteer - this.steer) * (1 - Math.exp(-STEER_RESP * dt));
+    const slow = 1 - THREE.MathUtils.smoothstep(Math.abs(this.speed), 5, 22);
+    const maxAngle = 0.16 + 0.7 * slow;
+    const angle = this.steer * maxAngle;
+    const slip = Math.abs(this.speed) < 0.35 ? (Math.abs(throttle) > 0.05 ? 1.1 : 0.45) : 0;
+    this.heading += this.speed * Math.tan(angle) / WHEELBASE * dt;
+    this.heading += this.steer * slip * dt;
+
+    const wantX = Math.sin(this.heading) * this.speed;
+    const wantZ = Math.cos(this.heading) * this.speed;
+    const grip = onRoad ? (input.boost ? 12 : 9.2) : 4.6;
+    const catchUp = 1 - Math.exp(-grip * dt);
+    this.vx += (wantX - this.vx) * catchUp;
+    this.vz += (wantZ - this.vz) * catchUp;
+
+    const wall = input.wall;
+    if (wall) {
+      const into = this.vx * wall.x + this.vz * wall.z;
+      if (into < 0) {
+        this.vx -= into * wall.x * 1.18;
+        this.vz -= into * wall.z * 1.18;
+        this.speed *= 0.78;
+      }
+    }
+
+    this.position.x += this.vx * dt;
+    this.position.z += this.vz * dt;
 
     this.spin += (this.speed / WHEEL_R) * dt;
-    const turn = input.steer * 0.38;
+    const turn = angle * 0.92;
     for (const wheel of this.wheels) wheel.rotation.x = this.spin;
     for (const wheel of this.frontWheels) wheel.rotation.y = turn;
 
-    this.group.rotation.y = this.heading;
-    return this.speed * dt;
+    const lean = THREE.MathUtils.clamp(Math.abs(this.speed) / 16, 0, 1);
+    this.roll += (-this.steer * lean * 0.11 - this.roll) * (1 - Math.exp(-10 * dt));
+    this.pitch += (-throttle * 0.035 - this.pitch) * (1 - Math.exp(-8 * dt));
+    this.group.rotation.set(this.pitch, this.heading, this.roll);
   }
 
   mph() {

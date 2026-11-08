@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { osmLocal } from "./geo";
+import { SOUTH, WEST, NORTH, EAST, osmLocal } from "./geo";
 
 const IOW_RING: Array<[number, number]> = [
   [50.662, -1.589],
@@ -166,15 +166,19 @@ export function solentMaterial(extra?: THREE.MeshPhongMaterialParameters) {
 }
 
 export function addHorizon(scene: THREE.Scene, mapScene: THREE.Object3D) {
-  scene.fog = new THREE.Fog(0x8aa4ae, 16000, 56000);
+  scene.fog = new THREE.Fog(0x8aa4ae, 28000, 72000);
   scene.background = new THREE.Color(0x87a8b4);
 
-  const sea = new THREE.Mesh(new THREE.CircleGeometry(52000, 96), solentMaterial());
+  const sw = osmLocal(SOUTH - 0.22, WEST - 0.38);
+  const ne = osmLocal(NORTH + 0.08, EAST + 0.18);
+  const seaW = Math.abs(ne.x - sw.x);
+  const seaH = Math.abs(ne.y - sw.y);
+  const sea = new THREE.Mesh(new THREE.PlaneGeometry(seaW, seaH, 32, 32), solentMaterial());
   sea.geometry.rotateX(-Math.PI / 2);
-  const harbour = osmLocal(50.795, -1.09);
-  sea.position.set(harbour.x, 0.03, harbour.y);
+  sea.position.set((sw.x + ne.x) * 0.5, 0.03, (sw.y + ne.y) * 0.5);
   sea.name = "solent";
-  sea.receiveShadow = true;
+  sea.receiveShadow = false;
+  sea.frustumCulled = false;
   sea.renderOrder = -2;
   mapScene.add(sea);
   mapScene.add(buildIsleOfWight());

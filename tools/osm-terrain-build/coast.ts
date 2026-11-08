@@ -1,6 +1,6 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { localM, inBox } from "./bbox.ts";
+import { SOUTH, WEST, NORTH, EAST, SCALE_X, SCALE_Y, localM, isHayling, closeOpenRing } from "./bbox.ts";
 
 const DATA_DIR = "./data";
 const OSM_PATH = `${DATA_DIR}/portsmouth.osm`;
@@ -124,7 +124,13 @@ function main() {
   while ((m = nodeRe.exec(buf)) !== null) {
     const lat = Number(m[2]);
     const lon = Number(m[3]);
-    if (inBox(lat, lon)) {
+    const pad = 0.02;
+    if (
+      lat >= SOUTH - pad &&
+      lat <= NORTH + pad &&
+      lon >= WEST - pad &&
+      lon <= EAST + pad
+    ) {
       nodeMap.set(Number(m[1]), [lat, lon]);
     }
   }
@@ -175,9 +181,18 @@ function main() {
   const coasts = stitchCoastlines(coastLines)
     .map((ring) => {
       if (ring.length > 2 && samePt(ring[0], ring[ring.length - 1], 8)) ring.pop();
-      return densify(chaikinClosed(ring, 2), 7);
+      return densify(chaikinClosed(closeOpenRing(ring), 2), 7);
     })
-    .filter((ring) => ring.length >= 16 && Math.abs(signedArea(ring)) > 2000)
+    .filter((ring) => {
+      const area = Math.abs(signedArea(ring));
+      const bboxArea = (EAST - WEST) * SCALE_X * (NORTH - SOUTH) * SCALE_Y;
+      if (ring.length < 16 || area < 2000 || area > bboxArea * 0.85) return false;
+      const cx = ring.reduce((s, p) => s + p.x, 0) / ring.length;
+      const cy = ring.reduce((s, p) => s + p.y, 0) / ring.length;
+      const lon = WEST + cx / SCALE_X;
+      const lat = NORTH + cy / SCALE_Y;
+      return !isHayling(lat, lon);
+    })
     .sort((a, b) => Math.abs(signedArea(b)) - Math.abs(signedArea(a)));
 
   const keepPoly = (r: Pt[]) => r.length >= 4 && Math.abs(signedArea(r)) > 80;

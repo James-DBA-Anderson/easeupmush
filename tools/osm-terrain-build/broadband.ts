@@ -24,7 +24,7 @@ const GAME_MODELS = path.resolve("../../apps/simpompey/public/models");
 const GAME_PUBLIC = path.resolve("../../apps/simpompey/public");
 
 const UA = "easeupmush/simpompey (broadband)";
-const WANT_OUT = new Set(["PO1", "PO2", "PO3", "PO4", "PO5", "PO6", "PO12", "PO13"]);
+const WANT_OUT = new Set(["PO1", "PO2", "PO3", "PO4", "PO5", "PO6", "PO12", "PO13", "PO14", "PO15", "PO16", "PO17"]);
 const COVER_URL =
   "https://www.ofcom.org.uk/siteassets/resources/documents/research-and-data/multi-sector/infrastructure-research/connected-nations-2025/202507_fixed_broadband_coverage_r01.zip?v=407830";
 const PERF_URL =

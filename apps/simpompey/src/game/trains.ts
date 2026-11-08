@@ -6,7 +6,8 @@ type TrainData = {
   trains: Array<{ id: string; kind: Kind; name: string; samples: number[] }>;
 };
 
-const REPLAY_RATE = 8;
+/** Wall-clock multiplier, same idea as AIS_RATE on ships. Samples are already ~35 mph. */
+const REPLAY_RATE = 1.5;
 
 function lerpAngle(a: number, b: number, t: number) {
   let d = b - a;

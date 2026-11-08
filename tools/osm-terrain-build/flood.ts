@@ -151,7 +151,7 @@ async function fetchLayer(url: string, extra: Record<string, string>, cache: str
   return out;
 }
 
-function paint(polys: Poly[], cols: number, rows: number, cell: number, originX: number, originZ: number, land: Uint8Array) {
+function paint(polys: Poly[], cols: number, rows: number, cell: number, originX: number, originZ: number, land: Uint8Array | null) {
   const field = new Uint8Array(cols * rows);
   let n = 0;
   for (const poly of polys) {
@@ -176,7 +176,7 @@ function paint(polys: Poly[], cols: number, rows: number, cell: number, originX:
     for (let r = r0; r <= r1; r++) {
       for (let c = c0; c <= c1; c++) {
         const i = r * cols + c;
-        if (!land[i] || field[i] >= poly.band) continue;
+        if ((land && !land[i]) || field[i] >= poly.band) continue;
         const x = originX + (c + 0.5) * cell;
         const z = originZ + (r + 0.5) * cell;
         if (tiny) {
@@ -232,7 +232,8 @@ function main() {
     }
 
     console.log(`  raster sea ${sea.length} polys`);
-    const seaField = paint(sea, cols, rows, cell, originX, originZ, land);
+    // Sea flood includes harbour / Solent inside the playable window; skip IoW by bbox.
+    const seaField = paint(sea, cols, rows, cell, originX, originZ, null);
     console.log(`  raster surface ${swParts.length} polys`);
     const swField = paint(swParts, cols, rows, cell, originX, originZ, land);
 

@@ -181,8 +181,8 @@ async function fetchAadf(): Promise<Count[]> {
   for (const row of await paged(`https://roadtraffic.dft.gov.uk/api/average-annual-daily-flow?filter[local_authority_id]=${LA.portsmouth}`)) {
     take(row);
   }
-  console.log("  Hampshire AADF 2025 in bbox");
-  for (const row of await paged(`https://roadtraffic.dft.gov.uk/api/average-annual-daily-flow?filter[local_authority_id]=${LA.hampshire}&filter[year]=2025`)) {
+  console.log("  Hampshire AADF (all years, keep latest, includes Gosport & Fareham)");
+  for (const row of await paged(`https://roadtraffic.dft.gov.uk/api/average-annual-daily-flow?filter[local_authority_id]=${LA.hampshire}`)) {
     take(row);
   }
   const counts = [...latest.values()];
@@ -219,7 +219,7 @@ def cells(row, n=16):
         out.extend([val] * max(k, 0))
         if len(out) >= n: break
     return out
-keep = {"Portsmouth", "Hampshire"}
+keep = {"Portsmouth", "Hampshire", "Gosport", "Fareham"}
 delay = {k: {} for k in keep}
 for table in root.findall(".//" + T + "table"):
     if table.get(T + "name") != "CGN0504e":
@@ -307,7 +307,7 @@ function parseRoads(): Way[] {
 
 function delayFor(count: Count, cgn: Record<string, Record<string, number>>): number {
   const la = count.la === LA.portsmouth ? "Portsmouth" : "Hampshire";
-  return cgn[la]?.[count.road] ?? cgn.Portsmouth?.[count.road] ?? cgn.Hampshire?.[count.road] ?? 0;
+  return cgn[la]?.[count.road] ?? cgn.Portsmouth?.[count.road] ?? cgn.Hampshire?.[count.road] ?? cgn.Gosport?.[count.road] ?? cgn.Fareham?.[count.road] ?? 0;
 }
 
 function assign(ways: Way[], counts: Count[], cgn: Record<string, Record<string, number>>) {

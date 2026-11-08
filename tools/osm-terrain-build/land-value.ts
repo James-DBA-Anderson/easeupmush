@@ -11,7 +11,7 @@ const GAME_MODELS = path.resolve("../../apps/simpompey/public/models");
 const GAME_PUBLIC = path.resolve("../../apps/simpompey/public");
 
 
-const DISTRICTS = ["PORTSMOUTH", "GOSPORT"];
+const DISTRICTS = ["PORTSMOUTH", "GOSPORT", "FAREHAM"];
 const SINCE = "2022-01-01";
 const PAGE = 200;
 const SPLAT_M = 220;
@@ -83,15 +83,29 @@ async function getJson(url: string): Promise<any> {
   return res.json();
 }
 
+function outcode(pc: string) {
+  return pc.replace(/\s+/g, "").toUpperCase().replace(/[0-9][A-Z]{2}$/, "");
+}
+
+function cacheHasFareham(sales: Sale[]) {
+  return sales.some((s) => {
+    const oc = outcode(s.postcode);
+    return oc === "PO14" || oc === "PO15" || oc === "PO16" || oc === "PO17";
+  });
+}
+
 async function fetchSales(): Promise<Sale[]> {
-  if (existsSync(SALES_CACHE)) {
-    const cached = JSON.parse(readFileSync(SALES_CACHE, "utf8")) as Sale[];
-    console.log(`  sales cache: ${cached.length}`);
-    return cached;
+  const sales: Sale[] = existsSync(SALES_CACHE)
+    ? (JSON.parse(readFileSync(SALES_CACHE, "utf8")) as Sale[])
+    : [];
+  const seen = new Set(sales.map((s) => `${s.postcode}:${s.price}:${s.date}`));
+  const districts = sales.length === 0 ? DISTRICTS : cacheHasFareham(sales) ? [] : ["FAREHAM"];
+  if (!districts.length) {
+    console.log(`  sales cache: ${sales.length}`);
+    return sales;
   }
-  const sales: Sale[] = [];
-  const seen = new Set<string>();
-  for (const district of DISTRICTS) {
+  if (sales.length) console.log(`  sales cache: ${sales.length} (fetching ${districts.join(", ")})`);
+  for (const district of districts) {
     let page = 0;
     for (;;) {
       const url =
@@ -158,6 +172,7 @@ function main() {
     const zones = JSON.parse(readFileSync(ZONES, "utf8")) as ZoneFile;
     const { cell, originX, originZ, cols, rows } = zones;
     const n = cols * rows;
+    const land = Uint8Array.from(Buffer.from(zones.zones, "base64"));
     console.log(`grid ${cols}×${rows} @ ${cell}m`);
 
     const sales = await fetchSales();
@@ -210,10 +225,10 @@ function main() {
     const next = new Float32Array(n);
     const has = new Uint8Array(n);
     for (const i of filled) has[i] = 1;
-    for (let pass = 0; pass < 12; pass++) {
+    for (let pass = 0; pass < 28; pass++) {
       next.set(field);
       for (let i = 0; i < n; i++) {
-        if (has[i]) continue;
+        if (has[i] || !land[i]) continue;
         const c = i % cols;
         const r = (i / cols) | 0;
         let v = 0;
@@ -249,7 +264,7 @@ function main() {
     const value = new Uint8Array(n);
     let painted = 0;
     for (let i = 0; i < n; i++) {
-      if (!has[i] || field[i] <= 0) continue;
+      if (!land[i] || !has[i] || field[i] <= 0) continue;
       const t = Math.max(0, Math.min(1, (field[i] - lo) / span));
       value[i] = Math.round(t * 255);
       painted++;
@@ -268,7 +283,7 @@ function main() {
       p90: Math.round(percentile(prices, 0.9)),
       rates: RATE_LIST,
       source: {
-        prices: "HM Land Registry Price Paid Data, 2022–, districts Portsmouth & Gosport. OGL.",
+        prices: "HM Land Registry Price Paid Data, 2022–, districts Portsmouth, Gosport & Fareham. OGL.",
         rates: "MHCLG Land value estimates for policy appraisal 2023. Portsmouth £/ha.",
       },
       value: b64(value),

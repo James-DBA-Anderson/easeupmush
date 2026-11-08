@@ -89,7 +89,6 @@ export class Game {
   private miniCam: THREE.OrthographicCamera;
   private miniSize = new THREE.Vector2();
   private driveBtn = document.getElementById("drive-toggle") as HTMLButtonElement | null;
-  private demolishBtn = document.getElementById("demolish-toggle") as HTMLButtonElement | null;
   private aerialBtn = document.getElementById("aerial-toggle") as HTMLButtonElement | null;
   private viewSelect = document.getElementById("view-select") as HTMLSelectElement | null;
   private viewIndex = 0;
@@ -129,6 +128,8 @@ export class Game {
   private camQuatInv = new THREE.Quaternion();
   private camHold: string | null = null;
   private camHoldAt = 0;
+  private camLagFwd = new THREE.Vector3(0, 0, 1);
+  private wallHit = new THREE.Vector3();
   private compassRose = document.getElementById("cam-compass");
   private camBoom = 9.6;
   private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -153,6 +154,10 @@ export class Game {
   private landmarks: THREE.Object3D | null = null;
   private trains: RailTraffic | null = null;
   private builder: CityBuilder | null = null;
+  private lookBounds = new THREE.Box3();
+  private lookReady = false;
+  private mapSpanX = 0;
+  private mapSpanZ = 0;
   private filters: MapFilters = {
     buildings: true,
     roads: true,
@@ -210,7 +215,7 @@ export class Game {
     this.controls.minPolarAngle = 0;
     this.controls.maxPolarAngle = Math.PI * 0.495;
     this.controls.minDistance = 18;
-    this.controls.maxDistance = 20000;
+    this.controls.maxDistance = 9000;
     this.controls.target.set(0, 0, 0);
     this.controls.mouseButtons = {
       LEFT: THREE.MOUSE.PAN,
@@ -263,7 +268,7 @@ export class Game {
     this.setBoot("Hang on mush…", 0.04);
     try {
       const labelsP = fetch("./models/portsmouth-labels.json").then((r) => r.json()) as Promise<MapLabel[]>;
-      const gltf = await this.loadGltf(loader, "./models/portsmouth-terrain.gltf?v=roads1", (t) => {
+      const gltf = await this.loadGltf(loader, "./models/portsmouth-terrain.gltf?v=land5", (t) => {
         this.setBoot("Laying out Pompey…", 0.06 + 0.7 * t);
       });
       const labels = await labelsP;
@@ -418,11 +423,14 @@ export class Game {
       await this.placeBuilder();
       this.setBoot("Sweet as nut", 1);
 
-      const span = Math.max(size.x, size.z);
+      this.mapSpanX = size.x;
+      this.mapSpanZ = size.z;
+      this.setLookBounds();
+      this.applyZoomLimit();
       this.aerialHeight = TOWN_VIEWS[0].height || 4200;
       this.snapAerial();
-      this.controls.maxDistance = Math.max(8000, span * 1.6);
       this.controls.update();
+      this.clampLookAt();
       this.hideBoot();
     } catch (e) {
       console.error("Failed to load terrain:", e);
@@ -484,6 +492,7 @@ export class Game {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h, false);
+    this.applyZoomLimit();
   };
 
   private loop = () => {
@@ -499,6 +508,7 @@ export class Game {
     this.harbour?.update(dt);
     this.trains?.update(dt);
     if (!this.driving) this.controls.update();
+    if (!this.driving) this.clampLookAt();
     this.updateSun();
     this.updateBarriers();
     const coverLift = Math.min(12, Math.max(0, (this.camera.position.y - 30) * 0.012));
@@ -598,6 +608,7 @@ export class Game {
     this.controls.target.add(this.camMove);
     this.camera.position.y = Math.max(8, this.camera.position.y);
     this.controls.target.y = Math.max(0, this.controls.target.y);
+    this.clampLookAt();
   }
 
   private bindInput() {
@@ -653,11 +664,6 @@ export class Game {
         e.preventDefault();
         return;
       }
-      if (e.code === "KeyX" && !e.repeat) {
-        this.toggleDemolish();
-        e.preventDefault();
-        return;
-      }
       if (e.code === "KeyC" && !e.repeat) {
         this.setDriving(!this.driving);
         e.preventDefault();
@@ -705,7 +711,6 @@ export class Game {
     this.canvas.addEventListener("pointerup", this.onPlanPointer);
     this.canvas.addEventListener("pointerleave", this.onPlanPointer);
     this.driveBtn?.addEventListener("click", () => this.setDriving(!this.driving));
-    this.demolishBtn?.addEventListener("click", () => this.toggleDemolish());
     this.aerialBtn?.addEventListener("click", () => this.snapView(TOWN_VIEWS[0]));
     document.getElementById("hud")?.addEventListener("click", (e) => {
       const tab = (e.target as HTMLElement | null)?.closest("[data-panel]") as HTMLElement | null;
@@ -837,6 +842,7 @@ export class Game {
     this.camera.up.copy(this.camYUp);
     this.camera.lookAt(this.controls.target);
     this.controls.update();
+    this.clampLookAt();
   }
 
   private syncCompass() {
@@ -931,7 +937,48 @@ export class Game {
     this.controls.target.lerp(this.pickHit, 0.42);
     this.controls.target.y = 0;
     this.controls.update();
+    this.clampLookAt();
   };
+
+  private setLookBounds() {
+    const terrain = this.layerMeshes.get("terrain");
+    if (terrain) this.lookBounds.setFromObject(terrain);
+    else if (this.mapScene) this.lookBounds.setFromObject(this.mapScene);
+    else return;
+    const spanX = this.lookBounds.max.x - this.lookBounds.min.x;
+    const spanZ = this.lookBounds.max.z - this.lookBounds.min.z;
+    this.lookBounds.min.x -= spanX * 0.06;
+    this.lookBounds.max.x += spanX * 0.06;
+    this.lookBounds.min.z -= spanZ * 0.06;
+    this.lookBounds.max.z += spanZ * 0.06;
+    this.lookReady = true;
+  }
+
+  private applyZoomLimit() {
+    if (this.mapSpanX < 1 || this.mapSpanZ < 1) return;
+    const vHalf = Math.tan(THREE.MathUtils.degToRad(this.camera.fov * 0.5));
+    const hHalf = vHalf * Math.max(0.5, this.camera.aspect);
+    const fit = Math.max(this.mapSpanZ * 0.5 / vHalf, this.mapSpanX * 0.5 / hHalf);
+    this.controls.maxDistance = fit * 1.12;
+    const dist = this.camera.position.distanceTo(this.controls.target);
+    if (dist > this.controls.maxDistance && dist > 1) {
+      this.camera.position.lerp(this.controls.target, 1 - this.controls.maxDistance / dist);
+    }
+  }
+
+  private clampLookAt() {
+    if (this.driving || !this.lookReady) return;
+    const t = this.controls.target;
+    const x = THREE.MathUtils.clamp(t.x, this.lookBounds.min.x, this.lookBounds.max.x);
+    const z = THREE.MathUtils.clamp(t.z, this.lookBounds.min.z, this.lookBounds.max.z);
+    const dx = x - t.x;
+    const dz = z - t.z;
+    if (dx === 0 && dz === 0) return;
+    t.x = x;
+    t.z = z;
+    this.camera.position.x += dx;
+    this.camera.position.z += dz;
+  }
 
   private bindFilters() {
     const panel = document.getElementById("map-filters");
@@ -1026,20 +1073,8 @@ export class Game {
     this.layersOpen = on;
     this.syncHudChrome();
     if (on) this.setPlanning(true);
-    else if (this.builder?.tool !== "demolish") this.setPlanning(false);
+    else this.setPlanning(false);
     this.canvas.focus();
-  }
-
-  private toggleDemolish() {
-    if (!this.builder) return;
-    if (this.driving) this.setDriving(false);
-    if (this.builder.active && this.builder.tool === "demolish") {
-      this.builder.setTool("query");
-      if (!this.layersOpen) this.setPlanning(false);
-    } else {
-      this.setPlanning(true);
-      this.builder.setTool("demolish");
-    }
   }
 
   private setPlanning(on: boolean) {
@@ -1069,7 +1104,6 @@ export class Game {
       Digit8: "utilities",
       Digit9: "cultural",
       Digit0: "query",
-      KeyZ: "dezone",
     };
     const tool = tools[e.code];
     if (tool) {
@@ -1126,17 +1160,28 @@ export class Game {
     this.camera.updateProjectionMatrix();
 
     if (on) {
-      const spawn = this.controls.target;
-      const ground = this.sampleGround(spawn.x, spawn.z) ?? spawn.y;
-      this.motor.place(spawn.x, ground, spawn.z, 0);
+      const spawn = this.nearestRoad(this.controls.target.x, this.controls.target.z);
+      const ground = spawn.y;
+      this.camera.getWorldDirection(this.camForward);
+      this.camForward.y = 0;
+      if (this.camForward.lengthSq() < 0.04) {
+        this.camForward.set(spawn.x - this.camera.position.x, 0, spawn.z - this.camera.position.z);
+      }
+      if (this.camForward.lengthSq() < 1e-6) this.camForward.set(0, 0, 1);
+      this.camForward.normalize();
+      const heading = Math.atan2(this.camForward.x, this.camForward.z);
+      this.motor.place(spawn.x, ground, spawn.z, heading);
       this.motor.forward(this.driveFwd);
-      this.camBoom = 9.6;
+      this.camLagFwd.copy(this.driveFwd);
+      this.camBoom = 9.2;
       this.followMotor(this.motor.position, this.nearbyChunks(spawn.x, spawn.z, 90), 0, true);
       this.controls.target.set(spawn.x, ground, spawn.z);
     } else {
       const p = this.motor.position;
       this.controls.target.set(p.x, p.y, p.z);
       this.camera.position.set(p.x, p.y + 80, p.z + 40);
+      this.camera.fov = 60;
+      this.camera.updateProjectionMatrix();
       this.controls.update();
     }
     this.canvas.focus();
@@ -1363,13 +1408,16 @@ export class Game {
     this.driveRay.set(this.driveOrigin, this.driveDown);
     this.driveRay.near = 0;
     this.driveRay.far = 120;
-    const hit = this.driveRay.intersectObjects(this.groundMeshes, false)[0];
+    const hits = this.driveRay.intersectObjects(this.groundMeshes, false);
+    const hit = hits[0];
     if (!hit) {
       this.groundHit.ok = false;
       return null;
     }
-    const road = hit.object.name === "roads";
-    this.groundHit = { x, z, y: hit.point.y, road, ok: true };
+    const near = hits.find((h) => h.object.name === "roads" && h.distance <= hit.distance + 0.45);
+    const use = near ?? hit;
+    const road = use.object.name === "roads" || use.object.name.startsWith("road-");
+    this.groundHit = { x, z, y: use.point.y, road, ok: true };
     return this.groundHit;
   }
 
@@ -1381,13 +1429,49 @@ export class Game {
     return this.sampleHit(x, z)?.road ?? false;
   }
 
-  private bumperBlocked(origin: THREE.Vector3, dir: THREE.Vector3, chunks: THREE.Mesh[]): number {
-    this.driveRay.set(origin, dir);
-    this.driveRay.near = 0.1;
-    this.driveRay.far = 2.4;
-    const hit = this.driveRay.intersectObjects(chunks, false)[0];
-    if (!hit) return 0;
-    return dir.dot(this.driveFwd) >= 0 ? 1 : -1;
+  private nearestRoad(x: number, z: number): { x: number; z: number; y: number } {
+    const here = this.sampleHit(x, z);
+    if (here?.road) return { x, z, y: here.y };
+    for (let r = 3; r <= 48; r += 3) {
+      const steps = 12 + r * 2;
+      for (let i = 0; i < steps; i++) {
+        const a = (i / steps) * Math.PI * 2;
+        const px = x + Math.cos(a) * r;
+        const pz = z + Math.sin(a) * r;
+        const hit = this.sampleHit(px, pz);
+        if (hit?.road) return { x: px, z: pz, y: hit.y };
+      }
+    }
+    return { x, z, y: here?.y ?? 0 };
+  }
+
+  private bumperNormal(p: THREE.Vector3, fwd: THREE.Vector3, chunks: THREE.Mesh[], reverse: boolean): THREE.Vector3 | null {
+    if (chunks.length === 0) return null;
+    const sense = reverse ? -1 : 1;
+    this.camForward.copy(fwd).multiplyScalar(sense);
+    this.camRight.set(this.camForward.z, 0, -this.camForward.x);
+    if (this.camRight.lengthSq() < 1e-6) this.camRight.set(1, 0, 0);
+    else this.camRight.normalize();
+    let best: THREE.Vector3 | null = null;
+    let bestD = 2.2;
+    for (const side of [0, 0.62, -0.62]) {
+      this.driveOrigin.set(p.x, p.y + 0.58, p.z);
+      this.driveOrigin.addScaledVector(this.camForward, 1.28);
+      this.driveOrigin.addScaledVector(this.camRight, side);
+      this.driveRay.set(this.driveOrigin, this.camForward);
+      this.driveRay.near = 0.05;
+      this.driveRay.far = 1.65;
+      const hit = this.driveRay.intersectObjects(chunks, false)[0];
+      if (!hit || hit.distance >= bestD) continue;
+      bestD = hit.distance;
+      this.wallHit.copy(hit.normal ?? this.camForward);
+      this.wallHit.y = 0;
+      if (this.wallHit.lengthSq() < 1e-4) this.wallHit.copy(this.camForward).multiplyScalar(-1);
+      else this.wallHit.normalize();
+      if (this.wallHit.dot(this.camForward) > 0) this.wallHit.multiplyScalar(-1);
+      best = this.wallHit;
+    }
+    return best;
   }
 
   /** How far from `from` toward `to` before a building wall, with a little skin. */
@@ -1426,14 +1510,16 @@ export class Game {
   }
 
   private followMotor(p: THREE.Vector3, chunks: THREE.Mesh[], dt: number, snap: boolean) {
-    const BACK = 9.6;
-    const HEIGHT = 3.8;
-    this.labelScratch.copy(p).addScaledVector(this.driveFwd, 6.4);
-    this.labelScratch.y += 1.2;
+    const speed = Math.abs(this.motor?.speed ?? 0);
+    const BACK = 9.2 + Math.min(5.2, speed * 0.16);
+    const HEIGHT = 3.45 + Math.min(1.5, speed * 0.05);
+    const look = 4.6 + Math.min(7, speed * 0.2);
+    this.labelScratch.copy(p).addScaledVector(this.camLagFwd, look);
+    this.labelScratch.y += 1.35;
     this.driveOrigin.copy(p);
-    this.driveOrigin.y += 1.4;
+    this.driveOrigin.y += 1.35;
 
-    this.camMove.copy(p).addScaledVector(this.driveFwd, -BACK);
+    this.camMove.copy(p).addScaledVector(this.camLagFwd, -BACK);
     this.camMove.y = p.y + HEIGHT;
     const walls = this.filters.buildings ? chunks : [];
     const low = this.boomClearance(this.driveOrigin, this.camMove, walls);
@@ -1463,7 +1549,7 @@ export class Game {
     this.driveOrigin.y += 1.4;
 
     if (snap) this.camera.position.copy(this.camMove);
-    else this.camera.position.lerp(this.camMove, 1 - Math.exp(-7 * dt));
+    else this.camera.position.lerp(this.camMove, 1 - Math.exp(-5.2 * dt));
 
     const keep = this.boomClearance(this.driveOrigin, this.camera.position, walls);
     this.camForward.subVectors(this.camera.position, this.driveOrigin);
@@ -1484,23 +1570,32 @@ export class Game {
     const steer = Number(k.a || k.ArrowLeft) - Number(k.d || k.ArrowRight);
     motor.forward(this.driveFwd);
     const p = motor.position;
-    const chunks = this.nearbyChunks(p.x, p.z, 90);
-    const sense = motor.speed < -0.35 ? -1 : 1;
-    this.camForward.copy(this.driveFwd).multiplyScalar(sense);
-    this.driveOrigin.set(p.x, p.y + 0.7, p.z).addScaledVector(this.camForward, 1.55);
-    const blocked = this.bumperBlocked(this.driveOrigin, this.camForward, chunks);
+    const chunks = this.filters.buildings ? this.nearbyChunks(p.x, p.z, 90) : [];
+    const reverse = motor.speed < -0.45;
+    const wall = this.bumperNormal(p, this.driveFwd, chunks, reverse);
 
-    const travel = motor.integrate(dt, {
+    motor.integrate(dt, {
       throttle,
       steer,
       brake: k.space,
       boost: k.Shift,
-    }, blocked);
-    if (!blocked) p.addScaledVector(this.driveFwd, travel);
+      onRoad: this.onCarriage(p.x, p.z),
+      wall,
+    });
 
     const ground = this.sampleGround(p.x, p.z);
-    if (ground !== null) p.y = ground;
+    if (ground !== null) p.y += (ground - p.y) * (1 - Math.exp(-18 * dt));
     else p.y += (0.2 - p.y) * Math.min(1, 4 * dt);
+
+    const chase = 1 - Math.exp(-(reverse ? 6.5 : 3.4) * dt);
+    this.camLagFwd.lerp(this.driveFwd, chase);
+    this.camLagFwd.y = 0;
+    if (this.camLagFwd.lengthSq() < 1e-6) this.camLagFwd.copy(this.driveFwd);
+    else this.camLagFwd.normalize();
+
+    const wantFov = 58 + Math.min(8, Math.abs(motor.speed) * 0.22);
+    this.camera.fov += (wantFov - this.camera.fov) * (1 - Math.exp(-3.2 * dt));
+    this.camera.updateProjectionMatrix();
 
     this.controls.target.copy(p);
     this.followMotor(p, chunks, dt, false);
@@ -1510,9 +1605,10 @@ export class Game {
   private updateSun() {
     const target = this.controls.target;
     const dist = this.camera.position.distanceTo(target);
-    const skyDist = Math.min(8200, Math.max(3200, dist * 2.2));
+    const above = (this.camera.position.y + 1200) / Math.max(0.25, this.sunDir.y);
+    const skyDist = Math.max(2800, dist * 1.35, above);
     this.sunDisc.position.copy(target).addScaledVector(this.sunDir, skyDist);
-    this.sunDisc.scale.setScalar(skyDist * 0.028);
+    this.sunDisc.scale.setScalar(skyDist * 0.022);
 
     const shadowsOn = this.filters.buildings && dist < 2100;
     this.sun.castShadow = shadowsOn;
@@ -1583,19 +1679,24 @@ export class Game {
   }
 
   private updateLabels() {
-    if (!this.mapScene) return;
+    if (!this.mapScene || !this.labelLayer) return;
     this.mapScene.updateWorldMatrix(true, false);
     this.camera.updateMatrixWorld();
     const rect = this.canvas.getBoundingClientRect();
+    const layerRect = this.labelLayer.getBoundingClientRect();
     const w = rect.width;
     const h = rect.height;
+    const ox = rect.left - layerRect.left;
+    const oy = rect.top - layerRect.top;
     const viewDist = this.camera.position.distanceTo(this.controls.target);
     const far = viewDist > 4000;
     const mid = viewDist > 1500;
     const roadRankCap = far ? 0 : mid ? 1 : 2;
+    const maxRoadTarget = far ? viewDist * 1.2 : mid ? Math.max(1100, viewDist * 0.8) : Math.max(420, viewDist * 2.6);
+    const maxRoadCam = far ? viewDist * 2.2 : mid ? viewDist * 3.2 : viewDist * 4.8;
     const budget: Record<MapLabel["kind"], number> = {
       area: far ? 22 : mid ? 18 : 26,
-      road: far ? 18 : mid ? 28 : 52,
+      road: far ? 18 : mid ? 28 : 36,
       building: far ? 18 : mid ? 24 : 64,
     };
     const cell = far ? 150 : mid ? 118 : 86;
@@ -1622,13 +1723,20 @@ export class Game {
       const dx = this.labelScratch.x - this.controls.target.x;
       const dz = this.labelScratch.z - this.controls.target.z;
       const dist = Math.hypot(dx, dz);
+      if (label.kind === "road") {
+        const camDist = this.labelScratch.distanceTo(this.camera.position);
+        if (dist > maxRoadTarget || camDist > maxRoadCam) {
+          label.el.style.display = "none";
+          continue;
+        }
+      }
       this.labelScratch.project(this.camera);
       if (this.labelScratch.z < -1 || this.labelScratch.z > 1) {
         label.el.style.display = "none";
         continue;
       }
-      const x = (this.labelScratch.x * 0.5 + 0.5) * w;
-      const y = (-this.labelScratch.y * 0.5 + 0.5) * h;
+      const x = (this.labelScratch.x * 0.5 + 0.5) * w + ox;
+      const y = (-this.labelScratch.y * 0.5 + 0.5) * h + oy;
       if (x < -60 || x > w + 60 || y < -30 || y > h + 30) {
         label.el.style.display = "none";
         continue;
@@ -1636,12 +1744,15 @@ export class Game {
       byKind[label.kind].push({ label, x, y, dist });
     }
 
-    for (const list of Object.values(byKind)) {
-      list.sort((a, b) => a.label.rank - b.label.rank || a.dist - b.dist);
+    for (const kind of ["area", "road", "building"] as const) {
+      const list = byKind[kind];
+      if (kind === "road") list.sort((a, b) => a.dist - b.dist || a.label.rank - b.label.rank);
+      else list.sort((a, b) => a.label.rank - b.label.rank || a.dist - b.dist);
     }
 
     this.placedLabels.length = 0;
     const usedCells = new Set<string>();
+    const usedRoadNames = new Set<string>();
     const shown: Record<MapLabel["kind"], number> = { area: 0, road: 0, building: 0 };
     const kinds = (["area", "road", "building"] as const).filter((k) => this.labelKindOn(k));
     const cursor = { area: 0, road: 0, building: 0 };
@@ -1651,6 +1762,12 @@ export class Game {
       const list = byKind[kind];
       while (cursor[kind] < list.length) {
         const { label, x, y } = list[cursor[kind]++];
+        const text = label.el.textContent ?? "";
+        const nameKey = text.toLowerCase();
+        if (kind === "road" && !far && usedRoadNames.has(nameKey)) {
+          label.el.style.display = "none";
+          continue;
+        }
         const gx = Math.round(x / cell);
         const gy = Math.round(y / cell);
         const key = `${gx},${gy}`;
@@ -1658,7 +1775,6 @@ export class Game {
           label.el.style.display = "none";
           continue;
         }
-        const text = label.el.textContent ?? "";
         const lw = Math.max(36, text.length * 6.4);
         const lh = kind === "area" ? 16 : 13;
         const box = { x: x - lw * 0.5, y: y - lh, w: lw, h: lh };
@@ -1667,6 +1783,7 @@ export class Game {
           continue;
         }
         usedCells.add(key);
+        if (kind === "road") usedRoadNames.add(nameKey);
         this.placedLabels.push(box);
         shown[kind]++;
         label.el.style.display = "block";

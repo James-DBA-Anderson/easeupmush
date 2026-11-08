@@ -16,7 +16,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Anton&family=Source+Sans+3:wght@400;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Source+Sans+3:wght@400;600;700;800&display=swap"
       rel="stylesheet"
     />
     <style>
@@ -95,13 +95,19 @@
       }
 
       .boot__map {
-        width: min(280px, 72vw);
+        width: min(300px, 78vw);
         height: auto;
         overflow: visible;
       }
 
       .boot__water {
         fill: #0e2a33;
+      }
+
+      .boot__sheen {
+        fill: #1a4a56;
+        opacity: 0.28;
+        animation: boot-sheen 5.5s ease-in-out infinite;
       }
 
       .boot__land {
@@ -111,37 +117,27 @@
       .boot__fill {
         fill: #2f7a6e;
         clip-path: inset(calc(100% - var(--boot-pct, 6%)) 0 0 0);
-        transition: clip-path 0.28s ease;
+        transition: clip-path 0.55s ease-out;
       }
 
-      .boot__trace {
+      .boot__coast {
         fill: none;
-        stroke: #f0a23a;
-        stroke-width: 1.7;
+        stroke: rgba(240, 162, 58, 0.85);
+        stroke-width: 1.35;
         stroke-linejoin: round;
         stroke-linecap: round;
-        stroke-dasharray: 7 11;
-        animation: boot-dash 16s linear infinite;
       }
 
-      .boot__ping {
-        fill: none;
-        stroke: rgba(240, 162, 58, 0.5);
-        stroke-width: 1.2;
-        transform-box: fill-box;
-        transform-origin: center;
-        animation: boot-ping 2.5s ease-out infinite;
-      }
-
-      .boot__ping--late {
-        animation-delay: 1.25s;
+      .boot__mark {
+        fill: #f0a23a;
+        animation: boot-glow 2.4s ease-in-out infinite;
       }
 
       .boot__title {
-        font-family: var(--font-display);
-        font-size: clamp(1.8rem, 6vw, 2.6rem);
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
+        font-family: var(--font-ui);
+        font-weight: 800;
+        font-size: clamp(1.85rem, 6vw, 2.55rem);
+        letter-spacing: 0.01em;
         color: var(--chalk);
         line-height: 1;
       }
@@ -170,22 +166,26 @@
         transition: width 0.28s ease;
       }
 
-      @keyframes boot-dash {
-        to { stroke-dashoffset: -360; }
+      @keyframes boot-sheen {
+        0%, 100% { opacity: 0.16; }
+        50% { opacity: 0.4; }
       }
 
-      @keyframes boot-ping {
-        0% { transform: scale(0.35); opacity: 0.65; }
-        100% { transform: scale(5.4); opacity: 0; }
+      @keyframes boot-glow {
+        0%, 100% { opacity: 0.55; }
+        50% { opacity: 1; }
       }
 
       @media (prefers-reduced-motion: reduce) {
-        .boot__trace,
-        .boot__ping,
+        .boot__sheen,
+        .boot__mark,
         .boot__fill,
         .boot__bar-fill {
           animation: none;
           transition: none;
+        }
+        .boot__mark {
+          opacity: 1;
         }
       }
 
@@ -391,12 +391,6 @@
         border-color: var(--sodium);
         background: var(--sodium);
         color: var(--ink);
-      }
-
-      #demolish-toggle.is-on {
-        border-color: #e24a3a;
-        background: #e24a3a;
-        color: #fff;
       }
 
       .dock {
@@ -905,27 +899,27 @@
   </head>
   <body class="is-booting">
     <div id="boot" role="status" aria-live="polite" aria-busy="true">
-      <svg class="boot__map" viewBox="0 0 200 168" aria-hidden="true">
-        <rect class="boot__water" x="0" y="0" width="200" height="168" rx="18"/>
+      <svg class="boot__map" viewBox="0 0 240 200" aria-hidden="true">
+        <rect class="boot__water" x="0" y="0" width="240" height="200" rx="20"/>
+        <path class="boot__sheen" d="M0 132c44-8 96-4 148 6 34 7 68 4 92-10v72H0z"/>
         <g class="boot__land">
-          <path d="M38 46c8-10 22-16 34-12 8 3 12 12 14 22 3 16 2 34-2 50-3 12-10 24-20 30-12 8-26 6-34-4-8-10-10-28-8-44 2-14 8-32 16-42z"/>
-          <path d="M96 22c10-6 22-6 32 2 12 10 18 28 22 46 5 22 8 44 2 62-4 14-16 22-30 22-14 0-24-8-30-20-6-12-10-28-10-44 0-18 4-36 8-50 2-8 4-14 6-18z"/>
-          <path d="M142 28c14-4 28 2 36 14 8 12 10 28 8 44-2 18-10 34-22 42-12 8-26 6-34-6-6-10-6-26-2-40 4-16 10-30 14-54z"/>
+          <path d="M8 30c48-14 108-16 164-8 28 4 52 14 60 28v16c-44-10-102-8-154 0-28 4-52 8-70 4V30z"/>
+          <path d="M20 74l44 8c12 6 16 22 12 44-4 22-18 34-36 32-16-2-22-18-20-40 2-18 2-34 0-44z"/>
+          <path d="M112 56l44-4c22 2 34 18 36 44 2 28-6 52-24 64-20 12-44 8-58-8-12-16-16-42-12-66 2-16 6-26 14-30z"/>
         </g>
         <g class="boot__fill">
-          <path d="M38 46c8-10 22-16 34-12 8 3 12 12 14 22 3 16 2 34-2 50-3 12-10 24-20 30-12 8-26 6-34-4-8-10-10-28-8-44 2-14 8-32 16-42z"/>
-          <path d="M96 22c10-6 22-6 32 2 12 10 18 28 22 46 5 22 8 44 2 62-4 14-16 22-30 22-14 0-24-8-30-20-6-12-10-28-10-44 0-18 4-36 8-50 2-8 4-14 6-18z"/>
-          <path d="M142 28c14-4 28 2 36 14 8 12 10 28 8 44-2 18-10 34-22 42-12 8-26 6-34-6-6-10-6-26-2-40 4-16 10-30 14-54z"/>
+          <path d="M8 30c48-14 108-16 164-8 28 4 52 14 60 28v16c-44-10-102-8-154 0-28 4-52 8-70 4V30z"/>
+          <path d="M20 74l44 8c12 6 16 22 12 44-4 22-18 34-36 32-16-2-22-18-20-40 2-18 2-34 0-44z"/>
+          <path d="M112 56l44-4c22 2 34 18 36 44 2 28-6 52-24 64-20 12-44 8-58-8-12-16-16-42-12-66 2-16 6-26 14-30z"/>
         </g>
-        <circle class="boot__ping" cx="84" cy="88" r="8"/>
-        <circle class="boot__ping boot__ping--late" cx="84" cy="88" r="8"/>
-        <g class="boot__trace">
-          <path d="M38 46c8-10 22-16 34-12 8 3 12 12 14 22 3 16 2 34-2 50-3 12-10 24-20 30-12 8-26 6-34-4-8-10-10-28-8-44 2-14 8-32 16-42z"/>
-          <path d="M96 22c10-6 22-6 32 2 12 10 18 28 22 46 5 22 8 44 2 62-4 14-16 22-30 22-14 0-24-8-30-20-6-12-10-28-10-44 0-18 4-36 8-50 2-8 4-14 6-18z"/>
-          <path d="M142 28c14-4 28 2 36 14 8 12 10 28 8 44-2 18-10 34-22 42-12 8-26 6-34-6-6-10-6-26-2-40 4-16 10-30 14-54z"/>
+        <g class="boot__coast">
+          <path d="M8 30c48-14 108-16 164-8 28 4 52 14 60 28"/>
+          <path d="M20 74l44 8c12 6 16 22 12 44-4 22-18 34-36 32-16-2-22-18-20-40 2-18 2-34 0-44z"/>
+          <path d="M112 56l44-4c22 2 34 18 36 44 2 28-6 52-24 64-20 12-44 8-58-8-12-16-16-42-12-66 2-16 6-26 14-30z"/>
         </g>
+        <circle class="boot__mark" cx="126" cy="122" r="3.2"/>
       </svg>
-      <h1 class="boot__title">SIMPOMPEY</h1>
+      <h1 class="boot__title">SimPompey</h1>
       <p class="boot__status" id="boot-status">Hang on mush…</p>
       <div class="boot__bar" id="boot-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="4" aria-labelledby="boot-status">
         <span class="boot__bar-fill" id="boot-bar-fill"></span>
@@ -946,12 +940,6 @@
         </label>
       </nav>
       <div class="hud__tools">
-        <button type="button" class="hud__icon" id="demolish-toggle" title="Knock down" aria-label="Knock down" aria-pressed="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M5 11.2 12 5.4 19 11.2V19.6H5z"/>
-            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="m9 13.4 6 6M15 13.4l-6 6"/>
-          </svg>
-        </button>
         <button type="button" class="hud__icon" id="drive-toggle" title="Take the motor" aria-label="Take the motor" aria-pressed="false">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path fill="currentColor" d="M5 14.2 7.1 10h2.2L11 7.8h5.6L18.2 10H20l1.2 4.2H5zm.8 1.5h12.4v1.15H5.8z"/>
@@ -1017,7 +1005,6 @@
               <button type="button" class="planner__zone" data-tool="education"><span class="planner__swatch" style="background:#22e0ff"></span> Education</button>
               <button type="button" class="planner__zone" data-tool="parking"><span class="planner__swatch" style="background:#a8b4ff"></span> Parking</button>
             </div>
-            <button type="button" data-tool="dezone">Wipe zone</button>
             <div class="planner__brush">
               <span class="planner__brush-label">Brush</span>
               <button type="button" data-brush="1">1</button>
@@ -1103,8 +1090,8 @@
           <span class="planner__ramp"></span>
           <span data-legend-hi>High</span>
         </div>
-        <span class="planner__info" id="planner-info">Pick a layer, then paint the island</span>
-        <p class="planner__hint">Paint to rezone · 1–9 layers · Esc all zones · X knock down · -/= brush</p>
+        <span class="planner__info" id="planner-info">Pick a layer to look around the island</span>
+        <p class="planner__hint">1–9 layers · Esc close · -/= brush</p>
       </div>
     </aside>
     <div id="speedo" hidden>0 mph</div>

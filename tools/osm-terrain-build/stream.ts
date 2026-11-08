@@ -1273,62 +1273,109 @@ function emitLandRing(
 }
 
 function buildTerrain(
-  rows: number,
-  cols: number,
+  _rows: number,
+  _cols: number,
   sample: (lat: number, lon: number) => number,
   writer: BinWriter,
-  coastlines: { x: number; y: number }[][],
+  _coastlines: { x: number; y: number }[][],
   ground?: TerrainIndex,
 ) {
-  const stitched = stitchCoastlines(coastlines)
-    .map((ring) => {
-      if (ring.length > 2 && samePt(ring[0], ring[ring.length - 1], 8)) ring.pop();
-      return ring;
-    })
-    .filter((ring) => ring.length >= 16 && Math.abs(signedArea(ring)) > 8000)
-    .sort((a, b) => Math.abs(signedArea(b)) - Math.abs(signedArea(a)));
+  // Land comes from coast.json rings (already closed against the bbox).
+  // Tessellating raw OSM coast chains fills Portsmouth / Langstone harbours.
+  emitMainlandFill(sample, writer, ground, [], loadClosedLand());
+}
 
-  if (stitched.length) {
-    const used = new Set<number>();
-    for (let i = 0; i < stitched.length; i++) {
-      if (used.has(i)) continue;
-      const outer = stitched[i];
-      const holes: { x: number; y: number }[][] = [];
-      for (let j = i + 1; j < stitched.length; j++) {
-        if (used.has(j)) continue;
-        if (!pointInPoly(stitched[j][0].x, stitched[j][0].y, outer)) continue;
-        used.add(j);
-        holes.push(stitched[j]);
-      }
-      emitLandRing(outer, holes, sample, writer, ground);
-    }
-    return;
+function loadClosedLand(): { x: number; y: number }[][] {
+  const file = `${DATA_DIR}/portsmouth-coast.json`;
+  if (!existsSync(file)) return [];
+  const data = JSON.parse(readFileSync(file, "utf8")) as { coasts?: number[][] };
+  const bboxArea = (EAST - WEST) * SCALE_X * (NORTH - SOUTH) * SCALE_Y;
+  const rings: { x: number; y: number }[][] = [];
+  for (const flat of data.coasts ?? []) {
+    const pts: { x: number; y: number }[] = [];
+    for (let i = 0; i + 1 < flat.length; i += 2) pts.push({ x: flat[i], y: flat[i + 1] });
+    const area = Math.abs(signedArea(pts));
+    if (pts.length >= 16 && area > 20000 && area < bboxArea * 0.85) rings.push(pts);
   }
+  return rings;
+}
 
-  // Fallback: smoothed DEM land contour if OSM coastline is missing
-  const verts = new Float32Array(rows * cols * 3);
-  const elev = new Float32Array(rows * cols);
-  let vi = 0;
+/** DEM land inside the map window that OSM island rings never closed (Cosham, Portsdown, Gosport interior). */
+function emitMainlandFill(
+  sample: (lat: number, lon: number) => number,
+  writer: BinWriter,
+  ground: TerrainIndex | undefined,
+  osmLand: { x: number; y: number }[][],
+  closedLand: { x: number; y: number }[][],
+) {
+  const cell = 16;
+  const cols = Math.max(2, Math.round(((EAST - WEST) * SCALE_X) / cell) + 1);
+  const rows = Math.max(2, Math.round(((NORTH - SOUTH) * SCALE_Y) / cell) + 1);
+  const xs = new Float32Array(rows * cols);
+  const zs = new Float32Array(rows * cols);
+  const mask = new Uint8Array(rows * cols);
+  const osmSimple = osmLand.map((ring) => ring.filter((_, i) => i % 6 === 0 || i === ring.length - 1));
+  const landSimple = closedLand.map((ring) => ring.filter((_, i) => i % 6 === 0 || i === ring.length - 1));
+  let landCells = 0;
   for (let r = 0; r < rows; r++) {
-    const fracR = r / (rows - 1);
-    const lat = NORTH - fracR * (NORTH - SOUTH);
+    const lat = NORTH - (r / Math.max(1, rows - 1)) * (NORTH - SOUTH);
     for (let c = 0; c < cols; c++) {
-      const fracC = c / (cols - 1);
-      const lon = WEST + fracC * (EAST - WEST);
+      const lon = WEST + (c / Math.max(1, cols - 1)) * (EAST - WEST);
       const { x, y: z } = localM(lat, lon);
-      let ele = sample(lat, lon);
-      if (!Number.isFinite(ele) || ele < 0) ele = 0;
-      if (ele > 160) ele = 160;
-      elev[r * cols + c] = ele;
-      verts[vi++] = x; verts[vi++] = ele; verts[vi++] = z;
+      const i = r * cols + c;
+      xs[i] = x;
+      zs[i] = z;
+      if (!inBox(lat, lon)) continue;
+      if (osmSimple.some((ring) => pointInPoly(x, z, ring))) continue;
+      const inLand = landSimple.some((ring) => pointInPoly(x, z, ring));
+      const ele = sample(lat, lon);
+      // High ground only (Portsdown). Shallow DEM noise must not fill harbour water.
+      if (!inLand && (!Number.isFinite(ele) || ele < 8)) continue;
+      mask[i] = 1;
+      landCells++;
     }
   }
-  const rings = marchingSquares(elev, rows, cols, verts, 0.15)
-    .map((ring) => chaikinClosed(ring, 4))
-    .filter((ring) => ring.length >= 16 && Math.abs(signedArea(ring)) > 20000)
-    .sort((a, b) => Math.abs(signedArea(b)) - Math.abs(signedArea(a)))
-    .slice(0, 6);
-  for (const ring of rings) emitLandRing(ring, [], sample, writer, ground);
+
+  const indexAt = new Int32Array(rows * cols).fill(-1);
+  const px: number[] = [];
+  const py: number[] = [];
+  const pz: number[] = [];
+  const vert = (r: number, c: number) => {
+    const i = r * cols + c;
+    if (indexAt[i] >= 0) return indexAt[i];
+    const vi = px.length;
+    indexAt[i] = vi;
+    px.push(xs[i]);
+    pz.push(zs[i]);
+    py.push(sampleAtLocal(sample, xs[i], zs[i]));
+    return vi;
+  };
+  const idx: number[] = [];
+  for (let r = 0; r < rows - 1; r++) {
+    for (let c = 0; c < cols - 1; c++) {
+      const i00 = r * cols + c;
+      if (!mask[i00] || !mask[i00 + 1] || !mask[i00 + cols] || !mask[i00 + cols + 1]) continue;
+      const a = vert(r, c);
+      const b = vert(r, c + 1);
+      const d = vert(r + 1, c);
+      const e = vert(r + 1, c + 1);
+      idx.push(a, d, b, b, d, e);
+    }
+  }
+  console.log(`  DEM mainland fill: ${landCells} cells on ${rows}×${cols}, ${px.length} verts, ${idx.length / 3} tris`);
+  if (idx.length < 3) return;
+
+  const tVerts = new Float32Array(px.length * 3);
+  const tNorms = new Float32Array(tVerts.length);
+  for (let i = 0; i < px.length; i++) {
+    tVerts[i * 3] = px[i];
+    tVerts[i * 3 + 1] = py[i];
+    tVerts[i * 3 + 2] = pz[i];
+  }
+  const indices = new Uint32Array(idx);
+  computeNormals(tVerts, indices, tNorms);
+  writer.push("terrain", tVerts, tNorms, indices, TERRAIN_COLOUR);
+  ground?.addMesh(tVerts, indices);
 }
 
 function buildBuilding(
@@ -1351,7 +1398,7 @@ function buildBuilding(
   const heights = nodes.map(([lat, lon]) => {
     let h = sample(lat, lon);
     if (!Number.isFinite(h) || h < 0) h = 0;
-    if (h > 12) h = 12;
+    if (h > 160) h = 160;
     return h;
   });
   const maxH = heights.reduce((a, b) => Math.max(a, b), 0);

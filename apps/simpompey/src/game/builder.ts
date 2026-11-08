@@ -348,6 +348,7 @@ export class CityBuilder {
   private zonePix: Uint8Array = new Uint8Array(0);
   private zoneMix = { value: 0 };
   private zoneWash = { value: 0.7 };
+  private overlaySheet: THREE.Mesh | null = null;
   private valueIndex: Uint8Array = new Uint8Array(0);
   private valueRates: number[] = [];
   private trafficFlow: Uint8Array = new Uint8Array(0);
@@ -451,7 +452,7 @@ export class CityBuilder {
   }
 
   async load() {
-    const raw = (await fetch("./portsmouth-zones.json?v=7").then((r) => {
+      const raw = (await fetch("./portsmouth-zones.json?v=9").then((r) => {
       if (!r.ok) throw new Error(`zones ${r.status}`);
       return r.json();
     })) as ZoneFile;
@@ -479,7 +480,7 @@ export class CityBuilder {
 
   private async loadLandValue() {
     try {
-      const raw = (await fetch("./portsmouth-land-value.json?v=4").then((r) => {
+      const raw = (await fetch("./portsmouth-land-value.json?v=6").then((r) => {
         if (!r.ok) throw new Error(`land-value ${r.status}`);
         return r.json();
       })) as { value: string; rates?: number[] };
@@ -492,7 +493,7 @@ export class CityBuilder {
 
   private async loadTraffic() {
     try {
-      const raw = (await fetch("./portsmouth-traffic.json?v=2").then((r) => {
+      const raw = (await fetch("./portsmouth-traffic.json?v=4").then((r) => {
         if (!r.ok) throw new Error(`traffic ${r.status}`);
         return r.json();
       })) as {
@@ -540,7 +541,7 @@ export class CityBuilder {
 
   private async loadPollution() {
     try {
-      const raw = (await fetch("./portsmouth-pollution.json?v=2").then((r) => {
+      const raw = (await fetch("./portsmouth-pollution.json?v=3").then((r) => {
         if (!r.ok) throw new Error(`pollution ${r.status}`);
         return r.json();
       })) as {
@@ -572,7 +573,7 @@ export class CityBuilder {
 
   private async loadFlood() {
     try {
-      const raw = (await fetch("./portsmouth-flood.json?v=1").then((r) => {
+      const raw = (await fetch("./portsmouth-flood.json?v=2").then((r) => {
         if (!r.ok) throw new Error(`flood ${r.status}`);
         return r.json();
       })) as { sea?: string; surface?: string };
@@ -585,7 +586,7 @@ export class CityBuilder {
 
   private async loadImd() {
     try {
-      const raw = (await fetch("./portsmouth-deprivation.json?v=1").then((r) => {
+      const raw = (await fetch("./portsmouth-deprivation.json?v=2").then((r) => {
         if (!r.ok) throw new Error(`imd ${r.status}`);
         return r.json();
       })) as {
@@ -611,7 +612,7 @@ export class CityBuilder {
 
   private async loadBroadband() {
     try {
-      const raw = (await fetch("./portsmouth-broadband.json?v=1").then((r) => {
+      const raw = (await fetch("./portsmouth-broadband.json?v=2").then((r) => {
         if (!r.ok) throw new Error(`broadband ${r.status}`);
         return r.json();
       })) as { layers?: Record<string, string> };
@@ -626,7 +627,7 @@ export class CityBuilder {
 
   private async loadSpeeds() {
     try {
-      const raw = (await fetch("./portsmouth-speeds.json?v=1").then((r) => {
+      const raw = (await fetch("./portsmouth-speeds.json?v=2").then((r) => {
         if (!r.ok) throw new Error(`speeds ${r.status}`);
         return r.json();
       })) as { down?: string; up?: string; downLo?: number; downHi?: number; upLo?: number; upHi?: number };
@@ -643,7 +644,7 @@ export class CityBuilder {
 
   private async loadMasts() {
     try {
-      const raw = (await fetch("./portsmouth-masts.json?v=2").then((r) => {
+      const raw = (await fetch("./portsmouth-masts.json?v=3").then((r) => {
         if (!r.ok) throw new Error(`masts ${r.status}`);
         return r.json();
       })) as { density?: string; sites?: MastSite[] };
@@ -906,7 +907,47 @@ export class CityBuilder {
       }
     };
     mat.needsUpdate = true;
+    this.makeOverlaySheet(tex, spanX, spanZ);
     this.refreshOverlay();
+  }
+
+  private makeOverlaySheet(tex: THREE.DataTexture, spanX: number, spanZ: number) {
+    this.overlaySheet?.removeFromParent();
+    (this.overlaySheet?.material as THREE.Material | undefined)?.dispose();
+    this.overlaySheet?.geometry.dispose();
+    const y = 0.45;
+    const geo = new THREE.BufferGeometry();
+    const { originX, originZ } = this;
+    geo.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(
+        [
+          originX, y, originZ,
+          originX + spanX, y, originZ,
+          originX, y, originZ + spanZ,
+          originX + spanX, y, originZ + spanZ,
+        ],
+        3,
+      ),
+    );
+    geo.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1], 2));
+    geo.setIndex([0, 1, 2, 1, 3, 2]);
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -8,
+      polygonOffsetUnits: -8,
+    });
+    const sheet = new THREE.Mesh(geo, mat);
+    sheet.name = "overlay-sheet";
+    sheet.renderOrder = 3;
+    sheet.frustumCulled = false;
+    sheet.visible = false;
+    this.mapScene.add(sheet);
+    this.overlaySheet = sheet;
   }
 
   private focusZone(): ZoneId | null {
@@ -921,13 +962,13 @@ export class CityBuilder {
     if (this.zoneTex) this.zoneTex.needsUpdate = true;
     const focus = this.focusZone();
     const heat = HEAT_OVERLAY.includes(this.overlay);
-    this.zoneMix.value =
-      !this.active || this.overlay === "none" ? 0
-      : heat ? 0.9
-      : focus !== null ? 0.94
-      : 0.68;
+    const show = this.active && this.overlay !== "none";
+    // Terrain carries colour on land; the full-bbox sheet covers harbour / Solent
+    // gaps the heightfield does not. Isle of Wight sits south of the sheet.
+    this.zoneMix.value = show ? 1 : 0;
     this.zoneWash.value = heat ? 0.28 : focus !== null ? 0.18 : 0.4;
-    const showOutlines = this.active && this.overlay !== "none";
+    if (this.overlaySheet) this.overlaySheet.visible = show;
+    const showOutlines = show;
     if (this.outlines) this.outlines.visible = showOutlines;
     if (!showOutlines) this.pickOutline.visible = false;
   }
@@ -1723,7 +1764,7 @@ export class CityBuilder {
       else if (this.overlay === "broadband") this.infoEl.textContent = "Hover for Ofcom coverage";
       else if (this.overlay === "speeds") this.infoEl.textContent = "Hover for median speed (2023)";
       else if (this.overlay === "masts") this.infoEl.textContent = "Hover for radio sites";
-      else if (this.overlay === "zones") this.infoEl.textContent = "Pick a layer, then paint the island";
+      else if (this.overlay === "zones") this.infoEl.textContent = "Hover a plot for land use";
     }
     const knock = document.getElementById("demolish-toggle");
     if (knock) {

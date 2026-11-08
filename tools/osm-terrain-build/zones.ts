@@ -522,6 +522,25 @@ function b64(bytes: Uint8Array): string {
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
 }
 
+function unpackCoast(flat: number[]): Pt[] {
+  const pts: Pt[] = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) pts.push({ x: flat[i], y: flat[i + 1] });
+  return pts;
+}
+
+function landCells(cols: number, rows: number, originX: number, originZ: number): Uint8Array {
+  const mask = new Uint8Array(cols * rows);
+  const coastPath = `${DATA_DIR}/portsmouth-coast.json`;
+  if (!existsSync(coastPath)) return mask;
+  const coast = JSON.parse(readFileSync(coastPath, "utf8")) as { coasts?: number[][] };
+  const rings = (coast.coasts ?? []).map(unpackCoast).filter((r) => r.length >= 16);
+  for (const ring of rings) {
+    const simple = ring.filter((_, i) => i % 8 === 0 || i === ring.length - 1);
+    if (simple.length >= 12) fillPoly(mask, cols, rows, originX, originZ, simple, 1, true);
+  }
+  return mask;
+}
+
 function fillPoly(grid: Uint8Array, cols: number, rows: number, originX: number, originZ: number, pts: Pt[], zone: number, overwrite: boolean) {
   const b = ringBox(pts);
   const c0 = Math.max(0, Math.floor((b.minX - originX) / CELL));
@@ -643,7 +662,8 @@ function main() {
       const n = nodeMap.get(Number(ndMatch[1]));
       if (n) nodes.push(n);
     }
-    if (ndCount === 0 || nodes.length !== ndCount) continue;
+    const complete = ndCount > 0 && nodes.length === ndCount;
+    if (nodes.length < 3) continue;
     ways++;
 
     const wayId = Number(wayMatch[1]);
@@ -661,6 +681,7 @@ function main() {
     if (pts.length < 3) continue;
 
     if (tags.building && tags.building !== "no") {
+      if (!complete) continue;
       if (isGiantBuilding(pts)) continue;
       const zone = buildingZone(tags.building, polyArea(pts), tags);
       buildings.push({ pts, zone, tags });
@@ -749,6 +770,15 @@ function main() {
     fillPoly(grid, cols, rows, originX, originZ, b.pts, b.zone, punch);
   }
   for (const pts of water) fillPoly(grid, cols, rows, originX, originZ, pts, ZONE.none, true);
+
+  const land = landCells(cols, rows, originX, originZ);
+  let leftover = 0;
+  for (let i = 0; i < grid.length; i++) {
+    if (grid[i] !== ZONE.none || !land[i]) continue;
+    grid[i] = ZONE.nature;
+    leftover++;
+  }
+  console.log(`  leftover land filled as nature: ${leftover}`);
 
   const counts = new Array(19).fill(0);
   for (const z of grid) counts[z]++;
