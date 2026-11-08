@@ -18,6 +18,7 @@ import { TOWN_VIEWS, type TownView } from "./views";
 import { CityBuilder, type BuilderTool } from "./builder";
 import { osmLocal } from "./geo";
 
+const TERRAIN_RANGE_CHUNK = 16 * 1024 * 1024;
 const BARRIER_VIEW = 340;
 const BARRIER_REACH = 170;
 const SHADOW_MAP = 2048;
@@ -449,17 +450,27 @@ export class Game {
     this.loop();
   }
 
-  private loadGltf(loader: GLTFLoader, url: string, onPct: (t: number) => void): Promise<GLTF> {
-    return new Promise((resolve, reject) => {
-      loader.load(
-        url,
-        resolve,
-        (e) => {
-          if (e.lengthComputable && e.total > 0) onPct(e.loaded / e.total);
-        },
-        reject,
-      );
-    });
+  private async loadGltf(loader: GLTFLoader, url: string, onPct: (t: number) => void): Promise<GLTF> {
+    const specRes = await fetch(url);
+    if (!specRes.ok) throw new Error(`terrain gltf ${specRes.status}`);
+    const spec = (await specRes.json()) as {
+      buffers?: { uri?: string; byteLength?: number }[];
+    };
+    const binUri = spec.buffers?.[0]?.uri;
+    let blobUrl = "";
+    if (binUri && !binUri.startsWith("data:")) {
+      const binUrl = new URL(binUri, new URL(url, window.location.href)).href;
+      const bin = await fetchRangedArrayBuffer(binUrl, onPct);
+      blobUrl = URL.createObjectURL(new Blob([bin], { type: "application/octet-stream" }));
+      spec.buffers![0].uri = blobUrl;
+    }
+    try {
+      return await new Promise<GLTF>((resolve, reject) => {
+        loader.parse(JSON.stringify(spec), "", resolve, reject);
+      });
+    } finally {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    }
   }
 
   private setBoot(label: string, amount: number) {
@@ -1897,4 +1908,35 @@ function chunkBuildings(src: THREE.Mesh, cell: number): THREE.Group {
     group.add(mesh);
   }
   return group;
+}
+
+async function fetchRangedArrayBuffer(url: string, onPct: (t: number) => void): Promise<ArrayBuffer> {
+  const probe = await fetch(url, { headers: { Range: "bytes=0-0" } });
+  if (!probe.ok && probe.status !== 206) throw new Error(`terrain bin ${probe.status}`);
+  if (probe.status === 200) {
+    const buf = await probe.arrayBuffer();
+    onPct(1);
+    return buf;
+  }
+  const total = contentRangeTotal(probe.headers.get("Content-Range"));
+  await probe.arrayBuffer();
+  if (!total) throw new Error("terrain bin size unknown");
+  const out = new Uint8Array(total);
+  let offset = 0;
+  while (offset < total) {
+    const end = Math.min(total, offset + TERRAIN_RANGE_CHUNK) - 1;
+    const res = await fetch(url, { headers: { Range: `bytes=${offset}-${end}` } });
+    if (res.status !== 206) throw new Error(`terrain bin range ${res.status}`);
+    const piece = new Uint8Array(await res.arrayBuffer());
+    if (!piece.length) throw new Error("terrain bin range empty");
+    out.set(piece, offset);
+    offset += piece.length;
+    onPct(offset / total);
+  }
+  return out.buffer;
+}
+
+function contentRangeTotal(header: string | null): number {
+  const match = /\/(\d+)\s*$/.exec(header ?? "");
+  return match ? Number(match[1]) : 0;
 }

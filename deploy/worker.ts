@@ -53,7 +53,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === TERRAIN_PATH) {
-      return handleTerrain(request, env, ctx);
+      return handleTerrain(request, env);
     }
     if (url.pathname === "/api/backflip-bill/scores") {
       return handleScores(request, env);
@@ -65,11 +65,7 @@ export default {
   },
 };
 
-async function handleTerrain(
-  request: Request,
-  env: Env,
-  ctx: { waitUntil(p: Promise<unknown>): void },
-): Promise<Response> {
+async function handleTerrain(request: Request, env: Env): Promise<Response> {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return new Response("Method not allowed", { status: 405 });
   }
@@ -85,27 +81,30 @@ async function handleTerrain(
 
   const headers = new Headers();
   headers.set("Content-Type", "application/octet-stream");
-  headers.set("Cache-Control", "public, max-age=31536000, immutable");
   headers.set("Accept-Ranges", "bytes");
   if (manifest?.hash) headers.set("ETag", `"${manifest.hash}"`);
 
   const range = parseBytesRange(request.headers.get("Range"), size);
   if (range === "unsatisfiable") {
     headers.set("Content-Range", `bytes */${size}`);
+    headers.set("Cache-Control", "public, max-age=31536000, immutable");
     return new Response(null, { status: 416, headers });
   }
   const start = range?.start ?? 0;
   const end = range?.end ?? size - 1;
+  const ranged = Boolean(range);
   headers.set("Content-Length", String(end - start + 1));
-  if (range) headers.set("Content-Range", `bytes ${start}-${end}/${size}`);
+  headers.set("Cache-Control", ranged ? "public, max-age=31536000, immutable" : "no-store");
+  if (ranged) headers.set("Content-Range", `bytes ${start}-${end}/${size}`);
 
   if (request.method === "HEAD") {
-    return new Response(null, { status: range ? 206 : 200, headers });
+    return new Response(null, { status: ranged ? 206 : 200, headers });
   }
 
-  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-  ctx.waitUntil(pipeTerrainParts(env, parts, start, end, writable));
-  return new Response(readable, { status: range ? 206 : 200, headers });
+  return new Response(streamTerrainParts(env, parts, start, end), {
+    status: ranged ? 206 : 200,
+    headers,
+  });
 }
 
 async function readTerrainManifest(env: Env): Promise<TerrainManifest | null> {
@@ -146,39 +145,55 @@ function parseBytesRange(header: string | null, size: number): { start: number; 
   return { start, end };
 }
 
-async function pipeTerrainParts(
+function streamTerrainParts(
   env: Env,
   parts: TerrainPart[],
   start: number,
   end: number,
-  writable: WritableStream<Uint8Array>,
-) {
-  const writer = writable.getWriter();
-  try {
-    let offset = 0;
-    for (const part of parts) {
-      const partEnd = offset + part.size;
-      const sliceStart = Math.max(start, offset);
-      const sliceEnd = Math.min(end + 1, partEnd);
-      if (sliceStart < sliceEnd) {
-        const object = await env.MAPS.get(part.key, {
-          range: { offset: sliceStart - offset, length: sliceEnd - sliceStart },
-        });
-        if (!object?.body) throw new Error(`Map mesh part missing: ${part.key}`);
-        const reader = object.body.getReader();
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) await writer.write(value);
-        }
-      }
-      offset = partEnd;
-      if (offset > end) break;
+): ReadableStream<Uint8Array> {
+  const slices: { key: string; offset: number; length: number }[] = [];
+  let cursor = 0;
+  for (const part of parts) {
+    const partEnd = cursor + part.size;
+    const sliceStart = Math.max(start, cursor);
+    const sliceEnd = Math.min(end + 1, partEnd);
+    if (sliceStart < sliceEnd) {
+      slices.push({ key: part.key, offset: sliceStart - cursor, length: sliceEnd - sliceStart });
     }
-    await writer.close();
-  } catch (err) {
-    await writer.abort(err);
+    cursor = partEnd;
+    if (cursor > end) break;
   }
+
+  let index = 0;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  return new ReadableStream({
+    async pull(controller) {
+      while (true) {
+        if (!reader) {
+          if (index >= slices.length) {
+            controller.close();
+            return;
+          }
+          const slice = slices[index++];
+          const object = await env.MAPS.get(slice.key, {
+            range: { offset: slice.offset, length: slice.length },
+          });
+          if (!object?.body) throw new Error(`Map mesh part missing: ${slice.key}`);
+          reader = object.body.getReader();
+        }
+        const { done, value } = await reader.read();
+        if (done) {
+          reader = null;
+          continue;
+        }
+        if (value) controller.enqueue(value);
+        return;
+      }
+    },
+    cancel() {
+      void reader?.cancel();
+    },
+  });
 }
 
 function jimStore(env: Env) {
