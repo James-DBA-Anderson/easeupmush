@@ -79,23 +79,17 @@ async function handleTerrain(request: Request, env: Env): Promise<Response> {
   }
   const size = parts.reduce((sum, part) => sum + part.size, 0);
 
-  const headers = new Headers();
-  headers.set("Content-Type", "application/octet-stream");
-  headers.set("Accept-Ranges", "bytes");
-  if (manifest?.hash) headers.set("ETag", `"${manifest.hash}"`);
-
   const range = parseBytesRange(request.headers.get("Range"), size);
   if (range === "unsatisfiable") {
+    const headers = terrainHeaders({ size, ranged: true, hash: manifest?.hash });
     headers.set("Content-Range", `bytes */${size}`);
-    headers.set("Cache-Control", "public, max-age=31536000, immutable");
+    headers.set("Content-Length", "0");
     return new Response(null, { status: 416, headers });
   }
   const start = range?.start ?? 0;
   const end = range?.end ?? size - 1;
   const ranged = Boolean(range);
-  headers.set("Content-Length", String(end - start + 1));
-  headers.set("Cache-Control", ranged ? "public, max-age=31536000, immutable" : "no-store");
-  if (ranged) headers.set("Content-Range", `bytes ${start}-${end}/${size}`);
+  const headers = terrainHeaders({ size, start, end, ranged, hash: manifest?.hash });
 
   if (request.method === "HEAD") {
     return new Response(null, { status: ranged ? 206 : 200, headers });
@@ -118,15 +112,43 @@ async function readTerrainManifest(env: Env): Promise<TerrainManifest | null> {
 }
 
 function serveSingleTerrain(request: Request, object: R2ObjectBody): Response {
-  const headers = new Headers();
-  object.writeHttpMetadata(headers);
-  headers.set("etag", object.httpEtag);
-  headers.set("Content-Type", "application/octet-stream");
-  headers.set("Content-Length", String(object.size));
-  headers.set("Cache-Control", "public, max-age=31536000, immutable");
-  headers.set("Accept-Ranges", "bytes");
+  const headers = terrainHeaders({
+    size: object.size,
+    start: 0,
+    end: object.size - 1,
+    ranged: false,
+    hash: object.etag,
+  });
   if (request.method === "HEAD") return new Response(null, { headers });
   return new Response(object.body, { headers });
+}
+
+function terrainHeaders(opts: {
+  size: number;
+  start?: number;
+  end?: number;
+  ranged: boolean;
+  hash?: string;
+}): Headers {
+  const headers = new Headers();
+  const start = opts.start ?? 0;
+  const end = opts.end ?? opts.size - 1;
+  headers.set("Content-Type", "application/octet-stream");
+  headers.set("Accept-Ranges", "bytes");
+  headers.set("Vary", "Range");
+  headers.set("Content-Length", String(Math.max(0, end - start + 1)));
+  if (opts.hash) headers.set("ETag", `"${opts.hash.replace(/"/g, "")}"`);
+  if (opts.ranged && opts.start !== undefined) {
+    headers.set("Content-Range", `bytes ${start}-${end}/${opts.size}`);
+  }
+  if (opts.ranged) {
+    headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  } else {
+    headers.set("Cache-Control", "no-store");
+    headers.set("CDN-Cache-Control", "no-store");
+    headers.set("Cloudflare-CDN-Cache-Control", "no-store");
+  }
+  return headers;
 }
 
 function parseBytesRange(header: string | null, size: number): { start: number; end: number } | "unsatisfiable" | null {

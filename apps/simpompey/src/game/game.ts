@@ -457,19 +457,23 @@ export class Game {
       buffers?: { uri?: string; byteLength?: number }[];
     };
     const binUri = spec.buffers?.[0]?.uri;
-    let blobUrl = "";
-    if (binUri && !binUri.startsWith("data:")) {
+    const expected = spec.buffers?.[0]?.byteLength ?? 0;
+    const cacheKey = "__simpompey_terrain_bin__";
+    const cacheWasEnabled = THREE.Cache.enabled;
+    if (binUri && !binUri.startsWith("data:") && expected > 0) {
       const binUrl = new URL(binUri, new URL(url, window.location.href)).href;
-      const bin = await fetchRangedArrayBuffer(binUrl, onPct);
-      blobUrl = URL.createObjectURL(new Blob([bin], { type: "application/octet-stream" }));
-      spec.buffers![0].uri = blobUrl;
+      const bin = await fetchRangedArrayBuffer(binUrl, expected, onPct);
+      spec.buffers![0].uri = cacheKey;
+      THREE.Cache.enabled = true;
+      THREE.Cache.add(cacheKey, bin);
     }
     try {
       return await new Promise<GLTF>((resolve, reject) => {
-        loader.parse(JSON.stringify(spec), "", resolve, reject);
+        loader.parse(spec, "", resolve, reject);
       });
     } finally {
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      THREE.Cache.remove(cacheKey);
+      THREE.Cache.enabled = cacheWasEnabled;
     }
   }
 
@@ -1910,33 +1914,48 @@ function chunkBuildings(src: THREE.Mesh, cell: number): THREE.Group {
   return group;
 }
 
-async function fetchRangedArrayBuffer(url: string, onPct: (t: number) => void): Promise<ArrayBuffer> {
-  const probe = await fetch(url, { headers: { Range: "bytes=0-0" } });
-  if (!probe.ok && probe.status !== 206) throw new Error(`terrain bin ${probe.status}`);
-  if (probe.status === 200) {
-    const buf = await probe.arrayBuffer();
-    onPct(1);
-    return buf;
-  }
-  const total = contentRangeTotal(probe.headers.get("Content-Range"));
-  await probe.arrayBuffer();
-  if (!total) throw new Error("terrain bin size unknown");
-  const out = new Uint8Array(total);
+async function fetchRangedArrayBuffer(
+  url: string,
+  expected: number,
+  onPct: (t: number) => void,
+): Promise<ArrayBuffer> {
+  const rangedUrl = `${url}${url.includes("?") ? "&" : "?"}chunks=1`;
+  const out = new Uint8Array(expected);
   let offset = 0;
-  while (offset < total) {
-    const end = Math.min(total, offset + TERRAIN_RANGE_CHUNK) - 1;
-    const res = await fetch(url, { headers: { Range: `bytes=${offset}-${end}` } });
-    if (res.status !== 206) throw new Error(`terrain bin range ${res.status}`);
+  while (offset < expected) {
+    const end = Math.min(expected, offset + TERRAIN_RANGE_CHUNK) - 1;
+    const res = await fetch(rangedUrl, {
+      cache: "no-store",
+      headers: { Range: `bytes=${offset}-${end}` },
+    });
+    if (!res.ok && res.status !== 206) throw new Error(`terrain bin ${res.status}`);
     const piece = new Uint8Array(await res.arrayBuffer());
     if (!piece.length) throw new Error("terrain bin range empty");
+    if (res.status === 200) {
+      if (piece.byteLength !== expected) {
+        throw new Error(`terrain bin ${piece.byteLength} of ${expected}`);
+      }
+      onPct(1);
+      return copyArrayBuffer(piece);
+    }
+    if (res.status !== 206) throw new Error(`terrain bin range ${res.status}`);
+    if (offset === 0 && piece.byteLength === expected) {
+      onPct(1);
+      return copyArrayBuffer(piece);
+    }
+    if (offset + piece.length > expected) throw new Error("terrain bin range overflow");
     out.set(piece, offset);
     offset += piece.length;
-    onPct(offset / total);
+    onPct(offset / expected);
   }
-  return out.buffer;
+  if (offset !== expected) throw new Error(`terrain bin assembled ${offset} of ${expected}`);
+  return copyArrayBuffer(out);
 }
 
-function contentRangeTotal(header: string | null): number {
-  const match = /\/(\d+)\s*$/.exec(header ?? "");
-  return match ? Number(match[1]) : 0;
+function copyArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const raw = bytes.buffer;
+  if (raw instanceof ArrayBuffer && bytes.byteOffset === 0 && bytes.byteLength === raw.byteLength) {
+    return raw;
+  }
+  return bytes.slice().buffer;
 }
