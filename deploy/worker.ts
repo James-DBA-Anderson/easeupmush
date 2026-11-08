@@ -19,6 +19,10 @@ const MAX_ROWS = 50;
 
 const TERRAIN_PATH = "/games/simpompey/models/portsmouth-terrain.bin";
 const TERRAIN_KEY = "simpompey/portsmouth-terrain.bin";
+const TERRAIN_MANIFEST_KEY = "simpompey/portsmouth-terrain.json";
+
+type TerrainPart = { key: string; size: number };
+type TerrainManifest = { hash?: string; size?: number; parts?: TerrainPart[] };
 
 interface Env {
   SCORES: KVNamespace;
@@ -49,7 +53,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === TERRAIN_PATH) {
-      return handleTerrain(request, env);
+      return handleTerrain(request, env, ctx);
     }
     if (url.pathname === "/api/backflip-bill/scores") {
       return handleScores(request, env);
@@ -61,20 +65,120 @@ export default {
   },
 };
 
-async function handleTerrain(request: Request, env: Env): Promise<Response> {
+async function handleTerrain(
+  request: Request,
+  env: Env,
+  ctx: { waitUntil(p: Promise<unknown>): void },
+): Promise<Response> {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return new Response("Method not allowed", { status: 405 });
   }
-  const object = await env.MAPS.get(TERRAIN_KEY);
-  if (!object) return new Response("Map mesh missing", { status: 503 });
+
+  const manifest = await readTerrainManifest(env);
+  const parts = manifest?.parts?.filter((part) => part.key && part.size > 0) ?? [];
+  if (!parts.length) {
+    const object = await env.MAPS.get(TERRAIN_KEY);
+    if (!object) return new Response("Map mesh missing", { status: 503 });
+    return serveSingleTerrain(request, object);
+  }
+  const size = parts.reduce((sum, part) => sum + part.size, 0);
+
+  const headers = new Headers();
+  headers.set("Content-Type", "application/octet-stream");
+  headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  headers.set("Accept-Ranges", "bytes");
+  if (manifest?.hash) headers.set("ETag", `"${manifest.hash}"`);
+
+  const range = parseBytesRange(request.headers.get("Range"), size);
+  if (range === "unsatisfiable") {
+    headers.set("Content-Range", `bytes */${size}`);
+    return new Response(null, { status: 416, headers });
+  }
+  const start = range?.start ?? 0;
+  const end = range?.end ?? size - 1;
+  headers.set("Content-Length", String(end - start + 1));
+  if (range) headers.set("Content-Range", `bytes ${start}-${end}/${size}`);
+
+  if (request.method === "HEAD") {
+    return new Response(null, { status: range ? 206 : 200, headers });
+  }
+
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  ctx.waitUntil(pipeTerrainParts(env, parts, start, end, writable));
+  return new Response(readable, { status: range ? 206 : 200, headers });
+}
+
+async function readTerrainManifest(env: Env): Promise<TerrainManifest | null> {
+  const object = await env.MAPS.get(TERRAIN_MANIFEST_KEY);
+  if (!object) return null;
+  try {
+    return await object.json<TerrainManifest>();
+  } catch {
+    return null;
+  }
+}
+
+function serveSingleTerrain(request: Request, object: R2ObjectBody): Response {
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("etag", object.httpEtag);
   headers.set("Content-Type", "application/octet-stream");
   headers.set("Content-Length", String(object.size));
   headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  headers.set("Accept-Ranges", "bytes");
   if (request.method === "HEAD") return new Response(null, { headers });
   return new Response(object.body, { headers });
+}
+
+function parseBytesRange(header: string | null, size: number): { start: number; end: number } | "unsatisfiable" | null {
+  if (!header) return null;
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(header.trim());
+  if (!match) return "unsatisfiable";
+  const hasStart = match[1] !== "";
+  const hasEnd = match[2] !== "";
+  if (!hasStart && !hasEnd) return "unsatisfiable";
+  let start = hasStart ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+  let end = hasEnd && hasStart ? Number(match[2]) : size - 1;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start >= size || start > end) {
+    return "unsatisfiable";
+  }
+  end = Math.min(end, size - 1);
+  return { start, end };
+}
+
+async function pipeTerrainParts(
+  env: Env,
+  parts: TerrainPart[],
+  start: number,
+  end: number,
+  writable: WritableStream<Uint8Array>,
+) {
+  const writer = writable.getWriter();
+  try {
+    let offset = 0;
+    for (const part of parts) {
+      const partEnd = offset + part.size;
+      const sliceStart = Math.max(start, offset);
+      const sliceEnd = Math.min(end + 1, partEnd);
+      if (sliceStart < sliceEnd) {
+        const object = await env.MAPS.get(part.key, {
+          range: { offset: sliceStart - offset, length: sliceEnd - sliceStart },
+        });
+        if (!object?.body) throw new Error(`Map mesh part missing: ${part.key}`);
+        const reader = object.body.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) await writer.write(value);
+        }
+      }
+      offset = partEnd;
+      if (offset > end) break;
+    }
+    await writer.close();
+  } catch (err) {
+    await writer.abort(err);
+  }
 }
 
 function jimStore(env: Env) {

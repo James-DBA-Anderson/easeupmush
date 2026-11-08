@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   createReadStream,
+  createWriteStream,
   existsSync,
   mkdirSync,
   openSync,
@@ -27,6 +28,10 @@ const tmpDir = resolve(root, ".local/r2-parts");
 const BUCKET = "easeupmush-maps";
 const PREFIX = "simpompey/portsmouth-terrain";
 const MIN_BIN_BYTES = 1_000_000;
+/** Wrangler `r2 object put` refuses anything over 300 MiB. */
+const WRANGLER_R2_PUT_MAX = 300 * 1024 * 1024;
+/** Leave headroom under that cap when splitting. */
+const PART_MAX = 280 * 1024 * 1024;
 
 function fail(message) {
   console.error(message);
@@ -92,6 +97,36 @@ function putFile(key, file, contentType) {
   ]);
 }
 
+async function splitIntoParts(srcPath, size) {
+  mkdirSync(tmpDir, { recursive: true });
+  const parts = [];
+  let offset = 0;
+  let i = 0;
+  while (offset < size) {
+    const length = Math.min(PART_MAX, size - offset);
+    const file = resolve(tmpDir, `part-${i}.bin`);
+    rmSync(file, { force: true });
+    await pipeline(
+      createReadStream(srcPath, { start: offset, end: offset + length - 1 }),
+      createWriteStream(file),
+    );
+    const { size: wrote } = statSync(file);
+    if (wrote !== length) fail(`Part ${i} wrote ${wrote} bytes, expected ${length}.`);
+    if (wrote > WRANGLER_R2_PUT_MAX) fail(`Part ${i} is ${wrote} bytes — still over Wrangler's 300 MiB put cap.`);
+    parts.push({ key: `${PREFIX}.bin.part${i}`, size: length, file });
+    console.log(`  part ${i}: ${(length / 1024 / 1024).toFixed(1)} MiB`);
+    offset += length;
+    i++;
+  }
+  return parts;
+}
+
+function sameMesh(remote, hash, size, split) {
+  if (!remote || remote.hash !== hash || remote.size !== size) return false;
+  if (split) return Array.isArray(remote.parts) && remote.parts.length > 0;
+  return !remote.parts?.length;
+}
+
 if (!process.env.CLOUDFLARE_API_TOKEN || !process.env.CLOUDFLARE_ACCOUNT_ID) {
   fail("Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to publish the map mesh.");
 }
@@ -114,19 +149,30 @@ if (binSize < MIN_BIN_BYTES) {
 }
 
 const hash = await sha256File(binPath);
+const split = binSize > WRANGLER_R2_PUT_MAX;
 const manifest = { hash, size: binSize };
 
-console.log(`Map mesh ${binSize} bytes, sha256 ${hash}.`);
+console.log(`Map mesh ${binSize} bytes, sha256 ${hash}${split ? " (split for Wrangler 300 MiB put cap)" : ""}.`);
 
 wrangler(["r2", "bucket", "create", BUCKET], { allowFail: true, quiet: true });
 
 const remote = readRemoteManifest();
-if (remote?.hash === hash && remote.size === binSize) {
+if (sameMesh(remote, hash, binSize, split)) {
   console.log("R2 already has this mesh, skipping upload.");
 } else {
   mkdirSync(tmpDir, { recursive: true });
-  console.log("Uploading portsmouth-terrain.bin to R2 (this takes a few minutes).");
-  putFile(`${PREFIX}.bin`, binPath, "application/octet-stream");
+  if (split) {
+    console.log("Splitting portsmouth-terrain.bin for R2 (Wrangler will not put more than 300 MiB).");
+    const parts = await splitIntoParts(binPath, binSize);
+    for (const part of parts) {
+      console.log(`Uploading ${part.key}…`);
+      putFile(part.key, part.file, "application/octet-stream");
+    }
+    manifest.parts = parts.map(({ key, size }) => ({ key, size }));
+  } else {
+    console.log("Uploading portsmouth-terrain.bin to R2 (this takes a few minutes).");
+    putFile(`${PREFIX}.bin`, binPath, "application/octet-stream");
+  }
   const manifestPath = resolve(tmpDir, "manifest.json");
   writeFileSync(manifestPath, JSON.stringify(manifest));
   putFile(`${PREFIX}.json`, manifestPath, "application/json");

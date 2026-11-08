@@ -59,8 +59,8 @@ jobs:
         working-directory: deploy
         run: npm ci
 
-      # 264 MB terrain.bin cannot be a Worker static asset (25 MiB/file).
-      # Put it on R2, then strip it from dist/ before cf deploy.
+      # terrain.bin cannot be a Worker static asset (25 MiB/file).
+      # Put it on R2 (split if over Wrangler's 300 MiB put cap), then strip it from dist/.
       - name: Publish map mesh to R2
         run: node scripts/publish-map-assets.mjs
         env:
