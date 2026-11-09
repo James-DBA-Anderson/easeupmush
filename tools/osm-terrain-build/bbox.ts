@@ -92,6 +92,14 @@ function walkPeri(from: Pt, to: Pt, dir: 1 | -1, step = 40): Pt[] {
   return pts;
 }
 
+function distToPeri(p: Pt): number {
+  const x0 = 0;
+  const x1 = (EAST - WEST) * SCALE_X;
+  const y0 = (SOUTH - NORTH) * SCALE_Y;
+  const y1 = 0;
+  return Math.min(Math.abs(p.x - x0), Math.abs(p.x - x1), Math.abs(p.y - y0), Math.abs(p.y - y1));
+}
+
 function ringArea2(pts: Pt[]): number {
   let a = 0;
   for (let i = 0; i < pts.length; i++) {
@@ -127,18 +135,23 @@ function landSample(chain: Pt[]): Pt {
  * Close an open OSM coastline chain against the map window.
  * Already-closed rings pass through. Picks the closing that keeps land
  * (OSM left-hand side) inside, so we don't flood the whole bbox with land.
+ *
+ * Interior gaps (Portsea's 70 m dockyard break) must close with a straight
+ * chord. Snapping those endpoints to the window and walking the peri draws a
+ * land spit from the dockyard to the south of the island.
  */
 export function closeOpenRing(chain: Pt[]): Pt[] {
   if (chain.length < 3) return chain;
   const first = chain[0];
   const last = chain[chain.length - 1];
-  if (Math.hypot(first.x - last.x, first.y - last.y) < 8) {
+  const gap = Math.hypot(first.x - last.x, first.y - last.y);
+  if (gap < 8) {
     const ring = chain.slice();
-    if (Math.hypot(ring[0].x - ring[ring.length - 1].x, ring[0].y - ring[ring.length - 1].y) < 8) {
-      ring.pop();
-    }
+    ring.pop();
     return ring;
   }
+  const edge = Math.min(distToPeri(first), distToPeri(last));
+  if (gap < 400 || gap < edge * 0.5) return chain;
   const fwd = [...chain, ...walkPeri(last, first, 1)];
   const back = [...chain, ...walkPeri(last, first, -1)];
   const land = landSample(chain);

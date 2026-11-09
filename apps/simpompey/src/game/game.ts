@@ -17,6 +17,7 @@ import { addPlaces } from "./places";
 import { TOWN_VIEWS, type TownView } from "./views";
 import { CityBuilder, type BuilderTool } from "./builder";
 import { osmLocal } from "./geo";
+import { DATA_SOURCES, sourceRow, type SourceUse } from "./sources";
 
 const TERRAIN_RANGE_CHUNK = 16 * 1024 * 1024;
 const BARRIER_VIEW = 340;
@@ -24,8 +25,6 @@ const BARRIER_REACH = 170;
 const SHADOW_MAP = 2048;
 const SHADOW_EXTENT_MIN = 320;
 const SHADOW_EXTENT_MAX = 720;
-const MINIMAP_CSS = 168;
-const MINIMAP_PAD = 16;
 const MINIMAP_RADIUS = 150;
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -78,6 +77,8 @@ export class Game {
     space: false,
   };
   private driving = false;
+  private driveHold = new Set<string>();
+  private drivePointers = new Map<number, string>();
   private motor: Motor | null = null;
   private driveRay = new THREE.Raycaster();
   private driveFwd = new THREE.Vector3();
@@ -100,9 +101,17 @@ export class Game {
   private bootStatus = document.getElementById("boot-status");
   private bootBar = document.getElementById("boot-bar");
   private bootFill = document.getElementById("boot-bar-fill");
+  private titleEl = document.getElementById("title");
+  private titleFill = document.getElementById("title-bar-fill");
+  private titleLoad = document.getElementById("title-load");
+  private wantPlay = false;
+  private loadReady = false;
+  private loadFailed = false;
+  private playing = false;
+  private loopStarted = false;
   private mapHint =
     "Drag to pan · scroll zooms to cursor · right-drag to tilt · double-click to close in · T aerial · [ ] viewpoints · M map · B layers · WASD to move · Q/E height";
-  private aerialHeight = 4200;
+  private aerialHeight = 8000;
   private driveHint = "WASD to drive · Space brake · Shift boot it · Esc back to the map";
   private mapRoot = new THREE.Group();
   private mapScene: THREE.Object3D | null = null;
@@ -132,6 +141,9 @@ export class Game {
   private camLagFwd = new THREE.Vector3(0, 0, 1);
   private wallHit = new THREE.Vector3();
   private compassRose = document.getElementById("cam-compass");
+  /** Mesh +Z is north; mapRoot.scale.z = -1 so world north is -Z. */
+  private northWorld = new THREE.Vector3(0, 0, -1);
+  private northView = new THREE.Vector3();
   private camBoom = 9.6;
   private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private pickRay = new THREE.Raycaster();
@@ -227,6 +239,7 @@ export class Game {
       ONE: THREE.TOUCH.PAN,
       TWO: THREE.TOUCH.DOLLY_ROTATE,
     };
+    this.controls.enabled = false;
 
     this.scene.add(new THREE.AmbientLight(0xfff6ea, 0.32));
     this.scene.add(new THREE.HemisphereLight(0xd4e7f7, 0x9a8b6a, 0.9));
@@ -264,12 +277,12 @@ export class Game {
     if (this.running) return;
     this.running = true;
 
-    // Load terrain + buildings
+    // Load terrain + buildings behind the title screen.
     const loader = new GLTFLoader();
     this.setBoot("Hang on mush…", 0.04);
     try {
       const labelsP = fetch("./models/portsmouth-labels.json").then((r) => r.json()) as Promise<MapLabel[]>;
-      const gltf = await this.loadGltf(loader, "./models/portsmouth-terrain.gltf?v=land5", (t) => {
+      const gltf = await this.loadGltf(loader, "./models/portsmouth-terrain.gltf?v=land6", (t) => {
         this.setBoot("Laying out Pompey…", 0.06 + 0.7 * t);
       });
       const labels = await labelsP;
@@ -422,32 +435,26 @@ export class Game {
       this.applyFilters();
       this.setBoot("Planning office…", 0.97);
       await this.placeBuilder();
-      this.setBoot("Sweet as nut", 1);
+      this.setBoot("Sweet as a nut", 1);
 
       this.mapSpanX = size.x;
       this.mapSpanZ = size.z;
       this.setLookBounds();
       this.applyZoomLimit();
-      this.aerialHeight = TOWN_VIEWS[0].height || 4200;
+      this.aerialHeight = TOWN_VIEWS[0].height || 8000;
       this.snapAerial();
       this.controls.update();
       this.clampLookAt();
-      this.hideBoot();
+      this.loadReady = true;
+      this.enterMap();
     } catch (e) {
       console.error("Failed to load terrain:", e);
+      this.loadFailed = true;
       this.setBoot("Couldn't load the map, mush. Refresh.", 0);
       if (this.bootEl) this.bootEl.setAttribute("aria-busy", "false");
-      this.clock.start();
-      window.addEventListener("resize", this.resize);
-      this.resize();
-      this.loop();
+      if (this.wantPlay) this.showBoot();
       return;
     }
-
-    this.clock.start();
-    window.addEventListener("resize", this.resize);
-    this.resize();
-    this.loop();
   }
 
   private async loadGltf(loader: GLTFLoader, url: string, onPct: (t: number) => void): Promise<GLTF> {
@@ -477,12 +484,66 @@ export class Game {
     }
   }
 
+  private bindTitle() {
+    document.getElementById("title-explore")?.addEventListener("click", () => {
+      this.enterMap();
+    });
+    document.getElementById("title-plan")?.addEventListener("click", () => {
+      const note = document.getElementById("title-soon-note");
+      if (note) {
+        note.hidden = false;
+        note.textContent = "The planning office isn't open yet. Explore the map for now.";
+      }
+    });
+  }
+
   private setBoot(label: string, amount: number) {
     const pct = Math.max(0, Math.min(1, amount));
     if (this.bootStatus) this.bootStatus.textContent = label;
     if (this.bootFill) this.bootFill.style.width = `${Math.round(pct * 100)}%`;
     if (this.bootBar) this.bootBar.setAttribute("aria-valuenow", String(Math.round(pct * 100)));
     this.bootEl?.style.setProperty("--boot-pct", `${Math.round(pct * 100)}%`);
+    if (this.titleFill) this.titleFill.style.width = `${Math.round(pct * 100)}%`;
+    if (this.titleLoad) this.titleLoad.textContent = this.loadFailed ? label : label;
+  }
+
+  private hideTitle() {
+    document.body.classList.remove("is-title");
+    const el = this.titleEl;
+    if (!el) return;
+    el.classList.add("is-done");
+    el.setAttribute("aria-hidden", "true");
+    window.setTimeout(() => el.remove(), 700);
+  }
+
+  private showBoot() {
+    document.body.classList.add("is-booting");
+    this.bootEl?.removeAttribute("hidden");
+    this.bootEl?.setAttribute("aria-busy", this.loadFailed ? "false" : "true");
+  }
+
+  private enterMap() {
+    this.wantPlay = true;
+    this.hideTitle();
+    this.enterIfReady();
+  }
+
+  private enterIfReady() {
+    if (!this.wantPlay) return;
+    if (this.loadFailed) {
+      this.showBoot();
+      return;
+    }
+    if (!this.loadReady) {
+      this.showBoot();
+      return;
+    }
+    if (this.playing) return;
+    this.playing = true;
+    this.controls.enabled = true;
+    this.hideBoot();
+    this.beginLoop();
+    this.canvas.focus();
   }
 
   private hideBoot() {
@@ -492,6 +553,15 @@ export class Game {
     el.classList.add("is-done");
     el.setAttribute("aria-busy", "false");
     window.setTimeout(() => el.remove(), 700);
+  }
+
+  private beginLoop() {
+    if (this.loopStarted) return;
+    this.loopStarted = true;
+    this.clock.start();
+    window.addEventListener("resize", this.resize);
+    this.resize();
+    this.loop();
   }
 
   stop() {
@@ -519,11 +589,11 @@ export class Game {
       this.updateFly(dt);
       this.tickCamPad(dt);
     }
-    this.syncCompass();
     this.harbour?.update(dt);
     this.trains?.update(dt);
     if (!this.driving) this.controls.update();
     if (!this.driving) this.clampLookAt();
+    this.syncCompass();
     this.updateSun();
     this.updateBarriers();
     const coverLift = Math.min(12, Math.max(0, (this.camera.position.y - 30) * 0.012));
@@ -545,16 +615,21 @@ export class Game {
 
   private renderMinimap() {
     const motor = this.motor;
-    if (!motor) return;
+    const frame = this.minimapEl;
+    if (!motor || !frame || frame.hidden) return;
 
+    const canvasRect = this.canvas.getBoundingClientRect();
+    const rect = frame.getBoundingClientRect();
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
-    const size = MINIMAP_CSS;
-    const x = MINIMAP_PAD;
-    const y = h - MINIMAP_PAD - MINIMAP_CSS;
+    const x = rect.left - canvasRect.left;
+    const y = canvasRect.bottom - rect.bottom;
+    const size = Math.min(rect.width, rect.height);
+    if (size < 8) return;
 
     const p = motor.position;
     this.miniCam.position.set(p.x, p.y + 220, p.z);
+    this.miniCam.up.set(0, 0, -1);
     this.miniCam.lookAt(p.x, p.y, p.z);
     this.miniCam.updateProjectionMatrix();
 
@@ -646,6 +721,15 @@ export class Game {
       }
     };
     const onDown = (e: KeyboardEvent) => {
+      if (!this.playing) return;
+      if (e.code === "Escape") {
+        const sources = document.getElementById("sources") as HTMLDialogElement | null;
+        if (sources?.open) {
+          sources.close();
+          e.preventDefault();
+          return;
+        }
+      }
       if (e.code === "Escape" && this.driving) {
         this.setDriving(false);
         e.preventDefault();
@@ -740,6 +824,45 @@ export class Game {
     });
     this.bindViews();
     this.bindCamPad();
+    this.bindDrivePad();
+    this.bindTitle();
+    this.bindSources();
+  }
+
+  private bindDrivePad() {
+    const pad = document.getElementById("drive-pad");
+    if (!pad) return;
+    const buttonOf = (e: Event) =>
+      (e.target as HTMLElement | null)?.closest("[data-drive]") as HTMLElement | null;
+    const syncHold = () => {
+      this.driveHold.clear();
+      for (const held of this.drivePointers.values()) this.driveHold.add(held);
+      for (const btn of pad.querySelectorAll<HTMLElement>("[data-drive]")) {
+        btn.classList.toggle("is-held", this.driveHold.has(btn.dataset.drive ?? ""));
+      }
+    };
+    pad.addEventListener("pointerdown", (e) => {
+      const btn = buttonOf(e);
+      const action = btn?.dataset.drive;
+      if (!btn || !action || !this.driving) return;
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        btn.setPointerCapture(e.pointerId);
+      } catch {
+        /* capture is optional on some browsers */
+      }
+      this.drivePointers.set(e.pointerId, action);
+      syncHold();
+    });
+    const release = (e: PointerEvent) => {
+      if (!this.drivePointers.has(e.pointerId)) return;
+      this.drivePointers.delete(e.pointerId);
+      syncHold();
+    };
+    pad.addEventListener("pointerup", release);
+    pad.addEventListener("pointercancel", release);
+    pad.addEventListener("lostpointercapture", release, true);
   }
 
   private bindCamPad() {
@@ -862,8 +985,10 @@ export class Game {
 
   private syncCompass() {
     if (!this.compassRose) return;
-    const deg = THREE.MathUtils.radToDeg(this.controls.getAzimuthalAngle());
-    this.compassRose.style.setProperty("--heading", `${-deg}deg`);
+    this.northView.copy(this.northWorld).transformDirection(this.camera.matrixWorldInverse);
+    if (this.northView.x * this.northView.x + this.northView.y * this.northView.y < 1e-8) return;
+    const deg = THREE.MathUtils.radToDeg(Math.atan2(this.northView.x, this.northView.y));
+    this.compassRose.style.setProperty("--heading", `${deg}deg`);
   }
 
   private bindViews() {
@@ -1008,7 +1133,7 @@ export class Game {
   }
 
   private hidingGround() {
-    return Boolean(this.builder?.active && this.builder.overlay !== "none");
+    return Boolean(this.builder && this.builder.overlay !== "none");
   }
 
   private applyFilters() {
@@ -1019,6 +1144,7 @@ export class Game {
     const showVeg = this.filters.vegetation && !strip;
     const showPower = this.filters.power && !strip;
     const showTrains = this.filters.trains;
+    const showShips = this.filters.ships;
     const buildings = this.layerMeshes.get("buildings");
     const roads = this.layerMeshes.get("roads");
     const rails = this.layerMeshes.get("rails");
@@ -1032,8 +1158,8 @@ export class Game {
     if (this.vegetation) this.vegetation.visible = showVeg;
     if (this.groundCover) this.groundCover.visible = showVeg;
     if (this.landmarks) this.landmarks.visible = showBuildings;
-    if (this.harbour) this.harbour.group.visible = this.filters.ships;
-    if (this.harbourKit) this.harbourKit.visible = this.filters.ships;
+    if (this.harbour) this.harbour.group.visible = showShips;
+    if (this.harbourKit) this.harbourKit.visible = showShips;
     if (this.powerKit) this.powerKit.visible = showPower;
     for (const extra of this.powerDecor) extra.visible = showPower;
     if (this.trains) this.trains.group.visible = showTrains;
@@ -1041,6 +1167,179 @@ export class Game {
     if (this.barrierKit) this.barrierKit.visible = !strip;
     this.updateSun();
     this.updateLabels();
+    this.refreshCredits({
+      buildings: showBuildings,
+      vegetation: showVeg,
+      ships: showShips,
+      trains: showTrains,
+    });
+  }
+
+  private bindSources() {
+    const credit = document.getElementById("map-credit");
+    const dialog = document.getElementById("sources") as HTMLDialogElement | null;
+    const mapList = document.getElementById("sources-map");
+    const overlayList = document.getElementById("sources-overlays");
+    if (!dialog) return;
+    if (mapList) {
+      mapList.replaceChildren(...DATA_SOURCES.filter((s) => s.group === "map").map(sourceRow));
+    }
+    if (overlayList) {
+      overlayList.replaceChildren(...DATA_SOURCES.filter((s) => s.group === "overlay").map(sourceRow));
+    }
+    const toggle = () => {
+      if (dialog.open) dialog.close();
+      else {
+        dialog.showModal();
+        document.getElementById("sources-title")?.focus();
+      }
+    };
+    credit?.addEventListener("click", toggle);
+    dialog.querySelector("[data-close='sources']")?.addEventListener("click", () => dialog.close());
+    dialog.addEventListener("click", (e) => {
+      if (e.target === dialog) dialog.close();
+    });
+  }
+
+  private refreshCredits(on: { buildings: boolean; vegetation: boolean; ships: boolean; trains: boolean }) {
+    const el = document.getElementById("map-credit-text") ?? document.getElementById("map-credit");
+    if (!el) return;
+    const bits: Array<{ label: string; href: string; name: string; after?: string }> = [
+      {
+        label: "Map data",
+        href: "https://www.openstreetmap.org/copyright",
+        name: "© OpenStreetMap",
+        after: "contributors",
+      },
+    ];
+    const ogl = "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/";
+    if (on.buildings) {
+      bits.push({
+        label: "buildings",
+        href: "https://github.com/microsoft/GlobalMLBuildingFootprints",
+        name: "© Microsoft",
+      });
+    }
+    if (on.vegetation) {
+      bits.push({ label: "canopy", href: ogl, name: "© Environment Agency" });
+    }
+    if (on.ships) {
+      bits.push({ label: "AIS", href: ogl, name: "© MCA", after: "(OGL)" });
+    }
+    if (on.trains) {
+      bits.push({
+        label: "trains",
+        href: "https://www.nationalrail.co.uk/developers/darwin-data-feeds/",
+        name: "© National Rail Enquiries",
+        after: "Darwin",
+      });
+    }
+    const overlay = this.builder?.overlay ?? "none";
+    const pollution = this.builder?.pollutionLayer ?? "no2";
+    if (overlay === "value") {
+      bits.push({
+        label: "prices",
+        href: "https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads",
+        name: "© HM Land Registry",
+      });
+      bits.push({
+        label: "land values",
+        href: "https://www.gov.uk/government/publications/land-value-estimates-for-policy-appraisal-2023",
+        name: "© MHCLG",
+      });
+    } else if (overlay === "traffic") {
+      bits.push({
+        label: "traffic",
+        href: "https://roadtraffic.dft.gov.uk/local-authorities/E06000044",
+        name: "© DfT",
+      });
+      bits.push({
+        label: "congestion",
+        href: "https://www.gov.uk/government/statistical-data-sets/average-speed-delay-and-reliability-of-travel-times-cgn",
+        name: "© DfT CGN",
+      });
+    } else if (overlay === "density") {
+      bits.push({
+        label: "population",
+        href: "https://www.nomisweb.co.uk/datasets/c2021ts006",
+        name: "© ONS",
+      });
+    } else if (overlay === "crime") {
+      bits.push({ label: "crime", href: "https://data.police.uk/", name: "© police.uk" });
+    } else if (overlay === "pollution") {
+      if (pollution !== "noise") {
+        bits.push({
+          label: "air",
+          href: "https://uk-air.defra.gov.uk/data/pcm-data",
+          name: "© Defra UK-AIR",
+        });
+      }
+      if (pollution === "noise") {
+        bits.push({
+          label: "noise",
+          href: "https://www.data.gov.uk/dataset/38b1444f-47a0-42ca-a358-0d145fcf7d5c/road-noise-all-metrics-england-round-4",
+          name: "© Defra",
+        });
+      }
+    } else if (overlay === "flood") {
+      bits.push({
+        label: "flood",
+        href: "https://www.data.gov.uk/dataset/bad1991f-6ac9-41aa-b0fd-26b7266f511d/risk-of-flooding-from-rivers-and-sea",
+        name: "© Environment Agency",
+      });
+    } else if (overlay === "imd") {
+      bits.push({
+        label: "deprivation",
+        href: "https://www.gov.uk/government/statistics/english-indices-of-deprivation-2025",
+        name: "© MHCLG",
+      });
+    } else if (overlay === "broadband") {
+      bits.push({
+        label: "broadband",
+        href: "https://www.ofcom.org.uk/phones-and-broadband/coverage-and-speeds/connected-nations-20252/data-downloads-2025",
+        name: "© Ofcom",
+      });
+    } else if (overlay === "speeds") {
+      bits.push({
+        label: "speeds",
+        href: "https://www.ofcom.org.uk/phones-and-broadband/coverage-and-speeds/connected-nations-2023/data-downloads",
+        name: "© Ofcom",
+      });
+    } else if (overlay === "masts") {
+      bits.push({
+        label: "masts",
+        href: "https://www.ofcom.org.uk/spectrum/frequencies/wtr",
+        name: "© Ofcom WTR",
+      });
+      bits.push({
+        label: "cells",
+        href: "https://opencellid.org/",
+        name: "© OpenCelliD",
+        after: "(OGL / CC-BY-SA)",
+      });
+    }
+    el.textContent = bits
+      .map((bit) => `${bit.label} ${bit.name}${bit.after ? ` ${bit.after}` : ""}`)
+      .join(" · ");
+    const used = new Set<SourceUse>(["osm", "terrain"]);
+    if (on.buildings) used.add("buildings");
+    if (on.vegetation) used.add("vegetation");
+    if (on.ships) used.add("ships");
+    if (on.trains) used.add("trains");
+    if (overlay === "density") used.add("density");
+    if (overlay === "value") used.add("value");
+    if (overlay === "traffic") used.add("traffic");
+    if (overlay === "crime") used.add("crime");
+    if (overlay === "pollution" && pollution === "noise") used.add("pollution-noise");
+    else if (overlay === "pollution") used.add("pollution-air");
+    if (overlay === "flood") used.add("flood");
+    if (overlay === "imd") used.add("imd");
+    if (overlay === "broadband") used.add("broadband");
+    if (overlay === "speeds") used.add("speeds");
+    if (overlay === "masts") used.add("masts");
+    for (const row of document.querySelectorAll<HTMLElement>("[data-source]")) {
+      row.classList.toggle("is-used", used.has(row.dataset.source as SourceUse));
+    }
   }
 
   private async placeBuilder() {
@@ -1156,16 +1455,21 @@ export class Game {
 
   private setDriving(on: boolean) {
     if (!this.motor || !this.mapScene) return;
-    if (on) this.setPlanning(false);
+    if (on) {
+      this.setPlanning(false);
+      this.setMapOpen(false);
+      this.setLayersOpen(false);
+    } else {
+      this.driveHold.clear();
+      this.drivePointers.clear();
+      document.getElementById("drive-pad")?.querySelectorAll(".is-held").forEach((el) => el.classList.remove("is-held"));
+    }
     this.driving = on;
     this.motor.group.visible = on;
     this.controls.enabled = !on;
     document.body.classList.toggle("is-driving", on);
     if (this.driveBtn) {
-      const label = on ? "Back to the map" : "Take the motor";
       this.driveBtn.classList.toggle("is-on", on);
-      this.driveBtn.title = label;
-      this.driveBtn.setAttribute("aria-label", label);
       this.driveBtn.setAttribute("aria-pressed", String(on));
     }
     if (this.hintEl) this.hintEl.textContent = on ? this.driveHint : this.mapHint;
@@ -1581,8 +1885,18 @@ export class Game {
     const motor = this.motor;
     if (!motor) return;
     const k = this.keys;
-    const throttle = Number(k.w || k.ArrowUp) - Number(k.s || k.ArrowDown);
-    const steer = Number(k.a || k.ArrowLeft) - Number(k.d || k.ArrowRight);
+    const throttle = THREE.MathUtils.clamp(
+      Number(k.w || k.ArrowUp) - Number(k.s || k.ArrowDown)
+        + Number(this.driveHold.has("accel")) - Number(this.driveHold.has("reverse")),
+      -1,
+      1,
+    );
+    const steer = THREE.MathUtils.clamp(
+      Number(k.a || k.ArrowLeft) - Number(k.d || k.ArrowRight)
+        + Number(this.driveHold.has("left")) - Number(this.driveHold.has("right")),
+      -1,
+      1,
+    );
     motor.forward(this.driveFwd);
     const p = motor.position;
     const chunks = this.filters.buildings ? this.nearbyChunks(p.x, p.z, 90) : [];
@@ -1592,8 +1906,8 @@ export class Game {
     motor.integrate(dt, {
       throttle,
       steer,
-      brake: k.space,
-      boost: k.Shift,
+      brake: k.space || this.driveHold.has("brake"),
+      boost: k.Shift || this.driveHold.has("boost"),
       onRoad: this.onCarriage(p.x, p.z),
       wall,
     });

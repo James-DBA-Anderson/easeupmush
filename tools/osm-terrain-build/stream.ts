@@ -234,6 +234,10 @@ class BinWriter {
     return merged;
   }
 
+  takeMerged(name: string): Mesh | undefined {
+    return this.mergeByName().find((m) => m.name === name);
+  }
+
   flush(gltfPath: string, binPath: string) {
     this.meshes = this.mergeByName();
     const nodes: number[] = [];
@@ -3711,9 +3715,92 @@ function roadWidth(kind: string, tags?: Record<string, string>): number {
 /*  6. Main                                                             */
 /* ------------------------------------------------------------------ */
 
+function spliceLandMesh(mesh: Mesh) {
+  const gltf = JSON.parse(readFileSync(OUT_GLTF, "utf8")) as {
+    nodes: { name: string; mesh: number }[];
+    meshes: { primitives: { attributes: { POSITION: number; NORMAL: number }; indices: number }[] }[];
+    accessors: {
+      bufferView: number;
+      count: number;
+      min?: number[];
+      max?: number[];
+    }[];
+    bufferViews: { byteOffset: number; byteLength: number }[];
+    buffers: { uri: string; byteLength: number }[];
+  };
+  const meshIdx = gltf.nodes.find((n) => n.name === "terrain")?.mesh;
+  if (meshIdx === undefined) throw new Error("existing glTF has no terrain node");
+  const prim = gltf.meshes[meshIdx].primitives[0];
+  const posAcc = gltf.accessors[prim.attributes.POSITION];
+  const nrmAcc = gltf.accessors[prim.attributes.NORMAL];
+  const idxAcc = gltf.accessors[prim.indices];
+  const views = [posAcc, nrmAcc, idxAcc].map((a) => gltf.bufferViews[a.bufferView]);
+  const start = Math.min(...views.map((v) => v.byteOffset));
+  const end = Math.max(...views.map((v) => v.byteOffset + v.byteLength));
+
+  const pos = Buffer.from(mesh.positions.buffer, mesh.positions.byteOffset, mesh.positions.byteLength);
+  const nrm = Buffer.from(mesh.normals.buffer, mesh.normals.byteOffset, mesh.normals.byteLength);
+  const idx = Buffer.from(mesh.indices.buffer, mesh.indices.byteOffset, mesh.indices.byteLength);
+  const land = Buffer.concat([pos, nrm, idx]);
+  const oldBin = readFileSync(OUT_BIN);
+  const next = Buffer.concat([oldBin.subarray(0, start), land, oldBin.subarray(end)]);
+  const delta = land.length - (end - start);
+
+  posAcc.bufferView = gltf.bufferViews.indexOf(views[0]);
+  nrmAcc.bufferView = gltf.bufferViews.indexOf(views[1]);
+  idxAcc.bufferView = gltf.bufferViews.indexOf(views[2]);
+  views[0].byteOffset = start;
+  views[0].byteLength = pos.length;
+  views[1].byteOffset = start + pos.length;
+  views[1].byteLength = nrm.length;
+  views[2].byteOffset = start + pos.length + nrm.length;
+  views[2].byteLength = idx.length;
+  for (const bv of gltf.bufferViews) {
+    if (bv !== views[0] && bv !== views[1] && bv !== views[2] && bv.byteOffset >= end) {
+      bv.byteOffset += delta;
+    }
+  }
+
+  const nVert = mesh.positions.length / 3;
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < mesh.positions.length; i += 3) {
+    const x = mesh.positions[i], y = mesh.positions[i + 1], z = mesh.positions[i + 2];
+    minX = Math.min(minX, x); minY = Math.min(minY, y); minZ = Math.min(minZ, z);
+    maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); maxZ = Math.max(maxZ, z);
+  }
+  posAcc.count = nVert;
+  posAcc.min = [minX, minY, minZ];
+  posAcc.max = [maxX, maxY, maxZ];
+  nrmAcc.count = nVert;
+  idxAcc.count = mesh.indices.length;
+  gltf.buffers[0].byteLength = next.length;
+  gltf.buffers[0].uri = "portsmouth-terrain.bin?v=land6";
+
+  writeFileSync(OUT_BIN, next);
+  writeFileSync(OUT_GLTF, JSON.stringify(gltf));
+  mkdirSync(GAME_MODELS, { recursive: true });
+  copyFileSync(OUT_GLTF, path.join(GAME_MODELS, "portsmouth-terrain.gltf"));
+  copyFileSync(OUT_BIN, path.join(GAME_MODELS, "portsmouth-terrain.bin"));
+  console.log(`  spliced terrain ${nVert} verts, ${mesh.indices.length / 3} tris, bin ${next.length} bytes`);
+}
+
 async function main() {
   const labelsOnly = process.argv.includes("--labels");
+  const landOnly = process.argv.includes("--land");
   const labels = new LabelWriter();
+
+  if (landOnly) {
+    console.log("Loading DEM…");
+    const dem = await loadDem();
+    console.log(`  tile ${dem.rows}×${dem.cols}`);
+    const writer = new BinWriter();
+    buildTerrain(dem.rows, dem.cols, dem.sample, writer, [], undefined);
+    const land = writer.takeMerged("terrain");
+    if (!land) throw new Error("land rebuild produced no terrain mesh");
+    spliceLandMesh(land);
+    return;
+  }
 
   if (labelsOnly) {
     console.log("Parsing OSM for labels…");

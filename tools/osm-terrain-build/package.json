@@ -15,6 +15,7 @@
     "os-buildings": "tsx os-buildings.ts",
     "gardens": "tsx gardens.ts",
     "coast": "tsx coast.ts",
+    "land": "tsx stream.ts --land",
     "furniture": "tsx furniture.ts",
     "places": "tsx places.ts",
     "zones": "tsx zones.ts",
@@ -24,6 +25,7 @@
     "pollution": "tsx pollution.ts",
     "flood": "tsx flood.ts",
     "imd": "tsx deprivation.ts",
+    "population": "tsx population.ts",
     "broadband": "tsx broadband.ts",
     "terrain": "npm run fetch && npm run build"
   },

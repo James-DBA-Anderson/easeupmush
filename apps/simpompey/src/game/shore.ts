@@ -224,7 +224,7 @@ function meshOf(pos: number[], col: number[], idx: number[], name: string, extra
 }
 
 export async function addShore(mapScene: THREE.Object3D) {
-  const data = (await fetch("./models/portsmouth-coast.json?v=land").then((r) => {
+  const data = (await fetch("./models/portsmouth-coast.json?v=land6").then((r) => {
     if (!r.ok) throw new Error(`coast json ${r.status}`);
     return r.json();
   })) as CoastData;

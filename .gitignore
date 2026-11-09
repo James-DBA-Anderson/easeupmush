@@ -36,6 +36,9 @@ tools/osm-terrain-build/data/noise/
 tools/osm-terrain-build/data/flood-*.json
 tools/osm-terrain-build/data/imd-file7.csv
 tools/osm-terrain-build/data/lsoa-portsmouth.json
+tools/osm-terrain-build/data/census2021-ts006.zip
+tools/osm-terrain-build/data/census2021-ts006-oa.csv
+tools/osm-terrain-build/data/oa-portsmouth.json
 tools/osm-terrain-build/data/ofcom/
 tools/osm-terrain-build/data/cell_towers.csv.gz
 tools/osm-terrain-build/data/WTR.csv

@@ -196,6 +196,10 @@ function formatFlow(n: number): string {
   return `${Math.round(n)} / day`;
 }
 
+function formatDensity(n: number): string {
+  return `${Math.round(n).toLocaleString("en-GB")} /km²`;
+}
+
 function roadLabel(s: string): string {
   if (!s || s === "U" || s === "C") return "Minor road";
   return s;
@@ -236,7 +240,27 @@ function buildingFactLines(b: BuildingFoot): string[] {
   return lines;
 }
 
-type OverlayKind = "none" | "zones" | "value" | "traffic" | "crime" | "pollution" | "flood" | "imd" | "broadband" | "speeds" | "masts";
+type OverlayKind = "none" | "density" | "zones" | "value" | "traffic" | "crime" | "pollution" | "flood" | "imd" | "broadband" | "speeds" | "masts";
+
+const OVERLAY_KINDS: OverlayKind[] = [
+  "none",
+  "density",
+  "zones",
+  "value",
+  "traffic",
+  "crime",
+  "pollution",
+  "flood",
+  "imd",
+  "broadband",
+  "speeds",
+  "masts",
+];
+
+function isOverlayKind(value: string | undefined): value is OverlayKind {
+  return !!value && OVERLAY_KINDS.includes(value as OverlayKind);
+}
+
 type CrimeLayer = "all" | "violence" | "asb" | "burglary" | "drugs" | "theft";
 type PollutionLayer = "no2" | "pm25" | "noise";
 type FloodLayer = "all" | "sea" | "surface";
@@ -266,7 +290,7 @@ const IMD_LABEL: Record<ImdLayer, string> = {
   health: "health",
   living: "living",
 };
-const HEAT_OVERLAY: OverlayKind[] = ["value", "traffic", "crime", "pollution", "flood", "imd", "broadband", "speeds", "masts"];
+const HEAT_OVERLAY: OverlayKind[] = ["density", "value", "traffic", "crime", "pollution", "flood", "imd", "broadband", "speeds", "masts"];
 const BROADBAND_LAYERS: BroadbandLayer[] = ["gigabit", "superfast", "slow"];
 
 function ordinal(n: number): string {
@@ -389,6 +413,11 @@ export class CityBuilder {
   private imdIndex: Uint16Array = new Uint16Array(0);
   private imdAreas: Array<{ name: string; rank: Record<ImdLayer, number>; decile: Record<ImdLayer, number> }> = [];
   private imdEngland = 0;
+  private densityHeat: Uint8Array = new Uint8Array(0);
+  private densityIndex: Uint16Array = new Uint16Array(0);
+  private densityAreas: Array<{ name: string; density: number }> = [];
+  private densityLo = 0;
+  private densityHi = 1;
   private broadbandLayers: Record<BroadbandLayer, Uint8Array> = {
     gigabit: new Uint8Array(0),
     superfast: new Uint8Array(0),
@@ -471,6 +500,7 @@ export class CityBuilder {
     await this.loadPollution();
     await this.loadFlood();
     await this.loadImd();
+    await this.loadPopulation();
     await this.loadBroadband();
     await this.loadSpeeds();
     await this.loadMasts();
@@ -607,6 +637,31 @@ export class CityBuilder {
       this.imdEngland = raw.england ?? 0;
     } catch (err) {
       console.warn("Deprivation failed to load:", err);
+    }
+  }
+
+  private async loadPopulation() {
+    try {
+      const raw = (await fetch("./portsmouth-population.json?v=1").then((r) => {
+        if (!r.ok) throw new Error(`population ${r.status}`);
+        return r.json();
+      })) as {
+        density?: string;
+        index?: string;
+        areas?: Array<{ name: string; density: number }>;
+        densityLo?: number;
+        densityHi?: number;
+      };
+      this.densityHeat = raw.density ? b64Bytes(raw.density) : new Uint8Array(0);
+      if (raw.index) {
+        const bytes = b64Bytes(raw.index);
+        this.densityIndex = new Uint16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
+      }
+      this.densityAreas = raw.areas ?? [];
+      this.densityLo = raw.densityLo ?? 0;
+      this.densityHi = raw.densityHi ?? 1;
+    } catch (err) {
+      console.warn("Population density failed to load:", err);
     }
   }
 
@@ -962,7 +1017,7 @@ export class CityBuilder {
     if (this.zoneTex) this.zoneTex.needsUpdate = true;
     const focus = this.focusZone();
     const heat = HEAT_OVERLAY.includes(this.overlay);
-    const show = this.active && this.overlay !== "none";
+    const show = this.overlay !== "none";
     // Terrain carries colour on land; the full-bbox sheet covers harbour / Solent
     // gaps the heightfield does not. Isle of Wight sits south of the sheet.
     this.zoneMix.value = show ? 1 : 0;
@@ -1017,39 +1072,43 @@ export class CityBuilder {
 
   private writePix(pix: Uint8Array, i: number, zone: ZoneId) {
     const o = i * 4;
-    if (this.active && this.overlay === "value") {
+    if (this.overlay === "value") {
       this.writeValuePix(pix, i, zone);
       return;
     }
-    if (this.active && this.overlay === "traffic") {
+    if (this.overlay === "traffic") {
       this.writeTrafficPix(pix, i);
       return;
     }
-    if (this.active && this.overlay === "crime") {
+    if (this.overlay === "crime") {
       this.writeCrimePix(pix, i);
       return;
     }
-    if (this.active && this.overlay === "pollution") {
+    if (this.overlay === "pollution") {
       this.writePollutionPix(pix, i);
       return;
     }
-    if (this.active && this.overlay === "flood") {
+    if (this.overlay === "flood") {
       this.writeFloodPix(pix, i);
       return;
     }
-    if (this.active && this.overlay === "imd") {
+    if (this.overlay === "density") {
+      this.writeHeatPix(pix, i, this.densityHeat[i] ?? 0);
+      return;
+    }
+    if (this.overlay === "imd") {
       this.writeImdPix(pix, i);
       return;
     }
-    if (this.active && this.overlay === "broadband") {
+    if (this.overlay === "broadband") {
       this.writeHeatPix(pix, i, this.broadbandLayers[this.broadbandLayer][i] ?? 0);
       return;
     }
-    if (this.active && this.overlay === "speeds") {
+    if (this.overlay === "speeds") {
       this.writeHeatPix(pix, i, (this.speedsLayer === "up" ? this.speedsUp : this.speedsDown)[i] ?? 0);
       return;
     }
-    if (this.active && this.overlay === "masts") {
+    if (this.overlay === "masts") {
       this.writeHeatPix(pix, i, this.mastDensity[i] ?? 0);
       return;
     }
@@ -1061,7 +1120,7 @@ export class CityBuilder {
       return;
     }
     const plot = this.occupy[i] === 1;
-    const focus = this.active ? this.focusZone() : null;
+    const focus = this.overlay === "zones" ? this.focusZone() : null;
     const selected = focus !== null && zone === focus;
     const other = focus !== null && zone !== focus;
     const rgb = washRgb(
@@ -1435,6 +1494,7 @@ export class CityBuilder {
     else if (this.overlay === "crime") overlay = this.crimeAt(x, z, i) ?? "No crime logged";
     else if (this.overlay === "pollution") overlay = this.pollutionAt(x, z, i) ?? "No reading";
     else if (this.overlay === "flood") overlay = this.floodAt(i) ?? "Dry";
+    else if (this.overlay === "density") overlay = this.densityAt(i) ?? "No density data";
     else if (this.overlay === "imd") overlay = this.imdAt(i) ?? "No IMD";
     else if (this.overlay === "broadband") overlay = this.broadbandAt(i) ?? "No coverage data";
     else if (this.overlay === "speeds") overlay = this.speedsAt(i) ?? "No speed reading";
@@ -1556,6 +1616,24 @@ export class CityBuilder {
     return bits.length ? bits.join(" · ") : null;
   }
 
+  private densityAt(i: number): string | null {
+    const idx = this.densityIndex[i] ?? 0;
+    if (idx) {
+      const area = this.densityAreas[idx - 1];
+      if (area) {
+        const bits = [formatDensity(area.density)];
+        if (area.name) bits.unshift(area.name);
+        return bits.join(" · ");
+      }
+    }
+    const heat = this.densityHeat[i] ?? 0;
+    if (!heat) return null;
+    const logLo = Math.log(Math.max(1, this.densityLo));
+    const logHi = Math.log(Math.max(logLo + 1e-6, this.densityHi));
+    const t = heat / 255;
+    return formatDensity(Math.exp(logLo + t * (logHi - logLo)));
+  }
+
   private imdAt(i: number): string | null {
     const idx = this.imdIndex[i] ?? 0;
     if (!idx) return null;
@@ -1648,8 +1726,8 @@ export class CityBuilder {
     bar.addEventListener("click", (e) => {
       const btn = (e.target as HTMLElement | null)?.closest("[data-tool], [data-brush], [data-view], [data-crime], [data-pollution], [data-flood], [data-imd], [data-broadband], [data-speeds]") as HTMLElement | null;
       if (!btn) return;
-      if (btn.dataset.view === "value" || btn.dataset.view === "zones" || btn.dataset.view === "traffic" || btn.dataset.view === "crime" || btn.dataset.view === "pollution" || btn.dataset.view === "flood" || btn.dataset.view === "imd" || btn.dataset.view === "broadband" || btn.dataset.view === "speeds" || btn.dataset.view === "masts") {
-        this.setOverlay(btn.dataset.view);
+      if (isOverlayKind(btn.dataset.view)) {
+        this.setOverlay(btn.dataset.view === this.overlay ? "none" : btn.dataset.view);
       }
       if (btn.dataset.crime) this.setCrimeLayer(btn.dataset.crime as CrimeLayer);
       if (btn.dataset.pollution) this.setPollutionLayer(btn.dataset.pollution as PollutionLayer);
@@ -1687,6 +1765,7 @@ export class CityBuilder {
             this.overlay === "traffic" || this.overlay === "crime" || (this.overlay === "pollution" && this.pollutionLayer === "noise") ? "Quiet"
             : this.overlay === "pollution" ? "Clean"
             :             this.overlay === "flood" ? "Dry"
+            : this.overlay === "density" ? "Sparse"
             : this.overlay === "imd" ? "Least"
             : this.overlay === "broadband" && this.broadbandLayer === "slow" ? "Can get 30"
             : this.overlay === "broadband" ? "None"
@@ -1700,6 +1779,7 @@ export class CityBuilder {
             : this.overlay === "crime" ? "Hot"
             : this.overlay === "pollution" && this.pollutionLayer === "noise" ? "Loud"
             : this.overlay === "pollution" ? "Dirty"
+            : this.overlay === "density" ? "Packed"
             : this.overlay === "imd" ? "Most"
             : this.overlay === "broadband" && this.broadbandLayer === "slow" ? "Notspot"
             : this.overlay === "broadband" ? "All premises"
@@ -1760,11 +1840,13 @@ export class CityBuilder {
       else if (this.overlay === "crime") this.infoEl.textContent = this.crimeMonths ? `Hover a street · ${this.crimeMonths}` : "Hover a street for crime";
       else if (this.overlay === "pollution") this.infoEl.textContent = this.pollutionLayer === "noise" ? "Hover for dB Lden" : "Hover for µg/m³";
       else if (this.overlay === "flood") this.infoEl.textContent = "Hover for flood likelihood";
+      else if (this.overlay === "density") this.infoEl.textContent = "Hover an area for people per km²";
       else if (this.overlay === "imd") this.infoEl.textContent = "Hover an area for IMD 2025";
       else if (this.overlay === "broadband") this.infoEl.textContent = "Hover for Ofcom coverage";
       else if (this.overlay === "speeds") this.infoEl.textContent = "Hover for median speed (2023)";
       else if (this.overlay === "masts") this.infoEl.textContent = "Hover for radio sites";
       else if (this.overlay === "zones") this.infoEl.textContent = "Hover a plot for land use";
+      else this.infoEl.textContent = "No overlay on the map";
     }
     const knock = document.getElementById("demolish-toggle");
     if (knock) {

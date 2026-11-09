@@ -16,7 +16,7 @@ export type TownView = {
 };
 
 export const TOWN_VIEWS: TownView[] = [
-  { id: "aerial", name: "Aerial", aerial: true, lat: 50.8025, lon: -1.087, dist: 0, height: 4200, from: 0 },
+  { id: "aerial", name: "Aerial", aerial: true, lat: 50.8025, lon: -1.087, dist: 0, height: 8000, from: 0 },
   {
     id: "spinnaker",
     name: "Spinnaker Tower",

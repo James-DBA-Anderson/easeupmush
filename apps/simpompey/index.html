@@ -60,8 +60,23 @@
 
       body.is-booting .hud,
       body.is-booting .dock,
-      body.is-booting .map-chrome {
+      body.is-booting .map-chrome,
+      body.is-title .hud,
+      body.is-title .dock,
+      body.is-title .map-chrome {
         opacity: 0;
+        pointer-events: none;
+      }
+
+      body.is-title #boot,
+      body.is-title #labels {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      body.is-title #game,
+      body.is-booting #game {
         pointer-events: none;
       }
 
@@ -84,53 +99,22 @@
         gap: 18px;
         background:
           radial-gradient(ellipse at 50% 42%, #14323c 0%, #0b1c24 62%, #07141a 100%);
-        pointer-events: auto;
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
         transition: opacity 0.55s ease, visibility 0.55s ease;
+      }
+
+      body.is-booting #boot {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
       }
 
       #boot.is-done {
         opacity: 0;
         visibility: hidden;
         pointer-events: none;
-      }
-
-      .boot__map {
-        width: min(300px, 78vw);
-        height: auto;
-        overflow: visible;
-      }
-
-      .boot__water {
-        fill: #0e2a33;
-      }
-
-      .boot__sheen {
-        fill: #1a4a56;
-        opacity: 0.28;
-        animation: boot-sheen 5.5s ease-in-out infinite;
-      }
-
-      .boot__land {
-        fill: #1c4048;
-      }
-
-      .boot__fill {
-        fill: #2f7a6e;
-        clip-path: inset(calc(100% - var(--boot-pct, 6%)) 0 0 0);
-        transition: clip-path 0.55s ease-out;
-      }
-
-      .boot__coast {
-        fill: none;
-        stroke: rgba(240, 162, 58, 0.85);
-        stroke-width: 1.35;
-        stroke-linejoin: round;
-        stroke-linecap: round;
-      }
-
-      .boot__mark {
-        fill: #f0a23a;
-        animation: boot-glow 2.4s ease-in-out infinite;
       }
 
       .boot__title {
@@ -166,26 +150,171 @@
         transition: width 0.28s ease;
       }
 
-      @keyframes boot-sheen {
-        0%, 100% { opacity: 0.16; }
-        50% { opacity: 0.4; }
+      .title-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: max(16px, env(safe-area-inset-top)) 20px max(16px, env(safe-area-inset-bottom));
+        background:
+          radial-gradient(ellipse at 50% 38%, #14323c 0%, #0b1c24 58%, #07141a 100%);
+        pointer-events: auto;
+        overflow-x: hidden;
+        overflow-y: auto;
+        transition: opacity 0.55s ease, visibility 0.55s ease;
       }
 
-      @keyframes boot-glow {
-        0%, 100% { opacity: 0.55; }
-        50% { opacity: 1; }
+      .title-screen.is-done {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .title-screen__inner {
+        width: min(720px, 100%);
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: clamp(8px, 1.6vh, 18px);
+      }
+
+      .title-screen__name {
+        font-family: var(--font-ui);
+        font-weight: 800;
+        font-size: clamp(2.2rem, 8vw, 3.4rem);
+        letter-spacing: 0.01em;
+        color: var(--chalk);
+        line-height: 0.95;
+        text-align: center;
+      }
+
+      .title-screen__choices {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 8px;
+      }
+
+      .title-card {
+        appearance: none;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+        text-align: left;
+        padding: 16px 18px 18px;
+        border-radius: 14px;
+        border: 1px solid rgba(200, 221, 230, 0.2);
+        background: rgba(7, 20, 26, 0.55);
+        color: var(--chalk);
+        cursor: pointer;
+        min-height: 0;
+      }
+
+      .title-card:hover,
+      .title-card:focus-visible {
+        border-color: var(--sodium);
+        outline: none;
+      }
+
+      .title-card--primary {
+        background: rgba(240, 162, 58, 0.12);
+        border-color: rgba(240, 162, 58, 0.55);
+      }
+
+      .title-card--primary:hover,
+      .title-card--primary:focus-visible {
+        background: var(--sodium);
+        color: var(--ink);
+      }
+
+      .title-card--primary:hover .title-card__kicker,
+      .title-card--primary:focus-visible .title-card__kicker,
+      .title-card--primary:hover .title-card__copy,
+      .title-card--primary:focus-visible .title-card__copy {
+        color: inherit;
+        opacity: 0.85;
+      }
+
+      .title-card--soon {
+        opacity: 0.78;
+      }
+
+      .title-card__kicker {
+        font-family: var(--font-display);
+        font-size: 0.72rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--sodium);
+      }
+
+      .title-card__title {
+        font-family: var(--font-ui);
+        font-weight: 800;
+        font-size: 1.15rem;
+        letter-spacing: 0.01em;
+        line-height: 1.2;
+      }
+
+      .title-card__copy {
+        font-size: 0.88rem;
+        line-height: 1.4;
+        color: var(--foam);
+      }
+
+      .title-screen__soon {
+        min-height: 1.3em;
+        margin: 0;
+        text-align: center;
+        font-size: 0.88rem;
+        color: var(--sodium);
+      }
+
+      .title-screen__load {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 6px;
+      }
+
+      .title-screen__load-label {
+        font-size: 0.78rem;
+        color: rgba(200, 221, 230, 0.72);
+        text-align: center;
+      }
+
+      .title-screen__bar {
+        height: 4px;
+        border-radius: 999px;
+        background: rgba(200, 221, 230, 0.14);
+        overflow: hidden;
+      }
+
+      .title-screen__bar-fill {
+        display: block;
+        width: 4%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #2a8070, #f0a23a);
+        transition: width 0.28s ease;
+      }
+
+      @media (max-width: 640px) {
+        .title-screen__choices {
+          grid-template-columns: 1fr;
+        }
       }
 
       @media (prefers-reduced-motion: reduce) {
-        .boot__sheen,
-        .boot__mark,
-        .boot__fill,
-        .boot__bar-fill {
+        .boot__bar-fill,
+        .title-screen__bar-fill {
           animation: none;
           transition: none;
         }
-        .boot__mark {
-          opacity: 1;
+        .title-screen {
+          transition: none;
         }
       }
 
@@ -493,16 +622,44 @@
       }
 
       .map-credit {
+        appearance: none;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
         align-self: stretch;
         margin: 0;
         padding: 5px 9px;
+        border: 0;
         border-radius: 8px;
         background: rgba(7, 20, 26, 0.72);
         color: rgba(200, 221, 230, 0.78);
         font-family: var(--font-ui);
         font-size: 0.68rem;
         letter-spacing: 0.02em;
-        pointer-events: none;
+        line-height: 1.35;
+        text-align: left;
+        cursor: pointer;
+        pointer-events: auto;
+      }
+
+      .map-credit:hover,
+      .map-credit:focus-visible {
+        color: var(--chalk);
+        outline: 1px solid rgba(240, 162, 58, 0.5);
+      }
+
+      .map-credit__text {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .map-credit__more {
+        flex: none;
+        font-family: var(--font-display);
+        font-size: 0.62rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--sodium);
       }
 
       .cam-pad {
@@ -527,13 +684,30 @@
         width: 100%;
         height: 100%;
         transform: rotate(var(--heading, 0deg));
+        transform-origin: center center;
+      }
+
+      .cam-pad__needle {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1px;
+        color: var(--sodium);
+        line-height: 1;
+      }
+
+      .cam-pad__arrow {
+        display: block;
+        width: 10px;
+        height: 7px;
       }
 
       .cam-pad__n {
         font-family: var(--font-display);
-        font-size: 0.95rem;
+        font-size: 0.78rem;
         letter-spacing: 0.04em;
-        color: var(--sodium);
+        color: inherit;
         line-height: 1;
       }
 
@@ -592,15 +766,203 @@
         display: none;
       }
 
-      .map-credit a {
-        color: var(--foam);
-        text-decoration: none;
-        pointer-events: auto;
+      .drive-pad {
+        display: none;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 24;
+        justify-content: space-between;
+        align-items: flex-end;
+        gap: 16px;
+        padding: 12px max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+        pointer-events: none;
       }
 
-      .map-credit a:hover {
+      .drive-pad__cluster {
+        display: flex;
+        gap: 10px;
+        pointer-events: auto;
+        touch-action: none;
+        user-select: none;
+      }
+
+      .drive-pad__cluster--pedals {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .drive-pad__row {
+        display: flex;
+        gap: 8px;
+      }
+
+      .drive-pad__row button {
+        flex: 1;
+      }
+
+      .drive-pad button {
+        appearance: none;
+        display: grid;
+        place-items: center;
+        min-width: 64px;
+        min-height: 64px;
+        padding: 0 12px;
+        border-radius: 16px;
+        border: 1px solid rgba(200, 221, 230, 0.22);
+        background: rgba(7, 20, 26, 0.82);
+        color: var(--foam);
+        font-family: var(--font-display);
+        font-size: 0.78rem;
+        letter-spacing: 0.04em;
+        backdrop-filter: blur(10px);
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .drive-pad button svg {
+        display: block;
+        width: 28px;
+        height: 28px;
+      }
+
+      .drive-pad__gas {
+        min-height: 72px;
+      }
+
+      .drive-pad button.is-held,
+      .drive-pad button:active {
+        background: var(--sodium);
+        border-color: var(--sodium);
+        color: var(--ink);
+      }
+
+      .sources {
+        width: min(560px, calc(100vw - 24px));
+        max-height: min(80dvh, 720px);
+        margin: auto;
+        padding: 0;
+        border: 1px solid rgba(200, 221, 230, 0.16);
+        border-radius: 16px;
+        background: #0d1f26;
+        color: var(--chalk);
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+        overflow: hidden;
+      }
+
+      .sources::backdrop {
+        background: rgba(7, 20, 26, 0.72);
+      }
+
+      .sources__panel {
+        display: flex;
+        flex-direction: column;
+        max-height: min(80dvh, 720px);
+      }
+
+      .sources__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 16px 10px;
+      }
+
+      .sources__name {
+        font-family: var(--font-ui);
+        font-weight: 800;
+        font-size: 1.15rem;
+        letter-spacing: 0.01em;
+      }
+
+      .sources__name:focus {
+        outline: none;
+      }
+
+      .sources__lede {
+        margin: 0;
+        padding: 0 16px 12px;
+        color: var(--foam);
+        font-size: 0.88rem;
+        line-height: 1.4;
+      }
+
+      .sources__scroller {
+        overflow: auto;
+        padding: 0 16px 16px;
+      }
+
+      .sources__group {
+        margin: 0 0 14px;
+        font-family: var(--font-display);
+        font-size: 0.72rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--sodium);
+      }
+
+      .sources__list {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin: 0 0 18px;
+      }
+
+      .sources__item {
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(200, 221, 230, 0.12);
+        background: rgba(7, 20, 26, 0.45);
+      }
+
+      .sources__item.is-used {
+        border-color: rgba(240, 162, 58, 0.55);
+        background: rgba(240, 162, 58, 0.08);
+      }
+
+      .sources__item .sources__head {
+        padding: 0;
+        margin-bottom: 4px;
+      }
+
+      .sources__title {
+        font-size: 0.92rem;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+      }
+
+      .sources__on {
+        display: none;
+        font-family: var(--font-display);
+        font-size: 0.62rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--sodium);
+      }
+
+      .sources__item.is-used .sources__on {
+        display: inline;
+      }
+
+      .sources__owner {
+        display: inline-block;
+        color: var(--foam);
+        font-size: 0.82rem;
+        text-decoration: none;
+      }
+
+      .sources__owner:hover {
         color: var(--sodium);
         text-decoration: underline;
+      }
+
+      .sources__meta,
+      .sources__note {
+        margin: 4px 0 0;
+        font-size: 0.78rem;
+        line-height: 1.35;
+        color: rgba(200, 221, 230, 0.72);
       }
 
       .planner__layer {
@@ -816,10 +1178,12 @@
         }
 
         #minimap {
-          top: auto;
+          top: calc(var(--hud-h) + env(safe-area-inset-top, 0px) + 10px);
           left: auto;
           right: max(12px, env(safe-area-inset-right));
-          bottom: max(52px, env(safe-area-inset-bottom));
+          bottom: auto;
+          width: 112px;
+          height: 112px;
         }
 
         body.is-map #minimap {
@@ -827,6 +1191,20 @@
         }
 
         body.is-layers #minimap {
+          right: auto;
+          left: max(12px, env(safe-area-inset-left));
+        }
+
+        #speedo {
+          left: auto;
+          right: max(12px, env(safe-area-inset-right));
+          top: calc(var(--hud-h) + env(safe-area-inset-top, 0px) + 130px);
+          bottom: auto;
+          min-width: 72px;
+          font-size: 1.1rem;
+        }
+
+        body.is-layers #speedo {
           right: auto;
           left: max(12px, env(safe-area-inset-left));
         }
@@ -850,6 +1228,23 @@
 
       body.is-driving #labels {
         display: none;
+      }
+
+      @media (max-width: 720px), ((hover: none) and (pointer: coarse)) {
+        body.is-driving .drive-pad {
+          display: flex;
+        }
+
+        body.is-driving .map-credit {
+          display: none;
+        }
+      }
+
+      @media (max-width: 400px) {
+        .drive-pad button {
+          min-width: 54px;
+          min-height: 54px;
+        }
       }
 
       .minimap__n {
@@ -897,28 +1292,32 @@
       }
     </style>
   </head>
-  <body class="is-booting">
+  <body class="is-title">
+    <div id="title" class="title-screen" role="dialog" aria-labelledby="title-name" aria-modal="true">
+      <div class="title-screen__inner">
+        <h1 class="title-screen__name" id="title-name">SimPompey</h1>
+        <div class="title-screen__choices">
+          <button type="button" class="title-card title-card--primary" id="title-explore">
+            <span class="title-card__kicker">Play now</span>
+            <span class="title-card__title">Explore the map</span>
+            <span class="title-card__copy">Wander Pompey and turn on land use, flood, crime, deprivation, broadband, and the rest.</span>
+          </button>
+          <button type="button" class="title-card title-card--soon" id="title-plan">
+            <span class="title-card__kicker">Coming soon</span>
+            <span class="title-card__title">Become the city's planner</span>
+            <span class="title-card__copy">Zone the island, paint land use, and run Portsmouth as a city.</span>
+          </button>
+        </div>
+        <p class="title-screen__soon" id="title-soon-note" hidden></p>
+        <div class="title-screen__load">
+          <p class="title-screen__load-label" id="title-load">The island is coming in…</p>
+          <div class="title-screen__bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-labelledby="title-load">
+            <span class="title-screen__bar-fill" id="title-bar-fill"></span>
+          </div>
+        </div>
+      </div>
+    </div>
     <div id="boot" role="status" aria-live="polite" aria-busy="true">
-      <svg class="boot__map" viewBox="0 0 240 200" aria-hidden="true">
-        <rect class="boot__water" x="0" y="0" width="240" height="200" rx="20"/>
-        <path class="boot__sheen" d="M0 132c44-8 96-4 148 6 34 7 68 4 92-10v72H0z"/>
-        <g class="boot__land">
-          <path d="M8 30c48-14 108-16 164-8 28 4 52 14 60 28v16c-44-10-102-8-154 0-28 4-52 8-70 4V30z"/>
-          <path d="M20 74l44 8c12 6 16 22 12 44-4 22-18 34-36 32-16-2-22-18-20-40 2-18 2-34 0-44z"/>
-          <path d="M112 56l44-4c22 2 34 18 36 44 2 28-6 52-24 64-20 12-44 8-58-8-12-16-16-42-12-66 2-16 6-26 14-30z"/>
-        </g>
-        <g class="boot__fill">
-          <path d="M8 30c48-14 108-16 164-8 28 4 52 14 60 28v16c-44-10-102-8-154 0-28 4-52 8-70 4V30z"/>
-          <path d="M20 74l44 8c12 6 16 22 12 44-4 22-18 34-36 32-16-2-22-18-20-40 2-18 2-34 0-44z"/>
-          <path d="M112 56l44-4c22 2 34 18 36 44 2 28-6 52-24 64-20 12-44 8-58-8-12-16-16-42-12-66 2-16 6-26 14-30z"/>
-        </g>
-        <g class="boot__coast">
-          <path d="M8 30c48-14 108-16 164-8 28 4 52 14 60 28"/>
-          <path d="M20 74l44 8c12 6 16 22 12 44-4 22-18 34-36 32-16-2-22-18-20-40 2-18 2-34 0-44z"/>
-          <path d="M112 56l44-4c22 2 34 18 36 44 2 28-6 52-24 64-20 12-44 8-58-8-12-16-16-42-12-66 2-16 6-26 14-30z"/>
-        </g>
-        <circle class="boot__mark" cx="126" cy="122" r="3.2"/>
-      </svg>
       <h1 class="boot__title">SimPompey</h1>
       <p class="boot__status" id="boot-status">Hang on mush…</p>
       <div class="boot__bar" id="boot-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="4" aria-labelledby="boot-status">
@@ -940,13 +1339,7 @@
         </label>
       </nav>
       <div class="hud__tools">
-        <button type="button" class="hud__icon" id="drive-toggle" title="Take the motor" aria-label="Take the motor" aria-pressed="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path fill="currentColor" d="M5 14.2 7.1 10h2.2L11 7.8h5.6L18.2 10H20l1.2 4.2H5zm.8 1.5h12.4v1.15H5.8z"/>
-            <circle cx="7.6" cy="18.6" r="1.55" fill="none" stroke="currentColor" stroke-width="1.5"/>
-            <circle cx="16.4" cy="18.6" r="1.55" fill="none" stroke="currentColor" stroke-width="1.5"/>
-          </svg>
-        </button>
+        <button type="button" class="hud__nav-btn" id="drive-toggle" aria-pressed="false">Drive</button>
       </div>
     </header>
     <aside class="dock dock--map is-away" id="dock-map">
@@ -982,6 +1375,12 @@
         </button>
       </div>
       <div class="planner dock__pane" id="planner">
+        <div class="planner__layer">
+          <button type="button" class="is-on" data-view="none">No overlay</button>
+        </div>
+        <div class="planner__layer">
+          <button type="button" data-view="density">Population density</button>
+        </div>
         <div class="planner__layer">
           <button type="button" data-view="zones">Land use</button>
           <div class="planner__zone-tools" id="zone-tools" hidden>
@@ -1090,7 +1489,7 @@
           <span class="planner__ramp"></span>
           <span data-legend-hi>High</span>
         </div>
-        <span class="planner__info" id="planner-info">Pick a layer to look around the island</span>
+        <span class="planner__info" id="planner-info">No overlay on the map</span>
         <p class="planner__hint">1–9 layers · Esc close · -/= brush</p>
       </div>
     </aside>
@@ -1102,11 +1501,42 @@
         <div class="minimap__dot"></div>
       </div>
     </div>
+    <div class="drive-pad" id="drive-pad">
+      <div class="drive-pad__cluster" aria-label="Steer">
+        <button type="button" data-drive="left" aria-label="Steer left">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m14 6-6 6 6 6"/>
+          </svg>
+        </button>
+        <button type="button" data-drive="right" aria-label="Steer right">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m10 6 6 6-6 6"/>
+          </svg>
+        </button>
+      </div>
+      <div class="drive-pad__cluster drive-pad__cluster--pedals" aria-label="Pedals">
+        <button type="button" data-drive="boost" aria-label="Boot it">Boot it</button>
+        <button type="button" class="drive-pad__gas" data-drive="accel" aria-label="Accelerate">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m7 14 5-5 5 5"/>
+          </svg>
+        </button>
+        <div class="drive-pad__row">
+          <button type="button" data-drive="brake" aria-label="Brake">Brake</button>
+          <button type="button" data-drive="reverse" aria-label="Reverse">Rev</button>
+        </div>
+      </div>
+    </div>
     <div class="map-chrome">
     <div class="cam-pad" id="cam-pad">
       <button type="button" class="cam-pad__compass" data-cam="north" title="North up" aria-label="North up">
         <span class="cam-pad__rose" id="cam-compass">
-          <span class="cam-pad__n">N</span>
+          <span class="cam-pad__needle">
+            <svg class="cam-pad__arrow" viewBox="0 0 12 8" aria-hidden="true">
+              <path fill="currentColor" d="M6 0 11.5 7.5H.5z"/>
+            </svg>
+            <span class="cam-pad__n">N</span>
+          </span>
         </span>
       </button>
       <div class="cam-pad__grid">
@@ -1144,49 +1574,30 @@
         </button>
       </div>
     </div>
-    <p class="map-credit">
-      Map data
-      <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap</a>
-      contributors
-      · buildings
-      <a href="https://github.com/microsoft/GlobalMLBuildingFootprints" target="_blank" rel="noreferrer">© Microsoft</a>
-      · canopy
-      <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/" target="_blank" rel="noreferrer">© Environment Agency</a>
-      · AIS
-      <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/" target="_blank" rel="noreferrer">© MCA</a>
-      (OGL)
-      · trains
-      <a href="https://www.nationalrail.co.uk/developers/darwin-data-feeds/" target="_blank" rel="noreferrer">© National Rail Enquiries</a>
-      Darwin
-      · prices
-      <a href="https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads" target="_blank" rel="noreferrer">© HM Land Registry</a>
-      · land values
-      <a href="https://www.gov.uk/government/publications/land-value-estimates-for-policy-appraisal-2023" target="_blank" rel="noreferrer">© MHCLG</a>
-      · traffic
-      <a href="https://roadtraffic.dft.gov.uk/local-authorities/E06000044" target="_blank" rel="noreferrer">© DfT</a>
-      · congestion
-      <a href="https://www.gov.uk/government/statistical-data-sets/average-speed-delay-and-reliability-of-travel-times-cgn" target="_blank" rel="noreferrer">© DfT CGN</a>
-      · crime
-      <a href="https://data.police.uk/" target="_blank" rel="noreferrer">© police.uk</a>
-      · air
-      <a href="https://uk-air.defra.gov.uk/data/pcm-data" target="_blank" rel="noreferrer">© Defra UK-AIR</a>
-      · noise
-      <a href="https://www.data.gov.uk/dataset/38b1444f-47a0-42ca-a358-0d145fcf7d5c/road-noise-all-metrics-england-round-4" target="_blank" rel="noreferrer">© Defra</a>
-      · flood
-      <a href="https://www.data.gov.uk/dataset/bad1991f-6ac9-41aa-b0fd-26b7266f511d/risk-of-flooding-from-rivers-and-sea" target="_blank" rel="noreferrer">© Environment Agency</a>
-      · deprivation
-      <a href="https://www.gov.uk/government/statistics/english-indices-of-deprivation-2025" target="_blank" rel="noreferrer">© MHCLG</a>
-      · broadband
-      <a href="https://www.ofcom.org.uk/phones-and-broadband/coverage-and-speeds/connected-nations-20252/data-downloads-2025" target="_blank" rel="noreferrer">© Ofcom</a>
-      · speeds
-      <a href="https://www.ofcom.org.uk/phones-and-broadband/coverage-and-speeds/connected-nations-2023/data-downloads" target="_blank" rel="noreferrer">© Ofcom</a>
-      · masts
-      <a href="https://www.ofcom.org.uk/spectrum/frequencies/wtr" target="_blank" rel="noreferrer">© Ofcom WTR</a>
-      · cells
-      <a href="https://opencellid.org/" target="_blank" rel="noreferrer">© OpenCelliD</a>
-      (OGL / CC-BY-SA)
-    </p>
+    <button type="button" class="map-credit" id="map-credit" aria-haspopup="dialog" aria-controls="sources" title="All data sources">
+      <span class="map-credit__text" id="map-credit-text" aria-live="polite">Map data © OpenStreetMap contributors</span>
+      <span class="map-credit__more">Details</span>
+    </button>
     </div>
+    <dialog class="sources" id="sources" aria-labelledby="sources-title">
+      <div class="sources__panel">
+        <div class="sources__head">
+          <h2 class="sources__name" id="sources-title" tabindex="-1">Data sources</h2>
+          <button type="button" class="dock__icon" data-close="sources" title="Close sources" aria-label="Close sources">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="m8 8 8 8M16 8l-8 8"/>
+            </svg>
+          </button>
+        </div>
+        <p class="sources__lede">Everything baked into this map, and the day we last pulled it.</p>
+        <div class="sources__scroller">
+          <h3 class="sources__group">Map</h3>
+          <ul class="sources__list" id="sources-map"></ul>
+          <h3 class="sources__group">Overlays</h3>
+          <ul class="sources__list" id="sources-overlays"></ul>
+        </div>
+      </div>
+    </dialog>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
