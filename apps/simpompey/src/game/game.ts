@@ -469,7 +469,7 @@ export class Game {
     }
     try {
       return await new Promise<GLTF>((resolve, reject) => {
-        loader.parse(spec, "", resolve, reject);
+        loader.parse(JSON.stringify(spec), "", resolve, reject);
       });
     } finally {
       THREE.Cache.remove(cacheKey);
