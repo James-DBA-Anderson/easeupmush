@@ -1276,6 +1276,111 @@ function emitLandRing(
   ground?.addMesh(tVerts, idx);
 }
 
+type RailBedPt = { x: number; z: number; y: number };
+
+function smoothRailBed(pts: RailBedPt[], windowM = 56): RailBedPt[] {
+  if (pts.length < 3) return pts;
+  const dist = [0];
+  for (let i = 1; i < pts.length; i++) {
+    dist.push(dist[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z));
+  }
+  return pts.map((p, i) => {
+    let w = 0;
+    let y = 0;
+    for (let j = i; j >= 0 && dist[i] - dist[j] <= windowM; j--) {
+      const k = 1 - (dist[i] - dist[j]) / windowM;
+      w += k;
+      y += pts[j].y * k;
+    }
+    for (let j = i + 1; j < pts.length && dist[j] - dist[i] <= windowM; j++) {
+      const k = 1 - (dist[j] - dist[i]) / windowM;
+      w += k;
+      y += pts[j].y * k;
+    }
+    return { x: p.x, z: p.z, y: w > 0 ? y / w : p.y };
+  });
+}
+
+function collectRailBeds(
+  roads: Array<{ nodes: [number, number][]; tags: Record<string, string>; mesh: string }>,
+  sample: (lat: number, lon: number) => number,
+): RailBedPt[] {
+  const out: RailBedPt[] = [];
+  for (const road of roads) {
+    if (road.mesh !== "rails" || isBridge(road.tags)) continue;
+    if (road.tags["tunnel"] && road.tags["tunnel"] !== "no") continue;
+    const nodes = road.nodes.map(([lat, lon]) => localM(lat, lon));
+    if (nodes.length < 2) continue;
+    const line: RailBedPt[] = [];
+    const step = 8;
+    for (let i = 0; i < nodes.length - 1; i++) {
+      const a = nodes[i];
+      const b = nodes[i + 1];
+      const dx = b.x - a.x;
+      const dz = b.y - a.y;
+      const len = Math.hypot(dx, dz);
+      if (len < 0.2) continue;
+      const n = Math.max(1, Math.ceil(len / step));
+      for (let s = 0; s < n; s++) {
+        const t = s / n;
+        const x = a.x + dx * t;
+        const z = a.y + dz * t;
+        line.push({ x, z, y: sampleAtLocal(sample, x, z) });
+      }
+    }
+    const last = nodes[nodes.length - 1];
+    line.push({ x: last.x, z: last.y, y: sampleAtLocal(sample, last.x, last.y) });
+    out.push(...smoothRailBed(line));
+  }
+  return out;
+}
+
+function flattenUnderRailBeds(xs: number[], ys: number[], zs: number[], beds: RailBedPt[]) {
+  if (!beds.length) return;
+  const cell = 16;
+  const inner = 10;
+  const reach = 18;
+  const maxDip = 2.2;
+  const key = (x: number, z: number) => `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+  const bins = new Map<string, RailBedPt[]>();
+  for (const p of beds) {
+    const k = key(p.x, p.z);
+    const bin = bins.get(k);
+    if (bin) bin.push(p);
+    else bins.set(k, [p]);
+  }
+  const ring = Math.ceil(reach / cell);
+  let n = 0;
+  for (let i = 0; i < ys.length; i++) {
+    const x = xs[i];
+    const z = zs[i];
+    const oldY = ys[i];
+    const cx = Math.floor(x / cell);
+    const cz = Math.floor(z / cell);
+    let nearest = Infinity;
+    let target = oldY;
+    for (let dz = -ring; dz <= ring; dz++) {
+      for (let dx = -ring; dx <= ring; dx++) {
+        const bin = bins.get(`${cx + dx},${cz + dz}`);
+        if (!bin) continue;
+        for (const p of bin) {
+          const d = Math.hypot(x - p.x, z - p.z);
+          if (d < nearest) {
+            nearest = d;
+            target = p.y;
+          }
+        }
+      }
+    }
+    if (nearest > reach) continue;
+    if (Math.abs(oldY - target) > maxDip) continue;
+    const fade = nearest <= inner ? 1 : 1 - (nearest - inner) / (reach - inner);
+    ys[i] = oldY + (target - oldY) * fade;
+    n++;
+  }
+  console.log(`  rail bed flatten: ${n} verts`);
+}
+
 function buildTerrain(
   _rows: number,
   _cols: number,
@@ -1283,10 +1388,11 @@ function buildTerrain(
   writer: BinWriter,
   _coastlines: { x: number; y: number }[][],
   ground?: TerrainIndex,
+  railBeds?: RailBedPt[],
 ) {
   // Land comes from coast.json rings (already closed against the bbox).
   // Tessellating raw OSM coast chains fills Portsmouth / Langstone harbours.
-  emitMainlandFill(sample, writer, ground, [], loadClosedLand());
+  emitMainlandFill(sample, writer, ground, [], loadClosedLand(), railBeds);
 }
 
 function loadClosedLand(): { x: number; y: number }[][] {
@@ -1311,6 +1417,7 @@ function emitMainlandFill(
   ground: TerrainIndex | undefined,
   osmLand: { x: number; y: number }[][],
   closedLand: { x: number; y: number }[][],
+  railBeds?: RailBedPt[],
 ) {
   const cell = 16;
   const cols = Math.max(2, Math.round(((EAST - WEST) * SCALE_X) / cell) + 1);
@@ -1368,6 +1475,7 @@ function emitMainlandFill(
   }
   console.log(`  DEM mainland fill: ${landCells} cells on ${rows}×${cols}, ${px.length} verts, ${idx.length / 3} tris`);
   if (idx.length < 3) return;
+  if (railBeds?.length) flattenUnderRailBeds(px, py, pz, railBeds);
 
   const tVerts = new Float32Array(px.length * 3);
   const tNorms = new Float32Array(tVerts.length);
@@ -2376,7 +2484,22 @@ function sideHasMappedSidewalk(
   return samples > 0 && hits >= Math.max(1, Math.ceil(samples * 0.35));
 }
 
-function pushSleepers(writer: BinWriter, pts: RoadPt[], ground: TerrainIndex, lift: number) {
+function heightAlong(pts: RoadPt[], heights: number[], dist: number): number {
+  let remain = Math.max(0, dist);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const len = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y) || 1e-6;
+    if (remain <= len) {
+      const u = remain / len;
+      const h0 = heights[Math.min(i, heights.length - 1)];
+      const h1 = heights[Math.min(i + 1, heights.length - 1)];
+      return h0 + (h1 - h0) * u;
+    }
+    remain -= len;
+  }
+  return heights[heights.length - 1] ?? 0;
+}
+
+function pushSleepers(writer: BinWriter, pts: RoadPt[], ground: TerrainIndex, lift: number, heights?: number[]) {
   const total = polylineLength(pts);
   if (total < 2) return;
   const spacing = 0.7;
@@ -2389,7 +2512,7 @@ function pushSleepers(writer: BinWriter, pts: RoadPt[], ground: TerrainIndex, li
     if (!a) continue;
     const tx = a.uz;
     const tz = -a.ux;
-    const y = ground.height(a.p.x, a.p.y) + lift + 0.04;
+    const y = (heights ? heightAlong(pts, heights, d) : ground.height(a.p.x, a.p.y) + lift) + 0.05;
     const lx = a.ux * halfLen;
     const lz = a.uz * halfLen;
     const wx = tx * halfW;
@@ -2410,6 +2533,42 @@ function pushSleepers(writer: BinWriter, pts: RoadPt[], ground: TerrainIndex, li
   writer.push("rail-sleepers", verts, nrm, new Uint32Array(idx), SLEEPER_COLOUR);
 }
 
+function extendTrack(pts: RoadPt[], norms: RoadNorm[], extra = 1.5): { pts: RoadPt[]; norms: RoadNorm[] } {
+  if (pts.length < 2) return { pts, norms };
+  const a = pts[0];
+  const b = pts[1];
+  const len0 = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const c = pts[pts.length - 2];
+  const d = pts[pts.length - 1];
+  const len1 = Math.hypot(d.x - c.x, d.y - c.y) || 1;
+  return {
+    pts: [
+      { x: a.x - ((b.x - a.x) / len0) * extra, y: a.y - ((b.y - a.y) / len0) * extra },
+      ...pts,
+      { x: d.x + ((d.x - c.x) / len1) * extra, y: d.y + ((d.y - c.y) / len1) * extra },
+    ],
+    norms: [norms[0], ...norms, norms[norms.length - 1]],
+  };
+}
+
+function trackBed(pts: RoadPt[], ground: TerrainIndex, lift: number, heights?: number[]): number[] {
+  const raw = heights ?? pts.map((p) => ground.height(p.x, p.y) + lift);
+  const n = raw.length;
+  const out = new Array<number>(n);
+  const win = 6;
+  for (let i = 0; i < n; i++) {
+    let w = 0;
+    let s = 0;
+    for (let j = Math.max(0, i - win); j <= Math.min(n - 1, i + win); j++) {
+      const k = 1 - Math.abs(j - i) / (win + 1);
+      w += k;
+      s += raw[j] * k;
+    }
+    out[i] = s / w;
+  }
+  return out;
+}
+
 function buildTrack(
   pts: RoadPt[],
   norms: RoadNorm[],
@@ -2423,36 +2582,37 @@ function buildTrack(
   const lift = RAIL_LIFT + deck;
   const ballastW = kind === "tram" || kind === "light_rail" ? 2.6 : kind === "miniature" ? 1.4 : 4.6;
   const half = ballastW / 2;
-  pushRibbon(writer, "rails", offsetSide(pts, norms, half), offsetSide(pts, norms, -half), ground, lift, BALLAST_COLOUR, heights);
+  const laid = extendTrack(pts, norms);
+  const bed = trackBed(laid.pts, ground, lift, heights ? [heights[0], ...heights, heights[heights.length - 1]] : undefined);
+  pushRibbon(writer, "rails", offsetSide(laid.pts, laid.norms, half), offsetSide(laid.pts, laid.norms, -half), ground, lift, BALLAST_COLOUR, bed);
   if (kind === "tram" || kind === "miniature") {
     if (heights) buildBridgeStructure(writer, pts, norms, heights, ballastW, ground, false);
     return;
   }
   const gauge = 1.435 / 2;
-  const head = 0.08;
-  const steelLift = lift + 0.07;
-  const steelYs = heights?.map((y) => y + 0.07);
+  const head = 0.11;
+  const steelYs = bed.map((y) => y + 0.1);
   pushRibbon(
     writer,
     "rail-steel",
-    offsetSide(pts, norms, gauge + head),
-    offsetSide(pts, norms, gauge - head),
+    offsetSide(laid.pts, laid.norms, gauge + head),
+    offsetSide(laid.pts, laid.norms, gauge - head),
     ground,
-    steelLift,
+    0,
     STEEL_COLOUR,
     steelYs,
   );
   pushRibbon(
     writer,
     "rail-steel",
-    offsetSide(pts, norms, -(gauge - head)),
-    offsetSide(pts, norms, -(gauge + head)),
+    offsetSide(laid.pts, laid.norms, -(gauge - head)),
+    offsetSide(laid.pts, laid.norms, -(gauge + head)),
     ground,
-    steelLift,
+    0,
     STEEL_COLOUR,
     steelYs,
   );
-  if (!heights) pushSleepers(writer, pts, ground, lift);
+  pushSleepers(writer, laid.pts, ground, lift, bed);
   if (heights) buildBridgeStructure(writer, pts, norms, heights, ballastW, ground, false);
 }
 
@@ -3861,7 +4021,9 @@ async function main() {
 
   console.log("Building terrain…");
   const ground = new TerrainIndex((x, z) => sampleAtLocal(dem.sample, x, z));
-  buildTerrain(dem.rows, dem.cols, dem.sample, writer, coasts, ground);
+  const railBeds = collectRailBeds(pendingRoads, dem.sample);
+  console.log(`  rail bed samples: ${railBeds.length}`);
+  buildTerrain(dem.rows, dem.cols, dem.sample, writer, coasts, ground, railBeds);
   ground.build();
 
   console.log(`Draping ${pendingRoads.length} roads/rails…`);

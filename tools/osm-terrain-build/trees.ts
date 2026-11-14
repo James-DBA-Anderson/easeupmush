@@ -149,7 +149,7 @@ function coverKindOf(tags: Record<string, string>): CoverKind | null {
   }
   const surface = (tags.surface ?? "").toLowerCase();
   const pavedSurface = /asphalt|concrete|paving|sett|cobble|artificial|tartan|acrylic/.test(surface);
-  if (tags.landuse === "railway") return "railway";
+  if (tags.landuse === "railway") return null;
   if (
     tags.amenity === "parking" ||
     tags.amenity === "parking_space" ||

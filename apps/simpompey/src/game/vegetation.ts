@@ -14,7 +14,7 @@ const COVER_COLOUR: Record<CoverKind, number> = {
   railway: 0xddd4c6,
   paved: 0x6a6964,
   sand: 0xc9c2b4,
-  allotment: 0x7a7a48,
+  allotment: 0x6a9a52,
   courtyard: 0xc2bdb0,
   grass: 0x6eaa5c,
   garden: 0x74b05a,
@@ -32,7 +32,9 @@ const COVER_LIFT: Record<CoverKind, number> = {
   park: 0.42,
   wood: 0.46,
 };
-const COVER_ORDER: CoverKind[] = ["paved", "sand", "allotment", "courtyard", "grass", "garden", "park", "wood", "railway"];
+/** Beige railway landuse and courtyard slabs sit on top of real rails/yards — skip them. */
+const COVER_SKIP = new Set<CoverKind>(["railway", "courtyard"]);
+const COVER_ORDER: CoverKind[] = ["paved", "sand", "allotment", "grass", "garden", "park", "wood"];
 
 function firstMesh(root: THREE.Object3D): THREE.Mesh | null {
   let found: THREE.Mesh | null = null;
@@ -224,6 +226,7 @@ export async function addVegetation(
   ]);
 
   for (const kind of COVER_ORDER) {
+    if (COVER_SKIP.has(kind)) continue;
     const mesh = coverMesh(kind, data.cover?.[kind] ?? [], mapScene, sampleGround);
     if (mesh) cover.add(mesh);
   }

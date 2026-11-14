@@ -12,18 +12,19 @@ const MARK_LIFT = 0.86;
 
 function pitchColour(sport: string): number {
   const s = sport.split(";")[0].toLowerCase();
-  if (s === "playground") return 0xd4a070;
   if (s === "tennis") return 0x3f8f6a;
   if (s === "soccer" || s === "football") return 0x4d9a4a;
-  if (s.includes("basket")) return 0xb56a38;
   if (s.includes("bowl")) return 0x58aa52;
   if (s.includes("cricket")) return 0x6ab05a;
   if (s.includes("rugby")) return 0x478a42;
   if (s.includes("hockey")) return 0x3a7a68;
-  if (s.includes("netball") || s.includes("multi")) return 0xc45a3a;
-  if (s.includes("athlet") || s === "running") return 0xb45a48;
   if (s === "skateboard" || s === "bmx") return 0x8a8680;
   return 0x5a9650;
+}
+
+function skipPitchFill(sport: string): boolean {
+  const s = sport.split(";")[0].toLowerCase();
+  return s === "playground" || s.includes("basket") || s.includes("netball") || s.includes("multi") || s.includes("athlet") || s === "running";
 }
 
 function firstMesh(root: THREE.Object3D): THREE.Mesh | null {
@@ -268,6 +269,7 @@ export async function addPlaces(
     else bySport.set(key, pitch.t.slice());
   }
   for (const [sport, tris] of bySport) {
+    if (skipPitchFill(sport)) continue;
     const fill = fillMesh(sport, tris, mapScene, sampleGround);
     if (fill) cover.add(fill);
   }

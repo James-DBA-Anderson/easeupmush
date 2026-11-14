@@ -26,6 +26,26 @@ const SHADOW_MAP = 2048;
 const SHADOW_EXTENT_MIN = 320;
 const SHADOW_EXTENT_MAX = 720;
 const MINIMAP_RADIUS = 150;
+/** Close-in drag covers about this many metres per screen-height, not the tiny orbit radius. */
+const NAV_PAN_REF = 520;
+const NAV_PAN_SPEED = 1.55;
+const NAV_ZOOM_SPEED = 1.55;
+const NAV_ZOOM_REF = 180;
+const NAV_FLY_MIN = 140;
+const NAV_ORBIT_PAN = 2;
+const NAV_ORBIT_TOUCH_PAN = 4;
+const NAV_ORBIT_TOUCH_DOLLY_PAN = 5;
+const CAM_CLEAR = 18;
+const CAM_MIN_DIST = 18;
+const CAM_MAX_TILT = Math.PI * 0.46;
+
+type OrbitNav = OrbitControls & {
+  _state: number;
+  _pan: (deltaX: number, deltaY: number) => void;
+  _panStart: THREE.Vector2;
+  _panEnd: THREE.Vector2;
+  _panOffset: THREE.Vector3;
+};
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -51,6 +71,241 @@ type MapFilters = {
   buildingLabels: boolean;
   areaLabels: boolean;
 };
+
+type RibbonEnd = {
+  x: number;
+  y: number;
+  z: number;
+  tx: number;
+  tz: number;
+  lx: number;
+  ly: number;
+  lz: number;
+  rx: number;
+  ry: number;
+  rz: number;
+};
+
+function ribbonKey(x: number, z: number, cell: number) {
+  return `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+}
+
+function collectRibbonEnds(pos: THREE.BufferAttribute): RibbonEnd[] {
+  if (pos.count < 4 || pos.count % 2 !== 0) return [];
+  const ends: RibbonEnd[] = [];
+  let start = 0;
+  const mid = (i: number) => ({
+    x: (pos.getX(i) + pos.getX(i + 1)) * 0.5,
+    y: (pos.getY(i) + pos.getY(i + 1)) * 0.5,
+    z: (pos.getZ(i) + pos.getZ(i + 1)) * 0.5,
+  });
+  const pushEnd = (a: number, b: number, outward: 1 | -1) => {
+    const pa = mid(a);
+    const pb = mid(b);
+    let tx = (pb.x - pa.x) * outward;
+    let tz = (pb.z - pa.z) * outward;
+    const len = Math.hypot(tx, tz) || 1;
+    tx /= len;
+    tz /= len;
+    const i = outward === 1 ? b : a;
+    ends.push({
+      x: outward === 1 ? pb.x : pa.x,
+      y: outward === 1 ? pb.y : pa.y,
+      z: outward === 1 ? pb.z : pa.z,
+      tx,
+      tz,
+      lx: pos.getX(i),
+      ly: pos.getY(i),
+      lz: pos.getZ(i),
+      rx: pos.getX(i + 1),
+      ry: pos.getY(i + 1),
+      rz: pos.getZ(i + 1),
+    });
+  };
+  for (let i = 2; i < pos.count; i += 2) {
+    const a = mid(i - 2);
+    const b = mid(i);
+    if (Math.hypot(b.x - a.x, b.z - a.z) > 12) {
+      if (i - start >= 4) {
+        pushEnd(start, start + 2, -1);
+        pushEnd(i - 4, i - 2, 1);
+      }
+      start = i;
+    }
+  }
+  if (pos.count - start >= 4) {
+    pushEnd(start, start + 2, -1);
+    pushEnd(pos.count - 4, pos.count - 2, 1);
+  }
+  return ends;
+}
+
+function fillRibbonGaps(mesh: THREE.Mesh, maxGap: number) {
+  const geo = mesh.geometry;
+  const pos = geo.getAttribute("position");
+  const oldIdx = geo.getIndex();
+  if (!pos || !oldIdx || pos.count < 4) return;
+  const ends = collectRibbonEnds(pos as THREE.BufferAttribute);
+  if (ends.length < 2) return;
+  const cell = 8;
+  const bins = new Map<string, number[]>();
+  ends.forEach((e, i) => {
+    const k = ribbonKey(e.x, e.z, cell);
+    const bin = bins.get(k);
+    if (bin) bin.push(i);
+    else bins.set(k, [i]);
+  });
+  const used = new Set<number>();
+  const extra: number[] = [];
+  const ring = Math.ceil(maxGap / cell);
+  for (let i = 0; i < ends.length; i++) {
+    if (used.has(i)) continue;
+    const a = ends[i];
+    const cx = Math.floor(a.x / cell);
+    const cz = Math.floor(a.z / cell);
+    let best = -1;
+    let bestD = maxGap;
+    for (let dz = -ring; dz <= ring; dz++) {
+      for (let dx = -ring; dx <= ring; dx++) {
+        const bin = bins.get(`${cx + dx},${cz + dz}`);
+        if (!bin) continue;
+        for (const j of bin) {
+          if (j === i || used.has(j)) continue;
+          const b = ends[j];
+          const lx = b.x - a.x;
+          const lz = b.z - a.z;
+          const d = Math.hypot(lx, lz);
+          if (d < 0.35 || d > bestD) continue;
+          const inv = 1 / d;
+          const nx = lx * inv;
+          const nz = lz * inv;
+          if (a.tx * nx + a.tz * nz < 0.55) continue;
+          if (b.tx * -nx + b.tz * -nz < 0.55) continue;
+          best = j;
+          bestD = d;
+        }
+      }
+    }
+    if (best < 0) continue;
+    used.add(i);
+    used.add(best);
+    const b = ends[best];
+    const aToBL = Math.hypot(a.lx - b.lx, a.lz - b.lz);
+    const aToBR = Math.hypot(a.lx - b.rx, a.lz - b.rz);
+    const swap = aToBR < aToBL;
+    extra.push(a.lx, a.ly, a.lz, a.rx, a.ry, a.rz);
+    if (swap) extra.push(b.rx, b.ry, b.rz, b.lx, b.ly, b.lz);
+    else extra.push(b.lx, b.ly, b.lz, b.rx, b.ry, b.rz);
+  }
+  if (!extra.length) return;
+  const src = pos.array as Float32Array;
+  const next = new Float32Array(src.length + extra.length);
+  next.set(src);
+  next.set(extra, src.length);
+  const base = pos.count;
+  const gapN = extra.length / 12;
+  const extraIdx: number[] = [];
+  for (let g = 0; g < gapN; g++) {
+    const o = base + g * 4;
+    extraIdx.push(o, o + 2, o + 1, o + 1, o + 2, o + 3);
+  }
+  const idxCount = (oldIdx?.count ?? 0) + extraIdx.length;
+  const idx = idxCount > 65535 ? new Uint32Array(idxCount) : new Uint16Array(idxCount);
+  if (oldIdx) {
+    const prev = oldIdx.array;
+    for (let i = 0; i < oldIdx.count; i++) idx[i] = prev[i];
+    idx.set(extraIdx, oldIdx.count);
+  } else {
+    for (let i = 0; i < pos.count; i++) idx[i] = i;
+    idx.set(extraIdx, pos.count);
+  }
+  geo.setAttribute("position", new THREE.BufferAttribute(next, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.computeVertexNormals();
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+}
+
+function hashMesh(mesh: THREE.Mesh, cell: number) {
+  const pos = mesh.geometry.getAttribute("position");
+  const bins = new Map<string, number[]>();
+  if (!pos) return bins;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const k = ribbonKey(x, z, cell);
+    const bin = bins.get(k);
+    if (bin) bin.push(x, y, z);
+    else bins.set(k, [x, y, z]);
+  }
+  return bins;
+}
+
+function smoothRibbonY(mesh: THREE.Mesh, radius: number) {
+  const pos = mesh.geometry.getAttribute("position");
+  if (!pos) return;
+  const cell = 8;
+  const bins = hashMesh(mesh, cell);
+  const ring = Math.ceil(radius / cell);
+  const ys = new Float32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    const cx = Math.floor(x / cell);
+    const cz = Math.floor(z / cell);
+    let wsum = 0;
+    let ysum = 0;
+    for (let dz = -ring; dz <= ring; dz++) {
+      for (let dx = -ring; dx <= ring; dx++) {
+        const bin = bins.get(`${cx + dx},${cz + dz}`);
+        if (!bin) continue;
+        for (let p = 0; p < bin.length; p += 3) {
+          const d = Math.hypot(x - bin[p], z - bin[p + 2]);
+          if (d > radius) continue;
+          const w = 1 / (1 + d);
+          wsum += w;
+          ysum += bin[p + 1] * w;
+        }
+      }
+    }
+    ys[i] = wsum > 0 ? ysum / wsum : pos.getY(i);
+  }
+  for (let i = 0; i < pos.count; i++) pos.setY(i, ys[i]);
+  pos.needsUpdate = true;
+}
+
+function drapeOnMesh(mesh: THREE.Mesh, bed: THREE.Mesh, lift: number) {
+  const pos = mesh.geometry.getAttribute("position");
+  if (!pos) return;
+  const cell = 8;
+  const bins = hashMesh(bed, cell);
+  const ring = 2;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    const cx = Math.floor(x / cell);
+    const cz = Math.floor(z / cell);
+    let best = Infinity;
+    let y = pos.getY(i);
+    for (let dz = -ring; dz <= ring; dz++) {
+      for (let dx = -ring; dx <= ring; dx++) {
+        const bin = bins.get(`${cx + dx},${cz + dz}`);
+        if (!bin) continue;
+        for (let p = 0; p < bin.length; p += 3) {
+          const d = Math.hypot(x - bin[p], z - bin[p + 2]);
+          if (d < best) {
+            best = d;
+            y = bin[p + 1];
+          }
+        }
+      }
+    }
+    if (best < 8) pos.setY(i, y + lift);
+  }
+  pos.needsUpdate = true;
+  mesh.geometry.computeVertexNormals();
+}
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -149,6 +404,8 @@ export class Game {
   private pickRay = new THREE.Raycaster();
   private pickNdc = new THREE.Vector2();
   private pickHit = new THREE.Vector3();
+  private panFrom = new THREE.Vector3();
+  private panNow = new THREE.Vector3();
   private placedLabels: Array<{ x: number; y: number; w: number; h: number }> = [];
   private sun: THREE.DirectionalLight;
   private sunDir = new THREE.Vector3(-0.38, 0.84, 0.4).normalize();
@@ -219,15 +476,16 @@ export class Game {
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.18;
-    this.controls.screenSpacePanning = true;
-    this.controls.panSpeed = 1.35;
-    this.controls.zoomSpeed = 1.15;
+    this.controls.dampingFactor = 0.26;
+    this.controls.screenSpacePanning = false;
+    this.controls.panSpeed = NAV_PAN_SPEED;
+    this.controls.zoomSpeed = NAV_ZOOM_SPEED;
+    this.controls.keyPanSpeed = 28;
     this.controls.rotateSpeed = 0.4;
     this.controls.zoomToCursor = true;
     this.controls.minPolarAngle = 0;
-    this.controls.maxPolarAngle = Math.PI * 0.495;
-    this.controls.minDistance = 18;
+    this.controls.maxPolarAngle = CAM_MAX_TILT;
+    this.controls.minDistance = CAM_MIN_DIST;
     this.controls.maxDistance = 9000;
     this.controls.target.set(0, 0, 0);
     this.controls.mouseButtons = {
@@ -240,6 +498,7 @@ export class Game {
       TWO: THREE.TOUCH.DOLLY_ROTATE,
     };
     this.controls.enabled = false;
+    this.bindMapPan();
 
     this.scene.add(new THREE.AmbientLight(0xfff6ea, 0.32));
     this.scene.add(new THREE.HemisphereLight(0xd4e7f7, 0x9a8b6a, 0.9));
@@ -397,6 +656,9 @@ export class Game {
           this.barrierChunks.push(child);
         }
       }
+
+      this.flattenTerrainUnderRails();
+      this.dressRailDeck();
 
       this.groundMeshes = [];
       for (const name of ["terrain", "roads"] as const) {
@@ -586,13 +848,18 @@ export class Game {
 
     if (this.driving) this.updateDrive(dt);
     else {
+      this.syncNavSpeed();
       this.updateFly(dt);
       this.tickCamPad(dt);
+      this.syncTerrainLimits();
     }
     this.harbour?.update(dt);
     this.trains?.update(dt);
     if (!this.driving) this.controls.update();
-    if (!this.driving) this.clampLookAt();
+    if (!this.driving) {
+      this.liftCameraOffTerrain();
+      this.clampLookAt();
+    }
     this.syncCompass();
     this.updateSun();
     this.updateBarriers();
@@ -676,7 +943,7 @@ export class Game {
     if (dx === 0 && dz === 0 && dy === 0) return;
 
     const dist = this.camera.position.distanceTo(this.controls.target);
-    const speed = Math.max(22, dist * 0.55) * (k.Shift ? 2.2 : 1);
+    const speed = Math.max(NAV_FLY_MIN, dist * 0.85) * (k.Shift ? 2.2 : 1);
 
     this.camera.getWorldDirection(this.camForward);
     this.camForward.y = 0;
@@ -696,8 +963,8 @@ export class Game {
 
     this.camera.position.add(this.camMove);
     this.controls.target.add(this.camMove);
-    this.camera.position.y = Math.max(8, this.camera.position.y);
     this.controls.target.y = Math.max(0, this.controls.target.y);
+    this.liftCameraOffTerrain();
     this.clampLookAt();
   }
 
@@ -963,23 +1230,27 @@ export class Game {
     this.camOffset.copy(this.camera.position).sub(this.controls.target).applyQuaternion(this.camQuat);
     this.camSpherical.setFromVector3(this.camOffset);
     this.camSpherical.theta += dTheta;
+    this.camSpherical.phi += dPhi;
+    if (dolly !== 1) this.camSpherical.radius *= dolly;
+    this.camOffset.setFromSpherical(this.camSpherical).applyQuaternion(this.camQuatInv);
+    this.camera.position.copy(this.controls.target).add(this.camOffset);
+    this.syncTerrainLimits();
     this.camSpherical.phi = THREE.MathUtils.clamp(
-      this.camSpherical.phi + dPhi,
+      this.camSpherical.phi,
       this.controls.minPolarAngle + 0.02,
       this.controls.maxPolarAngle,
     );
-    if (dolly !== 1) {
-      this.camSpherical.radius = THREE.MathUtils.clamp(
-        this.camSpherical.radius * dolly,
-        this.controls.minDistance,
-        this.controls.maxDistance,
-      );
-    }
+    this.camSpherical.radius = THREE.MathUtils.clamp(
+      this.camSpherical.radius,
+      this.controls.minDistance,
+      this.controls.maxDistance,
+    );
     this.camOffset.setFromSpherical(this.camSpherical).applyQuaternion(this.camQuatInv);
     this.camera.position.copy(this.controls.target).add(this.camOffset);
     this.camera.up.copy(this.camYUp);
     this.camera.lookAt(this.controls.target);
     this.controls.update();
+    this.liftCameraOffTerrain();
     this.clampLookAt();
   }
 
@@ -1057,7 +1328,7 @@ export class Game {
     this.controls.target.copy(target);
     this.camera.position.copy(cam);
     this.camera.up.set(0, 1, 0);
-    this.controls.minDistance = 18;
+    this.controls.minDistance = CAM_MIN_DIST;
     this.controls.update();
     this.canvas.focus();
   }
@@ -1073,10 +1344,11 @@ export class Game {
     this.pickRay.setFromCamera(this.pickNdc, this.camera);
     if (!this.pickRay.ray.intersectPlane(this.groundPlane, this.pickHit)) return;
     this.camera.position.lerp(this.pickHit, 0.42);
-    this.camera.position.y = Math.max(22, this.camera.position.y);
     this.controls.target.lerp(this.pickHit, 0.42);
     this.controls.target.y = 0;
+    this.syncTerrainLimits();
     this.controls.update();
+    this.liftCameraOffTerrain();
     this.clampLookAt();
   };
 
@@ -1106,6 +1378,65 @@ export class Game {
     }
   }
 
+  private navDist() {
+    return Math.max(1, this.camera.position.distanceTo(this.controls.target));
+  }
+
+  private syncNavSpeed() {
+    const dist = this.navDist();
+    this.controls.panSpeed = NAV_PAN_SPEED * Math.max(1, NAV_PAN_REF / dist);
+    this.controls.zoomSpeed = NAV_ZOOM_SPEED * Math.max(1, Math.min(2.8, NAV_ZOOM_REF / dist));
+  }
+
+  private bindMapPan() {
+    const orbit = this.controls as OrbitNav;
+    const fallback = orbit._pan.bind(orbit);
+    orbit._pan = (deltaX, deltaY) => {
+      if (this.panAlongGround(orbit)) return;
+      fallback(deltaX, deltaY);
+    };
+    const panning = (state: number) =>
+      state === NAV_ORBIT_PAN || state === NAV_ORBIT_TOUCH_PAN || state === NAV_ORBIT_TOUCH_DOLLY_PAN;
+    this.controls.addEventListener("start", () => {
+      if (panning(orbit._state)) this.controls.enableDamping = false;
+    });
+    this.controls.addEventListener("end", () => {
+      this.controls.enableDamping = true;
+    });
+  }
+
+  private panAlongGround(orbit: OrbitNav) {
+    const start = orbit._panStart;
+    const end = orbit._panEnd;
+    if (Math.abs(end.x - start.x) + Math.abs(end.y - start.y) < 0.5) return false;
+    const rect = this.canvas.getBoundingClientRect();
+    if (!this.hitPanPlane(start.x, start.y, rect, this.panFrom)) return false;
+    if (!this.hitPanPlane(end.x, end.y, rect, this.panNow)) return false;
+    let dx = this.panFrom.x - this.panNow.x;
+    let dz = this.panFrom.z - this.panNow.z;
+    const span = Math.hypot(dx, dz);
+    const max = Math.max(120, this.navDist() * 10);
+    if (span > max) {
+      const s = max / span;
+      dx *= s;
+      dz *= s;
+    }
+    orbit._panOffset.x += dx;
+    orbit._panOffset.z += dz;
+    return true;
+  }
+
+  private hitPanPlane(clientX: number, clientY: number, rect: DOMRect, out: THREE.Vector3) {
+    if (rect.width < 1 || rect.height < 1) return false;
+    this.pickNdc.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    this.pickRay.setFromCamera(this.pickNdc, this.camera);
+    this.groundPlane.constant = -this.controls.target.y;
+    return Boolean(this.pickRay.ray.intersectPlane(this.groundPlane, out));
+  }
+
   private clampLookAt() {
     if (this.driving || !this.lookReady) return;
     const t = this.controls.target;
@@ -1118,6 +1449,98 @@ export class Game {
     t.z = z;
     this.camera.position.x += dx;
     this.camera.position.z += dz;
+  }
+
+  private camBlockers: THREE.Object3D[] = [];
+
+  private gatherCamBlockers() {
+    const n = this.groundMeshes.length + this.buildingChunks.length;
+    if (this.camBlockers.length !== n) {
+      this.camBlockers.length = 0;
+      for (const mesh of this.groundMeshes) this.camBlockers.push(mesh);
+      for (const mesh of this.buildingChunks) this.camBlockers.push(mesh);
+    }
+    return this.camBlockers;
+  }
+
+  private sampleGroundHigh(x: number, z: number): number | null {
+    const blockers = this.gatherCamBlockers();
+    if (blockers.length === 0) return null;
+    this.driveOrigin.set(x, 400, z);
+    this.driveRay.set(this.driveOrigin, this.driveDown);
+    this.driveRay.near = 0;
+    this.driveRay.far = 480;
+    const hit = this.driveRay.intersectObjects(blockers, false)[0];
+    return hit ? hit.point.y : null;
+  }
+
+  private cameraMinY() {
+    const p = this.camera.position;
+    let ground = this.sampleGroundHigh(p.x, p.z) ?? Number.NEGATIVE_INFINITY;
+    const span = 28;
+    ground = Math.max(
+      ground,
+      this.sampleGroundHigh(p.x + span, p.z) ?? Number.NEGATIVE_INFINITY,
+      this.sampleGroundHigh(p.x - span, p.z) ?? Number.NEGATIVE_INFINITY,
+      this.sampleGroundHigh(p.x, p.z + span) ?? Number.NEGATIVE_INFINITY,
+      this.sampleGroundHigh(p.x, p.z - span) ?? Number.NEGATIVE_INFINITY,
+    );
+    if (!Number.isFinite(ground)) ground = 0;
+    return Math.max(ground, 0) + CAM_CLEAR;
+  }
+
+  private syncTerrainLimits() {
+    if (this.driving) return;
+    const minY = this.cameraMinY();
+    const need = minY - this.controls.target.y;
+    const dist = this.navDist();
+    if (need <= 0.5) {
+      this.controls.maxPolarAngle = CAM_MAX_TILT;
+      this.controls.minDistance = CAM_MIN_DIST;
+      return;
+    }
+    if (need >= dist * 0.92) {
+      this.controls.minDistance = need / 0.92;
+      this.controls.maxPolarAngle = Math.min(CAM_MAX_TILT, 0.32);
+      return;
+    }
+    this.controls.maxPolarAngle = Math.min(CAM_MAX_TILT, Math.acos(need / dist));
+    this.controls.minDistance = Math.max(
+      CAM_MIN_DIST,
+      need / Math.max(Math.cos(this.controls.getPolarAngle()), 0.42),
+    );
+  }
+
+  private liftCameraOffTerrain() {
+    if (this.driving) return;
+    const minY = this.cameraMinY();
+    const cam = this.camera.position;
+    const target = this.controls.target;
+    this.camOffset.copy(cam).sub(target);
+    const needY = minY - target.y;
+    if (this.camOffset.y < needY - 0.05) {
+      if (this.camOffset.y > 0.35) {
+        this.camOffset.multiplyScalar(needY / this.camOffset.y);
+        cam.copy(target).add(this.camOffset);
+      } else {
+        cam.y = minY;
+        this.camOffset.copy(cam).sub(target);
+      }
+      this.controls.minDistance = Math.max(this.controls.minDistance, this.camOffset.length());
+    }
+    const blockers = this.gatherCamBlockers();
+    if (blockers.length === 0) return;
+    this.camForward.copy(target).sub(cam);
+    const look = this.camForward.length();
+    if (look < 2) return;
+    this.camForward.multiplyScalar(1 / look);
+    this.driveRay.set(cam, this.camForward);
+    this.driveRay.near = 0.2;
+    this.driveRay.far = Math.min(look, 60);
+    const hit = this.driveRay.intersectObjects(blockers, false)[0];
+    if (!hit || hit.distance >= 8) return;
+    cam.addScaledVector(this.camForward, -(8 - hit.distance));
+    if (cam.y < minY) cam.y = minY;
   }
 
   private bindFilters() {
@@ -1681,11 +2104,97 @@ export class Game {
     }
   }
 
+  /** DEM verts sit on a 16 m grid, so a peak beside the ballast still pokes through the track. */
+  private flattenTerrainUnderRails() {
+    const terrain = this.layerMeshes.get("terrain");
+    const rails = this.layerMeshes.get("rails");
+    if (!(terrain instanceof THREE.Mesh) || !(rails instanceof THREE.Mesh)) return;
+    const tPos = terrain.geometry.getAttribute("position");
+    const rPos = rails.geometry.getAttribute("position");
+    if (!tPos || !rPos) return;
+
+    const cell = 16;
+    const inner = 10;
+    const reach = 18;
+    const smooth = 36;
+    const clear = 0.42;
+    const maxDip = 2.2;
+    const key = (x: number, z: number) => `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+    const bins = new Map<string, number[]>();
+    const stride = Math.max(1, Math.floor(rPos.count / 28_000));
+    for (let i = 0; i < rPos.count; i += stride) {
+      const x = rPos.getX(i);
+      const y = rPos.getY(i);
+      const z = rPos.getZ(i);
+      const k = key(x, z);
+      const bin = bins.get(k);
+      if (bin) bin.push(x, y, z);
+      else bins.set(k, [x, y, z]);
+    }
+    const ring = Math.ceil(Math.max(reach, smooth) / cell);
+    for (let i = 0; i < tPos.count; i++) {
+      const x = tPos.getX(i);
+      const oldY = tPos.getY(i);
+      const z = tPos.getZ(i);
+      const cx = Math.floor(x / cell);
+      const cz = Math.floor(z / cell);
+      let nearest = Infinity;
+      let wsum = 0;
+      let ysum = 0;
+      for (let dz = -ring; dz <= ring; dz++) {
+        for (let dx = -ring; dx <= ring; dx++) {
+          const bin = bins.get(`${cx + dx},${cz + dz}`);
+          if (!bin) continue;
+          for (let p = 0; p < bin.length; p += 3) {
+            const d = Math.hypot(x - bin[p], z - bin[p + 2]);
+            if (d < nearest) nearest = d;
+            if (d < smooth) {
+              const w = 1 / (1 + d);
+              wsum += w;
+              ysum += bin[p + 1] * w;
+            }
+          }
+        }
+      }
+      if (nearest > reach || wsum <= 0) continue;
+      const target = ysum / wsum - clear;
+      if (Math.abs(oldY - target) > maxDip) continue;
+      const fade = nearest <= inner ? 1 : 1 - (nearest - inner) / (reach - inner);
+      tPos.setY(i, oldY + (target - oldY) * fade);
+    }
+    tPos.needsUpdate = true;
+    terrain.geometry.computeVertexNormals();
+    terrain.geometry.computeBoundingBox();
+    terrain.geometry.computeBoundingSphere();
+  }
+
+  /** OSM rail ways don't quite meet, and steel/sleeper Y is sampled off the ballast. */
+  private dressRailDeck() {
+    const ballast = this.layerMeshes.get("rails");
+    if (!(ballast instanceof THREE.Mesh)) return;
+    fillRibbonGaps(ballast, 8);
+    for (const extra of this.railDecor) {
+      if (!(extra instanceof THREE.Mesh)) continue;
+      if (extra.name === "rail-steel") fillRibbonGaps(extra, 10);
+    }
+    smoothRibbonY(ballast, 14);
+    for (const extra of this.railDecor) {
+      if (!(extra instanceof THREE.Mesh)) continue;
+      const lift = extra.name === "rail-steel" ? 0.1 : extra.name === "rail-sleepers" ? 0.06 : 0.04;
+      drapeOnMesh(extra, ballast, lift);
+    }
+  }
+
   private async placeTrains(loader: GLTFLoader, labels: MapLabel[]) {
     if (!this.mapScene) return;
     try {
       this.trains = new RailTraffic();
-      await this.trains.load(loader, this.mapScene, (x, z) => this.sampleGround(x, z));
+      await this.trains.load(
+        loader,
+        this.mapScene,
+        (x, z) => this.sampleGround(x, z),
+        this.layerMeshes.get("rails"),
+      );
       this.trains.group.traverse((o) => {
         const name = o.userData?.label as string | undefined;
         if (!name) return;
